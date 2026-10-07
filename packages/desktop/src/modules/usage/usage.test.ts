@@ -5,7 +5,6 @@ import { createNodeTestDb } from "@/testing/node-db";
 import {
   createUsage,
   startOfHour,
-  totalsOf,
   USAGE_BUCKETS_COLLECTION_ID,
   type UsageApi,
 } from "@/modules/usage";
@@ -137,21 +136,4 @@ describe("usage", () => {
     expect(after.limits.toArray[0].limits.windows).toEqual([window("seven_day", 0.85, 1000)]);
   });
 
-  it("totals buckets overall, per harness and per model", async () => {
-    await usage.recordTurn(event({ usage: turnUsage(10, 0.1, "a") }));
-    await usage.recordTurn(event({ at: T0 + HOUR, usage: turnUsage(20, 0.2, "b") }));
-    await usage.recordTurn(event({ harnessId: "devin", usage: turnUsage(5, null, "a") }));
-
-    const totals = totalsOf(usage.buckets.toArray);
-    expect(totals.all.turns).toBe(3);
-    expect(totals.all.total.tokens.input).toBe(35);
-    expect(totals.byHarness["claude-code"].turns).toBe(2);
-    expect(totals.byHarness.devin.total.cost).toBeNull();
-    expect(
-      totals.byModel.map((row) => [row.model, row.usage.tokens.input]).sort(),
-    ).toEqual([
-      ["a", 15],
-      ["b", 20],
-    ]);
-  });
 });

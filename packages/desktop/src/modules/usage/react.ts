@@ -8,10 +8,8 @@ import { and, gte, lt, useLiveQuery } from "@tanstack/react-db";
 import { useCore } from "@notefig/core/react";
 import {
   startOfHour,
-  totalsOf,
   type HarnessLimits,
   type UsageBucket,
-  type UsageTotals,
 } from "./usage";
 import {
   usagePattern,
@@ -48,12 +46,6 @@ export function useHarnessLimits(): HarnessLimits[] {
   const { limits } = useCore().usage;
   const { data = [] } = useLiveQuery((q) => q.from({ row: limits }), [limits]);
   return data;
-}
-
-/** Totals over [from, to): overall, per harness and per model. */
-export function useUsageTotals(range: Range): UsageTotals {
-  const data = useBuckets(range);
-  return useMemo(() => totalsOf(data), [data]);
 }
 
 /** Usage per local day, week, month or quarter over [from, to), split by

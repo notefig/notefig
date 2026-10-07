@@ -39,6 +39,7 @@ import {
 import { usageReportingOf, type UsageReporting } from "@/modules/agents/usage-reporting";
 import { useActiveHarnesses, useHarnessLabels } from "@/hooks/use-harness-selection";
 import { useClock } from "@/hooks/use-clock";
+import { useElementHeight } from "@/hooks/use-element-height";
 import { formatCost, formatTokens } from "@/utils/usage-format";
 import { UsageAreaChart } from "./usage-area-chart";
 import { UsageBarChart, type ChartBar, type ChartSeries } from "./usage-bar-chart";
@@ -49,18 +50,16 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
-const RANGES = [7, 30, 90, 365] as const;
+const RANGES = [7, 30, 90] as const;
 type RangeDays = (typeof RANGES)[number];
 
-/** Grains that give a range a readable number of bars (≤ ~90). */
-const GRAINS: Record<RangeDays, UsageGrain[]> = {
-  7: ["day"],
-  30: ["day", "week"],
-  90: ["day", "week", "month"],
-  365: ["week", "month", "quarter"],
-};
+/** Each range's grain: days up to a month, weeks beyond. */
+const GRAIN: Record<RangeDays, UsageGrain> = { 7: "day", 30: "day", 90: "week" };
 
 const PATTERN_DAYS = 7;
+
+/** The x-axis labels' row under a plot, with the gap above it. */
+const AXIS_LABELS_PX = 22;
 
 /** Series shown before the rest fold into "Other" — four when exactly four. */
 const TOP_SERIES = 3;
@@ -248,8 +247,7 @@ export function UsageOverTime() {
   const { t } = useTranslation();
   const [metric, setMetric] = useState<Metric>("tokens");
   const [rangeDays, setRangeDays] = useState<RangeDays>(30);
-  const [grainChoice, setGrain] = useState<UsageGrain>("day");
-  const grain = GRAINS[rangeDays].includes(grainChoice) ? grainChoice : GRAINS[rangeDays][0];
+  const grain = GRAIN[rangeDays];
   const { range, patternRange } = useRanges(rangeDays);
 
   const byHarness = useUsageSeries({ from: range.from, to: range.to, grain, groupBy: "harness" });
@@ -260,7 +258,7 @@ export function UsageOverTime() {
   const formatters = useFormatters(currency);
 
   const metricName = metric === "cost" ? t("usageCost") : t("usageTokens");
-  const rangeName = rangeDays === 365 ? t("usageRangeYear") : t("usageRangeDays", { count: rangeDays });
+  const rangeName = t("usageRangeDays", { count: rangeDays });
   const grainName = t(`usageGrain_${grain}`).toLowerCase();
   const shared = {
     metric,
@@ -275,8 +273,6 @@ export function UsageOverTime() {
       <UsageControls
         metric={metric}
         onMetric={setMetric}
-        grain={grain}
-        onGrain={setGrain}
         rangeDays={rangeDays}
         onRangeDays={setRangeDays}
       />
@@ -312,21 +308,15 @@ export function UsageOverTime() {
 function UsageControls({
   metric,
   onMetric,
-  grain,
-  onGrain,
   rangeDays,
   onRangeDays,
 }: {
   metric: Metric;
   onMetric: (metric: Metric) => void;
-  grain: UsageGrain;
-  onGrain: (grain: UsageGrain) => void;
   rangeDays: RangeDays;
   onRangeDays: (days: RangeDays) => void;
 }) {
   const { t } = useTranslation();
-  const rangeLabel = (days: RangeDays) =>
-    days === 365 ? t("usageRangeYear") : t("usageRangeDays", { count: days });
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
@@ -343,17 +333,14 @@ function UsageControls({
             { value: "cost", label: t("usageCost") },
           ]}
         />
-        <Segmented
-          label={t("usageGrain")}
-          value={grain}
-          onChange={onGrain}
-          options={GRAINS[rangeDays].map((value) => ({ value, label: t(`usageGrain_${value}`) }))}
-        />
         <Picker
           label={t("usageRange")}
           value={String(rangeDays)}
           onChange={(value) => onRangeDays(Number(value) as RangeDays)}
-          options={RANGES.map((days) => ({ value: String(days), label: rangeLabel(days) }))}
+          options={RANGES.map((days) => ({
+            value: String(days),
+            label: t("usageRangeDays", { count: days }),
+          }))}
         />
       </div>
     </div>
@@ -717,7 +704,7 @@ function HarnessCard({
         />
       </div>
 
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_15rem]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_15rem]">
         <ModelChart
           overlay={disabled?.overlay}
           points={byModel.points}
@@ -727,7 +714,7 @@ function HarnessCard({
           formatAxis={formatters.axis(shownMetric)}
         />
 
-        <div className="space-y-4 rounded-lg border border-border bg-muted/30 p-3 text-xs">
+        <div className="space-y-4 self-start rounded-lg border border-border bg-muted/30 p-3 text-xs">
           <LimitsPanel
             name={name}
             supported={reporting.limits}
@@ -784,18 +771,23 @@ function ModelChart({
   format: (value: number) => string;
   formatAxis: (value: number) => string;
 }) {
+  // The plot fills the row, which the panel beside it may make taller than
+  // the chart's own minimum; the axis labels under it take the rest.
+  const [box, boxHeight] = useElementHeight<HTMLDivElement>();
   return (
-    <div className="min-w-0">
-      <PeriodChart
-        points={points}
-        shown={shown}
-        grain={grain}
-        format={format}
-        formatAxis={formatAxis}
-        height={200}
-        overlay={overlay}
-        testId="usage-chart-models"
-      />
+    <div ref={box} className="relative min-h-[13.5rem] min-w-0">
+      <div className="absolute inset-0">
+        <PeriodChart
+          points={points}
+          shown={shown}
+          grain={grain}
+          format={format}
+          formatAxis={formatAxis}
+          height={Math.max(160, boxHeight - AXIS_LABELS_PX)}
+          overlay={overlay}
+          testId="usage-chart-models"
+        />
+      </div>
     </div>
   );
 }
@@ -858,15 +850,11 @@ function ModelsPanel({
   const sum = shown.totals.reduce((a, b) => a + b, 0);
   if (unnamed) {
     return (
-      <div className="space-y-1 opacity-60">
-        <div className="font-medium">{t("usageModels")}</div>
-        <div className="text-muted-foreground">{t("usageNoModelNames", { name })}</div>
-      </div>
+      <div className="text-muted-foreground opacity-60">{t("usageNoModelNames", { name })}</div>
     );
   }
   return (
     <div className="space-y-2">
-      <div className="font-medium">{t("usageModels")}</div>
       {shown.series.length === 0 && (
         <div className="text-muted-foreground">{t("usageNoUsageInRange")}</div>
       )}

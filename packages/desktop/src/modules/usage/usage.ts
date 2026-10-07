@@ -22,13 +22,10 @@ import {
   type PersistedCollectionPersistence,
 } from "@tanstack/db-sqlite-persistence-core";
 import {
-  addModelUsage,
-  addSummary,
   addTurn,
   emptySummary,
   newUsageBucketId,
   newUsageLimitsId,
-  type ModelUsage,
   type UsageLimits,
   type UsageSummary,
 } from "@notefig/shared/agent";
@@ -60,31 +57,9 @@ export type HarnessLimits = {
   limits: UsageLimits;
 };
 
-export type UsageTotals = {
-  all: UsageSummary;
-  byHarness: Record<string, UsageSummary>;
-  byModel: ModelUsage[];
-};
-
 /** The start of the UTC hour `at` falls in. */
 export function startOfHour(at: number): number {
   return Math.floor(at / HOUR_MS) * HOUR_MS;
-}
-
-/** Add buckets up: overall, per harness, and per model. */
-export function totalsOf(buckets: readonly UsageBucket[]): UsageTotals {
-  let all = emptySummary();
-  const byHarness: Record<string, UsageSummary> = {};
-  let byModel: ModelUsage[] = [];
-  for (const bucket of buckets) {
-    all = addSummary(all, bucket);
-    byHarness[bucket.harnessId] = addSummary(
-      byHarness[bucket.harnessId] ?? emptySummary(),
-      bucket,
-    );
-    byModel = addModelUsage(byModel, bucket.byModel);
-  }
-  return { all, byHarness, byModel };
 }
 
 /** A new limits report over the stored one. A harness may report one

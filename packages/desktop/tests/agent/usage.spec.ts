@@ -37,11 +37,8 @@ test("usage shows in the composer, under each prompt, and in settings", async ({
   const turnUsage = page.locator('[data-entry-type="user"]').getByText(/tokens$/);
   await expect(turnUsage).toHaveCount(2);
 
-  // Today's totals from the hourly time series.
   await page.goto(`${new URL(page.url()).pathname}?settings=usage`);
   const section = page.locator('[data-settings-section="usage"]');
-  await expect(section.getByText("Today")).toBeVisible();
-  await expect(section.getByText("Turns")).toBeVisible();
 
   // Over time: the session's turns in today's bar, the average day, and
   // the harness in detail (the mock runs under the default harness, the
