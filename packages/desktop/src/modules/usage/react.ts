@@ -6,7 +6,7 @@
 import { useMemo } from "react";
 import { and, gte, lt, useLiveQuery } from "@tanstack/react-db";
 import { useCore } from "@notefig/core/react";
-import { costType } from "@notefig/shared/agent";
+import { costType, type TokenCounts } from "@notefig/shared/agent";
 import type { UsageReporting } from "@/modules/agents/harnesses";
 import {
   startOfHour,
@@ -16,6 +16,7 @@ import {
 import {
   usagePattern,
   usageSeries,
+  weekdayTokens,
   type UsageGrain,
   type UsageGroupBy,
   type UsagePattern,
@@ -105,5 +106,14 @@ export function useUsagePattern({
   return useMemo(
     () => usagePattern(data, { from, to, harnessId, groupBy }),
     [data, from, to, harnessId, groupBy],
+  );
+}
+
+/** Tokens per day of the week over [from, to), Monday first. */
+export function useWeekdayTokens({ from, to, harnessId }: UsageScope): TokenCounts[] {
+  const data = useBuckets({ from, to });
+  return useMemo(
+    () => weekdayTokens(data, { from, to, harnessId }),
+    [data, from, to, harnessId],
   );
 }
