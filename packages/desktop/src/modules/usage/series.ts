@@ -221,7 +221,9 @@ export function usageSeries(
       start = periodStart(bucket.hour, grain);
       startOfBucketHour.set(bucket.hour, start);
     }
-    const slice = slotOf.get(start);
+    // In a half-hour zone the range's first UTC hour starts before its
+    // first local period; it overlaps that period, so it counts there.
+    const slice = slotOf.get(start) ?? (start < starts[0] ? slices[0] : undefined);
     if (slice) addBucket(slice, bucket, groupBy);
   }
 

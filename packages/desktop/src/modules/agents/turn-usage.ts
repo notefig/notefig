@@ -196,7 +196,10 @@ export function normalizeTurnUsage({
   const runningCost = costTotalFrom(lastUpdate);
   const costTotal = runningCost?.amount ?? null;
   const cost = turnCost(runningCost, costBaseline);
-  if (!response?.usage && !cost) return { usage: null, costTotal };
+  // A running cost that hasn't moved since the last turn is the previous
+  // turn's report, still held — not this turn's. Without tokens too, the
+  // turn reported nothing (a failed prompt) and must not count as a turn.
+  if (!response?.usage && !(cost && cost.amount !== 0)) return { usage: null, costTotal };
 
   const quotaRows = response ? quotaModelRows(response) : null;
   const total: Usage = { tokens: turnTokens(harnessId, response, quotaRows), cost };

@@ -13,15 +13,17 @@ import {
 import { useUsageTotals } from "@/modules/usage/react";
 import { useHarnessLabels } from "@/hooks/use-harness-selection";
 import { formatCost, formatTokens } from "@/utils/usage-format";
+import { useClock } from "@/hooks/use-clock";
 import { UsageOverTime } from "./usage-over-time";
 
+const HOUR_MS = 3_600_000;
+
 /** Local midnight today, and the end of the current hour (so the live
- *  bucket is included). Recomputed per mount: the section is opened, read
- *  and closed, not left running across midnight. */
-function todayRange(): { from: number; to: number } {
-  const now = new Date();
+ *  bucket is included). */
+function todayRange(hour: number): { from: number; to: number } {
+  const now = new Date(hour);
   const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return { from: midnight.getTime(), to: now.getTime() + 3_600_000 };
+  return { from: midnight.getTime(), to: hour + HOUR_MS };
 }
 
 export function UsageSettings() {
@@ -35,7 +37,10 @@ export function UsageSettings() {
 
 function UsageToday() {
   const { t } = useTranslation();
-  const range = useMemo(todayRange, []);
+  // Moves on hourly, so a section left open keeps up (and starts a new
+  // day at midnight).
+  const hour = useClock(HOUR_MS);
+  const range = useMemo(() => todayRange(hour), [hour]);
   const totals = useUsageTotals(range);
   const labelOf = useHarnessLabels();
 

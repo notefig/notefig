@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import { emptySummary, type TurnUsage } from "@notefig/shared/agent";
 import {
   periodStart,
@@ -147,6 +147,28 @@ describe("usageSeries", () => {
       [at(6, 1), 6],
       [at(9, 1), 8],
     ]);
+  });
+});
+
+describe("usageSeries in a half-hour zone", () => {
+  const zone = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = zone;
+  });
+
+  it("counts the UTC hour that straddles the range's first midnight", () => {
+    process.env.TZ = "Asia/Kolkata"; // UTC+5:30
+    const from = new Date(2026, 9, 6).getTime(); // local midnight, 18:30 UTC
+    const firstHour = Math.floor(from / 3_600_000) * 3_600_000; // 23:30 local, Oct 5
+    expect(firstHour).toBe(from - 1_800_000); // the zone took effect
+    const series = usageSeries([bucket(firstHour, turn(7, null))], {
+      from,
+      to: new Date(2026, 9, 7).getTime(),
+      grain: "day",
+      groupBy: "harness",
+    });
+    expect(series.points).toHaveLength(1);
+    expect(series.points[0].total.tokens.input).toBe(7);
   });
 });
 

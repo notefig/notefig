@@ -154,4 +154,18 @@ describe("normalizeTurnUsage", () => {
       }),
     ).toEqual({ usage: null, costTotal: null });
   });
+
+  it("a failed prompt after a costed turn is null: the held cost hasn't moved", () => {
+    // The previous turn's usage_update (cost 0.5) is still the latest; its
+    // total is already the baseline.
+    expect(
+      normalizeTurnUsage({
+        harnessId: "claude-code",
+        response: null,
+        lastUpdate: { ...opencodeUpdate, cost: { amount: 0.5, currency: "USD" } },
+        model: null,
+        costBaseline: 0.5,
+      }),
+    ).toEqual({ usage: null, costTotal: 0.5 });
+  });
 });

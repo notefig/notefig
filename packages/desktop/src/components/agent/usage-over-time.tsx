@@ -37,6 +37,7 @@ import {
 } from "@/modules/usage/react";
 import { usageReportingOf, type UsageReporting } from "@/modules/agents/usage-reporting";
 import { useActiveHarnesses, useHarnessLabels } from "@/hooks/use-harness-selection";
+import { useClock } from "@/hooks/use-clock";
 import { formatCost, formatTokens } from "@/utils/usage-format";
 import { UsageBarChart, type ChartBar, type ChartSeries } from "./usage-bar-chart";
 
@@ -184,21 +185,21 @@ function everyNth(count: number): (index: number) => boolean {
   return (index) => (count - 1 - index) % every === 0;
 }
 
-/** The over-time ranges, computed when the range changes: the section is
- *  opened, read and closed, not left running across midnight. */
+/** The over-time ranges, moving on with the clock (hourly) so a section
+ *  left open keeps taking in new hours, and the next day at midnight. */
 function useRanges(rangeDays: RangeDays) {
+  const hour = useClock(HOUR_MS);
   const range = useMemo(() => {
-    const now = new Date();
+    const now = new Date(hour);
     return {
-      now: now.getTime(),
       from: new Date(now.getFullYear(), now.getMonth(), now.getDate() - (rangeDays - 1)).getTime(),
       to: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime(),
     };
-  }, [rangeDays]);
+  }, [rangeDays, hour]);
   const patternRange = useMemo(() => {
-    const to = Math.floor(Date.now() / HOUR_MS) * HOUR_MS + HOUR_MS;
+    const to = hour + HOUR_MS;
     return { from: to - PATTERN_DAYS * DAY_MS, to };
-  }, []);
+  }, [hour]);
   return { range, patternRange };
 }
 
@@ -619,7 +620,7 @@ function HarnessCard({
   formatters,
 }: {
   metric: Metric;
-  range: { now: number; from: number; to: number };
+  range: { from: number; to: number };
   grain: UsageGrain;
   harnessIds: string[];
   labelOf: (harnessId: string) => string;
@@ -685,7 +686,6 @@ function HarnessCard({
             name={name}
             supported={reporting.limits}
             row={limits.find((row) => row.harnessId === harnessId)}
-            now={range.now}
           />
         </div>
       </div>
@@ -906,14 +906,14 @@ function LimitsPanel({
   name,
   supported,
   row,
-  now,
 }: {
   name: string;
   supported: boolean;
   row: HarnessLimits | undefined;
-  now: number;
 }) {
   const { t } = useTranslation();
+  // Reset countdowns tick by the minute while the section is open.
+  const now = useClock(60_000);
   if (!supported) {
     return (
       <div className="space-y-1 opacity-60" data-testid="usage-limits">
