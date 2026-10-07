@@ -1,5 +1,5 @@
 /**
- * Settings → Usage, below today's totals: usage over time by harness, the
+ * Settings → Usage: usage over time by harness, the
  * average day hour by hour, and one harness in detail (its models and its
  * account limits). Everything reads the usage module's hourly buckets for
  * the chosen range; the grouping is `series.ts`'s, done once per change.
@@ -7,6 +7,7 @@
  * Charts show the three largest series and fold the rest into "Other", so
  * they stay readable however many harnesses or models there are. A harness
  * that never reports cost or limits is greyed wherever those are asked for.
+ * The metric and range controls sit in the section's header.
  */
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -38,6 +39,7 @@ import {
 } from "@/modules/usage/react";
 import { usageReportingOf, type UsageReporting } from "@/modules/agents/usage-reporting";
 import { useActiveHarnesses, useHarnessLabels } from "@/hooks/use-harness-selection";
+import { SettingsSectionActions } from "@/components/editor/settings-section";
 import { useClock } from "@/hooks/use-clock";
 import { useElementHeight } from "@/hooks/use-element-height";
 import { formatCost, formatTokens } from "@/utils/usage-format";
@@ -269,7 +271,7 @@ export function UsageOverTime() {
   };
 
   return (
-    <div className="space-y-4 pt-4" data-testid="usage-over-time">
+    <div className="space-y-4 pt-2" data-testid="usage-over-time">
       <UsageControls
         metric={metric}
         onMetric={setMetric}
@@ -318,7 +320,7 @@ function UsageControls({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-wrap items-center justify-end gap-3">
+    <SettingsSectionActions>
       <Segmented
         label={t("usageMetric")}
         value={metric}
@@ -337,7 +339,7 @@ function UsageControls({
           label: t("usageRangeDays", { count: days }),
         }))}
       />
-    </div>
+    </SettingsSectionActions>
   );
 }
 
