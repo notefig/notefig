@@ -1,6 +1,7 @@
 import {
   addSummary,
   addTurn,
+  costType,
   emptySummary,
   totalTokens,
   type TurnUsage,
@@ -13,7 +14,7 @@ function turn(
 ): TurnUsage {
   const total = {
     tokens: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, thought: 0, ...tokens },
-    cost: cost === null ? null : { amount: cost, currency: "USD" },
+    cost: cost === null ? null : { amount: cost, currency: "USD", type: "currency" as const },
   };
   return { total, byModel: [{ model, usage: total }] };
 }
@@ -32,7 +33,7 @@ describe("usage summaries", () => {
       output: 3,
       thought: 0,
     });
-    expect(summary.total.cost).toEqual({ amount: 0.75, currency: "USD" });
+    expect(summary.total.cost).toEqual({ amount: 0.75, currency: "USD", type: "currency" });
     expect(totalTokens(summary.total.tokens)).toBe(116);
   });
 
@@ -57,11 +58,29 @@ describe("usage summaries", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
     const usd = addTurn(emptySummary(), turn({}, 1));
     const mixed = addTurn(usd, {
-      total: { tokens: usd.total.tokens, cost: { amount: 5, currency: "CREDITS" } },
+      total: { tokens: usd.total.tokens, cost: { amount: 5, currency: "devin-credit", type: "credits" } },
       byModel: [],
     });
-    expect(mixed.total.cost).toEqual({ amount: 1, currency: "USD" });
+    expect(mixed.total.cost).toEqual({ amount: 1, currency: "USD", type: "currency" });
     warn.mockRestore();
+  });
+
+  it("keeps a cost's type; one saved before types existed is money", () => {
+    const credits: TurnUsage = {
+      total: { ...turn({ input: 1 }, null).total, cost: { amount: 1.5, currency: "devin-credit", type: "credits" } },
+      byModel: [],
+    };
+    const summary = addTurn(addTurn(emptySummary(), credits), credits);
+    expect(summary.total.cost).toEqual({ amount: 3, currency: "devin-credit", type: "credits" });
+
+    const legacy = turn({ input: 1 }, 0.5);
+    delete (legacy.total.cost as { type?: unknown }).type;
+    expect(costType(legacy.total.cost!)).toBe("currency");
+    expect(addTurn(addTurn(emptySummary(), legacy), turn({}, 0.25)).total.cost).toEqual({
+      amount: 0.75,
+      currency: "USD",
+      type: "currency",
+    });
   });
 
   it("adds whole summaries, keeping the target's extra fields", () => {

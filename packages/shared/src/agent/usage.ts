@@ -18,13 +18,34 @@ export type TokenCounts = {
   thought: number;
 };
 
-export type Money = { amount: number; currency: string };
+/**
+ * What a harness charges, in the unit it bills in:
+ *
+ * - `"currency"`: money, `currency` an ISO 4217 code (`"USD"`).
+ * - `"credits"`: the harness's own billing unit, named in `currency`
+ *   (`"devin-credit"`). Not money — what a credit is worth depends on the
+ *   account's plan — so a reader that adds harnesses together keeps the two
+ *   apart, or converts.
+ *
+ * Costs saved before `type` existed are all money; read them through
+ * {@link costType}.
+ */
+export type Cost = {
+  amount: number;
+  currency: string;
+  type: "currency" | "credits";
+};
 
-/** Tokens and cost: the unit every level adds up. */
+/** A cost's type; one saved before `type` existed is money. */
+export function costType(cost: Cost): Cost["type"] {
+  return cost.type ?? "currency";
+}
+
+/** Tokens and cost: what every level adds up. */
 export type Usage = {
   tokens: TokenCounts;
   /** Null when the harness reports no cost (a harness either always does or never does). */
-  cost: Money | null;
+  cost: Cost | null;
 };
 
 export type ModelUsage = {
@@ -117,18 +138,18 @@ export function addTokens(a: TokenCounts, b: TokenCounts): TokenCounts {
   };
 }
 
-function addCost(a: Money | null, b: Money | null): Money | null {
+function addCost(a: Cost | null, b: Cost | null): Cost | null {
   if (!b) return a;
   if (!a) return { ...b };
-  if (a.currency !== b.currency) {
-    // One summary covers one harness's turns, and a harness reports in one
-    // currency — so this is an adapter changing under us, not a real mix.
+  if (a.currency !== b.currency || costType(a) !== costType(b)) {
+    // One summary covers one harness's turns, and a harness bills in one
+    // unit — so this is an adapter changing under us, not a real mix.
     console.warn(
       `[usage] dropping ${b.amount} ${b.currency}: summary is in ${a.currency}`,
     );
     return a;
   }
-  return { amount: a.amount + b.amount, currency: a.currency };
+  return { amount: a.amount + b.amount, currency: a.currency, type: costType(a) };
 }
 
 export function addUsage(a: Usage, b: Usage): Usage {

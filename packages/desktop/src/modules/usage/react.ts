@@ -6,6 +6,7 @@
 import { useMemo } from "react";
 import { and, gte, lt, useLiveQuery } from "@tanstack/react-db";
 import { useCore } from "@notefig/core/react";
+import { costType } from "@notefig/shared/agent";
 import type { UsageReporting } from "@/modules/agents/harnesses";
 import {
   startOfHour,
@@ -61,7 +62,11 @@ export function useHarnessReporting(
     const costSeen = new Set<string>();
     for (const point of byHarness.points) {
       for (const group of point.groups) {
-        if (group.usage.cost && group.key) costSeen.add(group.key);
+        // Cost in the views' sense is money; a harness billing in credits
+        // charts them on its own, never stacked with money.
+        if (group.usage.cost && costType(group.usage.cost) === "currency" && group.key) {
+          costSeen.add(group.key);
+        }
       }
     }
     const limitsSeen = new Set(limits.map((row) => row.harnessId));

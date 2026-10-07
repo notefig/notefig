@@ -2206,7 +2206,7 @@ describe("usage (token & cost)", () => {
     const session = store.tasks.get(task.taskId)?.usage;
     expect(session?.turns).toBe(2);
     expect(session?.total.tokens.input).toBe(20);
-    expect(session?.total.cost).toEqual({ amount: 0.5, currency: "USD" });
+    expect(session?.total.cost).toEqual({ amount: 0.5, currency: "USD", type: "currency" });
     expect(session?.context).toEqual({ used: 2000, size: 200_000 });
 
     expect(emitted).toHaveLength(2);
@@ -2274,6 +2274,76 @@ describe("usage (token & cost)", () => {
     expect(turn.status).toBe("cancelled");
     expect(turn.usage?.total.tokens.input).toBe(7);
     expect(store.tasks.get(task.taskId)?.usage?.turns).toBe(1);
+  });
+
+  it("Devin: sums each request, subagents included; their context and words stay out", async () => {
+    // As recorded (acp-usage-multistep-spike): one usage_update per request,
+    // the main agent's sent plain and again tagged root, a subagent's once
+    // with its own id; the response holds the last request only.
+    const request = (
+      agentId: string | null,
+      used: number,
+      input: number,
+      output: number,
+      credits: number,
+    ) => ({
+      sessionUpdate: "usage_update",
+      used,
+      size: 200_000,
+      _meta: {
+        "cognition.ai/inputTokens": input,
+        "cognition.ai/outputTokens": output,
+        "cognition.ai/cachedReadTokens": input - 100,
+        "cognition.ai/totalCreditCost": credits,
+        ...(agentId ? { "cognition.ai/subagent_context": { parentAgentId: agentId } } : {}),
+      },
+    });
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async (params, a) => {
+      const sid = params.sessionId;
+      a.update(sid, request(null, 12_000, 11_900, 200, 1));
+      a.update(sid, request("root", 12_000, 11_900, 200, 1));
+      a.update(sid, {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "subagent musing" },
+        _meta: { "cognition.ai/subagent_context": { parentAgentId: "b25b62a7" } },
+      });
+      a.update(sid, request("b25b62a7", 2_300, 2_200, 70, 1.5));
+      a.update(sid, request(null, 12_200, 12_000, 130, 2));
+      a.update(sid, request("root", 12_200, 12_000, 130, 2));
+      a.update(sid, {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "3" },
+      });
+      return {
+        stopReason: "end_turn",
+        usage: { inputTokens: 12_000, outputTokens: 130, cachedReadTokens: 11_900, totalTokens: 12_130 },
+        _meta: { "cognition.ai/userMessageId": "m1" },
+      };
+    };
+
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "count lines with a subagent");
+
+    const [turn] = turnFor(task.taskId);
+    expect(turn.usage?.total.tokens).toEqual({
+      input: 300,
+      cacheRead: 11_800 + 2_100 + 11_900,
+      cacheWrite: 0,
+      output: 400,
+      thought: 0,
+    });
+    // Credits are its cost: the main agent's running total, 2 at the end.
+    const credits = { amount: 2, currency: "devin-credit", type: "credits" };
+    expect(turn.usage?.total.cost).toEqual(credits);
+    const session = store.tasks.get(task.taskId)?.usage;
+    expect(session?.total.cost).toEqual(credits);
+    expect(session?.context).toEqual({ used: 12_200, size: 200_000 });
+    const texts = entriesFor(task.taskId).map((e) => ("text" in e ? e.text : ""));
+    expect(texts.join("|")).not.toContain("subagent musing");
+    expect(texts).toContain("3");
   });
 });
 

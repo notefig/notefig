@@ -695,6 +695,7 @@ i18n
           usageHarness: "Harness",
           usageNoModelData: "No per-model data",
           usageCapCost: "Tokens + cost",
+          usageCapCredits: "Tokens + credits",
           usageCapTokensOnly: "Tokens only",
           usageCapLimits: "Limits",
           usageCapNoLimits: "No limits",

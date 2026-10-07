@@ -139,6 +139,21 @@ describe("pure helpers", () => {
     expect(garbled?.usage).toBeUndefined();
   });
 
+  it("a saved cost keeps its type; one saved before types existed is money", () => {
+    const tokens = { input: 1, cacheRead: 0, cacheWrite: 0, output: 1, thought: 0 };
+    const row = (cost: object) => {
+      const total = { tokens, cost };
+      return parsePersistedAgentTask({
+        ...taskRow({}),
+        usage: { total, byModel: [{ model: "m", usage: total }], turns: 1, context: null },
+      })?.usage;
+    };
+    expect(row({ amount: 0.5, currency: "USD" })?.total.cost?.type).toBe("currency");
+    const credits = { amount: 2.5, currency: "devin-credit", type: "credits" };
+    expect(row(credits)?.total.cost).toEqual(credits);
+    expect(row(credits)?.byModel[0].usage.cost).toEqual(credits);
+  });
+
 });
 
 describe("persisted tasks collection", () => {
