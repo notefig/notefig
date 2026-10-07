@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stackedCurves } from "./usage-area-chart";
+import { curvePeak, stackedCurves } from "./usage-area-chart";
 
 const bars = (...series: number[][]) =>
   series[0].map((_, i) => ({
@@ -39,5 +39,17 @@ describe("stackedCurves", () => {
         expect(at(curves[2], i, t)).toBeGreaterThanOrEqual(at(curves[1], i, t) - 1e-9);
       }
     }
+  });
+
+  it("bounds the top curve, which can rise above every point's total", () => {
+    const curves = stackedCurves(bars([0, 80, 100, 0], [0, 20, 0, 100]), 2);
+    const top = curves[2];
+    const peak = curvePeak(top);
+    let highest = 0;
+    for (let i = 0; i < 3; i++) {
+      for (let t = 0; t <= 1; t += 0.01) highest = Math.max(highest, at(top, i, t));
+    }
+    expect(highest).toBeGreaterThan(100);
+    expect(peak).toBeGreaterThanOrEqual(highest - 1e-9);
   });
 });

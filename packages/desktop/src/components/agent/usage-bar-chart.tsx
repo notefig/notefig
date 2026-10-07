@@ -36,10 +36,11 @@ function niceStep(x: number): number {
 }
 
 /** Each bar's stacked total, and an axis of `TICKS` nice steps over the
- *  tallest. */
-export function scaleOf(bars: readonly ChartBar[]) {
+ *  tallest — or over `peak`, when what is drawn reaches higher (a curve
+ *  between points). */
+export function scaleOf(bars: readonly ChartBar[], peak = 0) {
   const totals = bars.map((bar) => bar.values.reduce((sum, value) => sum + value, 0));
-  const step = niceStep(Math.max(0, ...totals) / TICKS);
+  const step = niceStep(Math.max(peak, ...totals) / TICKS);
   return { totals, step, top: step * TICKS };
 }
 

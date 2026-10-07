@@ -63,6 +63,11 @@ export function stackedCurves(bars: readonly ChartBar[], seriesCount: number): C
   return curves;
 }
 
+/** The highest a curve can reach: its points and control heights. */
+export function curvePeak({ at, c1, c2 }: Curve): number {
+  return Math.max(0, ...at, ...c1, ...c2);
+}
+
 export function UsageAreaChart({
   series,
   bars,
@@ -85,12 +90,14 @@ export function UsageAreaChart({
   const plot = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<number | null>(null);
   const count = bars.length;
-  const { totals, step, top } = scaleOf(bars);
+  const curves = stackedCurves(bars, series.length);
+  // Stacked smooth curves can rise above every point's total between two
+  // points; a cubic stays within its control heights, so those bound it.
+  const { totals, step, top } = scaleOf(bars, curvePeak(curves[curves.length - 1]));
   const xOf = (index: number) => (count > 1 ? (index / (count - 1)) * WIDTH : 0);
   const yOf = (value: number) => height - (top ? (value / top) * height : 0);
   const fraction = (index: number) => (count > 1 ? index / (count - 1) : 0);
 
-  const curves = stackedCurves(bars, series.length);
   /** A boundary as SVG path commands, left to right or back. */
   const trace = ({ at, c1, c2 }: Curve, back = false): string => {
     if (count === 1) {
