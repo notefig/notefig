@@ -10,6 +10,7 @@ import {
   type Usage,
   type UsageSummary,
 } from "@notefig/shared/agent";
+import { startOfHour } from "@/modules/usage";
 import { useUsageTotals } from "@/modules/usage/react";
 import { useHarnessLabels } from "@/hooks/use-harness-selection";
 import { formatCost, formatTokens } from "@/utils/usage-format";
@@ -18,13 +19,7 @@ import { UsageOverTime } from "./usage-over-time";
 
 const HOUR_MS = 3_600_000;
 
-/** Local midnight today, and the end of the current hour (so the live
- *  bucket is included). */
-function todayRange(hour: number): { from: number; to: number } {
-  const now = new Date(hour);
-  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return { from: midnight.getTime(), to: hour + HOUR_MS };
-}
+
 
 export function UsageSettings() {
   return (
@@ -37,10 +32,14 @@ export function UsageSettings() {
 
 function UsageToday() {
   const { t } = useTranslation();
-  // Moves on hourly, so a section left open keeps up (and starts a new
-  // day at midnight).
-  const hour = useClock(HOUR_MS);
-  const range = useMemo(() => todayRange(hour), [hour]);
+  // Local midnight today to the end of the current hour (so the live bucket
+  // is included), moving on so a section left open keeps up. The clock is
+  // by the minute — a UTC-hour floor would read 23:30 yesterday at 00:10
+  // in a half-hour zone — but the range only changes at an hour.
+  const now = new Date(useClock(60_000));
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const to = startOfHour(now.getTime()) + HOUR_MS;
+  const range = useMemo(() => ({ from, to }), [from, to]);
   const totals = useUsageTotals(range);
   const labelOf = useHarnessLabels();
 

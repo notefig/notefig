@@ -24,6 +24,7 @@ import {
   type UsageLimitStatus,
   type Usage,
 } from "@notefig/shared/agent";
+import { startOfHour } from "@/modules/usage";
 import type {
   HarnessLimits,
   UsageGrain,
@@ -43,6 +44,7 @@ import { UsageBarChart, type ChartBar, type ChartSeries } from "./usage-bar-char
 
 type Metric = "tokens" | "cost";
 
+const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
@@ -185,21 +187,27 @@ function everyNth(count: number): (index: number) => boolean {
   return (index) => (count - 1 - index) % every === 0;
 }
 
-/** The over-time ranges, moving on with the clock (hourly) so a section
- *  left open keeps taking in new hours, and the next day at midnight. */
+/** The over-time ranges, moving on with the clock so a section left open
+ *  keeps taking in new hours, and the next day at midnight. The clock is
+ *  by the minute — exact local time in every zone, where a UTC-hour floor
+ *  lands half an hour early in a half-hour one — but the ranges only change
+ *  at an hour or a day, so the queries over them rerun no more often. */
 function useRanges(rangeDays: RangeDays) {
-  const hour = useClock(HOUR_MS);
+  const now = useClock(MINUTE_MS);
+  const today = new Date(now);
+  const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const hourEnd = startOfHour(now) + HOUR_MS;
   const range = useMemo(() => {
-    const now = new Date(hour);
+    const day = new Date(dayStart);
     return {
-      from: new Date(now.getFullYear(), now.getMonth(), now.getDate() - (rangeDays - 1)).getTime(),
-      to: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime(),
+      from: new Date(day.getFullYear(), day.getMonth(), day.getDate() - (rangeDays - 1)).getTime(),
+      to: new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime(),
     };
-  }, [rangeDays, hour]);
-  const patternRange = useMemo(() => {
-    const to = hour + HOUR_MS;
-    return { from: to - PATTERN_DAYS * DAY_MS, to };
-  }, [hour]);
+  }, [rangeDays, dayStart]);
+  const patternRange = useMemo(
+    () => ({ from: hourEnd - PATTERN_DAYS * DAY_MS, to: hourEnd }),
+    [hourEnd],
+  );
   return { range, patternRange };
 }
 
@@ -913,7 +921,7 @@ function LimitsPanel({
 }) {
   const { t } = useTranslation();
   // Reset countdowns tick by the minute while the section is open.
-  const now = useClock(60_000);
+  const now = useClock(MINUTE_MS);
   if (!supported) {
     return (
       <div className="space-y-1 opacity-60" data-testid="usage-limits">
