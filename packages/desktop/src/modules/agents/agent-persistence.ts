@@ -7,10 +7,31 @@
  * turns a stored row back into a live one.
  */
 import { z } from "zod";
+import type { SessionUsage } from "@notefig/shared/agent";
 import type { AgentTaskRow } from "./agent-collections";
 
 /** The collection id, and so the SQLite table this data lands in. */
 export const AGENT_TASKS_COLLECTION_ID = "agent-tasks";
+
+const TokenCountsSchema = z.object({
+  input: z.number(),
+  cacheRead: z.number(),
+  cacheWrite: z.number(),
+  output: z.number(),
+  thought: z.number(),
+});
+
+const UsageSchema = z.object({
+  tokens: TokenCountsSchema,
+  cost: z.object({ amount: z.number(), currency: z.string() }).nullable(),
+});
+
+const SessionUsageSchema: z.ZodType<SessionUsage> = z.object({
+  total: UsageSchema,
+  byModel: z.array(z.object({ model: z.string().nullable(), usage: UsageSchema })),
+  turns: z.number(),
+  context: z.object({ used: z.number(), size: z.number() }).nullable(),
+});
 
 /**
  * Full-row persistence: what's written is the collection row itself (plus
@@ -39,6 +60,10 @@ export const PersistedAgentTaskSchema = z
         status: z.enum(["completed", "error"]),
       })
       .optional(),
+    // Loose and self-healing: usage is a summary, not identity — a row whose
+    // usage predates a shape change (or was hand-edited) keeps the task and
+    // only loses its totals.
+    usage: SessionUsageSchema.optional().catch(undefined),
   })
   .passthrough();
 
@@ -72,5 +97,7 @@ export function bootAgentTaskRow(row: PersistedAgentTask): AgentTaskRow | null {
     updatedAt: row.updatedAt,
     // Not runtime-only: it is the durable half of the attention model.
     ...(row.lastSettled ? { lastSettled: row.lastSettled } : {}),
+    // Durable too: a restored chat keeps what it has spent.
+    ...(row.usage ? { usage: row.usage } : {}),
   };
 }

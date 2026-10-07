@@ -28,6 +28,8 @@ const ID_PREFIXES = {
   event: "evt",
   permission: "per",
   diagnostic: "dg",
+  usage: "usg",
+  usageLimits: "ulm",
 } as const;
 
 export type IdPrefix = keyof typeof ID_PREFIXES;
@@ -61,9 +63,8 @@ function randomBase62(length: number): string {
 function createId(
   prefix: IdPrefix,
   direction: "ascending" | "descending",
-  timestampMs?: number,
 ): string {
-  const now = timestampMs ?? Date.now();
+  const now = Date.now();
   if (now !== lastTimestamp) {
     lastTimestamp = now;
     counter = 0;
@@ -104,6 +105,16 @@ export function newPermissionId(): string {
 /** Ascending: task-keyed diagnostics stream (stderr, frames, errors …). */
 export function newDiagnosticId(): string {
   return createId("diagnostic", "ascending");
+}
+
+/** An hourly usage bucket (queried by its `hour`, never by id). */
+export function newUsageBucketId(): string {
+  return createId("usage", "ascending");
+}
+
+/** A harness's stored account limits (one row per harness). */
+export function newUsageLimitsId(): string {
+  return createId("usageLimits", "ascending");
 }
 
 /**

@@ -24,12 +24,15 @@ import {
   Loader2,
   Sparkles,
   Shield,
+  BarChart3,
 } from "lucide-react";
 import {
   updateTelemetryConsent,
   telemetryAvailable,
 } from "@/telemetry/telemetry";
 import { HarnessSettings } from "@/components/agent/harness-settings";
+import { UsageSettings } from "@/components/agent/usage-settings";
+import { SettingsSection } from "./settings-section";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
@@ -75,6 +78,7 @@ const SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
   { id: "appearance", label: "appearance", icon: Palette },
   { id: "hotkeys", label: "hotkeys", icon: Keyboard },
   { id: "harnesses", label: "harnessSettingsTitle", icon: Sparkles },
+  { id: "usage", label: "usageSettingsTitle", icon: BarChart3 },
   { id: "privacy", label: "privacySettings", icon: Shield },
 ];
 
@@ -198,6 +202,10 @@ export function SettingsModal({
               <HarnessSettings />
             </SettingsSection>
 
+            <SettingsSection id="usage" title={t("usageSettingsTitle")}>
+              <UsageSettings />
+            </SettingsSection>
+
             <SettingsSection id="privacy" last>
               <PrivacySettings />
             </SettingsSection>
@@ -248,33 +256,6 @@ function SettingsIndexItem({
  * heading carries its own controls (harnesses, with its rescan button) render
  * their own.
  */
-function SettingsSection({
-  id,
-  title,
-  last,
-  children,
-}: {
-  id: string;
-  title?: string;
-  last?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <section
-      data-settings-section={id}
-      className={cn(
-        "space-y-2 py-6",
-        // The final section stretches to a full viewport height so that it,
-        // too, can scroll up to the activation line and light up in the index.
-        last ? "min-h-full" : "border-b border-border",
-      )}
-    >
-      {title && <h2 className="text-lg font-semibold">{title}</h2>}
-      {children}
-    </section>
-  );
-}
-
 function GeneralSettings({
   settings,
   setSettings,

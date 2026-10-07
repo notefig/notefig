@@ -122,6 +122,23 @@ describe("pure helpers", () => {
     ).toBeNull();
   });
 
+  it("session usage is durable: it survives the boot mapping, and a malformed one drops alone", () => {
+    const tokens = { input: 1, cacheRead: 2, cacheWrite: 0, output: 3, thought: 0 };
+    const total = { tokens, cost: { amount: 0.5, currency: "USD" } };
+    const usage = {
+      total,
+      byModel: [{ model: "m", usage: total }],
+      turns: 1,
+      context: { used: 10, size: 100 },
+    };
+    const stored = parsePersistedAgentTask({ ...taskRow({}), usage });
+    expect(bootAgentTaskRow(stored!)).toMatchObject({ status: "restored", usage });
+
+    const garbled = parsePersistedAgentTask({ ...taskRow({}), usage: { turns: "many" } });
+    expect(garbled?.taskId).toBe("task_a");
+    expect(garbled?.usage).toBeUndefined();
+  });
+
 });
 
 describe("persisted tasks collection", () => {

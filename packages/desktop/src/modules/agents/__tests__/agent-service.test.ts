@@ -2156,3 +2156,159 @@ describe("session config options (MET-81)", () => {
     ).toBe("plan");
   });
 });
+
+describe("usage (token & cost)", () => {
+  const usageUpdate = (used: number, cost?: number) => ({
+    sessionUpdate: "usage_update",
+    used,
+    size: 200_000,
+    ...(cost === undefined ? {} : { cost: { amount: cost, currency: "USD" } }),
+  });
+
+  function captureUsage() {
+    const seen: unknown[] = [];
+    hooks.on("agent:usage", (detail) => {
+      seen.push(detail);
+    });
+    return seen;
+  }
+
+  it("lands a turn's usage on the turn, the session total and agent:usage", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let prompts = 0;
+    agent.onPrompt = async (params, a) => {
+      prompts++;
+      a.update(params.sessionId, usageUpdate(1000 * prompts, 0.25 * prompts));
+      return {
+        stopReason: "end_turn",
+        usage: { inputTokens: 10, outputTokens: 5, cachedReadTokens: 100, totalTokens: 115 },
+      };
+    };
+    const emitted = captureUsage();
+
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "one");
+    await runPrompt(task, "two");
+
+    const turns = turnFor(task.taskId);
+    // Cost arrives as a running total; each turn gets its difference.
+    expect(turns.map((t) => t.usage?.total.cost?.amount)).toEqual([0.25, 0.25]);
+    expect(turns[0].usage?.total.tokens).toEqual({
+      input: 10,
+      cacheRead: 100,
+      cacheWrite: 0,
+      output: 5,
+      thought: 0,
+    });
+
+    const session = store.tasks.get(task.taskId)?.usage;
+    expect(session?.turns).toBe(2);
+    expect(session?.total.tokens.input).toBe(20);
+    expect(session?.total.cost).toEqual({ amount: 0.5, currency: "USD" });
+    expect(session?.context).toEqual({ used: 2000, size: 200_000 });
+
+    expect(emitted).toHaveLength(2);
+    expect(emitted[0]).toMatchObject({
+      taskId: task.taskId,
+      turnId: turns[0].turnId,
+      workspacePath: "/ws",
+      harnessId: harness.id,
+    });
+    // usage_update is session state, never a transcript entry.
+    expect(entriesFor(task.taskId).some((e) => e.type === "unknown")).toBe(false);
+  });
+
+  it("a usage_update between turns moves the context fill only", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    await task.start(() => client);
+
+    agent.update("sess_test", usageUpdate(4242));
+    await vi.waitFor(() =>
+      expect(store.tasks.get(task.taskId)?.usage?.context).toEqual({
+        used: 4242,
+        size: 200_000,
+      }),
+    );
+    expect(store.tasks.get(task.taskId)?.usage?.turns).toBe(0);
+  });
+
+  it("a turn that reports nothing gets null usage and announces nothing", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    new FakeAgent(agentSide);
+    const emitted = captureUsage();
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "hi");
+
+    expect(turnFor(task.taskId)[0].usage).toBeNull();
+    expect(store.tasks.get(task.taskId)?.usage).toBeUndefined();
+    expect(emitted).toHaveLength(0);
+  });
+
+  it("a cancelled turn still counts what its late response reports", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    agent.onPrompt = async () => {
+      await gate;
+      return { stopReason: "cancelled", usage: { inputTokens: 7, outputTokens: 1, totalTokens: 8 } };
+    };
+    const emitted = captureUsage();
+
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    await task.start(() => client);
+    task.prompt("stop me");
+    await vi.waitFor(() => expect(turnFor(task.taskId)[0]?.status).toBe("running"));
+    await task.cancel();
+    // The turn settled on the cancel; its response only lands now.
+    expect(turnFor(task.taskId)[0].usage).toBeUndefined();
+    release();
+
+    await vi.waitFor(() => expect(emitted).toHaveLength(1));
+    const [turn] = turnFor(task.taskId);
+    expect(turn.status).toBe("cancelled");
+    expect(turn.usage?.total.tokens.input).toBe(7);
+    expect(store.tasks.get(task.taskId)?.usage?.turns).toBe(1);
+  });
+});
+
+describe("usage limits", () => {
+  it("announces a harness's account limits when they change, quietly otherwise", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const announced: unknown[] = [];
+    hooks.on("agent:usage-limits", (detail) => {
+      announced.push(detail);
+    });
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    await task.start(() => client);
+
+    const withLimits = (utilization: number) => ({
+      sessionUpdate: "usage_update",
+      used: 10,
+      size: 100,
+      _meta: {
+        "_claude/rateLimit": {
+          status: "allowed",
+          unifiedWindows: { five_hour: { utilization, resetsAt: 1791355200 } },
+        },
+      },
+    });
+    agent.update("sess_test", withLimits(0.1));
+    agent.update("sess_test", withLimits(0.1));
+    agent.update("sess_test", withLimits(0.2));
+    agent.update("sess_test", { sessionUpdate: "usage_update", used: 11, size: 100 });
+
+    await vi.waitFor(() => expect(announced).toHaveLength(2));
+    expect(announced[1]).toMatchObject({
+      taskId: task.taskId,
+      harnessId: harness.id,
+      limits: { status: "ok", windows: [{ id: "five_hour", utilization: 0.2 }] },
+    });
+  });
+});

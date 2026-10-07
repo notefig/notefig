@@ -103,11 +103,12 @@ export class FakeAgent {
    *  startup-timeout tests). */
   onNewSession: (params: Json, agent: FakeAgent) => Promise<Json> = async () =>
     this.newSessionResult;
-  /** Scripted turn behavior; may emit updates / request permission via `this`. */
+  /** Scripted turn behavior; may emit updates / request permission via `this`.
+   *  The result is the prompt response (`usage`, `_meta` ride along). */
   onPrompt: (
     params: Json,
     agent: FakeAgent,
-  ) => Promise<{ stopReason: string }> = async () => ({
+  ) => Promise<{ stopReason: string; usage?: Json; _meta?: Json }> = async () => ({
     stopReason: "end_turn",
   });
   /** Scripted `authenticate` behavior; throwing rejects the call. */
@@ -309,7 +310,7 @@ export type MockTurnContext = {
 /** A scenario plays one turn; the resolved stopReason answers the prompt. */
 export type MockScenario = (
   ctx: MockTurnContext,
-) => Promise<{ stopReason: string } | void>;
+) => Promise<{ stopReason: string; usage?: Json; _meta?: Json } | void>;
 
 export type MockScenarioFactory = (options: Json) => MockScenario;
 
@@ -508,9 +509,15 @@ export function longTranscript(
   };
 }
 
-/** Default scenario: a short streamed echo — enough to see the loop work. */
+/** Each mock session's running usage, as a harness would keep it. */
+const echoMeters = new Map<string, { context: number; cost: number }>();
+
+/** Default scenario: a short streamed echo — enough to see the loop work.
+ *  Reports usage the way real harnesses do: a `usage_update` with the
+ *  context fill and the session-running cost, then per-turn tokens on the
+ *  prompt response. */
 export function echo(): MockScenario {
-  return async ({ promptText, emit, sleep, signal }) => {
+  return async ({ sessionId, promptText, emit, sleep, signal }) => {
     const reply = `You said:\n\n> ${promptText || "(nothing)"}\n\nMock harness reporting in.`;
     for (let at = 0; at < reply.length && !signal.aborted; at += 24) {
       emit({
@@ -519,7 +526,40 @@ export function echo(): MockScenario {
       });
       await sleep(10);
     }
-    return { stopReason: "end_turn" };
+    // A scenario is built per prompt; the running totals are the session's.
+    const meter = echoMeters.get(sessionId) ?? { context: 12_000, cost: 0 };
+    const input = 40 + promptText.length;
+    const output = Math.ceil(reply.length / 4);
+    meter.context += input + output;
+    meter.cost += (input * 3 + output * 15) / 1_000_000 + 0.002;
+    echoMeters.set(sessionId, meter);
+    const context = meter.context;
+    emit({
+      sessionUpdate: "usage_update",
+      used: context,
+      size: 200_000,
+      cost: { amount: meter.cost, currency: "USD" },
+      // Account limits in Claude's shape, so the limits path runs too.
+      _meta: {
+        "_claude/rateLimit": {
+          status: "allowed",
+          isUsingOverage: false,
+          unifiedWindows: {
+            five_hour: { utilization: 0.42, resetsAt: Math.floor(Date.now() / 1000) + 7_200 },
+            seven_day: { utilization: 0.18, resetsAt: Math.floor(Date.now() / 1000) + 259_200 },
+          },
+        },
+      },
+    });
+    return {
+      stopReason: "end_turn",
+      usage: {
+        inputTokens: input,
+        outputTokens: output,
+        cachedReadTokens: context - input - output,
+        totalTokens: context,
+      },
+    };
   };
 }
 

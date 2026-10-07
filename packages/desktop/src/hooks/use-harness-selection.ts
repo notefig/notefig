@@ -10,6 +10,7 @@ import {
   parseHarnessOverrides,
   resolveEffectiveHarnesses,
 } from "@notefig/shared/agent";
+import { useCore } from "@notefig/core/react";
 import { useKv } from "@/modules/kv/react";
 import {
   HARNESS_CUSTOM_KEY,
@@ -141,4 +142,18 @@ export function useProbedHarnesses(): ProbedHarness[] {
       ),
     [rawOverrides, rawCustom, rawDiscovery],
   );
+}
+
+/** A harness's display name (`core.harnesses.label`), live: a renamed
+ *  custom entry shows its new name without a reload. */
+export function useHarnessLabel(harnessId: string): string {
+  return useHarnessLabels()(harnessId);
+}
+
+/** The same lookup for many ids at once (a list keyed by harness). */
+export function useHarnessLabels(): (harnessId: string) => string {
+  const { harnesses } = useCore();
+  // Only for the subscription: the label itself reads the same rows.
+  useKv(HARNESS_SETTINGS_NAMESPACE);
+  return (harnessId) => harnesses.label(harnessId);
 }

@@ -26,6 +26,10 @@ import {
   type ToolCallUpdate,
   type TurnOutcome,
   type SessionConfigSelect,
+  type PromptResponse,
+  type SessionUsage,
+  addTurn,
+  emptySummary,
 } from "@notefig/shared/agent";
 import type {
   FileSystemSurface,
@@ -50,6 +54,12 @@ import {
 import { toolRegistry, getTool } from "./tools";
 import { serverInstructions } from "./mcp-instructions";
 import { buildWidgetContextPayload } from "./widget-context-resource";
+import {
+  contextFrom,
+  normalizeTurnUsage,
+  type UsageUpdate,
+} from "./turn-usage";
+import { limitsFrom } from "./usage-limits";
 import i18n from "@/utils/intl";
 import { captureEvent } from "@/telemetry/telemetry";
 import {
@@ -190,6 +200,17 @@ function isSessionConfigUpdate(update: SessionUpdate): boolean {
     update.sessionUpdate === "current_mode_update" ||
     update.sessionUpdate === "config_option_update"
   );
+}
+
+function emptySessionUsage(): SessionUsage {
+  return { ...emptySummary(), context: null };
+}
+
+/** The session's current model, from its model config option (the same
+ *  option the composer's session config bar shows). */
+function currentModel(options: SessionConfigSelect[] | undefined): string | null {
+  const value = options?.find((option) => option.category === "model")?.currentValue;
+  return typeof value === "string" ? value : null;
 }
 
 export function contentBlockText(content: ContentBlock): string {
@@ -345,6 +366,14 @@ export class AgentTask {
   /** What this harness's adapter settled at invoke time (spawn env applied,
    *  wire pass-through pending); null until the task starts. */
   private spawnPrep: HarnessSpawnPrep | null = null;
+  /** The latest `usage_update` this runtime has seen; per process, like the
+   *  instance — a revival starts a fresh AgentTask. */
+  private lastUsageUpdate: UsageUpdate | null = null;
+  /** The harness's running cost at the last settled turn; null until the
+   *  first one, when the task row's saved total stands in. */
+  private costBaseline: number | null = null;
+  /** The last account limits announced, so an unchanged report is quiet. */
+  private lastLimitsKey: string | null = null;
 
   private readonly store: AgentStore;
 
@@ -904,7 +933,14 @@ export class AgentTask {
           kv.insert({ key, value: true });
         }
       }
-      return this.finishTurn(response.stopReason, "completed");
+      // A cancel settles the turn before its response lands; what the
+      // response says the turn spent still counts.
+      const status =
+        this.currentTurn?.turnId !== turnId
+          ? "cancelled"
+          : this.finishTurn(response.stopReason, "completed");
+      this.recordTurnUsage(turnId, response);
+      return status;
     } catch (error) {
       const message = errorMessage(error);
       // Logged-out claude-code-acp fails here with "Authentication required"
@@ -915,7 +951,9 @@ export class AgentTask {
         this.enterAuthBlock({ turnId, text, contextParts });
       }
       this.warn("turn error", message);
-      return this.finishTurn(undefined, "error", message);
+      const status = this.finishTurn(undefined, "error", message);
+      this.recordTurnUsage(turnId, null);
+      return status;
     }
   }
 
@@ -1120,8 +1158,96 @@ export class AgentTask {
     return turnStatus;
   }
 
+  /**
+   * Normalize what a settled turn spent and land it everywhere it counts:
+   * the turn row (in memory), the session total on the task row (durable),
+   * and `agent:usage` for whoever keeps usage beyond the task. Every harness
+   * difference is resolved in `normalizeTurnUsage`; nothing past this point
+   * knows which harness reported it.
+   */
+  private recordTurnUsage(turnId: string, response: PromptResponse | null): void {
+    const row = this.store.tasks.get(this.taskId);
+    const { usage, costTotal } = normalizeTurnUsage({
+      harnessId: this.harness.id,
+      response,
+      lastUpdate: this.lastUsageUpdate,
+      model: currentModel(row?.configOptions),
+      // The first baseline is what the session has already been charged:
+      // a harness whose running total survives a revival then counts only
+      // what's new, and one whose total restarted reports below it — which
+      // the normalizer reads as a restart.
+      costBaseline: this.costBaseline ?? row?.usage?.total.cost?.amount ?? 0,
+    });
+    if (costTotal !== null) this.costBaseline = costTotal;
+
+    if (this.store.turns.get(turnId)) {
+      this.store.turns.update(turnId, (draft) => {
+        draft.usage = usage;
+      });
+    }
+    if (!usage) return;
+    if (row) {
+      // Built from the stored row, not the draft: the new summary must hold
+      // plain data — draft proxies inside it can't be persisted once the
+      // mutation ends, and a failed persist rolls the whole write back.
+      const next = addTurn(row.usage ?? emptySessionUsage(), usage);
+      this.store.tasks.update(this.taskId, (draft) => {
+        draft.usage = next;
+      });
+    }
+    this.deps.hooks.emit("agent:usage", {
+      taskId: this.taskId,
+      turnId,
+      workspacePath: this.workspacePath,
+      harnessId: this.harness.id,
+      at: Date.now(),
+      usage,
+    });
+  }
+
+  /** A `usage_update`: the live context fill, and the running cost the next
+   *  settled turn is measured against. Arrives between turns as readily as
+   *  during one, and never becomes a transcript entry. */
+  private recordUsageUpdate(update: UsageUpdate): void {
+    this.lastUsageUpdate = update;
+    this.announceLimits(update);
+    const row = this.store.tasks.get(this.taskId);
+    if (!row) return;
+    const context = contextFrom(update);
+    const current = row.usage?.context;
+    // Some harnesses repeat each update (Devin, once per agent in the chain).
+    if (current?.used === context.used && current.size === context.size) return;
+    const next = { ...(row.usage ?? emptySessionUsage()), context };
+    this.store.tasks.update(this.taskId, (draft) => {
+      draft.usage = next;
+    });
+  }
+
+  /** Account limits riding a `usage_update` (Claude's rate-limit windows),
+   *  announced when they change. Not task state: they belong to the harness
+   *  account. A session/load replay's are history, so never announced. */
+  private announceLimits(update: UsageUpdate): void {
+    if (this.currentTurn?.entries instanceof ReplayStage) return;
+    const limits = limitsFrom(update);
+    if (!limits) return;
+    const key = JSON.stringify(limits);
+    if (key === this.lastLimitsKey) return;
+    this.lastLimitsKey = key;
+    this.deps.hooks.emit("agent:usage-limits", {
+      taskId: this.taskId,
+      harnessId: this.harness.id,
+      at: Date.now(),
+      limits,
+    });
+  }
+
   handleSessionUpdate(notification: SessionNotification): void {
     const update = notification.update;
+
+    if (update.sessionUpdate === "usage_update") {
+      this.recordUsageUpdate(update);
+      return;
+    }
 
     // Tool calls coalesce at the task level, so a final tool_call_update that
     // arrives at/after the turn boundary still lands. Handle it before the

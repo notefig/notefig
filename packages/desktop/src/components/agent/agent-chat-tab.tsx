@@ -27,12 +27,10 @@ import type {
   ToolCallStatus,
   ToolCallUpdate,
   PlanEntry,
+  TurnUsage,
 } from "@notefig/shared/agent";
-import {
-  BUILT_IN_HARNESSES,
-  sortEntriesChronologically,
-} from "@notefig/shared/agent";
-import { useActiveHarnesses } from "@/hooks/use-harness-selection";
+import { sortEntriesChronologically } from "@notefig/shared/agent";
+import { useHarnessLabel } from "@/hooks/use-harness-selection";
 import { Button } from "@notefig/ui/button";
 import {
   MessageScrollerProvider,
@@ -55,6 +53,7 @@ import { PermissionCard } from "./permission-card";
 import { AuthCard } from "./auth-card";
 import { HarnessLogo } from "@notefig/ui/harness-logo";
 import { SessionConfigBar } from "./session-config-bar";
+import { SessionUsageChip, TurnUsageLabel } from "./session-usage";
 import {
   clearComposerDraft,
   getComposerDraft,
@@ -359,7 +358,13 @@ function UnavailableCard({ taskId }: { taskId: string }) {
  *  banners are peers in the same windowed list, so one bottom-anchor/follow
  *  path covers both. */
 type TranscriptRow =
-  | { kind: "entry"; entry: AgentEntry; queued: boolean }
+  | {
+      kind: "entry";
+      entry: AgentEntry;
+      queued: boolean;
+      /** On a turn's user entry: what the turn spent, once it settled. */
+      usage?: TurnUsage | null;
+    }
   | { kind: "error"; turn: AgentTurn };
 
 function transcriptRowKey(row: TranscriptRow): string {
@@ -435,6 +440,10 @@ function useTranscriptRows(taskId: string): TranscriptRow[] {
       new Set(turns.filter((t) => t.status === "queued").map((t) => t.turnId)),
     [turns],
   );
+  const turnUsage = useMemo(
+    () => new Map(turns.map((t) => [t.turnId, t.usage])),
+    [turns],
+  );
   const sortedEntries = useMemo(
     () => sortEntriesChronologically(entries),
     [entries],
@@ -445,10 +454,11 @@ function useTranscriptRows(taskId: string): TranscriptRow[] {
         kind: "entry",
         entry,
         queued: entry.type === "user" && queuedTurnIds.has(entry.turnId),
+        usage: entry.type === "user" ? turnUsage.get(entry.turnId) : undefined,
       })),
       ...turnErrors.map((turn): TranscriptRow => ({ kind: "error", turn })),
     ],
-    [sortedEntries, queuedTurnIds, turnErrors],
+    [sortedEntries, queuedTurnIds, turnUsage, turnErrors],
   );
 }
 
@@ -704,7 +714,7 @@ function TranscriptRowView({
           {row.turn.error}
         </div>
       ) : (
-        <EntryView entry={row.entry} queued={row.queued} />
+        <EntryView entry={row.entry} queued={row.queued} usage={row.usage} />
       )}
     </div>
   );
@@ -716,9 +726,11 @@ function TranscriptRowView({
 export const EntryView = memo(function EntryView({
   entry,
   queued,
+  usage,
 }: {
   entry: AgentEntry;
   queued?: boolean;
+  usage?: TurnUsage | null;
 }) {
   if (entry.type === "tool_call") {
     if (!entry.toolCall) return null;
@@ -737,7 +749,7 @@ export const EntryView = memo(function EntryView({
   // run closed by a tool_call renders as an empty bubble otherwise), and
   // leading/trailing newlines would show inside whitespace-pre-wrap bubbles.
   if (!entry.text?.trim()) return null;
-  return <MessageEntry entry={entry} queued={queued} />;
+  return <MessageEntry entry={entry} queued={queued} usage={usage} />;
 });
 
 /** A user or assistant text message: compact bubble (user) or flat
@@ -745,9 +757,11 @@ export const EntryView = memo(function EntryView({
 function MessageEntry({
   entry,
   queued,
+  usage,
 }: {
   entry: AgentEntry;
   queued?: boolean;
+  usage?: TurnUsage | null;
 }) {
   const isUser = entry.type === "user";
   const text = entry.text?.trim() ?? "";
@@ -788,7 +802,12 @@ function MessageEntry({
         )}
         {queued && <QueuedBadge taskId={entry.taskId} turnId={entry.turnId} />}
       </div>
-      <MessageFooter text={text} createdAt={entry.createdAt} isUser={isUser} />
+      <MessageFooter
+        text={text}
+        createdAt={entry.createdAt}
+        isUser={isUser}
+        usage={usage}
+      />
     </div>
   );
 }
@@ -825,10 +844,13 @@ function MessageFooter({
   text,
   createdAt,
   isUser,
+  usage,
 }: {
   text: string;
   createdAt?: number;
   isUser: boolean;
+  /** A prompt's footer carries what its turn spent (live turns only). */
+  usage?: TurnUsage | null;
 }) {
   return (
     <div
@@ -849,6 +871,7 @@ function MessageFooter({
           {formatEntryTime(createdAt)}
         </span>
       )}
+      <TurnUsageLabel usage={usage} />
     </div>
   );
 }
@@ -1281,6 +1304,7 @@ export function PromptBox({
 }) {
   const { t } = useTranslation();
   const harnessLabel = useHarnessLabel(harnessId);
+  const sessionUsage = useTaskRow(taskId)?.usage;
   return (
     <div className="pointer-events-auto rounded-2xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
       <PromptEditor
@@ -1310,7 +1334,9 @@ export function PromptBox({
         }
         className="min-h-[2.75rem] w-full px-4 pt-3 text-sm"
       />
-      <div className="flex items-center gap-1 px-2 pb-2">
+      {/* Bottom-aligned: the action button is the row's tallest item, and
+          centring the small labels on it left a gap under them. */}
+      <div className="flex items-end gap-1 px-2 pb-1.5">
         {/* The session is pinned to one harness — a passive indicator, not
             a picker (the sidebar's new-session split button chooses). The
             session's switchable settings (mode, model, …) follow it. */}
@@ -1320,7 +1346,8 @@ export function PromptBox({
         </span>
         <SessionConfigBar taskId={taskId} composerRef={composerRef} />
 
-        <div className="ms-auto flex items-center gap-1">
+        <div className="ms-auto flex items-end gap-1">
+          <SessionUsageChip usage={sessionUsage} composerRef={composerRef} />
           <ComposerActionButton
             isRunning={isRunning}
             draftEmpty={value.trim().length === 0}
@@ -1383,14 +1410,3 @@ function ComposerActionButton({
   );
 }
 
-/** Label for a harness id — effective list first (covers custom entries and
- *  overrides), built-ins as fallback (a deleted custom entry's sessions keep
- *  the raw id), raw id last. */
-function useHarnessLabel(harnessId: string): string {
-  const effective = useActiveHarnesses();
-  return (
-    effective.find((harness) => harness.id === harnessId)?.label ??
-    BUILT_IN_HARNESSES.find((harness) => harness.id === harnessId)?.label ??
-    harnessId
-  );
-}

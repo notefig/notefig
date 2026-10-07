@@ -38,4 +38,5 @@ describe("agent ids", () => {
     expect(idTimestamp("nounderscore")).toBeUndefined();
     expect(idTimestamp("msg_short")).toBeUndefined();
   });
+
 });
