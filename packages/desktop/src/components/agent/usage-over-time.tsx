@@ -24,7 +24,6 @@ import {
 import { cn } from "@notefig/ui/utils";
 import {
   totalTokens,
-  type UsageLimitStatus,
   type Usage,
 } from "@notefig/shared/agent";
 import { startOfHour } from "@/modules/usage";
@@ -185,9 +184,10 @@ function until(at: number, now: number): string {
   return `${Math.floor(ms / HOUR_MS)}h ${Math.floor((ms % HOUR_MS) / 60_000)}m`;
 }
 
-/** Thin out axis labels to about eight, counted back from the newest bar. */
+/** Thin out axis labels to about six (they fit a half-width card),
+ *  counted back from the newest bar. */
 function everyNth(count: number): (index: number) => boolean {
-  const every = Math.max(1, Math.ceil(count / 8));
+  const every = Math.max(1, Math.ceil(count / 6));
   return (index) => (count - 1 - index) % every === 0;
 }
 
@@ -282,18 +282,20 @@ export function UsageOverTime() {
         rangeDays={rangeDays}
         onRangeDays={setRangeDays}
       />
-      <ByHarnessCard
-        {...shared}
-        points={byHarness.points}
-        keys={byHarness.keys}
-        grain={grain}
-        description={t("usageSeriesDesc", { metric: metricName, grain: grainName, range: rangeName })}
-      />
-      <PatternCard
-        {...shared}
-        pattern={pattern}
-        description={t("usagePatternDesc", { metric: metricName.toLowerCase(), count: PATTERN_DAYS })}
-      />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <ByHarnessCard
+          {...shared}
+          points={byHarness.points}
+          keys={byHarness.keys}
+          grain={grain}
+          description={t("usageSeriesDesc", { metric: metricName, grain: grainName, range: rangeName })}
+        />
+        <PatternCard
+          {...shared}
+          pattern={pattern}
+          description={t("usagePatternDesc", { metric: metricName.toLowerCase(), count: PATTERN_DAYS })}
+        />
+      </div>
       <HarnessCard
         metric={metric}
         range={range}
@@ -539,7 +541,7 @@ function ByHarnessCard({
         grain={grain}
         format={format}
         formatAxis={formatAxis}
-        height={200}
+        height={180}
         area
         testId="usage-chart-harness"
       />
@@ -614,7 +616,7 @@ function PatternCard({
           }))}
           format={format}
           formatAxis={formatAxis}
-          height={110}
+          height={180}
           testId="usage-chart-pattern"
         />
       )}
@@ -690,12 +692,12 @@ function HarnessCard({
         />
 
         <div className="space-y-4 rounded-lg border border-border bg-muted/30 p-3 text-xs">
-          <ModelsPanel shown={shown} format={format} unnamed={noModels} name={name} />
           <LimitsPanel
             name={name}
             supported={reporting.limits}
             row={limits.find((row) => row.harnessId === harnessId)}
           />
+          <ModelsPanel shown={shown} format={format} unnamed={noModels} name={name} />
         </div>
       </div>
     </Card>
@@ -918,13 +920,6 @@ function Meter({ fraction, color }: { fraction: number; color: string }) {
   );
 }
 
-const STATUS_STYLE: Record<UsageLimitStatus, string> = {
-  ok: "bg-success/15 text-foreground",
-  warning: "bg-warning/15 text-warning",
-  blocked: "bg-destructive text-destructive-foreground",
-  unknown: "bg-muted text-muted-foreground",
-};
-
 function utilizationColor(utilization: number): string {
   if (utilization >= 0.9) return "hsl(var(--destructive))";
   if (utilization >= 0.7) return "var(--warning)";
@@ -945,35 +940,21 @@ function LimitsPanel({
   const now = useClock(MINUTE_MS);
   if (!supported) {
     return (
-      <div className="space-y-1 opacity-60" data-testid="usage-limits">
-        <div className="font-medium">{t("usageLimits")}</div>
-        <div className="text-muted-foreground">{t("usageLimitsUnsupported", { name })}</div>
+      <div className="text-muted-foreground opacity-60" data-testid="usage-limits">
+        {t("usageLimitsUnsupported", { name })}
       </div>
     );
   }
   if (!row) {
     return (
-      <div className="space-y-1" data-testid="usage-limits">
-        <div className="font-medium">{t("usageLimits")}</div>
-        <div className="text-muted-foreground">{t("usageLimitsNone")}</div>
+      <div className="text-muted-foreground" data-testid="usage-limits">
+        {t("usageLimitsNone")}
       </div>
     );
   }
   const { limits } = row;
-  const overage =
-    limits.usingOverage === null
-      ? t("usageOverageUnknown")
-      : limits.usingOverage
-        ? t("usageOverageInUse")
-        : t("usageOverageNotInUse");
   return (
     <div className="space-y-2" data-testid="usage-limits">
-      <div className="flex items-center justify-between gap-2">
-        <div className="font-medium">{t("usageLimits")}</div>
-        <span className={cn("rounded px-1.5 py-0.5 text-[0.625rem]", STATUS_STYLE[limits.status])}>
-          {t(`usageLimitStatus_${limits.status}`)}
-        </span>
-      </div>
       {limits.windows.length === 0 && (
         <div className="text-muted-foreground">{t("usageLimitsNoWindows")}</div>
       )}
@@ -1005,10 +986,6 @@ function LimitsPanel({
           </div>
         );
       })}
-      <div className="flex justify-between text-muted-foreground">
-        <span>{t("usageOverage")}</span>
-        <span className="text-foreground">{overage}</span>
-      </div>
       <div className="text-[0.625rem] text-muted-foreground">
         {t("usageLimitsAsOf", {
           time: new Date(row.at).toLocaleString(undefined, {
