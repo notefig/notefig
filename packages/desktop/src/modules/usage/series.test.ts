@@ -15,8 +15,7 @@ const at = (month: number, day: number, hour = 0) =>
 function turn(input: number, cost: number | null, model: string | null = "m"): TurnUsage {
   const total = {
     tokens: { input, cacheRead: 0, cacheWrite: 0, output: 0, thought: 0 },
-    cost: cost === null ? null : { amount: cost, currency: "USD" },
-    credits: null,
+    cost: cost === null ? null : { amount: cost, currency: "USD", type: "currency" as const },
   };
   return { total, byModel: [{ model, usage: total }] };
 }
@@ -49,21 +48,23 @@ describe("periodStart", () => {
 });
 
 describe("usageSeries", () => {
-  it("keeps credits apart from cost, and reads an older bucket as having none", () => {
+  it("totals money only; a harness's credits stay in its group", () => {
+    const credits = { amount: 4, currency: "devin-credit", type: "credits" as const };
     const credited = turn(100, null);
-    credited.total = { ...credited.total, credits: { amount: 4, unit: "devin-credit" } };
+    credited.total = { ...credited.total, cost: credits };
+    // Saved before costs were typed: money.
     const legacy = bucket(at(9, 1, 10), turn(10, 0.1));
-    delete (legacy.total as { credits?: unknown }).credits;
+    delete (legacy.total.cost as { type?: unknown }).type;
     const series = usageSeries(
       [legacy, bucket(at(9, 1, 11), credited, { harnessId: "devin" })],
       { from: at(9, 1), to: at(9, 2), grain: "day", groupBy: "harness" },
     );
     const [day] = series.points;
-    expect(day.total.cost).toEqual({ amount: 0.1, currency: "USD" });
-    expect(day.total.credits).toEqual({ amount: 4, unit: "devin-credit" });
-    expect(day.groups.map((g) => [g.key, g.usage.credits])).toEqual([
-      ["devin", { amount: 4, unit: "devin-credit" }],
-      ["claude", null],
+    expect(day.total.cost?.amount).toBe(0.1);
+    expect(day.total.cost?.currency).toBe("USD");
+    expect(day.groups.map((g) => [g.key, g.usage.cost?.amount, g.usage.cost?.currency])).toEqual([
+      ["devin", 4, "devin-credit"],
+      ["claude", 0.1, "USD"],
     ]);
   });
 

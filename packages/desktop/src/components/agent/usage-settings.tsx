@@ -22,7 +22,7 @@ import {
 } from "@notefig/ui/dropdown-menu";
 import { HarnessLogo } from "@notefig/ui/harness-logo";
 import { cn } from "@notefig/ui/utils";
-import { totalTokens, type Credits, type Usage } from "@notefig/shared/agent";
+import { costType, totalTokens, type Cost, type Usage } from "@notefig/shared/agent";
 import { startOfHour } from "@/modules/usage";
 import type {
   HarnessLimits,
@@ -43,7 +43,7 @@ import {
 } from "@/hooks/use-harness-selection";
 import { SettingsSectionActions } from "@/components/editor/settings-section";
 import { useClock } from "@/hooks/use-clock";
-import { formatCost, formatCredits, formatTokens } from "@/utils/usage-format";
+import { formatCost, formatTokens } from "@/utils/usage-format";
 import { UsageAreaChart } from "./usage-area-chart";
 import {
   UsageBarChart,
@@ -158,15 +158,19 @@ function topSeries(
   return { series, values, totals };
 }
 
-function useFormatters(currency: string) {
+/** What a chart's costs are counted in: a currency, or a harness's credits. */
+type CostUnit = Pick<Cost, "currency" | "type">;
+
+const USD: CostUnit = { currency: "USD", type: "currency" };
+
+function useFormatters({ currency, type }: CostUnit) {
   return useMemo(() => {
     const compactCost = (() => {
       try {
         return new Intl.NumberFormat(undefined, {
-          style: "currency",
-          currency,
           notation: "compact",
           maximumFractionDigits: 1,
+          ...(type === "currency" ? { style: "currency", currency } : {}),
         });
       } catch {
         return null;
@@ -175,14 +179,14 @@ function useFormatters(currency: string) {
     return {
       value: (metric: Metric) => (value: number) =>
         metric === "cost"
-          ? formatCost({ amount: value, currency })
+          ? formatCost({ amount: value, currency, type })
           : formatTokens(value),
       axis: (metric: Metric) => (value: number) =>
         metric === "cost"
           ? (compactCost?.format(value) ?? `${value} ${currency}`)
           : formatTokens(value),
     };
-  }, [currency]);
+  }, [currency, type]);
 }
 
 function hourLabel(hour: number): string {
@@ -270,13 +274,20 @@ function useHarnessIds(
   }, [byHarness.keys, activeHarnesses, limits]);
 }
 
-/** The currency costs are in: the first one seen, USD until then. */
-function currencyOf(byHarness: UsageSeries): string {
-  for (const point of byHarness.points) {
-    for (const group of point.groups)
-      if (group.usage.cost) return group.usage.cost.currency;
+/** The unit a series' costs are in: the first one seen that `accept`s,
+ *  null when there is none. */
+function costUnitOf(
+  series: UsageSeries,
+  accept: (cost: Cost) => boolean = () => true,
+): CostUnit | null {
+  for (const point of series.points) {
+    for (const { usage } of point.groups) {
+      if (usage.cost && accept(usage.cost)) {
+        return { currency: usage.cost.currency, type: costType(usage.cost) };
+      }
+    }
   }
-  return "USD";
+  return null;
 }
 
 export function UsageSettings() {
@@ -297,7 +308,11 @@ export function UsageSettings() {
   const labelOf = useHarnessLabels();
   const reportingOf = useHarnessReporting(byHarness, limits);
   const harnessIds = useHarnessIds(byHarness, limits);
-  const formatters = useFormatters(currencyOf(byHarness));
+  // The views that stack harnesses chart money only; a harness billing in
+  // credits charts them in its own card.
+  const money =
+    costUnitOf(byHarness, (cost) => costType(cost) === "currency") ?? USD;
+  const formatters = useFormatters(money);
 
   const metricName = metric === "cost" ? t("usageCost") : t("usageTokens");
   const rangeName = t("usageRangeDays", { count: rangeDays });
@@ -348,7 +363,7 @@ export function UsageSettings() {
         reportingOf={reportingOf}
         limits={limits}
         caption={{ grain: grainName, range: rangeName }}
-        formatters={formatters}
+        money={money}
       />
     </div>
   );
@@ -771,7 +786,7 @@ function HarnessCard({
   reportingOf,
   limits,
   caption,
-  formatters,
+  money,
 }: {
   metric: Metric;
   range: { from: number; to: number };
@@ -782,7 +797,8 @@ function HarnessCard({
   limits: HarnessLimits[];
   /** The range and grain, as the captions name them. */
   caption: { grain: string; range: string };
-  formatters: ReturnType<typeof useFormatters>;
+  /** The unit the stacked views chart cost in. */
+  money: CostUnit;
 }) {
   const { t } = useTranslation();
   const [chosen, setChosen] = useState<string | null>(null);
@@ -797,11 +813,11 @@ function HarnessCard({
   });
   const reporting = reportingOf(harnessId);
   const name = labelOf(harnessId);
-  // Cost asked of a harness that has none: chart its tokens, greyed.
-  const noCost = metric === "cost" && !reporting.cost;
-  const noModels = namesNoModels(byModel.keys);
-  const shownMetric: Metric = noCost ? "tokens" : metric;
-  const disabled = modelChartDisabled(noCost, noModels, name, t);
+  const { unit, formatters, shownMetric, noModels, disabled } = useHarnessChart(
+    byModel,
+    reporting,
+    { metric, money, name },
+  );
   const format = formatters.value(shownMetric);
 
   const shown = topSeries(
@@ -816,7 +832,7 @@ function HarnessCard({
     <Card testId="usage-harness-detail">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <HarnessTitle name={name} reporting={reporting} />
+          <HarnessTitle name={name} reporting={reporting} unit={unit} />
           <div className="text-[0.625rem] text-muted-foreground">
             {disabled?.note ??
               t("usageDetailDesc", {
@@ -864,33 +880,40 @@ function HarnessCard({
             unnamed={noModels}
             name={name}
           />
-          <CreditsLine points={byModel.points} />
         </div>
       </div>
     </Card>
   );
 }
 
-/** The range's credits, for a harness that bills in them. Billing units
- *  aren't money, so they stand apart from the cost chart. */
-function CreditsLine({ points }: { points: readonly { total: Usage }[] }) {
+/** What one harness's chart shows: its cost in its own unit (or the
+ *  stacked views' money), else its tokens, greyed, when the view asks for a
+ *  cost it doesn't have or it names no models. */
+function useHarnessChart(
+  byModel: UsageSeries,
+  reporting: UsageReporting,
+  { metric, money, name }: { metric: Metric; money: CostUnit; name: string },
+) {
   const { t } = useTranslation();
-  const credits = points.reduce<Credits | null>(
-    (sum, point) =>
-      point.total.credits
-        ? { amount: (sum?.amount ?? 0) + point.total.credits.amount, unit: point.total.credits.unit }
-        : sum,
-    null,
-  );
-  if (!credits) return null;
-  return (
-    <div className="flex items-center gap-2" data-testid="usage-credits">
-      <span className="min-w-0 flex-1 truncate text-muted-foreground">
-        {t("usageCredits")}
-      </span>
-      <span className="font-medium tabular-nums">{formatCredits(credits)}</span>
-    </div>
-  );
+  const unit = harnessCostUnit(byModel, reporting, money);
+  const formatters = useFormatters(unit ?? money);
+  const noCost = metric === "cost" && !unit;
+  const noModels = namesNoModels(byModel.keys);
+  const shownMetric: Metric = noCost ? "tokens" : metric;
+  const disabled = modelChartDisabled(noCost, noModels, name, t);
+  return { unit, formatters, shownMetric, noModels, disabled };
+}
+
+/** The unit one harness's cost charts in: its own when the range shows it
+ *  billing in credits, the stacked views' money when it reports cost, null
+ *  when it has no cost to chart. */
+function harnessCostUnit(
+  series: UsageSeries,
+  reporting: UsageReporting,
+  money: CostUnit,
+): CostUnit | null {
+  const credits = costUnitOf(series, (cost) => costType(cost) === "credits");
+  return credits ?? (reporting.cost ? money : null);
 }
 
 /** Usage that names no model has no breakdown to chart. */
@@ -920,15 +943,23 @@ function modelChartDisabled(
 function HarnessTitle({
   name,
   reporting,
+  unit,
 }: {
   name: string;
   reporting: UsageReporting;
+  /** What its cost charts in; null when it has none. */
+  unit: CostUnit | null;
 }) {
   const { t } = useTranslation();
+  const costCap = !unit
+    ? t("usageCapTokensOnly")
+    : unit.type === "credits"
+      ? t("usageCapCredits")
+      : t("usageCapCost");
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <div className="text-[0.8125rem] font-medium">{name}</div>
-      <Cap>{reporting.cost ? t("usageCapCost") : t("usageCapTokensOnly")}</Cap>
+      <Cap>{costCap}</Cap>
       <Cap>
         {reporting.limits ? t("usageCapLimits") : t("usageCapNoLimits")}
       </Cap>

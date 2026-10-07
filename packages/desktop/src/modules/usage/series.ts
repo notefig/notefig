@@ -15,8 +15,8 @@
 import {
   emptyTokens,
   totalTokens,
-  type Credits,
-  type Money,
+  costType,
+  type Cost,
   type TokenCounts,
   type Usage,
 } from "@notefig/shared/agent";
@@ -32,7 +32,8 @@ export type UsageGroupBy = "harness" | "model";
 export type UsageGroup = { key: string | null; usage: Usage };
 
 /** A slice of usage and how it splits; groups follow the view's `keys`
- *  order, and only groups with usage in the slice are listed. */
+ *  order, and only groups with usage in the slice are listed. The total's
+ *  cost is money only; a group's is in its harness's unit (Devin credits). */
 export type UsageSlice = { total: Usage; turns: number; groups: UsageGroup[] };
 
 export type UsagePoint = UsageSlice & {
@@ -66,8 +67,7 @@ const DAY_MS = 24 * 3_600_000;
 
 type Accumulator = {
   tokens: TokenCounts;
-  cost: Money | null;
-  credits: Credits | null;
+  cost: Cost | null;
   turns: number;
 };
 
@@ -77,7 +77,7 @@ type SliceAccumulator = {
 };
 
 function emptyAccumulator(): Accumulator {
-  return { tokens: emptyTokens(), cost: null, credits: null, turns: 0 };
+  return { tokens: emptyTokens(), cost: null, turns: 0 };
 }
 
 function emptySlice(): SliceAccumulator {
@@ -93,17 +93,6 @@ function accumulate(into: Accumulator, usage: Usage, turns: number): void {
   tokens.output += usage.tokens.output;
   tokens.thought += usage.tokens.thought;
   into.turns += turns;
-  // Buckets saved before credits were tracked have no field at all.
-  const credits = usage.credits ?? null;
-  if (credits) {
-    if (!into.credits) into.credits = { ...credits };
-    else if (into.credits.unit === credits.unit) into.credits.amount += credits.amount;
-    else {
-      console.warn(
-        `[usage] dropping ${credits.amount} ${credits.unit}: series is in ${into.credits.unit}`,
-      );
-    }
-  }
   const cost = usage.cost;
   if (!cost) return;
   if (!into.cost) into.cost = { ...cost };
@@ -116,12 +105,20 @@ function accumulate(into: Accumulator, usage: Usage, turns: number): void {
   }
 }
 
+/** A slice's total spans harnesses, so its cost is money only: credits are
+ *  a harness's own unit and stay in that harness's group. */
+function moneyOnly(usage: Usage): Usage {
+  return usage.cost && costType(usage.cost) !== "currency"
+    ? { ...usage, cost: null }
+    : usage;
+}
+
 function addBucket(
   slice: SliceAccumulator,
   bucket: UsageBucket,
   groupBy: UsageGroupBy,
 ): void {
-  accumulate(slice.total, bucket.total, bucket.turns);
+  accumulate(slice.total, moneyOnly(bucket.total), bucket.turns);
   const groupOf = (key: string | null) => {
     let group = slice.groups.get(key);
     if (!group) slice.groups.set(key, (group = emptyAccumulator()));
@@ -144,8 +141,7 @@ function toUsage(acc: Accumulator, divisor: number): Usage {
       output: t.output / divisor,
       thought: t.thought / divisor,
     },
-    cost: acc.cost && { amount: acc.cost.amount / divisor, currency: acc.cost.currency },
-    credits: acc.credits && { amount: acc.credits.amount / divisor, unit: acc.credits.unit },
+    cost: acc.cost && { ...acc.cost, amount: acc.cost.amount / divisor },
   };
 }
 

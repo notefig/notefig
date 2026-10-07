@@ -377,8 +377,6 @@ export class AgentTask {
   /** The harness's running cost at the last settled turn; null until the
    *  first one, when the task row's saved total stands in. */
   private costBaseline: number | null = null;
-  /** The same, for the harness's running credit total. */
-  private creditBaseline: number | null = null;
   /** The last account limits announced, so an unchanged report is quiet. */
   private lastLimitsKey: string | null = null;
 
@@ -1182,16 +1180,19 @@ export class AgentTask {
     const row = this.store.tasks.get(this.taskId);
     const turnUpdates = this.turnUsageUpdates;
     this.turnUsageUpdates = [];
-    const { usage, costTotal, creditTotal } = normalizeTurnUsage({
+    const { usage, costTotal } = normalizeTurnUsage({
       harnessId: this.harness.id,
       response,
       lastUpdate: this.lastUsageUpdate,
       turnUpdates,
       model: currentModel(row?.configOptions),
-      ...this.usageBaselines(row?.usage),
+      // The first baseline is what the session has already been charged:
+      // a harness whose running total survives a revival then counts only
+      // what's new, and one whose total restarted reports below it — which
+      // the normalizer reads as a restart.
+      costBaseline: this.costBaseline ?? row?.usage?.total.cost?.amount ?? 0,
     });
     if (costTotal !== null) this.costBaseline = costTotal;
-    if (creditTotal !== null) this.creditBaseline = creditTotal;
 
     if (this.store.turns.get(turnId)) {
       this.store.turns.update(turnId, (draft) => {
@@ -1216,21 +1217,6 @@ export class AgentTask {
       at: Date.now(),
       usage,
     });
-  }
-
-  /** The running totals the next turn is measured against. The first is
-   *  what the session has already been charged: a harness whose running
-   *  total survives a revival then counts only what's new, and one whose
-   *  total restarted reports below it — which the normalizer reads as a
-   *  restart. */
-  private usageBaselines(saved: SessionUsage | undefined): {
-    costBaseline: number;
-    creditBaseline: number;
-  } {
-    return {
-      costBaseline: this.costBaseline ?? saved?.total.cost?.amount ?? 0,
-      creditBaseline: this.creditBaseline ?? saved?.total.credits?.amount ?? 0,
-    };
   }
 
   /** A `usage_update`: the live context fill, and the running cost the next

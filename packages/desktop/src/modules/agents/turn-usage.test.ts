@@ -224,7 +224,7 @@ describe("normalizeTurnUsage", () => {
       expect(usage?.total.tokens.output).toBe(15);
     });
 
-    it("credits are the running total's difference, kept apart from cost", () => {
+    it("credits are its cost: the running total's difference, typed credits", () => {
       const withCredits = (total: number) =>
         ({
           ...req("root", 11909, 15, 11776),
@@ -235,13 +235,12 @@ describe("normalizeTurnUsage", () => {
         response: lastResponse,
         lastUpdate: withCredits(3.5),
         model: null,
-        costBaseline: 0,
-        creditBaseline: 1.25,
+        costBaseline: 1.25,
       });
-      expect(result.usage?.total.credits).toEqual({ amount: 2.25, unit: "devin-credit" });
-      expect(result.usage?.total.cost).toBeNull();
-      expect(result.creditTotal).toBe(3.5);
-      expect(result.usage?.byModel[0].usage.credits?.amount).toBe(2.25);
+      const cost = { amount: 2.25, currency: "devin-credit", type: "credits" };
+      expect(result.usage?.total.cost).toEqual(cost);
+      expect(result.usage?.byModel[0].usage.cost).toEqual(cost);
+      expect(result.costTotal).toBe(3.5);
     });
 
     it("tells a subagent's update from the main agent's", () => {
@@ -260,7 +259,7 @@ describe("normalizeTurnUsage", () => {
         model: null,
         costBaseline: 0,
       }),
-    ).toEqual({ usage: null, costTotal: null, creditTotal: null });
+    ).toEqual({ usage: null, costTotal: null });
   });
 
   it("a failed prompt after a costed turn is null: the held cost hasn't moved", () => {
@@ -274,6 +273,6 @@ describe("normalizeTurnUsage", () => {
         model: null,
         costBaseline: 0.5,
       }),
-    ).toEqual({ usage: null, costTotal: 0.5, creditTotal: null });
+    ).toEqual({ usage: null, costTotal: 0.5 });
   });
 });

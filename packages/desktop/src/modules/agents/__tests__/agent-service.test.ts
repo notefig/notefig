@@ -2206,7 +2206,7 @@ describe("usage (token & cost)", () => {
     const session = store.tasks.get(task.taskId)?.usage;
     expect(session?.turns).toBe(2);
     expect(session?.total.tokens.input).toBe(20);
-    expect(session?.total.cost).toEqual({ amount: 0.5, currency: "USD" });
+    expect(session?.total.cost).toEqual({ amount: 0.5, currency: "USD", type: "currency" });
     expect(session?.context).toEqual({ used: 2000, size: 200_000 });
 
     expect(emitted).toHaveLength(2);
@@ -2335,11 +2335,11 @@ describe("usage (token & cost)", () => {
       output: 400,
       thought: 0,
     });
-    // Credits: the main agent's running total, 2 at the end of the turn.
-    expect(turn.usage?.total.credits).toEqual({ amount: 2, unit: "devin-credit" });
-    expect(turn.usage?.total.cost).toBeNull();
+    // Credits are its cost: the main agent's running total, 2 at the end.
+    const credits = { amount: 2, currency: "devin-credit", type: "credits" };
+    expect(turn.usage?.total.cost).toEqual(credits);
     const session = store.tasks.get(task.taskId)?.usage;
-    expect(session?.total.credits).toEqual({ amount: 2, unit: "devin-credit" });
+    expect(session?.total.cost).toEqual(credits);
     expect(session?.context).toEqual({ used: 12_200, size: 200_000 });
     const texts = entriesFor(task.taskId).map((e) => ("text" in e ? e.text : ""));
     expect(texts.join("|")).not.toContain("subagent musing");

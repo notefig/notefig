@@ -15,8 +15,7 @@ const T0 = Date.UTC(2026, 9, 6, 14, 5);
 function turnUsage(input: number, cost: number | null, model = "m"): TurnUsage {
   const total = {
     tokens: { input, cacheRead: 0, cacheWrite: 0, output: 1, thought: 0 },
-    cost: cost === null ? null : { amount: cost, currency: "USD" },
-    credits: null,
+    cost: cost === null ? null : { amount: cost, currency: "USD", type: "currency" as const },
   };
   return { total, byModel: [{ model, usage: total }] };
 }

@@ -16,8 +16,8 @@
  *   and once, tagged with its own id, for each subagent request — so the
  *   turn is the sum of the tagged updates
  *   (docs/architecture/spikes/acp-usage-multistep-spike.md). Its credits
- *   (`cognition.ai/totalCreditCost`) are a session-running total like cost,
- *   kept as {@link Credits} in `"devin-credit"`s, never as money.
+ *   (`cognition.ai/totalCreditCost`) are a session-running total like
+ *   others' money: its cost, typed `"credits"` in `"devin-credit"`s.
  * - Claude splits tokens per model in `_meta.quota.model_usage`; cost it
  *   reports only in total, so it goes to the main model.
  */
@@ -25,7 +25,7 @@ import {
   addTokens,
   emptyTokens,
   type ContextWindow,
-  type Credits,
+  type Cost,
   type ModelUsage,
   type PromptResponse,
   type SessionNotification,
@@ -44,13 +44,20 @@ export function contextFrom(update: UsageUpdate): ContextWindow {
   return { used: update.used, size: update.size };
 }
 
-/** The session-running cost a `usage_update` reports, if any. */
-export function costTotalFrom(
-  update: UsageUpdate | null,
-): { amount: number; currency: string } | null {
+/** The unit Devin's `totalCreditCost` counts in. */
+const DEVIN_CREDIT = "devin-credit";
+
+/** The session-running cost a `usage_update` reports, if any: money where
+ *  the harness sends ACP's `cost`, else Devin's running credit total. */
+function costTotalFrom(update: UsageUpdate | null): Cost | null {
   const cost = update?.cost;
-  if (!cost || typeof cost.amount !== "number") return null;
-  return { amount: cost.amount, currency: cost.currency };
+  if (cost && typeof cost.amount === "number") {
+    return { amount: cost.amount, currency: cost.currency, type: "currency" };
+  }
+  const credits = metaNumber(update, "cognition.ai/totalCreditCost");
+  return credits === null
+    ? null
+    : { amount: credits, currency: DEVIN_CREDIT, type: "credits" };
 }
 
 /** The agent a Devin `usage_update` or chunk came from: `"root"` for the
@@ -92,16 +99,12 @@ export type NormalizeTurnUsageInput = {
   model: string | null;
   /** The running cost total at the end of the previous turn (0 at spawn). */
   costBaseline: number;
-  /** The running credit total at the end of the previous turn (0 at spawn). */
-  creditBaseline?: number;
 };
 
 export type NormalizedTurnUsage = {
   usage: TurnUsage | null;
   /** The running total to use as the next turn's baseline. */
   costTotal: number | null;
-  /** The running credit total to use as the next turn's baseline. */
-  creditTotal: number | null;
 };
 
 type RawUsage = NonNullable<PromptResponse["usage"]>;
@@ -203,9 +206,6 @@ function requestTokens(updates: readonly UsageUpdate[]): TokenCounts | null {
   return sum;
 }
 
-/** The unit Devin's `totalCreditCost` counts in. */
-const DEVIN_CREDIT = "devin-credit";
-
 /** The difference of a running total from its baseline; a total below the
  *  baseline means the accumulator restarted, so all of it is this turn's. */
 function sinceBaseline(total: number, baseline: number): number {
@@ -221,15 +221,9 @@ function updateModel(update: UsageUpdate | null): string | null {
 }
 
 /** The turn's share of the running cost: the difference from the baseline. */
-function turnCost(
-  runningCost: { amount: number; currency: string } | null,
-  costBaseline: number,
-): Usage["cost"] {
+function turnCost(runningCost: Cost | null, costBaseline: number): Cost | null {
   if (!runningCost) return null;
-  return {
-    amount: sinceBaseline(runningCost.amount, costBaseline),
-    currency: runningCost.currency,
-  };
+  return { ...runningCost, amount: sinceBaseline(runningCost.amount, costBaseline) };
 }
 
 /** Per-model rows: Claude's own split (its cost to the main model, since it
@@ -248,7 +242,6 @@ function byModelRows(
     usage: {
       tokens: row.tokens,
       cost: row.model === costModel ? total.cost : null,
-      credits: row.model === costModel ? total.credits : null,
     },
   }));
 }
@@ -277,39 +270,26 @@ export function normalizeTurnUsage({
   turnUpdates = [],
   model,
   costBaseline,
-  creditBaseline = 0,
 }: NormalizeTurnUsageInput): NormalizedTurnUsage {
   const runningCost = costTotalFrom(lastUpdate);
   const costTotal = runningCost?.amount ?? null;
   const cost = turnCost(runningCost, costBaseline);
-  const creditTotal = metaNumber(lastUpdate, "cognition.ai/totalCreditCost");
-  const credits: Credits | null =
-    creditTotal === null
-      ? null
-      : { amount: sinceBaseline(creditTotal, creditBaseline), unit: DEVIN_CREDIT };
   const perRequest = requestTokens(turnUpdates);
   // A running total that hasn't moved since the last turn is the previous
   // turn's report, still held — not this turn's. Without tokens too, the
   // turn reported nothing (a failed prompt) and must not count as a turn.
-  if (
-    !response?.usage &&
-    !perRequest &&
-    !(cost && cost.amount !== 0) &&
-    !(credits && credits.amount !== 0)
-  ) {
-    return { usage: null, costTotal, creditTotal };
+  if (!response?.usage && !perRequest && !(cost && cost.amount !== 0)) {
+    return { usage: null, costTotal };
   }
 
   const quotaRows = response ? quotaModelRows(response) : null;
   const total: Usage = {
     tokens: turnTokens(harnessId, response, quotaRows, perRequest),
     cost,
-    credits,
   };
   const mainModel = updateModel(lastUpdate) ?? model;
   return {
     usage: { total, byModel: byModelRows(quotaRows, mainModel, total) },
     costTotal,
-    creditTotal,
   };
 }

@@ -23,12 +23,17 @@ const TokenCountsSchema = z.object({
 
 const UsageSchema = z.object({
   tokens: TokenCountsSchema,
-  cost: z.object({ amount: z.number(), currency: z.string() }).nullable(),
-  // Rows saved before credits were tracked have none.
-  credits: z.object({ amount: z.number(), unit: z.string() }).nullable().default(null),
+  cost: z
+    .object({
+      amount: z.number(),
+      currency: z.string(),
+      // Rows saved before costs were typed are all money.
+      type: z.enum(["currency", "credits"]).default("currency"),
+    })
+    .nullable(),
 });
 
-// Typed on its output only: an older row's input may lack `credits`.
+// Typed on its output only: an older row's cost may lack `type`.
 const SessionUsageSchema: z.ZodType<SessionUsage, z.ZodTypeDef, unknown> = z.object({
   total: UsageSchema,
   byModel: z.array(z.object({ model: z.string().nullable(), usage: UsageSchema })),
