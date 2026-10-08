@@ -1,10 +1,11 @@
 /**
  * A stacked area chart for the usage views: one point per period, one band
- * per series, smoothed, filled with a fading gradient, and a hover guide
- * with the period's breakdown. Plain SVG on theme tokens — no charting
+ * per series, smoothed, and a hover guide with the period's breakdown. Each
+ * band is filled evenly — not faded — so its thickness reads as its value:
+ * a small series is a thin strip on a large one, not a line beside it. Plain SVG on theme tokens — no charting
  * library — sharing the bar chart's data shape, axis and tooltip.
  */
-import { useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@notefig/ui/utils";
 import {
@@ -93,7 +94,6 @@ export function UsageAreaChart({
   testId?: string;
 }) {
   const { t } = useTranslation();
-  const gradientId = useId();
   const plot = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<number | null>(null);
   const count = bars.length;
@@ -156,26 +156,12 @@ export function UsageAreaChart({
           preserveAspectRatio="none"
           aria-hidden
         >
-          <defs>
-            {series.map((s, index) => (
-              <linearGradient
-                key={s.key}
-                id={`${gradientId}-${index}`}
-                x1="0"
-                y1="0"
-                x2="0"
-                y2="1"
-              >
-                <stop offset="5%" stopColor={s.color} stopOpacity={0.8} />
-                <stop offset="95%" stopColor={s.color} stopOpacity={0.1} />
-              </linearGradient>
-            ))}
-          </defs>
           {series.map((s, index) => (
             <g key={s.key}>
               <path
                 d={`${trace(curves[index + 1])}${trace(curves[index], true)}Z`}
-                fill={`url(#${gradientId}-${index})`}
+                fill={s.color}
+                fillOpacity={0.35}
               />
               <path
                 d={trace(curves[index + 1])}

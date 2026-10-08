@@ -4,6 +4,7 @@ import {
   periodStart,
   usagePattern,
   usageSeries,
+  weekdayTokens,
   type UsageBucket,
 } from "@/modules/usage";
 
@@ -214,5 +215,35 @@ describe("usagePattern", () => {
     ]);
     expect(pattern.hours[22].total.tokens.input).toBe(2);
     expect(pattern.hours[0].turns).toBe(0);
+  });
+});
+
+describe("weekdayTokens", () => {
+  it("adds each local weekday's tokens per harness, Monday first, the largest first", () => {
+    // 2026-10-05 is a Monday; the 11th the Sunday after.
+    const harnesses = weekdayTokens(
+      [
+        bucket(at(9, 5, 9), turn(10, null)),
+        bucket(at(9, 5, 15), turn(5, null)),
+        bucket(at(9, 11, 23), turn(7, null)),
+        bucket(at(9, 6, 9), turn(100, null), { harnessId: "devin" }),
+        bucket(at(9, 12, 9), turn(1, null)),
+      ],
+      { from: at(9, 5), to: at(9, 12) },
+    );
+    expect(
+      harnesses.map(({ harnessId, days }) => [harnessId, days.map((tokens) => tokens.input)]),
+    ).toEqual([
+      ["devin", [0, 100, 0, 0, 0, 0, 0]],
+      ["claude", [15, 0, 0, 0, 0, 0, 7]],
+    ]);
+  });
+
+  it("keeps to one harness when asked", () => {
+    const harnesses = weekdayTokens(
+      [bucket(at(9, 5, 9), turn(10, null)), bucket(at(9, 6, 9), turn(100, null), { harnessId: "devin" })],
+      { from: at(9, 5), to: at(9, 12), harnessId: "claude" },
+    );
+    expect(harnesses.map((h) => h.harnessId)).toEqual(["claude"]);
   });
 });

@@ -1,8 +1,10 @@
 /**
- * Settings → Usage: usage over time by harness, the average day hour by
- * hour, and one harness in detail (its models and its account limits).
- * Everything reads the usage module's hourly buckets for the chosen range;
- * the grouping is `series.ts`'s, done once per change.
+ * Settings → Usage: usage over time — every harness side by side, or one
+ * harness by model, beside its breakdown and account limits — the share of
+ * input read from cache by day of the week, and the average day hour by
+ * hour. Everything reads the usage module's hourly
+ * buckets for the chosen range; the grouping is `series.ts`'s, done once
+ * per change.
  *
  * Charts show the three largest series and fold the rest into "Other", so
  * they stay readable however many harnesses or models there are. A harness
@@ -22,9 +24,18 @@ import {
 } from "@notefig/ui/dropdown-menu";
 import { HarnessLogo } from "@notefig/ui/harness-logo";
 import { cn } from "@notefig/ui/utils";
-import { costType, totalTokens, type Cost, type Usage } from "@notefig/shared/agent";
+import {
+  cacheHitRate,
+  costType,
+  emptyTokens,
+  addTokens,
+  totalTokens,
+  type Cost,
+  type Usage,
+} from "@notefig/shared/agent";
 import { startOfHour } from "@/modules/usage";
 import type {
+  WeekdayTokens,
   HarnessLimits,
   UsageGrain,
   UsageSeries,
@@ -35,6 +46,7 @@ import {
   useHarnessReporting,
   useUsagePattern,
   useUsageSeries,
+  useWeekdayTokens,
 } from "@/modules/usage/react";
 import type { UsageReporting } from "@/modules/agents/harnesses";
 import {
@@ -44,12 +56,13 @@ import {
 import { SettingsSectionActions } from "@/components/editor/settings-section";
 import { useClock } from "@/hooks/use-clock";
 import { formatCost, formatTokens } from "@/utils/usage-format";
-import { UsageAreaChart } from "./usage-area-chart";
 import {
   UsageBarChart,
   type ChartBar,
   type ChartSeries,
 } from "./usage-bar-chart";
+import { UsageAreaChart } from "./usage-area-chart";
+import { UsageRadarChart, type RadarShape } from "./usage-radar-chart";
 
 type Metric = "tokens" | "cost";
 
@@ -77,9 +90,15 @@ const PALETTE = [
   "hsl(var(--chart-3))",
   "hsl(var(--chart-4))",
 ];
+/** The two rows of cards: a wide one beside a narrow one, then the other
+ *  way round, the narrow ones a third of the width. */
+const WIDE_NARROW = "grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]";
+const NARROW_WIDE = "grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]";
 const OTHER_COLOR = "hsl(var(--muted-foreground) / 0.45)";
 const OTHER_KEY = "\u0000other";
 const NULL_KEY = "\u0000none";
+/** The detail view's every-harness choice; no harness id starts with NUL. */
+const ALL = "\u0000all";
 
 function metricOf(usage: Usage, metric: Metric): number {
   return metric === "cost"
@@ -104,6 +123,36 @@ type ShownSeries = {
   totals: number[];
 };
 
+/** A harness's own colour, when it has one. */
+type ColorOf = (key: string | null) => string | undefined;
+
+/** One colour per harness wherever harnesses sit side by side, by its
+ *  tokens over the range — so switching to cost, or to the cache chart,
+ *  doesn't repaint them. Past the palette, none. */
+function harnessColors(byHarness: UsageSeries): ColorOf {
+  const totals = new Map<string, number>();
+  for (const point of byHarness.points) {
+    for (const { key, usage } of point.groups) {
+      if (key)
+        totals.set(key, (totals.get(key) ?? 0) + totalTokens(usage.tokens));
+    }
+  }
+  const ranked = [...totals.keys()].sort(
+    (a, b) => (totals.get(b) ?? 0) - (totals.get(a) ?? 0),
+  );
+  return (key) => (key === null ? undefined : PALETTE[ranked.indexOf(key)]);
+}
+
+/** Each key's colour: its own, else the next one no other key has. */
+function paletteFor(
+  keys: readonly (string | null)[],
+  colorOf: ColorOf = () => undefined,
+): string[] {
+  const own = keys.map(colorOf);
+  const spare = PALETTE.filter((color) => !own.includes(color));
+  return own.map((color) => color ?? spare.shift() ?? OTHER_COLOR);
+}
+
 /** The largest groups as chart series, the rest summed into "Other". */
 function topSeries(
   slices: readonly UsageSlice[],
@@ -112,6 +161,7 @@ function topSeries(
   nameOf: (key: string | null) => string,
   otherName: string,
   include: (key: string | null) => boolean = () => true,
+  colorOf?: ColorOf,
 ): ShownSeries {
   const totalOf = new Map<string | null, number>();
   for (const slice of slices) {
@@ -130,10 +180,11 @@ function topSeries(
     ranked.length <= TOP_SERIES + 1 ? ranked : ranked.slice(0, TOP_SERIES);
   const rest = new Set(ranked.slice(shown.length));
 
+  const colors = paletteFor(shown, colorOf);
   const series: ChartSeries[] = shown.map((key, index) => ({
     key: key ?? NULL_KEY,
     name: nameOf(key),
-    color: PALETTE[index],
+    color: colors[index],
   }));
   if (rest.size > 0)
     series.push({ key: OTHER_KEY, name: otherName, color: OTHER_COLOR });
@@ -274,20 +325,52 @@ function useHarnessIds(
   }, [byHarness.keys, activeHarnesses, limits]);
 }
 
-/** The unit a series' costs are in: the first one seen that `accept`s,
+/** The unit some slices' costs are in: the first one seen that `accept`s,
  *  null when there is none. */
 function costUnitOf(
-  series: UsageSeries,
+  slices: readonly UsageSlice[],
   accept: (cost: Cost) => boolean = () => true,
 ): CostUnit | null {
-  for (const point of series.points) {
-    for (const { usage } of point.groups) {
+  for (const slice of slices) {
+    for (const { usage } of slice.groups) {
       if (usage.cost && accept(usage.cost)) {
         return { currency: usage.cost.currency, type: costType(usage.cost) };
       }
     }
   }
   return null;
+}
+
+/** What a view reads for the chosen harness: every harness side by side,
+ *  or one harness's models. */
+function scopeOf(harnessId: string) {
+  return harnessId === ALL
+    ? { groupBy: "harness" as const }
+    : { harnessId, groupBy: "model" as const };
+}
+
+/** The harness the views show — `ALL` until one is picked, and
+ *  again if the picked one leaves the list. */
+function useChosenHarness(
+  harnessIds: string[],
+): [string, (harnessId: string) => void] {
+  const [chosen, setChosen] = useState(ALL);
+  return [harnessIds.includes(chosen) ? chosen : ALL, setChosen];
+}
+
+/** The money the views that stack harnesses chart cost in (a harness
+ *  billing in credits charts them in its own card), and the daily
+ *  pattern's formatters: one harness's in its own unit (credits, say). */
+function useCostUnits(
+  byHarness: UsageSeries,
+  patternHours: readonly UsageSlice[],
+  harnessId: string,
+) {
+  const money =
+    costUnitOf(byHarness.points, (cost) => costType(cost) === "currency") ??
+    USD;
+  const own = harnessId === ALL ? null : costUnitOf(patternHours);
+  return { money, patternFormatters: useFormatters(own ?? money) };
 }
 
 export function UsageSettings() {
@@ -303,27 +386,22 @@ export function UsageSettings() {
     grain,
     groupBy: "harness",
   });
-  const pattern = useUsagePattern({ ...patternRange, groupBy: "harness" });
   const limits = useHarnessLimits();
   const labelOf = useHarnessLabels();
   const reportingOf = useHarnessReporting(byHarness, limits);
   const harnessIds = useHarnessIds(byHarness, limits);
-  // The views that stack harnesses chart money only; a harness billing in
-  // credits charts them in its own card.
-  const money =
-    costUnitOf(byHarness, (cost) => costType(cost) === "currency") ?? USD;
-  const formatters = useFormatters(money);
+  const [harnessId, setChosen] = useChosenHarness(harnessIds);
+  const pattern = useUsagePattern({ ...patternRange, ...scopeOf(harnessId) });
+  const { money, patternFormatters } = useCostUnits(
+    byHarness,
+    pattern.hours,
+    harnessId,
+  );
+  const colorOf = useMemo(() => harnessColors(byHarness), [byHarness]);
 
   const metricName = metric === "cost" ? t("usageCost") : t("usageTokens");
   const rangeName = t("usageRangeDays", { count: rangeDays });
   const grainName = t(`usageGrain_${grain}`).toLowerCase();
-  const shared = {
-    metric,
-    labelOf,
-    reportingOf,
-    format: formatters.value(metric),
-    formatAxis: formatters.axis(metric),
-  };
 
   return (
     <div className="space-y-4 pt-2" data-testid="usage-settings">
@@ -332,21 +410,43 @@ export function UsageSettings() {
         onMetric={setMetric}
         rangeDays={rangeDays}
         onRangeDays={setRangeDays}
+      >
+        <HarnessPicker
+          value={harnessId}
+          onChange={setChosen}
+          harnessIds={harnessIds}
+          labelOf={labelOf}
+          reportingOf={reportingOf}
+          metric={metric}
+        />
+      </UsageControls>
+      <HarnessCard
+        metric={metric}
+        range={range}
+        grain={grain}
+        harnessId={harnessId}
+        labelOf={labelOf}
+        reportingOf={reportingOf}
+        limits={limits}
+        caption={{ grain: grainName, range: rangeName }}
+        money={money}
+        colorOf={colorOf}
       />
-      <div className="grid gap-4 xl:grid-cols-2">
-        <ByHarnessCard
-          {...shared}
-          points={byHarness.points}
-          keys={byHarness.keys}
-          grain={grain}
-          description={t("usageSeriesDesc", {
-            metric: metricName,
-            grain: grainName,
-            range: rangeName,
-          })}
+      <div className={NARROW_WIDE}>
+        <CacheCard
+          range={range}
+          harnessId={harnessId}
+          labelOf={labelOf}
+          colorOf={colorOf}
         />
         <PatternCard
-          {...shared}
+          harnessId={harnessId}
+          metric={metric}
+          labelOf={labelOf}
+          reportingOf={reportingOf}
+          colorOf={colorOf}
+          format={patternFormatters.value(metric)}
+          formatAxis={patternFormatters.axis(metric)}
           pattern={pattern}
           description={t("usagePatternDesc", {
             metric: metricName.toLowerCase(),
@@ -354,17 +454,6 @@ export function UsageSettings() {
           })}
         />
       </div>
-      <HarnessCard
-        metric={metric}
-        range={range}
-        grain={grain}
-        harnessIds={harnessIds}
-        labelOf={labelOf}
-        reportingOf={reportingOf}
-        limits={limits}
-        caption={{ grain: grainName, range: rangeName }}
-        money={money}
-      />
     </div>
   );
 }
@@ -374,11 +463,14 @@ function UsageControls({
   onMetric,
   rangeDays,
   onRangeDays,
+  children,
 }: {
   metric: Metric;
   onMetric: (metric: Metric) => void;
   rangeDays: RangeDays;
   onRangeDays: (days: RangeDays) => void;
+  /** The harness picker, last. */
+  children: React.ReactNode;
 }) {
   const { t } = useTranslation();
   return (
@@ -401,6 +493,7 @@ function UsageControls({
           label: t("usageRangeDays", { count: days }),
         }))}
       />
+      {children}
     </SettingsSectionActions>
   );
 }
@@ -499,13 +592,15 @@ function Picker({
 function Card({
   children,
   testId,
+  className,
 }: {
   children: React.ReactNode;
   testId?: string;
+  className?: string;
 }) {
   return (
     <div
-      className="space-y-4 rounded-lg border border-border p-4"
+      className={cn("space-y-4 rounded-lg border border-border p-4", className)}
       data-testid={testId}
     >
       {children}
@@ -557,19 +652,17 @@ function periodLabels(
   };
 }
 
-/** A series over periods — stacked areas, or bars — or a line saying the
- *  range is empty. */
+/** A series over periods as stacked areas, or a line saying the range is
+ *  empty. A greyed placeholder (`overlay`) is bars. */
 function PeriodChart({
   points,
   shown,
   grain,
-  area = false,
   ...chart
 }: {
   points: (UsageSlice & { start: number })[];
   shown: ShownSeries;
   grain: UsageGrain;
-  area?: boolean;
   format: (value: number) => string;
   formatAxis: (value: number) => string;
   /** Sizes the chart (see `UsageBarChart`). */
@@ -588,7 +681,7 @@ function PeriodChart({
   const bars = seriesBars(points, shown.values, grain, (date) =>
     t("usageWeekOf", { date }),
   );
-  return area ? (
+  return chart.overlay === undefined ? (
     <UsageAreaChart {...chart} series={shown.series} bars={bars} />
   ) : (
     <UsageBarChart {...chart} series={shown.series} bars={bars} />
@@ -613,120 +706,206 @@ function seriesBars(
   });
 }
 
-function ByHarnessCard({
-  metric,
-  points,
-  keys,
-  grain,
-  description,
+const percent = (share: number) => `${Math.round(share * 100)}%`;
+
+/** Monday first, as the usage views start their weeks (2024-01-01 was a
+ *  Monday). */
+function weekdayName(index: number): string {
+  return new Date(2024, 0, 1 + index).toLocaleDateString(undefined, {
+    weekday: "short",
+  });
+}
+
+/** How much of the input was read from cache, by day of the week, over
+ *  the range: for the harness the views show, or with all of them, one
+ *  shape per harness (the largest three in their colours, the rest as
+ *  "Other") over each other. The header reads out the hovered day, else the range. */
+function CacheCard({
+  range,
+  harnessId,
   labelOf,
-  reportingOf,
-  format,
-  formatAxis,
-}: Shared & {
-  points: (UsageSlice & { start: number })[];
-  keys: (string | null)[];
-  grain: UsageGrain;
-  description: string;
+  colorOf,
+}: {
+  range: { from: number; to: number };
+  harnessId: string;
+  labelOf: (harnessId: string) => string;
+  colorOf: ColorOf;
 }) {
   const { t } = useTranslation();
-  const canShow = showsMetric(metric, reportingOf);
-  const shown = topSeries(
-    points,
-    keys,
-    metric,
-    (key) => labelOf(key ?? ""),
-    t("usageOther"),
-    canShow,
+  const [hovered, setHovered] = useState<number | null>(null);
+  const harnesses = useWeekdayTokens({
+    ...range,
+    harnessId: harnessId === ALL ? undefined : harnessId,
+  });
+  const days = WEEKDAYS.map((index) =>
+    harnesses.reduce((sum, h) => addTokens(sum, h.days[index]), emptyTokens()),
   );
-  const withoutCost =
-    metric === "cost"
-      ? keys.filter((key): key is string => !!key && !canShow(key))
-      : [];
+  const total = days.reduce(addTokens, emptyTokens());
+  const whole = cacheHitRate(total);
+  const tokens = hovered === null ? total : days[hovered];
+  const rate = cacheHitRate(tokens);
+  const counts = t("usageCacheDetail", {
+    read: formatTokens(tokens.cacheRead),
+    input: formatTokens(tokens.input + tokens.cacheRead + tokens.cacheWrite),
+  });
+  const perHarness = harnessId === ALL && harnesses.length > 1;
+  const entries = perHarness
+    ? cacheEntries(harnesses, labelOf, colorOf, t("usageOther"))
+    : [];
+  const shapes: RadarShape[] = perHarness
+    ? entries.map(({ key, color, days }) => ({
+        key,
+        color,
+        values: days.map(cacheHitRate),
+      }))
+    : [{ key: ALL, color: PALETTE[0], values: days.map(cacheHitRate) }];
 
   return (
-    <Card testId="usage-by-harness">
-      <div className="flex flex-wrap justify-between gap-4">
-        <div>
+    <Card testId="usage-cache">
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="min-w-0">
           <div className="text-[0.8125rem] font-medium">
-            {t("usageByHarness")}
+            {t("usageCacheTitle")}
           </div>
-          <div className="text-[0.625rem] text-muted-foreground">
-            {description}
+          {whole !== null && (
+            <div
+              className="truncate text-[0.625rem] text-muted-foreground"
+              title={counts}
+            >
+              {counts}
+            </div>
+          )}
+        </div>
+        {whole !== null && (
+          <div
+            className="shrink-0 text-[0.625rem] text-muted-foreground"
+            data-testid="usage-cache-readout"
+          >
+            {hovered === null ? t("usageCacheHitRate") : weekdayName(hovered)}{" "}
+            <span className="font-medium tabular-nums text-foreground">
+              {rate === null ? "—" : percent(rate)}
+            </span>
           </div>
-        </div>
-        <div className="flex flex-col gap-0.5">
-          {shown.series.map((s, index) => (
-            <Legend
-              key={s.key}
-              name={s.name}
-              color={s.color}
-              value={format(shown.totals[index])}
-            />
-          ))}
-          {withoutCost.map((harnessId) => (
-            <Legend
-              key={harnessId}
-              name={labelOf(harnessId)}
-              color={OTHER_COLOR}
-              value={t("usageNoCostData")}
-              muted
-            />
-          ))}
-        </div>
+        )}
       </div>
-      <PeriodChart
-        points={points}
-        shown={shown}
-        grain={grain}
-        format={format}
-        formatAxis={formatAxis}
-        className="h-[180px]"
-        area
-        testId="usage-chart-harness"
-      />
+      {whole === null ? (
+        <p className="text-xs text-muted-foreground">
+          {t("usageNoUsageInRange")}
+        </p>
+      ) : (
+        <UsageRadarChart
+          labels={WEEKDAYS.map(weekdayName)}
+          shapes={shapes}
+          hovered={hovered}
+          onHover={setHovered}
+          testId="usage-chart-cache"
+        />
+      )}
+      {perHarness && whole !== null && (
+        <CacheLegend entries={entries} hovered={hovered} />
+      )}
     </Card>
   );
 }
 
-/** One line of a chart's legend: its color, name and total. */
-function Legend({
-  name,
-  color,
-  value,
-  muted = false,
-}: {
+const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
+
+type CacheEntry = {
+  key: string;
   name: string;
   color: string;
-  value: string;
-  muted?: boolean;
+  days: WeekdayTokens["days"];
+};
+
+/** The harnesses the cache chart draws, as the other charts do: the
+ *  largest three in their own colours, the rest added into "Other". */
+function cacheEntries(
+  harnesses: readonly WeekdayTokens[],
+  labelOf: (harnessId: string) => string,
+  colorOf: ColorOf,
+  otherName: string,
+): CacheEntry[] {
+  const shown =
+    harnesses.length <= TOP_SERIES + 1
+      ? harnesses
+      : harnesses.slice(0, TOP_SERIES);
+  const colors = paletteFor(
+    shown.map((h) => h.harnessId),
+    colorOf,
+  );
+  const entries: CacheEntry[] = shown.map(({ harnessId, days }, index) => ({
+    key: harnessId,
+    name: labelOf(harnessId),
+    color: colors[index],
+    days,
+  }));
+  const rest = harnesses.slice(shown.length);
+  if (rest.length > 0) {
+    entries.push({
+      key: OTHER_KEY,
+      name: otherName,
+      color: OTHER_COLOR,
+      days: WEEKDAYS.map((index) =>
+        rest.reduce((sum, h) => addTokens(sum, h.days[index]), emptyTokens()),
+      ),
+    });
+  }
+  return entries;
+}
+
+/** Which shape is which harness, with its rate for the hovered day, else
+ *  the range. */
+function CacheLegend({
+  entries,
+  hovered,
+}: {
+  entries: CacheEntry[];
+  hovered: number | null;
 }) {
   return (
     <div
-      className={cn(
-        "flex items-center gap-1.5 text-[0.625rem]",
-        muted && "opacity-60",
-      )}
+      className="space-y-1 text-[0.625rem]"
+      data-testid="usage-cache-harnesses"
     >
-      <span
-        className="size-1.5 shrink-0 rounded-full"
-        style={{ background: color }}
-      />
-      <span className="text-muted-foreground">{name}</span>
-      <span className="ms-auto ps-3 font-medium tabular-nums">{value}</span>
+      {entries.map(({ key, name, color, days }) => {
+        const rate = cacheHitRate(
+          hovered === null
+            ? days.reduce(addTokens, emptyTokens())
+            : days[hovered],
+        );
+        return (
+          <div key={key} className="flex items-center gap-2">
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ background: color }}
+            />
+            <span className="min-w-0 flex-1 truncate text-muted-foreground">
+              {name}
+            </span>
+            <span className="font-medium tabular-nums">
+              {rate === null ? "—" : percent(rate)}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 function PatternCard({
+  harnessId,
   metric,
   pattern,
   description,
   labelOf,
   reportingOf,
+  colorOf,
   format,
   formatAxis,
 }: Shared & {
+  /** The chosen harness, or `ALL`: split by harness, or by its models. */
+  harnessId: string;
+  colorOf: ColorOf;
   pattern: {
     hours: (UsageSlice & { hour: number })[];
     keys: (string | null)[];
@@ -734,18 +913,30 @@ function PatternCard({
   description: string;
 }) {
   const { t } = useTranslation();
-  const shown = topSeries(
-    pattern.hours,
-    pattern.keys,
-    metric,
-    (key) => labelOf(key ?? ""),
-    t("usageOther"),
-    showsMetric(metric, reportingOf),
-  );
+  const shown =
+    harnessId === ALL
+      ? topSeries(
+          pattern.hours,
+          pattern.keys,
+          metric,
+          (key) => labelOf(key ?? ""),
+          t("usageOther"),
+          showsMetric(metric, reportingOf),
+          colorOf,
+        )
+      : topSeries(
+          pattern.hours,
+          pattern.keys,
+          metric,
+          (key) => key ?? t("usageUnknownModel"),
+          t("usageOther"),
+        );
   const empty = shown.values.every((row) => row.every((value) => value === 0));
 
   return (
-    <Card testId="usage-pattern">
+    // A column, so the chart takes the height its row gives it — the cache
+    // card beside it grows with its legend.
+    <Card testId="usage-pattern" className="flex flex-col">
       <div>
         <div className="text-[0.8125rem] font-medium">
           {t("usageDailyPattern")}
@@ -769,7 +960,7 @@ function PatternCard({
           }))}
           format={format}
           formatAxis={formatAxis}
-          className="h-[180px]"
+          className="min-h-[180px] flex-1"
           testId="usage-chart-pattern"
         />
       )}
@@ -781,17 +972,19 @@ function HarnessCard({
   metric,
   range,
   grain,
-  harnessIds,
+  harnessId,
   labelOf,
   reportingOf,
   limits,
   caption,
   money,
+  colorOf,
 }: {
   metric: Metric;
   range: { from: number; to: number };
   grain: UsageGrain;
-  harnessIds: string[];
+  /** The chosen harness, or `ALL`. */
+  harnessId: string;
   labelOf: (harnessId: string) => string;
   reportingOf: (harnessId: string) => UsageReporting;
   limits: HarnessLimits[];
@@ -799,109 +992,171 @@ function HarnessCard({
   caption: { grain: string; range: string };
   /** The unit the stacked views chart cost in. */
   money: CostUnit;
+  colorOf: ColorOf;
 }) {
   const { t } = useTranslation();
-  const [chosen, setChosen] = useState<string | null>(null);
-  const harnessId =
-    chosen && harnessIds.includes(chosen) ? chosen : (harnessIds[0] ?? "");
-  const byModel = useUsageSeries({
+  const all = harnessId === ALL;
+  // Every harness side by side, or one harness's models.
+  const series = useUsageSeries({
     from: range.from,
     to: range.to,
-    harnessId,
     grain,
-    groupBy: "model",
+    ...scopeOf(harnessId),
   });
-  const reporting = reportingOf(harnessId);
-  const name = labelOf(harnessId);
-  const { unit, formatters, shownMetric, noModels, disabled } = useHarnessChart(
-    byModel,
-    reporting,
-    { metric, money, name },
-  );
-  const format = formatters.value(shownMetric);
-
-  const shown = topSeries(
-    byModel.points,
-    byModel.keys,
-    shownMetric,
-    (key) => key ?? t("usageUnknownModel"),
-    t("usageOther"),
-  );
+  const reporting = all ? null : reportingOf(harnessId);
+  const view = useDetailView(series, {
+    all,
+    harnessId,
+    metric,
+    money,
+    labelOf,
+    reportingOf,
+    colorOf,
+    caption,
+  });
+  const format = view.formatters.value(view.shownMetric);
 
   return (
-    <Card testId="usage-harness-detail">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className={WIDE_NARROW} data-testid="usage-harness-detail">
+      <Card>
         <div>
-          <HarnessTitle name={name} reporting={reporting} unit={unit} />
+          <HarnessTitle
+            name={view.name}
+            reporting={reporting}
+            unit={view.unit}
+          />
           <div className="text-[0.625rem] text-muted-foreground">
-            {disabled?.note ??
-              t("usageDetailDesc", {
-                metric:
-                  shownMetric === "cost" ? t("usageCost") : t("usageTokens"),
-                ...caption,
-              })}
+            {view.description}
           </div>
         </div>
-        <HarnessPicker
-          value={harnessId}
-          onChange={setChosen}
-          harnessIds={harnessIds}
-          labelOf={labelOf}
-          reportingOf={reportingOf}
-          metric={metric}
-        />
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_15rem]">
-        {/* The chart fills its row, which the panel beside it may make taller
-            than the chart's own minimum. Greyed tokens under `overlay` when
-            the view asks for a cost the harness doesn't report, or it names
-            no models. */}
+        {/* Greyed tokens under `overlay` when the view asks for a cost no
+            harness in it reports, or it names no models. */}
         <PeriodChart
-          points={byModel.points}
-          shown={shown}
+          points={series.points}
+          shown={view.shown}
           grain={grain}
           format={format}
-          formatAxis={formatters.axis(shownMetric)}
-          className="min-h-[13.5rem]"
-          overlay={disabled?.overlay}
-          testId="usage-chart-models"
+          formatAxis={view.formatters.axis(view.shownMetric)}
+          className="h-[13.5rem]"
+          overlay={view.disabled?.overlay}
+          testId={all ? "usage-chart-harness" : "usage-chart-models"}
         />
+      </Card>
 
-        <div className="space-y-4 self-start rounded-lg border border-border bg-muted/30 p-3 text-[0.625rem]">
-          <LimitsPanel
-            name={name}
-            supported={reporting.limits}
-            row={limits.find((row) => row.harnessId === harnessId)}
-          />
-          <ModelsPanel
-            shown={shown}
-            format={format}
-            unnamed={noModels}
-            name={name}
-          />
+      <Card>
+        <div className="text-[0.8125rem] font-medium">
+          {all ? t("usageByHarness") : t("usageByModel")}
         </div>
-      </div>
-    </Card>
+        <div className="space-y-4 text-[0.625rem]">
+          <BreakdownPanel
+            shown={view.shown}
+            format={format}
+            unnamed={view.unnamed}
+            name={view.name}
+            withoutCost={view.withoutCost.map(labelOf)}
+          />
+          {reporting ? (
+            <LimitsPanel
+              name={view.name}
+              supported={reporting.limits}
+              row={limits.find((row) => row.harnessId === harnessId)}
+            />
+          ) : (
+            <AllLimitsPanel limits={limits} labelOf={labelOf} />
+          )}
+        </div>
+      </Card>
+    </div>
   );
 }
 
-/** What one harness's chart shows: its cost in its own unit (or the
- *  stacked views' money), else its tokens, greyed, when the view asks for a
- *  cost it doesn't have or it names no models. */
-function useHarnessChart(
-  byModel: UsageSeries,
-  reporting: UsageReporting,
-  { metric, money, name }: { metric: Metric; money: CostUnit; name: string },
-) {
+type DetailScope = {
+  all: boolean;
+  harnessId: string;
+  metric: Metric;
+  money: CostUnit;
+  labelOf: (harnessId: string) => string;
+  reportingOf: (harnessId: string) => UsageReporting;
+  colorOf: ColorOf;
+  caption: { grain: string; range: string };
+};
+
+/** What the detail chart shows. For one harness: its models, its cost in
+ *  its own unit (or the money the others chart in). For all: each harness
+ *  that can show the metric, in money. Tokens, greyed, when the view asks
+ *  for a cost none of them has, or one harness names no models. */
+function useDetailView(series: UsageSeries, scope: DetailScope) {
   const { t } = useTranslation();
-  const unit = harnessCostUnit(byModel, reporting, money);
+  const { all, metric, money, caption } = scope;
+  const name = all ? t("usageAllHarnesses") : scope.labelOf(scope.harnessId);
+  const unit = detailCostUnit(series, scope);
   const formatters = useFormatters(unit ?? money);
   const noCost = metric === "cost" && !unit;
-  const noModels = namesNoModels(byModel.keys);
+  const unnamed = !all && namesNoModels(series.keys);
   const shownMetric: Metric = noCost ? "tokens" : metric;
-  const disabled = modelChartDisabled(noCost, noModels, name, t);
-  return { unit, formatters, shownMetric, noModels, disabled };
+  const disabled = detailChartDisabled({ noCost, unnamed, all, name }, t);
+  const description =
+    disabled?.note ??
+    t(all ? "usageAllDesc" : "usageDetailDesc", {
+      metric: shownMetric === "cost" ? t("usageCost") : t("usageTokens"),
+      ...caption,
+    });
+  return {
+    name,
+    unit,
+    formatters,
+    shownMetric,
+    unnamed,
+    disabled,
+    description,
+    ...detailSeries(series, scope, shownMetric, t),
+  };
+}
+
+/** All harnesses chart cost in money, when any of them reports it. */
+function detailCostUnit(
+  series: UsageSeries,
+  { all, harnessId, money, reportingOf }: DetailScope,
+): CostUnit | null {
+  if (!all) return harnessCostUnit(series, reportingOf(harnessId), money);
+  return series.keys.some(showsMetric("cost", reportingOf)) ? money : null;
+}
+
+/** The chart's series — harnesses or models — and, for a cost view of all
+ *  harnesses, the ones left out for having none. */
+function detailSeries(
+  series: UsageSeries,
+  { all, labelOf, reportingOf, colorOf }: DetailScope,
+  metric: Metric,
+  t: TFunction,
+): { shown: ShownSeries; withoutCost: string[] } {
+  if (!all) {
+    return {
+      shown: topSeries(
+        series.points,
+        series.keys,
+        metric,
+        (key) => key ?? t("usageUnknownModel"),
+        t("usageOther"),
+      ),
+      withoutCost: [],
+    };
+  }
+  const canShow = showsMetric(metric, reportingOf);
+  return {
+    shown: topSeries(
+      series.points,
+      series.keys,
+      metric,
+      (key) => labelOf(key ?? ""),
+      t("usageOther"),
+      canShow,
+      colorOf,
+    ),
+    withoutCost: series.keys.filter(
+      (key): key is string => !!key && !canShow(key),
+    ),
+  };
 }
 
 /** The unit one harness's cost charts in: its own when the range shows it
@@ -912,7 +1167,10 @@ function harnessCostUnit(
   reporting: UsageReporting,
   money: CostUnit,
 ): CostUnit | null {
-  const credits = costUnitOf(series, (cost) => costType(cost) === "credits");
+  const credits = costUnitOf(
+    series.points,
+    (cost) => costType(cost) === "credits",
+  );
   return credits ?? (reporting.cost ? money : null);
 }
 
@@ -921,18 +1179,21 @@ function namesNoModels(keys: readonly (string | null)[]): boolean {
   return keys.length > 0 && keys.every((key) => key === null);
 }
 
-function modelChartDisabled(
-  noCost: boolean,
-  noModels: boolean,
-  name: string,
+function detailChartDisabled(
+  {
+    noCost,
+    unnamed,
+    all,
+    name,
+  }: { noCost: boolean; unnamed: boolean; all: boolean; name: string },
   t: TFunction,
 ): { overlay: string; note: string } | undefined {
   if (noCost)
     return {
       overlay: t("usageNoCostData"),
-      note: t("usageDetailNoCost", { name }),
+      note: all ? t("usageAllNoCost") : t("usageDetailNoCost", { name }),
     };
-  if (noModels)
+  if (unnamed)
     return {
       overlay: t("usageNoModelData"),
       note: t("usageNoModelNames", { name }),
@@ -946,11 +1207,14 @@ function HarnessTitle({
   unit,
 }: {
   name: string;
-  reporting: UsageReporting;
+  /** Null for all harnesses together, which have no one set of caps. */
+  reporting: UsageReporting | null;
   /** What its cost charts in; null when it has none. */
   unit: CostUnit | null;
 }) {
   const { t } = useTranslation();
+  if (!reporting)
+    return <div className="text-[0.8125rem] font-medium">{name}</div>;
   const costCap = !unit
     ? t("usageCapTokensOnly")
     : unit.type === "credits"
@@ -967,8 +1231,8 @@ function HarnessTitle({
   );
 }
 
-/** Every harness, greyed when it lacks what the view is showing (cost), or
- *  reports neither cost nor limits. */
+/** All harnesses, then each, greyed when it lacks what the view is showing
+ *  (cost), or reports neither cost nor limits. */
 function HarnessPicker({
   value,
   onChange,
@@ -991,35 +1255,42 @@ function HarnessPicker({
       value={value}
       onChange={onChange}
       testId="usage-harness-select"
-      options={harnessIds.map((id) => {
-        const reporting = reportingOf(id);
-        return {
-          value: id,
-          label: (
-            <>
-              <HarnessLogo harnessId={id} className="size-3" />
-              {labelOf(id)}
-            </>
-          ),
-          greyed: (metric === "cost" || !reporting.limits) && !reporting.cost,
-        };
-      })}
+      options={[
+        { value: ALL, label: t("usageAllHarnesses") },
+        ...harnessIds.map((id) => {
+          const reporting = reportingOf(id);
+          return {
+            value: id,
+            label: (
+              <>
+                <HarnessLogo harnessId={id} className="size-3" />
+                {labelOf(id)}
+              </>
+            ),
+            greyed: (metric === "cost" || !reporting.limits) && !reporting.cost,
+          };
+        }),
+      ]}
     />
   );
 }
 
-/** A harness's models over the range, with each one's share. */
-function ModelsPanel({
+/** The chart's series over the range: one bar split by each one's share of
+ *  the whole, then each with its total and share. */
+function BreakdownPanel({
   shown,
   format,
   unnamed,
   name,
+  withoutCost,
 }: {
   shown: ShownSeries;
   format: (value: number) => string;
   /** The harness names no models at all. */
   unnamed: boolean;
   name: string;
+  /** Harnesses left out of a cost view, by name. */
+  withoutCost: string[];
 }) {
   const { t } = useTranslation();
   const sum = shown.totals.reduce((a, b) => a + b, 0);
@@ -1031,31 +1302,70 @@ function ModelsPanel({
     );
   }
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" data-testid="usage-breakdown">
       {shown.series.length === 0 && (
         <div className="text-muted-foreground">{t("usageNoUsageInRange")}</div>
       )}
-      {shown.series.map((s, index) => {
-        const share = sum ? Math.round((shown.totals[index] / sum) * 100) : 0;
-        return (
-          <div key={s.key} className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span
-                className="size-2 shrink-0 rounded-full"
-                style={{ background: s.color }}
-              />
-              <span className="min-w-0 flex-1 truncate">{s.name}</span>
-              <span className="font-medium tabular-nums">
-                {format(shown.totals[index])}
-              </span>
-              <span className="w-8 text-end tabular-nums text-muted-foreground">
-                {share}%
-              </span>
-            </div>
-            <Meter fraction={share / 100} color={s.color} />
-          </div>
-        );
-      })}
+      {sum > 0 && (
+        <div className="flex h-1.5 gap-px overflow-hidden rounded-full bg-foreground/10">
+          {shown.series.map((s, index) => (
+            <div
+              key={s.key}
+              className="h-full"
+              style={{
+                width: `${(shown.totals[index] / sum) * 100}%`,
+                background: s.color,
+              }}
+            />
+          ))}
+        </div>
+      )}
+      {shown.series.map((s, index) => (
+        <BreakdownRow
+          key={s.key}
+          name={s.name}
+          color={s.color}
+          value={format(shown.totals[index])}
+          share={sum ? Math.round((shown.totals[index] / sum) * 100) : 0}
+        />
+      ))}
+      {withoutCost.map((harness) => (
+        <BreakdownRow
+          key={harness}
+          name={harness}
+          color={OTHER_COLOR}
+          value={t("usageNoCostData")}
+          muted
+        />
+      ))}
+    </div>
+  );
+}
+
+function BreakdownRow({
+  name,
+  color,
+  value,
+  share,
+  muted = false,
+}: {
+  name: string;
+  color: string;
+  value: string;
+  share?: number;
+  muted?: boolean;
+}) {
+  return (
+    <div className={cn("flex items-center gap-2", muted && "opacity-60")}>
+      <span
+        className="size-2 shrink-0 rounded-full"
+        style={{ background: color }}
+      />
+      <span className="min-w-0 flex-1 truncate">{name}</span>
+      <span className="font-medium tabular-nums">{value}</span>
+      <span className="w-8 text-end tabular-nums text-muted-foreground">
+        {share === undefined ? "" : `${share}%`}
+      </span>
     </div>
   );
 }
@@ -1098,8 +1408,6 @@ function LimitsPanel({
   row: HarnessLimits | undefined;
 }) {
   const { t } = useTranslation();
-  // Reset countdowns tick by the minute while the section is open.
-  const now = useClock(MINUTE_MS);
   if (!supported) {
     return (
       <div
@@ -1117,9 +1425,43 @@ function LimitsPanel({
       </div>
     );
   }
-  const { limits } = row;
   return (
-    <div className="space-y-2" data-testid="usage-limits">
+    <div data-testid="usage-limits">
+      <LimitWindows limits={row.limits} />
+    </div>
+  );
+}
+
+/** Every harness's last reported limits, under its name. */
+function AllLimitsPanel({
+  limits,
+  labelOf,
+}: {
+  limits: HarnessLimits[];
+  labelOf: (harnessId: string) => string;
+}) {
+  if (limits.length === 0) return null;
+  return (
+    <div className="space-y-3" data-testid="usage-limits">
+      {limits.map((row) => (
+        <div key={row.harnessId} className="space-y-1.5">
+          <div className="flex items-center gap-1.5 font-medium">
+            <HarnessLogo harnessId={row.harnessId} className="size-3" />
+            {labelOf(row.harnessId)}
+          </div>
+          <LimitWindows limits={row.limits} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LimitWindows({ limits }: { limits: HarnessLimits["limits"] }) {
+  const { t } = useTranslation();
+  // Reset countdowns tick by the minute while the section is open.
+  const now = useClock(MINUTE_MS);
+  return (
+    <div className="space-y-2">
       {limits.windows.length === 0 && (
         // With no windows to show, a reported warning or block is all there is.
         <div

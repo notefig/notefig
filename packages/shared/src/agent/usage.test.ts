@@ -1,6 +1,7 @@
 import {
   addSummary,
   addTurn,
+  cacheHitRate,
   costType,
   emptySummary,
   totalTokens,
@@ -90,5 +91,11 @@ describe("usage summaries", () => {
     expect(sum.label).toBe("x");
     expect(sum.turns).toBe(2);
     expect(sum.total.cost?.amount).toBe(3);
+  });
+
+  it("counts cache reads as a share of all input", () => {
+    const tokens = { input: 10, cacheRead: 80, cacheWrite: 10, output: 500, thought: 0 };
+    expect(cacheHitRate(tokens)).toBe(0.8);
+    expect(cacheHitRate({ ...tokens, input: 0, cacheRead: 0, cacheWrite: 0 })).toBeNull();
   });
 });

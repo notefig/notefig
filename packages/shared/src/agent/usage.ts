@@ -195,3 +195,10 @@ export function addSummary<S extends UsageSummary>(
     turns: summary.turns + other.turns,
   };
 }
+
+/** The share of input served from the cache: cache reads over all input
+ *  (uncached, read and written). Null when there was no input. */
+export function cacheHitRate(tokens: TokenCounts): number | null {
+  const input = tokens.input + tokens.cacheRead + tokens.cacheWrite;
+  return input > 0 ? tokens.cacheRead / input : null;
+}

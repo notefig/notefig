@@ -16,7 +16,9 @@ import {
 import {
   usagePattern,
   usageSeries,
+  weekdayTokens,
   type UsageGrain,
+  type WeekdayTokens,
   type UsageGroupBy,
   type UsagePattern,
   type UsageScope,
@@ -105,5 +107,14 @@ export function useUsagePattern({
   return useMemo(
     () => usagePattern(data, { from, to, harnessId, groupBy }),
     [data, from, to, harnessId, groupBy],
+  );
+}
+
+/** Tokens per day of the week over [from, to), per harness. */
+export function useWeekdayTokens({ from, to, harnessId }: UsageScope): WeekdayTokens[] {
+  const data = useBuckets({ from, to });
+  return useMemo(
+    () => weekdayTokens(data, { from, to, harnessId }),
+    [data, from, to, harnessId],
   );
 }
