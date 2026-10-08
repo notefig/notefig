@@ -60,7 +60,7 @@ import {
   type ChartBar,
   type ChartSeries,
 } from "./usage-bar-chart";
-import { UsageLineChart } from "./usage-line-chart";
+import { UsageAreaChart } from "./usage-area-chart";
 import { UsageRadarChart } from "./usage-radar-chart";
 
 type Metric = "tokens" | "cost";
@@ -594,8 +594,8 @@ function periodLabels(
   };
 }
 
-/** A series over periods as stacked bars, or a line saying the range is
- *  empty. */
+/** A series over periods as stacked areas, or a line saying the range is
+ *  empty. A greyed placeholder (`overlay`) is bars. */
 function PeriodChart({
   points,
   shown,
@@ -623,7 +623,11 @@ function PeriodChart({
   const bars = seriesBars(points, shown.values, grain, (date) =>
     t("usageWeekOf", { date }),
   );
-  return <UsageBarChart {...chart} series={shown.series} bars={bars} />;
+  return chart.overlay === undefined ? (
+    <UsageAreaChart {...chart} series={shown.series} bars={bars} />
+  ) : (
+    <UsageBarChart {...chart} series={shown.series} bars={bars} />
+  );
 }
 
 function seriesBars(
@@ -783,7 +787,7 @@ function PatternCard({
           {t("usageNoUsageInRange")}
         </p>
       ) : (
-        <UsageLineChart
+        <UsageBarChart
           series={shown.series}
           bars={pattern.hours.map((slot, index) => ({
             key: slot.hour,

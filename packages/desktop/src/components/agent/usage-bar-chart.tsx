@@ -44,18 +44,15 @@ function niceStep(x: number): number {
   return nice * power;
 }
 
-/** An axis of `TICKS` nice steps reaching at least `peak`. */
-export function axisOver(peak: number) {
-  const step = niceStep(peak / TICKS);
-  return { step, top: step * TICKS };
-}
-
-/** Each bar's stacked total, and an axis over the tallest. */
-function scaleOf(bars: readonly ChartBar[]) {
+/** Each bar's stacked total, and an axis of `TICKS` nice steps over the
+ *  tallest — or over `peak`, when what is drawn reaches higher (a curve
+ *  between points). */
+export function scaleOf(bars: readonly ChartBar[], peak = 0) {
   const totals = bars.map((bar) =>
     bar.values.reduce((sum, value) => sum + value, 0),
   );
-  return { totals, ...axisOver(Math.max(0, ...totals)) };
+  const step = niceStep(Math.max(peak, ...totals) / TICKS);
+  return { totals, step, top: step * TICKS };
 }
 
 export function UsageBarChart({
