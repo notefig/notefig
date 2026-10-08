@@ -714,6 +714,13 @@ test.describe("agent workflows", () => {
       await widget.getByRole("button", { name: "Open chat" }).click();
       await expect(composer(page)).toBeVisible({ timeout: 15_000 });
       await expect(toolCards(page, "widget_respond").first()).toHaveAttribute("data-tool-status", "completed");
+      // The chat shows the answer the widget showed, not the raw tool input:
+      // collapsed to its title, expanding to the rendered body.
+      const answerCard = toolCards(page, "widget_respond").first();
+      await expect(answerCard).toContainText("Summary");
+      await expect(answerCard.locator("strong")).toHaveCount(0);
+      await answerCard.getByRole("button", { name: "Summary" }).click();
+      await expect(answerCard.locator("strong")).toContainText("nothing in particular");
       await expect(entries(page, "user")).toContainText("Summarize this document");
     });
 

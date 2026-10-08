@@ -19,7 +19,6 @@ import {
   RotateCw,
   Square,
   TextQuote,
-  TriangleAlert,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -46,7 +45,7 @@ import {
 import { draftToNode, readDraftNode } from "../composer/draft-text";
 import { mentionPopupHasResults } from "../composer/mention-bridge";
 import { registerComposerKeyHandler } from "../composer/key-bridge";
-import { CopyTextButton } from "./copy-text-button";
+import { WidgetResponseView } from "./widget-response-view";
 import { usePromptChangeCounts } from "../change-store";
 import {
   usePromptChangeNavigation,
@@ -77,7 +76,6 @@ import {
   deriveQueuePosition,
   deriveComposerKeyAction,
   deriveWidgetResponse,
-  deriveDoneLine,
   widgetPromptTarget,
   blobCardClass,
   referenceRemovalArmed,
@@ -1695,51 +1693,6 @@ function StatusRow({
  *  The line doubles as the expand/collapse toggle when there's a body to
  *  show (disabled otherwise — a bare Done/Stopped label has nothing to
  *  expand). Amber tint mirrors the issue callout below. */
-function DoneSummaryLine({
-  summary,
-  expandable,
-  expanded,
-  isIssue,
-  onToggle,
-}: {
-  summary: string;
-  expandable: boolean;
-  expanded: boolean;
-  isIssue: boolean;
-  onToggle: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <>
-      {isIssue ? (
-        <TriangleAlert className="size-3 shrink-0 text-warning" />
-      ) : (
-        <Check className="size-3 shrink-0 text-success/80" />
-      )}
-      <button
-        type="button"
-        disabled={!expandable}
-        title={
-          expandable
-            ? expanded
-              ? t("promptBlobShowLess")
-              : t("promptBlobShowMore")
-            : undefined
-        }
-        className={cn(
-          "min-w-0 flex-1 truncate text-left text-xs",
-          isIssue ? "text-warning" : "text-muted-foreground",
-          expandable &&
-            "cursor-pointer transition-colors hover:text-foreground",
-        )}
-        onClick={onToggle}
-      >
-        {summary}
-      </button>
-    </>
-  );
-}
-
 /** The selection this widget was summoned over — one muted line above the
  *  face, in every phase: the sent and done cards keep showing what the
  *  round was about. Truncated to a single line; the tooltip carries a
@@ -1891,12 +1844,10 @@ function ChangeDot({ on }: { on: boolean }) {
   );
 }
 
-/** Done: the widget's single resting face — the full response body,
- *  rendered as markdown and visible immediately (MET-133); the heading line
- *  above it doubles as the collapse toggle back to a one-line summary. The
- *  content prefers the `widget_respond` response and falls back to the
- *  turn's last assistant text, so even a harness that never calls the tool
- *  leaves something readable behind.
+/** Done: the widget's single resting face — the response as
+ *  WidgetResponseView renders it (the chat's widget_respond card shows the
+ *  same view), plus this placement's own chrome: Open chat and Dismiss in
+ *  the heading row, the touched-file chips below.
  *  No Edit here: Reply continues the session, ✕ dismisses; rewriting from
  *  scratch is what a fresh widget is for.
  *  Exported for tests only — mounting the whole PromptBlob needs Tiptap and
@@ -1928,79 +1879,34 @@ export function DoneState({
   onDismiss: () => void;
 }) {
   const { t } = useTranslation();
-  const { Markdown } = usePromptWidgetHost().slots;
-  // Expanded by default (MET-133): the response body IS the outcome — the
-  // collapsed one-liner is the opt-in resting face, not the landing state.
-  // Component-local on purpose; a dock remount resets to expanded, which is
-  // the desired default anyway.
-  const [expanded, setExpanded] = useState(true);
-  const { summary, body, isIssue } = deriveDoneLine({
-    response,
-    fallbackText,
-    cancelled,
-    expanded,
-    labels: {
-      done: t("promptBlobDone"),
-      stopped: t("promptBlobStopped"),
-      issue: t("promptBlobIssue"),
-    },
-  });
   return (
-    <div className="flex flex-col gap-0.5 px-2 py-1">
-      <div className="flex items-center gap-1.5">
-        <DoneSummaryLine
-          summary={summary}
-          expandable={body !== null}
-          expanded={expanded}
-          isIssue={isIssue}
-          onToggle={() => setExpanded((value) => !value)}
-        />
-        {body && (
-          <CopyTextButton
-            text={body}
-            className="p-0.5"
-            iconClassName="size-3"
-          />
-        )}
-        <button
-          type="button"
-          title={t("promptBlobOpenChat")}
-          aria-label={t("promptBlobOpenChat")}
-          className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={onOpenChat}
-        >
-          <MessageSquare className="size-3" />
-        </button>
-        <button
-          type="button"
-          title={t("promptBlobDismiss")}
-          aria-label={t("promptBlobDismiss")}
-          className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={onDismiss}
-        >
-          <X className="size-3" />
-        </button>
-      </div>
-      {expanded && body && (
-        <Markdown
-          text={body}
-          className={cn(
-            // Deliberately not `select-text`: the response is part of the widget's
-            // chrome as far as the document is concerned, and opting it into
-            // selection is what let a ⌘A over the prose paint it. The copy
-            // button in the status row is how this text leaves the widget.
-            "text-xs leading-relaxed",
-            // Scroll cap: brevity is steered on the agent side (the
-            // widget_respond directive), but a runaway response must scroll
-            // inside the widget, not swallow the document.
-            "max-h-80 overflow-y-auto",
-            // Issue text mirrors ErrorState's uniform tinted text, in amber
-            // — the card border (blobCardClass) carries the rest; no filled
-            // callout box.
-            isIssue ? "text-warning" : "text-foreground/80",
-          )}
-        />
-      )}
+    <WidgetResponseView
+      response={response}
+      fallbackText={fallbackText}
+      cancelled={cancelled}
+      actions={
+        <>
+          <button
+            type="button"
+            title={t("promptBlobOpenChat")}
+            aria-label={t("promptBlobOpenChat")}
+            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onClick={onOpenChat}
+          >
+            <MessageSquare className="size-3" />
+          </button>
+          <button
+            type="button"
+            title={t("promptBlobDismiss")}
+            aria-label={t("promptBlobDismiss")}
+            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onClick={onDismiss}
+          >
+            <X className="size-3" />
+          </button>
+        </>
+      }
+    >
       <TouchedFileChips
         paths={touchedFiles}
         documentPath={documentPath}
@@ -2008,7 +1914,7 @@ export function DoneState({
         changes={changes}
         onOpenFile={onOpenFile}
       />
-    </div>
+    </WidgetResponseView>
   );
 }
 

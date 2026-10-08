@@ -68,7 +68,7 @@ import {
 import { useAgentTabController } from "./agent-tab-controller";
 import { requestTabFocus } from "@/modules/tabs/tab-controllers";
 import { agentTabId } from "@/modules/tabs/tab-id";
-import { CopyTextButton } from "@notefig/widgets";
+import { CopyTextButton, renderPromptToolCall } from "@notefig/widgets";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 import { splitLeadingQuote } from "@/modules/agents/agents";
 
@@ -734,6 +734,21 @@ export const EntryView = memo(function EntryView({
 }) {
   if (entry.type === "tool_call") {
     if (!entry.toolCall) return null;
+    // The prompt widget's tools read as the widget renders them — it owns
+    // the card (pure call, safe in render); the transcript only frames it
+    // with its tool-call attributes. Null falls through to the generic line.
+    const widgetCard = renderPromptToolCall(entry.toolCall);
+    if (widgetCard) {
+      return (
+        <div
+          data-tool-call
+          data-tool-title={entry.toolCall.title}
+          data-tool-status={entry.toolCall.status ?? "pending"}
+        >
+          {widgetCard}
+        </div>
+      );
+    }
     const CustomCard = TOOL_NAME_RENDERER[entry.toolCall.title ?? ""];
     return CustomCard ? (
       <CustomCard toolCall={entry.toolCall} />
@@ -948,7 +963,8 @@ function ThoughtEntry({ text }: { text?: string }) {
  * (raw JSON result) isn't a useful summary. Deliberately a plain lookup
  * table, not a glob-based registry like blob-registry.ts — proportionate to
  * the one case that exists today; promote to a real registry file if a
- * second one shows up.
+ * second one shows up. (The prompt widget's tools aren't listed here: the
+ * widget renders its own cards, through renderPromptToolCall.)
  */
 const TOOL_NAME_RENDERER: Record<
   string,
