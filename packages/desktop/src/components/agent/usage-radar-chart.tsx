@@ -1,18 +1,20 @@
 /**
  * A radar chart for a share that repeats with a cycle (the days of the
  * week): one spoke per step, clockwise from the top, the centre at 0% and
- * the rim at 100%, the points joined into a filled shape. A step with
- * nothing to measure has no point and pulls the shape in to the centre.
+ * the rim at 100%, each series' points joined into a filled shape, the
+ * shapes overlaid — shares don't add up, so they aren't stacked. A step
+ * with nothing to measure has no point and pulls its shape in to the
+ * centre.
  * Hovering a spoke's wedge lights it and tells the caller, which reads it
  * out. Plain SVG on theme tokens — no charting library.
  */
 import { cn } from "@notefig/ui/utils";
 
-export type RadarSpoke = {
-  key: string | number;
-  label: string;
-  /** 0–1, or null when there was nothing to measure. */
-  value: number | null;
+export type RadarShape = {
+  key: string;
+  color: string;
+  /** One per spoke: 0–1, or null when there was nothing to measure. */
+  values: (number | null)[];
 };
 
 const SIZE = 240;
@@ -41,25 +43,29 @@ function wedge(index: number, count: number): string {
 }
 
 export function UsageRadarChart({
-  spokes,
-  color,
+  labels,
+  shapes,
   hovered,
   onHover,
   className,
   testId,
 }: {
-  spokes: RadarSpoke[];
-  color: string;
+  /** One per spoke, clockwise from the top. */
+  labels: string[];
+  shapes: RadarShape[];
   /** The spoke under the pointer, or null. */
   hovered: number | null;
   onHover: (index: number | null) => void;
   className?: string;
   testId?: string;
 }) {
-  const count = spokes.length;
-  const shape = spokes.map((spoke, index) =>
-    pointAt(index, count, (spoke.value ?? 0) * RADIUS),
-  );
+  const count = labels.length;
+  const pointsOf = (shape: RadarShape) =>
+    shape.values.map((value, index) =>
+      pointAt(index, count, (value ?? 0) * RADIUS),
+    );
+  const measured = (index: number) =>
+    shapes.some((shape) => shape.values[index] !== null);
 
   return (
     <svg
@@ -72,17 +78,17 @@ export function UsageRadarChart({
         <polygon
           key={ring}
           points={polygon(
-            spokes.map((_, index) => pointAt(index, count, ring * RADIUS)),
+            labels.map((_, index) => pointAt(index, count, ring * RADIUS)),
           )}
           fill="none"
           stroke="hsl(var(--foreground) / 0.1)"
         />
       ))}
-      {spokes.map((spoke, index) => {
+      {labels.map((label, index) => {
         const [x, y] = pointAt(index, count, RADIUS);
         const [lx, ly] = pointAt(index, count, RADIUS + 16);
         return (
-          <g key={spoke.key}>
+          <g key={index}>
             <line
               x1={CENTER}
               y1={CENTER}
@@ -98,36 +104,43 @@ export function UsageRadarChart({
               className={cn(
                 "fill-muted-foreground text-[11px]",
                 index === hovered && "fill-foreground",
-                spoke.value === null && "opacity-50",
+                !measured(index) && "opacity-50",
               )}
             >
-              {spoke.label}
+              {label}
             </text>
           </g>
         );
       })}
-      <polygon
-        points={polygon(shape)}
-        fill={color}
-        fillOpacity={0.25}
-        stroke={color}
-        strokeWidth={1.5}
-        strokeLinejoin="round"
-      />
-      {spokes.map((spoke, index) =>
-        spoke.value === null ? null : (
-          <circle
-            key={spoke.key}
-            cx={shape[index][0]}
-            cy={shape[index][1]}
-            r={index === hovered ? 3.5 : 2}
-            fill={color}
-          />
-        ),
-      )}
-      {spokes.map((spoke, index) => (
+      {shapes.map((shape) => {
+        const points = pointsOf(shape);
+        return (
+          <g key={shape.key}>
+            <polygon
+              points={polygon(points)}
+              fill={shape.color}
+              fillOpacity={shapes.length > 1 ? 0.12 : 0.25}
+              stroke={shape.color}
+              strokeWidth={1.5}
+              strokeLinejoin="round"
+            />
+            {shape.values.map((value, index) =>
+              value === null ? null : (
+                <circle
+                  key={index}
+                  cx={points[index][0]}
+                  cy={points[index][1]}
+                  r={index === hovered ? 3.5 : 2}
+                  fill={shape.color}
+                />
+              ),
+            )}
+          </g>
+        );
+      })}
+      {labels.map((label, index) => (
         <polygon
-          key={spoke.key}
+          key={label}
           points={wedge(index, count)}
           fill="transparent"
           onMouseEnter={() => onHover(index)}

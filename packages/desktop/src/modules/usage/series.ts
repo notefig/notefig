@@ -279,13 +279,17 @@ export function usagePattern(
   };
 }
 
-/** Tokens per local day of the week over [from, to), Monday first, as the
+/** One harness's tokens per local day of the week, Monday first, as the
  *  usage views start their weeks. */
+export type WeekdayTokens = { harnessId: string; days: TokenCounts[] };
+
+/** Tokens per local day of the week over [from, to), per harness, the
+ *  most tokens first. */
 export function weekdayTokens(
   buckets: readonly UsageBucket[],
   scope: UsageScope,
-): TokenCounts[] {
-  const days = Array.from({ length: 7 }, emptyTokens);
+): WeekdayTokens[] {
+  const byHarness = new Map<string, TokenCounts[]>();
   const weekdayOf = new Map<number, number>();
   const firstHour = startOfHour(scope.from);
   for (const bucket of buckets) {
@@ -295,7 +299,16 @@ export function weekdayTokens(
       weekday = (new Date(bucket.hour).getDay() + 6) % 7;
       weekdayOf.set(bucket.hour, weekday);
     }
+    let days = byHarness.get(bucket.harnessId);
+    if (!days) {
+      days = Array.from({ length: 7 }, emptyTokens);
+      byHarness.set(bucket.harnessId, days);
+    }
     days[weekday] = addTokens(days[weekday], bucket.total.tokens);
   }
-  return days;
+  const sizeOf = (days: TokenCounts[]) =>
+    days.reduce((sum, tokens) => sum + totalTokens(tokens), 0);
+  return [...byHarness]
+    .map(([harnessId, days]) => ({ harnessId, days }))
+    .sort((a, b) => sizeOf(b.days) - sizeOf(a.days));
 }

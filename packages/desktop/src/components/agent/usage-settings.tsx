@@ -35,6 +35,7 @@ import {
 } from "@notefig/shared/agent";
 import { startOfHour } from "@/modules/usage";
 import type {
+  WeekdayTokens,
   HarnessLimits,
   UsageGrain,
   UsageSeries,
@@ -61,7 +62,7 @@ import {
   type ChartSeries,
 } from "./usage-bar-chart";
 import { UsageAreaChart } from "./usage-area-chart";
-import { UsageRadarChart } from "./usage-radar-chart";
+import { UsageRadarChart, type RadarShape } from "./usage-radar-chart";
 
 type Metric = "tokens" | "cost";
 
@@ -383,7 +384,7 @@ export function UsageSettings() {
         money={money}
       />
       <div className={NARROW_WIDE}>
-        <CacheCard range={range} harnessId={harnessId} />
+        <CacheCard range={range} harnessId={harnessId} labelOf={labelOf} />
         <PatternCard
           harnessId={harnessId}
           metric={metric}
@@ -658,32 +659,44 @@ function weekdayName(index: number): string {
   });
 }
 
-/** How much of the input was read from cache, by day of the week, for the
- *  harness the detail view shows (or all of them), over the range. The
- *  header reads out the hovered day's rate, else the whole range's. */
+/** How much of the input was read from cache, by day of the week, over
+ *  the range: for the harness the views show, or with all of them, one
+ *  shape per harness (the largest three, in the usage chart's colours)
+ *  over each other. The header reads out the hovered day, else the range. */
 function CacheCard({
   range,
   harnessId,
+  labelOf,
 }: {
   range: { from: number; to: number };
   harnessId: string;
+  labelOf: (harnessId: string) => string;
 }) {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState<number | null>(null);
-  const days = useWeekdayTokens({
+  const harnesses = useWeekdayTokens({
     ...range,
     harnessId: harnessId === ALL ? undefined : harnessId,
   });
+  const days = WEEKDAYS.map((index) =>
+    harnesses.reduce((sum, h) => addTokens(sum, h.days[index]), emptyTokens()),
+  );
   const total = days.reduce(addTokens, emptyTokens());
   const whole = cacheHitRate(total);
   const tokens = hovered === null ? total : days[hovered];
   const rate = cacheHitRate(tokens);
-  const label =
-    hovered === null ? t("usageCacheHitRate") : weekdayName(hovered);
   const counts = t("usageCacheDetail", {
     read: formatTokens(tokens.cacheRead),
     input: formatTokens(tokens.input + tokens.cacheRead + tokens.cacheWrite),
   });
+  const perHarness = harnessId === ALL && harnesses.length > 1;
+  const shapes: RadarShape[] = perHarness
+    ? harnesses.slice(0, TOP_SERIES).map((h, index) => ({
+        key: h.harnessId,
+        color: PALETTE[index],
+        values: h.days.map(cacheHitRate),
+      }))
+    : [{ key: ALL, color: PALETTE[0], values: days.map(cacheHitRate) }];
 
   return (
     <Card testId="usage-cache">
@@ -706,7 +719,7 @@ function CacheCard({
             className="shrink-0 text-[0.625rem] text-muted-foreground"
             data-testid="usage-cache-readout"
           >
-            {label}{" "}
+            {hovered === null ? t("usageCacheHitRate") : weekdayName(hovered)}{" "}
             <span className="font-medium tabular-nums text-foreground">
               {rate === null ? "—" : percent(rate)}
             </span>
@@ -719,18 +732,64 @@ function CacheCard({
         </p>
       ) : (
         <UsageRadarChart
-          spokes={days.map((tokens, index) => ({
-            key: index,
-            label: weekdayName(index),
-            value: cacheHitRate(tokens),
-          }))}
-          color={PALETTE[0]}
+          labels={WEEKDAYS.map(weekdayName)}
+          shapes={shapes}
           hovered={hovered}
           onHover={setHovered}
           testId="usage-chart-cache"
         />
       )}
+      {perHarness && whole !== null && (
+        <CacheLegend
+          harnesses={harnesses.slice(0, TOP_SERIES)}
+          hovered={hovered}
+          labelOf={labelOf}
+        />
+      )}
     </Card>
+  );
+}
+
+const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
+
+/** Which shape is which harness, with its rate for the hovered day, else
+ *  the range. */
+function CacheLegend({
+  harnesses,
+  hovered,
+  labelOf,
+}: {
+  harnesses: WeekdayTokens[];
+  hovered: number | null;
+  labelOf: (harnessId: string) => string;
+}) {
+  return (
+    <div
+      className="space-y-1 text-[0.625rem]"
+      data-testid="usage-cache-harnesses"
+    >
+      {harnesses.map(({ harnessId, days }, index) => {
+        const rate = cacheHitRate(
+          hovered === null
+            ? days.reduce(addTokens, emptyTokens())
+            : days[hovered],
+        );
+        return (
+          <div key={harnessId} className="flex items-center gap-2">
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ background: PALETTE[index] }}
+            />
+            <span className="min-w-0 flex-1 truncate text-muted-foreground">
+              {labelOf(harnessId)}
+            </span>
+            <span className="font-medium tabular-nums">
+              {rate === null ? "—" : percent(rate)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
