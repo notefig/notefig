@@ -32,6 +32,12 @@ test("usage shows in the composer, under each prompt, and in settings", async ({
   await expect(details).toContainText("/ 200k");
   await page.keyboard.press("Escape");
   await expect(details).toBeHidden();
+  // Clicking the chip again while it is open just closes it.
+  await chip.click();
+  await expect(details).toBeVisible();
+  await chip.click();
+  await expect(details).toBeHidden();
+  await expect(chip).toHaveAttribute("aria-expanded", "false");
 
   // What each turn spent, in tokens, in its prompt's (hover-revealed) footer.
   const turnUsage = page.locator('[data-entry-type="user"]').getByText(/tokens$/);
@@ -55,11 +61,17 @@ test("usage shows in the composer, under each prompt, and in settings", async ({
   await section.getByTestId("usage-harness-select").click();
   await page.getByRole("menuitem", { name: "Claude" }).click();
   await expect(section.getByTestId("usage-chart-models")).toBeVisible();
+  // A mouse pick doesn't hand focus back to the trigger (and its ring).
+  // Radix moves focus once the menu unmounts, after its exit animation.
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(section.getByTestId("usage-harness-select")).not.toBeFocused();
   await expect(detail.getByTestId("usage-limits")).toContainText("five_hour");
 
   // Cost: a harness that never reports it is greyed in the picker.
   await section.getByRole("button", { name: "Cost", exact: true }).click();
   await section.getByTestId("usage-harness-select").click();
   await expect(page.getByRole("menuitem", { name: /Devin/ })).toHaveAttribute("data-greyed", "true");
+  // Closing from the keyboard still returns focus to the trigger.
   await page.keyboard.press("Escape");
+  await expect(section.getByTestId("usage-harness-select")).toBeFocused();
 });

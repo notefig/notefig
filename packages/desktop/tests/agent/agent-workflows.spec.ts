@@ -236,6 +236,15 @@ test.describe("agent workflows", () => {
       await expect(page.locator('[data-session-config-choice="sonnet"]')).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(composer(page)).toBeFocused();
+
+      // Clicking the open picker's trigger closes it; it must not dismiss
+      // and then reopen on the same click.
+      await model.click();
+      await expect(page.locator('[data-session-config-choice="sonnet"]')).toBeVisible();
+      await model.click();
+      await expect(page.locator('[data-session-config-choice="sonnet"]')).toHaveCount(0);
+      await expect(model).toHaveAttribute("aria-expanded", "false");
+      await expect(composer(page)).toBeFocused();
       expect(await lastWireSet(page, "session/set_model")).toEqual({
         sessionId: expect.any(String),
         modelId: "opus",
