@@ -592,13 +592,15 @@ function Picker({
 function Card({
   children,
   testId,
+  className,
 }: {
   children: React.ReactNode;
   testId?: string;
+  className?: string;
 }) {
   return (
     <div
-      className="space-y-4 rounded-lg border border-border p-4"
+      className={cn("space-y-4 rounded-lg border border-border p-4", className)}
       data-testid={testId}
     >
       {children}
@@ -932,7 +934,9 @@ function PatternCard({
   const empty = shown.values.every((row) => row.every((value) => value === 0));
 
   return (
-    <Card testId="usage-pattern">
+    // A column, so the chart takes the height its row gives it — the cache
+    // card beside it grows with its legend.
+    <Card testId="usage-pattern" className="flex flex-col">
       <div>
         <div className="text-[0.8125rem] font-medium">
           {t("usageDailyPattern")}
@@ -956,7 +960,7 @@ function PatternCard({
           }))}
           format={format}
           formatAxis={formatAxis}
-          className="h-[180px]"
+          className="min-h-[180px] flex-1"
           testId="usage-chart-pattern"
         />
       )}
