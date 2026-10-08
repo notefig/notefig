@@ -125,12 +125,22 @@ export function deriveWidgetResponse(
 ): WidgetResponse | null {
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
-    if (entry.type !== "tool_call") continue;
-    if (entry.toolCall?.title !== WIDGET_RESPOND_TOOL_NAME) continue;
-    const parsed = WidgetRespondInputSchema.safeParse(entry.toolCall.rawInput);
-    if (parsed.success) return parsed.data;
+    if (entry.type !== "tool_call" || !entry.toolCall) continue;
+    const response = readWidgetResponse(entry.toolCall);
+    if (response) return response;
   }
   return null;
+}
+
+/** One call's response: a `widget_respond` call whose input parses, else
+ *  null. The single reading both the done face (above) and the chat's
+ *  transcript card (./transcript.tsx) go through. */
+export function readWidgetResponse(
+  call: ToolCallUpdate,
+): WidgetResponse | null {
+  if (call.title !== WIDGET_RESPOND_TOOL_NAME) return null;
+  const parsed = WidgetRespondInputSchema.safeParse(call.rawInput);
+  return parsed.success ? parsed.data : null;
 }
 
 /**
