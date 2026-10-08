@@ -123,6 +123,36 @@ type ShownSeries = {
   totals: number[];
 };
 
+/** A harness's own colour, when it has one. */
+type ColorOf = (key: string | null) => string | undefined;
+
+/** One colour per harness wherever harnesses sit side by side, by its
+ *  tokens over the range — so switching to cost, or to the cache chart,
+ *  doesn't repaint them. Past the palette, none. */
+function harnessColors(byHarness: UsageSeries): ColorOf {
+  const totals = new Map<string, number>();
+  for (const point of byHarness.points) {
+    for (const { key, usage } of point.groups) {
+      if (key)
+        totals.set(key, (totals.get(key) ?? 0) + totalTokens(usage.tokens));
+    }
+  }
+  const ranked = [...totals.keys()].sort(
+    (a, b) => (totals.get(b) ?? 0) - (totals.get(a) ?? 0),
+  );
+  return (key) => (key === null ? undefined : PALETTE[ranked.indexOf(key)]);
+}
+
+/** Each key's colour: its own, else the next one no other key has. */
+function paletteFor(
+  keys: readonly (string | null)[],
+  colorOf: ColorOf = () => undefined,
+): string[] {
+  const own = keys.map(colorOf);
+  const spare = PALETTE.filter((color) => !own.includes(color));
+  return own.map((color) => color ?? spare.shift() ?? OTHER_COLOR);
+}
+
 /** The largest groups as chart series, the rest summed into "Other". */
 function topSeries(
   slices: readonly UsageSlice[],
@@ -131,6 +161,7 @@ function topSeries(
   nameOf: (key: string | null) => string,
   otherName: string,
   include: (key: string | null) => boolean = () => true,
+  colorOf?: ColorOf,
 ): ShownSeries {
   const totalOf = new Map<string | null, number>();
   for (const slice of slices) {
@@ -149,10 +180,11 @@ function topSeries(
     ranked.length <= TOP_SERIES + 1 ? ranked : ranked.slice(0, TOP_SERIES);
   const rest = new Set(ranked.slice(shown.length));
 
+  const colors = paletteFor(shown, colorOf);
   const series: ChartSeries[] = shown.map((key, index) => ({
     key: key ?? NULL_KEY,
     name: nameOf(key),
-    color: PALETTE[index],
+    color: colors[index],
   }));
   if (rest.size > 0)
     series.push({ key: OTHER_KEY, name: otherName, color: OTHER_COLOR });
@@ -293,14 +325,14 @@ function useHarnessIds(
   }, [byHarness.keys, activeHarnesses, limits]);
 }
 
-/** The unit a series' costs are in: the first one seen that `accept`s,
+/** The unit some slices' costs are in: the first one seen that `accept`s,
  *  null when there is none. */
 function costUnitOf(
-  series: UsageSeries,
+  slices: readonly UsageSlice[],
   accept: (cost: Cost) => boolean = () => true,
 ): CostUnit | null {
-  for (const point of series.points) {
-    for (const { usage } of point.groups) {
+  for (const slice of slices) {
+    for (const { usage } of slice.groups) {
       if (usage.cost && accept(usage.cost)) {
         return { currency: usage.cost.currency, type: costType(usage.cost) };
       }
@@ -326,6 +358,21 @@ function useChosenHarness(
   return [harnessIds.includes(chosen) ? chosen : ALL, setChosen];
 }
 
+/** The money the views that stack harnesses chart cost in (a harness
+ *  billing in credits charts them in its own card), and the daily
+ *  pattern's formatters: one harness's in its own unit (credits, say). */
+function useCostUnits(
+  byHarness: UsageSeries,
+  patternHours: readonly UsageSlice[],
+  harnessId: string,
+) {
+  const money =
+    costUnitOf(byHarness.points, (cost) => costType(cost) === "currency") ??
+    USD;
+  const own = harnessId === ALL ? null : costUnitOf(patternHours);
+  return { money, patternFormatters: useFormatters(own ?? money) };
+}
+
 export function UsageSettings() {
   const { t } = useTranslation();
   const [metric, setMetric] = useState<Metric>("tokens");
@@ -345,11 +392,12 @@ export function UsageSettings() {
   const harnessIds = useHarnessIds(byHarness, limits);
   const [harnessId, setChosen] = useChosenHarness(harnessIds);
   const pattern = useUsagePattern({ ...patternRange, ...scopeOf(harnessId) });
-  // The views that stack harnesses chart money only; a harness billing in
-  // credits charts them in its own card.
-  const money =
-    costUnitOf(byHarness, (cost) => costType(cost) === "currency") ?? USD;
-  const formatters = useFormatters(money);
+  const { money, patternFormatters } = useCostUnits(
+    byHarness,
+    pattern.hours,
+    harnessId,
+  );
+  const colorOf = useMemo(() => harnessColors(byHarness), [byHarness]);
 
   const metricName = metric === "cost" ? t("usageCost") : t("usageTokens");
   const rangeName = t("usageRangeDays", { count: rangeDays });
@@ -382,16 +430,23 @@ export function UsageSettings() {
         limits={limits}
         caption={{ grain: grainName, range: rangeName }}
         money={money}
+        colorOf={colorOf}
       />
       <div className={NARROW_WIDE}>
-        <CacheCard range={range} harnessId={harnessId} labelOf={labelOf} />
+        <CacheCard
+          range={range}
+          harnessId={harnessId}
+          labelOf={labelOf}
+          colorOf={colorOf}
+        />
         <PatternCard
           harnessId={harnessId}
           metric={metric}
           labelOf={labelOf}
           reportingOf={reportingOf}
-          format={formatters.value(metric)}
-          formatAxis={formatters.axis(metric)}
+          colorOf={colorOf}
+          format={patternFormatters.value(metric)}
+          formatAxis={patternFormatters.axis(metric)}
           pattern={pattern}
           description={t("usagePatternDesc", {
             metric: metricName.toLowerCase(),
@@ -661,16 +716,18 @@ function weekdayName(index: number): string {
 
 /** How much of the input was read from cache, by day of the week, over
  *  the range: for the harness the views show, or with all of them, one
- *  shape per harness (the largest three, in the usage chart's colours)
- *  over each other. The header reads out the hovered day, else the range. */
+ *  shape per harness (the largest three in their colours, the rest as
+ *  "Other") over each other. The header reads out the hovered day, else the range. */
 function CacheCard({
   range,
   harnessId,
   labelOf,
+  colorOf,
 }: {
   range: { from: number; to: number };
   harnessId: string;
   labelOf: (harnessId: string) => string;
+  colorOf: ColorOf;
 }) {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState<number | null>(null);
@@ -690,11 +747,14 @@ function CacheCard({
     input: formatTokens(tokens.input + tokens.cacheRead + tokens.cacheWrite),
   });
   const perHarness = harnessId === ALL && harnesses.length > 1;
+  const entries = perHarness
+    ? cacheEntries(harnesses, labelOf, colorOf, t("usageOther"))
+    : [];
   const shapes: RadarShape[] = perHarness
-    ? harnesses.slice(0, TOP_SERIES).map((h, index) => ({
-        key: h.harnessId,
-        color: PALETTE[index],
-        values: h.days.map(cacheHitRate),
+    ? entries.map(({ key, color, days }) => ({
+        key,
+        color,
+        values: days.map(cacheHitRate),
       }))
     : [{ key: ALL, color: PALETTE[0], values: days.map(cacheHitRate) }];
 
@@ -740,11 +800,7 @@ function CacheCard({
         />
       )}
       {perHarness && whole !== null && (
-        <CacheLegend
-          harnesses={harnesses.slice(0, TOP_SERIES)}
-          hovered={hovered}
-          labelOf={labelOf}
-        />
+        <CacheLegend entries={entries} hovered={hovered} />
       )}
     </Card>
   );
@@ -752,36 +808,77 @@ function CacheCard({
 
 const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
 
+type CacheEntry = {
+  key: string;
+  name: string;
+  color: string;
+  days: WeekdayTokens["days"];
+};
+
+/** The harnesses the cache chart draws, as the other charts do: the
+ *  largest three in their own colours, the rest added into "Other". */
+function cacheEntries(
+  harnesses: readonly WeekdayTokens[],
+  labelOf: (harnessId: string) => string,
+  colorOf: ColorOf,
+  otherName: string,
+): CacheEntry[] {
+  const shown =
+    harnesses.length <= TOP_SERIES + 1
+      ? harnesses
+      : harnesses.slice(0, TOP_SERIES);
+  const colors = paletteFor(
+    shown.map((h) => h.harnessId),
+    colorOf,
+  );
+  const entries: CacheEntry[] = shown.map(({ harnessId, days }, index) => ({
+    key: harnessId,
+    name: labelOf(harnessId),
+    color: colors[index],
+    days,
+  }));
+  const rest = harnesses.slice(shown.length);
+  if (rest.length > 0) {
+    entries.push({
+      key: OTHER_KEY,
+      name: otherName,
+      color: OTHER_COLOR,
+      days: WEEKDAYS.map((index) =>
+        rest.reduce((sum, h) => addTokens(sum, h.days[index]), emptyTokens()),
+      ),
+    });
+  }
+  return entries;
+}
+
 /** Which shape is which harness, with its rate for the hovered day, else
  *  the range. */
 function CacheLegend({
-  harnesses,
+  entries,
   hovered,
-  labelOf,
 }: {
-  harnesses: WeekdayTokens[];
+  entries: CacheEntry[];
   hovered: number | null;
-  labelOf: (harnessId: string) => string;
 }) {
   return (
     <div
       className="space-y-1 text-[0.625rem]"
       data-testid="usage-cache-harnesses"
     >
-      {harnesses.map(({ harnessId, days }, index) => {
+      {entries.map(({ key, name, color, days }) => {
         const rate = cacheHitRate(
           hovered === null
             ? days.reduce(addTokens, emptyTokens())
             : days[hovered],
         );
         return (
-          <div key={harnessId} className="flex items-center gap-2">
+          <div key={key} className="flex items-center gap-2">
             <span
               className="size-2 shrink-0 rounded-full"
-              style={{ background: PALETTE[index] }}
+              style={{ background: color }}
             />
             <span className="min-w-0 flex-1 truncate text-muted-foreground">
-              {labelOf(harnessId)}
+              {name}
             </span>
             <span className="font-medium tabular-nums">
               {rate === null ? "—" : percent(rate)}
@@ -800,11 +897,13 @@ function PatternCard({
   description,
   labelOf,
   reportingOf,
+  colorOf,
   format,
   formatAxis,
 }: Shared & {
   /** The chosen harness, or `ALL`: split by harness, or by its models. */
   harnessId: string;
+  colorOf: ColorOf;
   pattern: {
     hours: (UsageSlice & { hour: number })[];
     keys: (string | null)[];
@@ -821,6 +920,7 @@ function PatternCard({
           (key) => labelOf(key ?? ""),
           t("usageOther"),
           showsMetric(metric, reportingOf),
+          colorOf,
         )
       : topSeries(
           pattern.hours,
@@ -874,6 +974,7 @@ function HarnessCard({
   limits,
   caption,
   money,
+  colorOf,
 }: {
   metric: Metric;
   range: { from: number; to: number };
@@ -887,6 +988,7 @@ function HarnessCard({
   caption: { grain: string; range: string };
   /** The unit the stacked views chart cost in. */
   money: CostUnit;
+  colorOf: ColorOf;
 }) {
   const { t } = useTranslation();
   const all = harnessId === ALL;
@@ -905,6 +1007,7 @@ function HarnessCard({
     money,
     labelOf,
     reportingOf,
+    colorOf,
     caption,
   });
   const format = view.formatters.value(view.shownMetric);
@@ -970,6 +1073,7 @@ type DetailScope = {
   money: CostUnit;
   labelOf: (harnessId: string) => string;
   reportingOf: (harnessId: string) => UsageReporting;
+  colorOf: ColorOf;
   caption: { grain: string; range: string };
 };
 
@@ -1018,7 +1122,7 @@ function detailCostUnit(
  *  harnesses, the ones left out for having none. */
 function detailSeries(
   series: UsageSeries,
-  { all, labelOf, reportingOf }: DetailScope,
+  { all, labelOf, reportingOf, colorOf }: DetailScope,
   metric: Metric,
   t: TFunction,
 ): { shown: ShownSeries; withoutCost: string[] } {
@@ -1043,6 +1147,7 @@ function detailSeries(
       (key) => labelOf(key ?? ""),
       t("usageOther"),
       canShow,
+      colorOf,
     ),
     withoutCost: series.keys.filter(
       (key): key is string => !!key && !canShow(key),
@@ -1058,7 +1163,10 @@ function harnessCostUnit(
   reporting: UsageReporting,
   money: CostUnit,
 ): CostUnit | null {
-  const credits = costUnitOf(series, (cost) => costType(cost) === "credits");
+  const credits = costUnitOf(
+    series.points,
+    (cost) => costType(cost) === "credits",
+  );
   return credits ?? (reporting.cost ? money : null);
 }
 
