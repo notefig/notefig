@@ -20,6 +20,18 @@ describe("renderPromptToolCall", () => {
     expect(renderPromptToolCall(call({ status: "pending" }))).toBeNull();
   });
 
+  it("leaves a call that hasn't completed to the transcript, even with its full answer", () => {
+    // Recorded harnesses stream the whole input while the call is still
+    // pending; a check mark then would claim a delivery that hasn't run.
+    expect(renderPromptToolCall(call({ status: "pending", rawInput: answer }))).toBeNull();
+    expect(renderPromptToolCall(call({ status: "in_progress", rawInput: answer }))).toBeNull();
+    expect(renderPromptToolCall(call({ rawInput: answer }))).toBeNull();
+  });
+
+  it("an incomplete answer in a completed call stays the generic line", () => {
+    expect(renderPromptToolCall(call({ status: "completed", rawInput: { kind: "answer" } }))).toBeNull();
+  });
+
   it("leaves a failed call to the transcript, so its error shows", () => {
     expect(renderPromptToolCall(call({ status: "failed", rawInput: answer }))).toBeNull();
   });

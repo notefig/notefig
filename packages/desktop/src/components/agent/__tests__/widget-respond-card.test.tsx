@@ -84,6 +84,15 @@ describe("widget_respond in the transcript", () => {
     expect(card()?.querySelector("[data-widget-response]") ?? null).toBeNull();
   });
 
+  it("a pending call with its full answer keeps the in-flight tool line", () => {
+    renderToolCall({
+      status: "pending",
+      rawInput: { kind: "answer", markdown: "not delivered yet" },
+    });
+    expect(card()?.getAttribute("data-tool-status")).toBe("pending");
+    expect(card()?.querySelector("[data-widget-response]") ?? null).toBeNull();
+  });
+
   it("a failed call stays a plain tool line", () => {
     renderToolCall({
       status: "failed",
