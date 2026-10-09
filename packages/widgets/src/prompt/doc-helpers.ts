@@ -4,7 +4,11 @@
  * its dismiss semantics, and importing the node view from the chrome would
  * close an import cycle (the view renders the chrome).
  */
-import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
+import type {
+  Node as PMNode,
+  NodeType,
+  ResolvedPos,
+} from "@tiptap/pm/model";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
@@ -277,7 +281,7 @@ export function captureSelectionReference(
 /**
  * The selection summon: "/" typed over a non-empty selection inserts a
  * `summoned` widget carrying the selection as its reference AFTER the
- * top-level block the selection ends in — the referenced text stays in the
+ * block the selection ends in (see selectionSummonPos) — the referenced text stays in the
  * document untouched, and the "/" itself is consumed, never inserted.
  * Null when there is nothing to reference or the document can't hold a
  * widget there (the caller falls back to letting "/" type normally).
@@ -293,15 +297,32 @@ export function selectionSummonTr(
   if ($to.depth < 1) return null;
   const type = state.schema.nodes[PROMPT_NODE_NAME];
   if (!type) return null;
-  // Top-level insertion keeps v1 simple: a selection ending inside a list
-  // puts the widget after the whole list, not inside it.
-  const index = $to.index(0) + 1;
-  if (!state.doc.canReplaceWith(index, index, type)) return null;
+  const pos = selectionSummonPos($to, type);
+  if (pos === null) return null;
   const node = type.createAndFill({ summoned: true, blobId, reference });
   if (!node) return null;
-  const pos = $to.after(1);
   const tr = state.tr.insert(pos, node);
   return tr.setSelection(NodeSelection.create(tr.doc, pos));
+}
+
+/** Containers a selection-summoned widget may land inside, besides the doc. */
+const LIST_ITEMS = new Set(["listItem", "taskItem"]);
+
+/**
+ * Where the selection summon inserts: right after the block the selection
+ * ends in, inside the innermost list item that admits the widget there — so
+ * a reply to a bullet sits under that bullet, not after the whole list.
+ * Outside lists (or where an item's content expression refuses it, like a
+ * taskItem after its paragraph) it falls back to after the top-level block.
+ */
+function selectionSummonPos($to: ResolvedPos, type: NodeType): number | null {
+  for (let d = $to.depth - 1; d >= 0; d--) {
+    const container = $to.node(d);
+    if (d > 0 && !LIST_ITEMS.has(container.type.name)) continue;
+    const index = $to.index(d) + 1;
+    if (container.canReplaceWith(index, index, type)) return $to.after(d + 1);
+  }
+  return null;
 }
 
 /**

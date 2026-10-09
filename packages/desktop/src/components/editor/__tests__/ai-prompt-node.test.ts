@@ -421,6 +421,41 @@ describe('"/" summon over a selection (doc references)', () => {
     expect(getEditorMarkdown(editor)).toBe("One two\n\nThree four");
   });
 
+  it("lands inside the list item the selection ends in, not after the list", async () => {
+    editor = await documentEditor(
+      "<ul><li><p>one</p></li><li><p>two</p></li></ul><p>after</p>",
+    );
+    const markdownBefore = getEditorMarkdown(editor);
+    editor.commands.setTextSelection({ from: 3, to: 6 }); // "one"
+    expect(typeText(editor, "/")).toBe(true);
+    const node = findPromptNode(editor)!;
+    const $pos = editor.state.doc.resolve(node.pos);
+    expect($pos.parent.type.name).toBe("listItem");
+    expect($pos.parent.textContent).toBe("one");
+    expect(getEditorMarkdown(editor)).toBe(markdownBefore);
+  });
+
+  it("lands inside the nested list item the selection ends in", async () => {
+    editor = await documentEditor(
+      "<ul><li><p>a</p><ul><li><p>b</p></li></ul></li><li><p>c</p></li></ul>",
+    );
+    editor.commands.setTextSelection({ from: 8, to: 9 }); // "b"
+    expect(typeText(editor, "/")).toBe(true);
+    const $pos = editor.state.doc.resolve(findPromptNode(editor)!.pos);
+    expect($pos.parent.type.name).toBe("listItem");
+    expect($pos.parent.textContent).toBe("b");
+  });
+
+  it("falls back to after the list where a task item can't hold it", async () => {
+    editor = await documentEditor(
+      '<ul data-type="taskList"><li data-type="taskItem"><p>todo</p></li></ul><p>after</p>',
+    );
+    editor.commands.setTextSelection({ from: 3, to: 7 }); // "todo"
+    expect(typeText(editor, "/")).toBe(true);
+    const $pos = editor.state.doc.resolve(findPromptNode(editor)!.pos);
+    expect($pos.depth).toBe(0);
+  });
+
   it("lets '/' replace a whitespace-only selection as ordinary typing", async () => {
     editor = await documentEditor("<p>Hi there</p>");
     editor.commands.setTextSelection({ from: 3, to: 4 }); // the space
