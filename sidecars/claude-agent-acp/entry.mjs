@@ -1,7 +1,8 @@
 // Entry of the bundled Claude ACP adapter sidecar (MET-210).
 //
 // This is what gets compiled into `claude-agent-acp-<triple>`: the adapter's
-// own `bin` entry minus its `--cli`/`--version` shims, plus one job of ours —
+// own `bin` entry minus its `--cli`/`--version` shims, plus two jobs of ours:
+// reporting account limits after each turn (usage-report.mjs), and
 // pointing the adapter at the user's installed Claude Code CLI. The adapter
 // honours CLAUDE_CODE_EXECUTABLE; without it, it would look for the SDK's
 // platform-specific optional dependency (the ~200 MB native CLI), which the
@@ -16,6 +17,7 @@ import {
   runAcp,
 } from "@agentclientprotocol/claude-agent-acp/dist/acp-agent.js";
 import { applyManagedPolicyEnv } from "@agentclientprotocol/claude-agent-acp/dist/managed-policy.js";
+import { reportUsageLimits } from "./usage-report.mjs";
 
 function isExecutable(file) {
   try {
@@ -92,6 +94,7 @@ async function main() {
     : undefined;
   logger?.log("Claude ACP started (notefig sidecar)");
   const { connection, agent } = runAcp(logger);
+  reportUsageLimits(agent);
   async function shutdown() {
     await agent.dispose().catch((err) => {
       console.error("Error during cleanup:", err);
