@@ -9,7 +9,7 @@ import {
   StatusGlyph,
   type StatusGlyphState,
 } from "@/components/agent/status-glyph";
-import { HarnessLogo } from "@notefig/ui/harness-logo";
+import { HarnessLogo } from "@/components/agent/harness-logo";
 import { CheckpointsList } from "@/components/editor/git/checkpoint-panel";
 import { AppEmbed } from "./app-embed";
 import { DEMO_CHECKPOINTS, DEMO_SESSIONS } from "./demo-fixtures";

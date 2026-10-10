@@ -40,6 +40,15 @@ export const openCodeAdapter: HarnessAdapter = {
   },
   // Cost on `usage_update`; no account limits.
   reporting: { cost: true, limits: false },
+  // Brand mark is two-tone; drawn monochrome (currentColor + opacity) so
+  // it themes like the rest.
+  logo: {
+    viewBox: "0 0 240 300",
+    paths: [
+      { d: "M180 240H60V120H180V240Z", opacity: 0.45 },
+      { d: "M180 60H60V240H180V60ZM240 300H0V0H240V300Z" },
+    ],
+  },
 };
 
 /** The ACP env list as a plain record, the shape config files want. */

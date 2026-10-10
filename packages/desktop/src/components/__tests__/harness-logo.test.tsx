@@ -1,5 +1,6 @@
+import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { HarnessLogo } from "../harness-logo";
+import { HarnessLogo } from "../agent/harness-logo";
 
 const markup = (harnessId: string) =>
   renderToStaticMarkup(<HarnessLogo harnessId={harnessId} />);

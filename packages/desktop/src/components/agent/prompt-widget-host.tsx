@@ -34,6 +34,7 @@ import {
 } from "@/hooks/use-harness-selection";
 import { canOpenFile } from "@/modules/editors";
 import { FileTypeIcon } from "@/components/editor/file-type-icon";
+import { HarnessLogo } from "./harness-logo";
 import { Markdown } from "@/components/ui/markdown";
 import { useCore } from "@notefig/core/react";
 import { rankFileRows } from "@/utils/file-score";
@@ -193,6 +194,7 @@ const slots: PromptWidgetHost["slots"] = {
   PermissionCard: ({ taskId }) => <PermissionCard taskId={taskId} bare />,
   AuthCard: ({ task }) => <AuthCard task={task} bare />,
   FileIcon: FileTypeIcon,
+  HarnessLogo,
 };
 
 /** The workspace's "yes, agents may act here" gate. A real hook, called by

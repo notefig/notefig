@@ -68,6 +68,15 @@ export type UsageReporting = {
   limits: boolean;
 };
 
+/** A harness's brand mark as SVG data, drawn in `currentColor` so it
+ *  follows the surrounding text in both themes. Data rather than a
+ *  component, so nothing reading an adapter pulls React. */
+export type HarnessMark = {
+  viewBox: string;
+  fillRule?: "evenodd";
+  paths: readonly { d: string; opacity?: number }[];
+};
+
 export interface HarnessAdapter {
   /** Runs once per task, after the app-tools MCP endpoint is live and
    *  before the harness process spawns. */
@@ -77,6 +86,8 @@ export interface HarnessAdapter {
    *  to grey out what a harness will never fill, rather than show an empty
    *  chart as if nothing had been spent. */
   reporting: UsageReporting;
+  /** Its brand mark; none draws a generic bot. */
+  logo?: HarnessMark;
 }
 
 /** Reports nothing beyond tokens. */

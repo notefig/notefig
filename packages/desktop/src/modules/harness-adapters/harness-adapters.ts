@@ -13,7 +13,12 @@ import {
 import { defineModule } from "@notefig/core";
 import { platformModule } from "@/core/services";
 import { harnessesModule, type HarnessesApi } from "@/modules/agents/harnesses";
-import { NO_REPORTING, type HarnessAdapter, type UsageReporting } from "./adapter";
+import {
+  NO_REPORTING,
+  type HarnessAdapter,
+  type HarnessMark,
+  type UsageReporting,
+} from "./adapter";
 import { claudeCodeAdapter } from "./claude-code";
 import { devinAdapter } from "./devin";
 import { geminiCliAdapter } from "./gemini-cli";
@@ -28,14 +33,27 @@ const BUILT_IN_ADAPTERS = new Map<string, HarnessAdapter>([
 ]);
 
 /** A custom harness — settings data, no code of its own — registers the
- *  app's tools the way its mode names (by its `mcpRegistrationOverride`)
- *  and declares nothing it reports: what it has sent is the only evidence. */
+ *  app's tools the way its mode names (by its `mcpRegistrationOverride`),
+ *  borrowing only that from the built-in whose mode it is. It declares
+ *  nothing it reports (what it has sent is the only evidence) and has no
+ *  brand mark. */
+function customAdapter(registersLike: HarnessAdapter): HarnessAdapter {
+  return { onInvoke: registersLike.onInvoke, reporting: NO_REPORTING };
+}
+
 const CUSTOM_ADAPTERS: Record<McpRegistrationMode, HarnessAdapter> = {
-  "session-new": { ...claudeCodeAdapter, reporting: NO_REPORTING },
-  "opencode-config": { ...openCodeAdapter, reporting: NO_REPORTING },
-  "devin-config": { ...devinAdapter, reporting: NO_REPORTING },
-  none: { ...geminiCliAdapter, reporting: NO_REPORTING },
+  "session-new": customAdapter(claudeCodeAdapter),
+  "opencode-config": customAdapter(openCodeAdapter),
+  "devin-config": customAdapter(devinAdapter),
+  none: customAdapter(geminiCliAdapter),
 };
+
+/** A harness id's brand mark: a built-in's own; none for a custom harness
+ *  or an id whose entry is gone (its sessions keep the raw id). Static, so
+ *  views outside core (the marketing site) draw it too. */
+export function harnessLogo(harnessId: string): HarnessMark | undefined {
+  return BUILT_IN_ADAPTERS.get(harnessId)?.logo;
+}
 
 export interface HarnessAdaptersApi {
   /** The adapter for a harness: a built-in's own, else — a custom harness —

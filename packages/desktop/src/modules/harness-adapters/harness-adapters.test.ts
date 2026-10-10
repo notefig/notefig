@@ -6,7 +6,7 @@ import {
 import type { HarnessInvokeContext } from "./adapter";
 import { testKv } from "@/testing/test-kv";
 import { createHarnesses } from "@/modules/agents/harnesses";
-import { createHarnessAdapters } from "./harness-adapters";
+import { createHarnessAdapters, harnessLogo } from "./harness-adapters";
 
 const adapters = () =>
   createHarnessAdapters({ harnesses: createHarnesses({ kv: testKv() }) });
@@ -261,5 +261,14 @@ describe("usage reporting", () => {
     }).reporting;
     expect(reporting("custom:lab")).toEqual({ cost: false, limits: false });
     expect(reporting("custom:lab", { cost: true })).toEqual({ cost: true, limits: false });
+  });
+});
+
+describe("logos", () => {
+  it("gives each built-in its own mark, and a custom harness none", () => {
+    const marks = BUILT_IN_HARNESSES.map((built) => harnessLogo(built.id));
+    expect(marks.every((mark) => mark && mark.paths.length > 0)).toBe(true);
+    expect(new Set(marks.map((mark) => mark?.paths[0].d)).size).toBe(marks.length);
+    expect(harnessLogo("custom:lab")).toBeUndefined();
   });
 });

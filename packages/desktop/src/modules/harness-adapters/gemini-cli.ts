@@ -5,4 +5,10 @@ import { NO_PREP, NO_REPORTING, type HarnessAdapter } from "./adapter";
 export const geminiCliAdapter: HarnessAdapter = {
   onInvoke: async () => NO_PREP,
   reporting: NO_REPORTING,
+  logo: {
+    viewBox: "0 0 24 24",
+    paths: [
+      { d: "M12 24A14.304 14.304 0 0 0 0 12 14.304 14.304 0 0 0 12 0a14.305 14.305 0 0 0 12 12 14.305 14.305 0 0 0-12 12Z" },
+    ],
+  },
 };

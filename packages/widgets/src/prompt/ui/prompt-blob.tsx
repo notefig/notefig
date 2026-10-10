@@ -34,7 +34,6 @@ import {
   DropdownMenuTrigger,
 } from "@notefig/ui/dropdown-menu";
 import { cn } from "@notefig/ui/utils";
-import { HarnessLogo } from "@notefig/ui/harness-logo";
 import {
   sortEntriesChronologically,
   type AgentEntry,
@@ -1499,6 +1498,7 @@ function SessionControl({
 }) {
   const { t } = useTranslation();
   const host = usePromptWidgetHost();
+  const { HarnessLogo } = host.slots;
   // Default first, never empty — the top three become the explicit
   // new-conversation entries below.
   const harnesses = host.useHarnessList();
