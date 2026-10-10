@@ -444,3 +444,21 @@ describe("sidecar commands (MET-210)", () => {
     expect(claude.command.startsWith("sidecar:")).toBe(true);
   });
 });
+
+describe("resolveHarnessSpawn", () => {
+  it("defaults the cwd to the workspace and templates the args", () => {
+    const spawn = resolveHarnessSpawn(
+      BUILT_IN_HARNESSES.find((h) => h.id === "opencode")!,
+      "/ws",
+    );
+
+    expect(spawn.cwd).toBe("/ws");
+    expect(spawn.args).toEqual(["acp", "--cwd", "/ws"]);
+  });
+
+  it("spawns every built-in harness in the workspace itself", () => {
+    for (const built of BUILT_IN_HARNESSES) {
+      expect(resolveHarnessSpawn(built, "/ws").cwd).toBe("/ws");
+    }
+  });
+});

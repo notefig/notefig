@@ -12,8 +12,6 @@ import {
   BUILT_IN_HARNESSES,
   composePrompt,
   MCP_SERVER_NAME,
-  harnessAdapterFor,
-  type HarnessSpawnPrep,
   parseCustomHarnessEntries,
   parseHarnessOverrides,
   resolveEffectiveHarnesses,
@@ -39,6 +37,10 @@ import { resolveWorkspacePath } from "@/utils/fs";
 import { path as pathutil, workspaceKey } from "@/utils/path";
 import { APP_DIR_NAME } from "@/utils/app-dir";
 import type { KvApi } from "@/modules/kv";
+import type {
+  HarnessAdaptersApi,
+  HarnessSpawnPrep,
+} from "@/modules/harness-adapters";
 import { MarkdownJoiner } from "@/lib/markdown-joiner-transform";
 import { PermissionBroker } from "./permission-broker";
 import {
@@ -104,6 +106,8 @@ export interface AgentRuntimeDeps {
   agents(): AgentsApi;
   /** Where turn and tool-call moments are announced (core's hook bus). */
   hooks: Pick<Hooks, "emit">;
+  /** What each harness does differently (`core.harnessAdapters`). */
+  harnessAdapters: Pick<HarnessAdaptersApi, "adapterFor">;
 }
 
 /**
@@ -461,7 +465,8 @@ export class AgentTask {
       // The harness's own invoke hook runs here: whatever its dialect needs
       // in place before the process exists (a config file on disk, env to
       // inject) happens inside the adapter — this code reads none of it.
-      const prep = await harnessAdapterFor(this.harness).onInvoke({
+      const adapter = this.deps.harnessAdapters.adapterFor(this.harness);
+      const prep = await adapter.onInvoke({
         workspacePath: this.workspacePath,
         joinPath: (...parts) => pathutil.join(...parts),
         // The app dir is the app's own; the harness apparatus holds no copy.

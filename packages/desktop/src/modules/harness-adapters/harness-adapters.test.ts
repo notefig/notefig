@@ -1,10 +1,12 @@
+import { describe, expect, it } from "vitest";
 import {
   BUILT_IN_HARNESSES,
-  harnessAdapterFor,
-  resolveHarnessSpawn,
   type HarnessDefinition,
-  type HarnessInvokeContext,
-} from "./index";
+} from "@notefig/shared/agent";
+import type { HarnessInvokeContext } from "./adapter";
+import { createHarnessAdapters } from "./harness-adapters";
+
+const { adapterFor } = createHarnessAdapters();
 
 /** The host supplies the app dir from its own source of truth; the tests
  *  pick an arbitrary name and assert the adapters thread it through. */
@@ -46,7 +48,7 @@ const context = (overrides: Partial<HarnessInvokeContext> = {}) => {
 
 const invoke = (id: string, overrides: Partial<HarnessInvokeContext> = {}) => {
   const { ctx, written, warnings } = context(overrides);
-  return harnessAdapterFor(harness(id))
+  return adapterFor(harness(id))
     .onInvoke(ctx)
     .then((prep) => ({ prep, written, warnings }));
 };
@@ -81,7 +83,7 @@ describe("harness adapters", () => {
       mcpRegistration,
     });
     const prepFor = (mode: HarnessDefinition["mcpRegistration"]) =>
-      harnessAdapterFor(custom(mode)).onInvoke(context().ctx);
+      adapterFor(custom(mode)).onInvoke(context().ctx);
 
     expect((await prepFor("session-new")).passThroughSessionNew).toBe(true);
     expect((await prepFor("opencode-config")).env).toHaveProperty(
@@ -233,21 +235,6 @@ describe("harness adapters", () => {
         sessionParams: {},
       });
       expect(written).toEqual([]);
-    }
-  });
-});
-
-describe("resolveHarnessSpawn", () => {
-  it("defaults the cwd to the workspace and templates the args", () => {
-    const spawn = resolveHarnessSpawn(harness("opencode"), "/ws");
-
-    expect(spawn.cwd).toBe("/ws");
-    expect(spawn.args).toEqual(["acp", "--cwd", "/ws"]);
-  });
-
-  it("spawns every built-in harness in the workspace itself", () => {
-    for (const built of BUILT_IN_HARNESSES) {
-      expect(resolveHarnessSpawn(built, "/ws").cwd).toBe("/ws");
     }
   });
 });

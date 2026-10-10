@@ -78,6 +78,7 @@ export const workspaceAgentsModule = defineModule({
       },
       agents: () => agents!,
       hooks: ctx.hooks,
+      harnessAdapters: ctx.use("harnessAdapters"),
     });
     return (agents = createAgents({
       runtime,

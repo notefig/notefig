@@ -19,6 +19,7 @@ import { createNodeTestDb } from "./node-db";
 import { memoryUrlState } from "./test-core";
 import { testKv } from "./test-kv";
 import type { KvApi } from "@/modules/kv";
+import { createHarnessAdapters } from "@/modules/harness-adapters";
 
 /** A fresh, empty agent store. */
 export function testAgentStore(): AgentStore {
@@ -98,6 +99,7 @@ export function testAgents(
     }),
     agents: () => agents!,
     hooks,
+    harnessAdapters: createHarnessAdapters(),
     ...overrides,
   };
   const runtime = createAgentRuntime(deps);
