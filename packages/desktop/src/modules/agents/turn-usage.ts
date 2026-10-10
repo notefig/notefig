@@ -25,9 +25,11 @@ import {
 } from "@notefig/shared/agent";
 import {
   tokensFrom,
+  type HarnessAdapter,
   type ModelTokens,
   type UsageReader,
   type UsageUpdate,
+  type WithMeta,
 } from "@/modules/harness-adapters";
 
 /** The context fill a `usage_update` reports. */
@@ -35,31 +37,27 @@ export function contextFrom(update: UsageUpdate): ContextWindow {
   return { used: update.used, size: update.size };
 }
 
-/** The agent a Devin `usage_update` or chunk came from: `"root"` for the
- *  main agent, a subagent's id, or null when it isn't tagged (Devin's
- *  plain copy of a main-agent update, and every other harness). */
-export function agentOf(update: { _meta?: Record<string, unknown> | null }): string | null {
-  const context = update._meta?.["cognition.ai/subagent_context"] as
-    | { parentAgentId?: unknown }
-    | undefined;
-  return typeof context?.parentAgentId === "string" ? context.parentAgentId : null;
-}
-
 /** Whether an update or chunk is the session's own agent's, not a
  *  subagent's — the only ones that speak for the session's context fill
- *  and transcript. */
-export function isMainAgent(update: { _meta?: Record<string, unknown> | null }): boolean {
-  const agent = agentOf(update);
+ *  and transcript. A harness that doesn't tag them has only its own. */
+export function isMainAgent(
+  adapter: Pick<HarnessAdapter, "agentOf">,
+  update: WithMeta,
+): boolean {
+  const agent = adapter.agentOf?.(update) ?? null;
   return agent === null || agent === "root";
 }
 
 /** A subagent's reasoning or reply chunk, streamed into its parent's
  *  session — not the session agent's words. */
-export function isSubagentChunk(update: SessionNotification["update"]): boolean {
+export function isSubagentChunk(
+  adapter: Pick<HarnessAdapter, "agentOf">,
+  update: SessionNotification["update"],
+): boolean {
   return (
     (update.sessionUpdate === "agent_message_chunk" ||
       update.sessionUpdate === "agent_thought_chunk") &&
-    !isMainAgent(update)
+    !isMainAgent(adapter, update)
   );
 }
 

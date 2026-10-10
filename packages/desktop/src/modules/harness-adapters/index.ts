@@ -9,4 +9,5 @@ export type {
   UsageReader,
   UsageReporting,
   UsageUpdate,
+  WithMeta,
 } from "./adapter";

@@ -20,6 +20,7 @@ const usageOf = (id: string) =>
       mcpRegistration: "none",
     },
   ).usage;
+const devin = adapterFor(BUILT_IN_HARNESSES.find((harness) => harness.id === "devin")!);
 
 // Payloads as recorded from each harness in the token-usage spike
 // (docs/architecture/spikes/acp-token-usage-spike.md).
@@ -263,9 +264,9 @@ describe("normalizeTurnUsage", () => {
     });
 
     it("tells a subagent's update from the main agent's", () => {
-      expect(isMainAgent(req(null, 1, 1, 0))).toBe(true);
-      expect(isMainAgent(req("root", 1, 1, 0))).toBe(true);
-      expect(isMainAgent(req("b25b62a7", 1, 1, 0))).toBe(false);
+      expect(isMainAgent(devin, req(null, 1, 1, 0))).toBe(true);
+      expect(isMainAgent(devin, req("root", 1, 1, 0))).toBe(true);
+      expect(isMainAgent(devin, req("b25b62a7", 1, 1, 0))).toBe(false);
     });
   });
 

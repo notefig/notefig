@@ -25,7 +25,7 @@ import {
   claudeModelRows,
   claudeUpdateModel,
 } from "./claude-code";
-import { devinAdapter, devinUsageByMeta } from "./devin";
+import { devinAdapter, devinAgentOf, devinUsageByMeta } from "./devin";
 import { geminiCliAdapter } from "./gemini-cli";
 import { openCodeAdapter } from "./opencode";
 
@@ -43,7 +43,8 @@ const BUILT_IN_ADAPTERS = new Map<string, HarnessAdapter>([
  *  nothing it reports (what it has sent is the only evidence) and has no
  *  brand mark. What it sends is read in every known vendor's shape, so a
  *  custom entry running a known adapter (Devin under another id, a fork of
- *  claude-agent-acp) still counts usage and shows limits the way it does. */
+ *  claude-agent-acp) still counts usage, tags subagents and shows limits the
+ *  way it does. */
 function customAdapter(registersLike: HarnessAdapter): HarnessAdapter {
   return {
     onInvoke: registersLike.onInvoke,
@@ -53,6 +54,7 @@ function customAdapter(registersLike: HarnessAdapter): HarnessAdapter {
       modelRows: claudeModelRows,
       updateModel: claudeUpdateModel,
     },
+    agentOf: devinAgentOf,
     limits: claudeLimits,
   };
 }

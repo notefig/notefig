@@ -75,6 +75,9 @@ export type UsageReporting = {
   limits: boolean;
 };
 
+/** Anything a harness may tag with vendor `_meta`. */
+export type WithMeta = { _meta?: Record<string, unknown> | null };
+
 export type UsageUpdate = Extract<
   SessionNotification["update"],
   { sessionUpdate: "usage_update" }
@@ -166,6 +169,10 @@ export interface HarnessAdapter {
   reporting: UsageReporting;
   /** How it counts a turn. */
   usage: UsageReader;
+  /** The agent an update or chunk came from, for a harness that streams
+   *  its subagents into the parent session: `"root"` for the session's own
+   *  agent, a subagent's id, or null when it isn't tagged. */
+  agentOf?(update: WithMeta): string | null;
   /** Its brand mark; none draws a generic bot. */
   logo?: HarnessMark;
   /** The account limits a `usage_update`'s `_meta` carries, for a harness

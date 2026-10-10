@@ -13,6 +13,7 @@ import {
   type HarnessAdapter,
   type UsageReader,
   type UsageUpdate,
+  type WithMeta,
 } from "./adapter";
 
 /** Args are positional and unnamed, so they're forwarded by index; env
@@ -40,12 +41,15 @@ function metaNumber(update: UsageUpdate, key: string): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-/** Whether an update carries Devin's subagent tag (`root` included). */
-function isTagged(update: UsageUpdate): boolean {
-  const context = (update._meta as Record<string, unknown> | null | undefined)?.[
-    "cognition.ai/subagent_context"
-  ] as { parentAgentId?: unknown } | undefined;
-  return typeof context?.parentAgentId === "string";
+/** The agent a Devin update or chunk came from: `"root"` for the main
+ *  agent, a subagent's id, or null for its plain copy of a main-agent
+ *  update. Devin tags them only for a client that says it supports
+ *  subagents. */
+export function devinAgentOf(update: WithMeta): string | null {
+  const context = update._meta?.["cognition.ai/subagent_context"] as
+    | { parentAgentId?: unknown }
+    | undefined;
+  return typeof context?.parentAgentId === "string" ? context.parentAgentId : null;
 }
 
 /** Money where ACP's `cost` is sent, else Devin's running credit total. */
@@ -64,7 +68,7 @@ function devinCostTotal(update: UsageUpdate): Cost | null {
 function devinRequestTokens(updates: readonly UsageUpdate[]): TokenCounts | null {
   let sum: TokenCounts | null = null;
   for (const update of updates) {
-    if (!isTagged(update)) continue;
+    if (devinAgentOf(update) === null) continue;
     const input = metaNumber(update, "cognition.ai/inputTokens");
     if (input === null) continue;
     const tokens = tokensFrom(
@@ -185,6 +189,8 @@ export const devinAdapter: HarnessAdapter = {
   // Its cost is credits, not money, so it is charted apart.
   reporting: NO_REPORTING,
   usage: devinUsage,
+  // A subagent's chunks and usage arrive in the parent session, tagged.
+  agentOf: devinAgentOf,
   // The viewBox is tightened around the path's own bounds (70..356 x
   // 49..377) so it sits at the same optical size as the other logos.
   logo: {

@@ -557,7 +557,9 @@ export class AgentTask {
       // once told the client supports subagents) aren't the session agent's
       // words; its result reaches the transcript through the tool call.
       onSessionUpdate: (notification) => {
-        if (!isSubagentChunk(notification.update)) this.handleSessionUpdate(notification);
+        if (!isSubagentChunk(this.adapter, notification.update)) {
+          this.handleSessionUpdate(notification);
+        }
       },
       // Containment in front of the write path, not inside it: a
       // harness-supplied path is input from a process we do not control,
@@ -1234,7 +1236,7 @@ export class AgentTask {
    *  own, not the session's. */
   private recordUsageUpdate(update: UsageUpdate): void {
     if (this.currentTurn) this.turnUsageUpdates.push(update);
-    if (!isMainAgent(update)) return;
+    if (!isMainAgent(this.adapter, update)) return;
     this.lastUsageUpdate = update;
     this.announceLimits(update);
     const row = this.store.tasks.get(this.taskId);
