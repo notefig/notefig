@@ -71,6 +71,32 @@ describe("harness adapters", () => {
     expect(written).toEqual([]);
   });
 
+  it("gives a custom harness the generic adapter its registration mode names", async () => {
+    const custom = (
+      mcpRegistration: HarnessDefinition["mcpRegistration"],
+    ): HarnessDefinition => ({
+      ...harness("gemini-cli"),
+      id: "custom:lab",
+      command: "lab-acp",
+      mcpRegistration,
+    });
+    const prepFor = (mode: HarnessDefinition["mcpRegistration"]) =>
+      harnessAdapterFor(custom(mode)).onInvoke(context().ctx);
+
+    expect((await prepFor("session-new")).passThroughSessionNew).toBe(true);
+    expect((await prepFor("opencode-config")).env).toHaveProperty(
+      "OPENCODE_CONFIG_CONTENT",
+    );
+    expect((await prepFor("devin-config")).sessionParams).toHaveProperty(
+      "additionalDirectories",
+    );
+    expect(await prepFor("none")).toEqual({
+      env: {},
+      passThroughSessionNew: false,
+      sessionParams: {},
+    });
+  });
+
   it("hands OpenCode inline config in the env, touching no disk", async () => {
     const { prep, written } = await invoke("opencode");
 

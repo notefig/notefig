@@ -55,6 +55,14 @@ describe("NotefigAcpClient", () => {
     expect(client.embeddedContextCapability).toBe(true);
   });
 
+  it("tells the agent at initialize that it supports subagents", async () => {
+    const { client, agent } = makeClient();
+    await client.connect();
+    expect(agent.initializeParams?.clientCapabilities).toMatchObject({
+      _meta: { "cognition.ai/subagentSupport": true },
+    });
+  });
+
   it("surfaces the first auth method's description as the auth hint; capability defaults false", async () => {
     const { client } = makeClient({
       protocolVersion: 1,

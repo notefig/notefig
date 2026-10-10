@@ -25,6 +25,7 @@ import { documentsModule } from "@/modules/documents";
 import { layoutModule } from "@/modules/layout";
 import { editorsModule } from "@/modules/editors";
 import { historyModule } from "@/modules/history";
+import { harnessAdaptersModule } from "@/modules/harness-adapters";
 import { platformModule } from "@/core/services";
 
 declare module "@notefig/core" {
@@ -46,6 +47,7 @@ export const workspaceAgentsModule = defineModule({
     documentsModule,
     layoutModule,
     editorsModule,
+    harnessAdaptersModule,
   ],
   register: (ctx) => {
     const store = ctx.use("agentStore");
