@@ -4,9 +4,13 @@ import {
   type HarnessDefinition,
 } from "@notefig/shared/agent";
 import type { HarnessInvokeContext } from "./adapter";
+import { testKv } from "@/testing/test-kv";
+import { createHarnesses } from "@/modules/agents/harnesses";
 import { createHarnessAdapters } from "./harness-adapters";
 
-const { adapterFor } = createHarnessAdapters();
+const adapters = () =>
+  createHarnessAdapters({ harnesses: createHarnesses({ kv: testKv() }) });
+const { adapterFor } = adapters();
 
 /** The host supplies the app dir from its own source of truth; the tests
  *  pick an arbitrary name and assert the adapters thread it through. */
@@ -236,5 +240,26 @@ describe("harness adapters", () => {
       });
       expect(written).toEqual([]);
     }
+  });
+});
+
+describe("usage reporting", () => {
+  it("knows what the built-ins report, and believes the data over the table", () => {
+    const { reporting } = adapters();
+    expect(reporting("claude-code")).toEqual({ cost: true, limits: true });
+    expect(reporting("opencode")).toEqual({ cost: true, limits: false });
+    expect(reporting("devin")).toEqual({ cost: false, limits: false });
+    expect(reporting("gemini-cli")).toEqual({ cost: false, limits: false });
+    expect(reporting("custom:1", { cost: true })).toEqual({ cost: true, limits: false });
+    expect(reporting("devin", { limits: true })).toEqual({ cost: false, limits: true });
+  });
+
+  it("declares nothing for a custom harness, whichever built-in's tools it borrows", () => {
+    const custom = { ...harness("claude-code"), id: "custom:lab" };
+    const reporting = createHarnessAdapters({
+      harnesses: { configured: () => [...BUILT_IN_HARNESSES, custom] },
+    }).reporting;
+    expect(reporting("custom:lab")).toEqual({ cost: false, limits: false });
+    expect(reporting("custom:lab", { cost: true })).toEqual({ cost: true, limits: false });
   });
 });

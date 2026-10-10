@@ -38,6 +38,8 @@ export const openCodeAdapter: HarnessAdapter = {
       env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(config) },
     };
   },
+  // Cost on `usage_update`; no account limits.
+  reporting: { cost: true, limits: false },
 };
 
 /** The ACP env list as a plain record, the shape config files want. */

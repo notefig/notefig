@@ -13,4 +13,6 @@ export const claudeCodeAdapter: HarnessAdapter = {
     ...NO_PREP,
     passThroughSessionNew: mcpServer !== undefined,
   }),
+  // Cost on `usage_update`; rate-limit windows in its `_meta`.
+  reporting: { cost: true, limits: true },
 };

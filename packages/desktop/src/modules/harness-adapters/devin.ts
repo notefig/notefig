@@ -1,4 +1,9 @@
-import { NO_PREP, isStdioMcpServer, type HarnessAdapter } from "./adapter";
+import {
+  NO_PREP,
+  NO_REPORTING,
+  isStdioMcpServer,
+  type HarnessAdapter,
+} from "./adapter";
 
 /** Args are positional and unnamed, so they're forwarded by index; env
  *  entries keep their own names on both sides of the hop. */
@@ -85,4 +90,6 @@ export const devinAdapter: HarnessAdapter = {
       },
     };
   },
+  // Its cost is credits, not money, so it is charted apart.
+  reporting: NO_REPORTING,
 };

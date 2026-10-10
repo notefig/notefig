@@ -16,14 +16,4 @@ describe("harnesses", () => {
     expect(harnesses.label("custom:1")).toBe("Lab");
     expect(harnesses.configured().map((h) => h.id)).toContain("custom:1");
   });
-
-  it("knows what the built-ins report, and believes the data over the table", () => {
-    const harnesses = createHarnesses({ kv: testKv() });
-    expect(harnesses.reporting("claude-code")).toEqual({ cost: true, limits: true });
-    expect(harnesses.reporting("opencode")).toEqual({ cost: true, limits: false });
-    expect(harnesses.reporting("devin")).toEqual({ cost: false, limits: false });
-    expect(harnesses.reporting("gemini-cli")).toEqual({ cost: false, limits: false });
-    expect(harnesses.reporting("custom:1", { cost: true })).toEqual({ cost: true, limits: false });
-    expect(harnesses.reporting("devin", { limits: true })).toEqual({ cost: false, limits: true });
-  });
 });

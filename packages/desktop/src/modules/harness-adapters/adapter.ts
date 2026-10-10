@@ -60,11 +60,27 @@ export interface HarnessInvokeContext {
   warn: (label: string, detail?: string) => void;
 }
 
+/** What a harness reports about usage beyond tokens. */
+export type UsageReporting = {
+  /** Sends a running cost (`usage_update.cost`). */
+  cost: boolean;
+  /** Sends account limits the app reads. */
+  limits: boolean;
+};
+
 export interface HarnessAdapter {
   /** Runs once per task, after the app-tools MCP endpoint is live and
    *  before the harness process spawns. */
   onInvoke(context: HarnessInvokeContext): Promise<HarnessSpawnPrep>;
+  /** What it reports beyond tokens, as the token-usage spike found it
+   *  (docs/architecture/spikes/acp-token-usage-spike.md). A view uses this
+   *  to grey out what a harness will never fill, rather than show an empty
+   *  chart as if nothing had been spent. */
+  reporting: UsageReporting;
 }
+
+/** Reports nothing beyond tokens. */
+export const NO_REPORTING: UsageReporting = { cost: false, limits: false };
 
 export const NO_PREP: HarnessSpawnPrep = {
   env: {},

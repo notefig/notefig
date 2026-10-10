@@ -8,7 +8,7 @@
  *
  * Charts show the three largest series and fold the rest into "Other", so
  * they stay readable however many harnesses or models there are. A harness
- * that never reports cost or limits (`core.harnesses`, through the usage
+ * that never reports cost or limits (`core.harnessAdapters`, through the usage
  * module's `useHarnessReporting`) is greyed wherever those are asked for.
  * The metric and range controls sit in the section's header.
  */
@@ -48,7 +48,7 @@ import {
   useUsageSeries,
   useWeekdayTokens,
 } from "@/modules/usage/react";
-import type { UsageReporting } from "@/modules/agents/harnesses";
+import type { UsageReporting } from "@/modules/harness-adapters";
 import {
   useActiveHarnesses,
   useHarnessLabels,

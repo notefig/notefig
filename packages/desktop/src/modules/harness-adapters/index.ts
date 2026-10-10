@@ -3,4 +3,5 @@ export type {
   HarnessAdapter,
   HarnessInvokeContext,
   HarnessSpawnPrep,
+  UsageReporting,
 } from "./adapter";
