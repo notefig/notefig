@@ -95,6 +95,8 @@ export class FakeAgent {
     agentCapabilities: {},
     authMethods: [],
   };
+  /** Captured `initialize` params (client capability assertions). */
+  initializeParams: Json | null = null;
   newSessionResult: Json = { sessionId: "sess_test" };
   /** Captured `session/new` params (mcpServers pass-through assertions). */
   newSessionParams: Json | null = null;
@@ -226,6 +228,7 @@ export class FakeAgent {
     const { id, method, params } = msg;
     switch (method) {
       case "initialize":
+        this.initializeParams = params;
         return this.respond(id, this.initializeResult);
       case "session/new":
         this.newSessionParams = params;

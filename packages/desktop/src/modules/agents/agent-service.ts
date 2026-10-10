@@ -11,9 +11,6 @@ import {
   newEventId,
   BUILT_IN_HARNESSES,
   composePrompt,
-  MCP_SERVER_NAME,
-  harnessAdapterFor,
-  type HarnessSpawnPrep,
   parseCustomHarnessEntries,
   parseHarnessOverrides,
   resolveEffectiveHarnesses,
@@ -39,6 +36,13 @@ import { resolveWorkspacePath } from "@/utils/fs";
 import { path as pathutil, workspaceKey } from "@/utils/path";
 import { APP_DIR_NAME } from "@/utils/app-dir";
 import type { KvApi } from "@/modules/kv";
+import {
+  needsSignIn,
+  type HarnessAdapter,
+  type HarnessAdaptersApi,
+  type HarnessSpawnPrep,
+  type UsageUpdate,
+} from "@/modules/harness-adapters";
 import { MarkdownJoiner } from "@/lib/markdown-joiner-transform";
 import { PermissionBroker } from "./permission-broker";
 import {
@@ -59,7 +63,6 @@ import {
   isMainAgent,
   isSubagentChunk,
   normalizeTurnUsage,
-  type UsageUpdate,
 } from "./turn-usage";
 import { limitsFrom } from "./usage-limits";
 import i18n from "@/utils/intl";
@@ -104,6 +107,8 @@ export interface AgentRuntimeDeps {
   agents(): AgentsApi;
   /** Where turn and tool-call moments are announced (core's hook bus). */
   hooks: Pick<Hooks, "emit">;
+  /** What each harness does differently (`core.harnessAdapters`). */
+  harnessAdapters: Pick<HarnessAdaptersApi, "adapterFor">;
 }
 
 /**
@@ -244,17 +249,16 @@ function deriveToolLocations(
 }
 
 /**
- * Adapters mint their own MCP tool-name prefixes: claude-agent-acp uses
- * `mcp__<serverName>__<toolName>` (v2-mcp-passthrough-spike.md), OpenCode
- * uses `<serverName>_<toolName>` (v2-opencode-config-mcp-spike.md). Strip
- * whichever is present so transcript entries and `findBlobAuthorTask` see
- * the plain tool name, same as any other tool call.
+ * Harnesses mint their own MCP tool-name prefixes (their adapter's
+ * `toolNamePrefixes`). Strip whichever is present so transcript entries and
+ * `findBlobAuthorTask` see the plain tool name, same as any other tool call.
  */
 function normalizeMcpToolName(
   title: string | null | undefined,
+  prefixes: readonly string[],
 ): string | undefined {
   if (!title) return undefined;
-  for (const prefix of [`mcp__${MCP_SERVER_NAME}__`, `${MCP_SERVER_NAME}_`]) {
+  for (const prefix of prefixes) {
     if (title.startsWith(prefix)) return title.slice(prefix.length);
   }
   return title;
@@ -381,6 +385,8 @@ export class AgentTask {
   private lastLimitsKey: string | null = null;
 
   private readonly store: AgentStore;
+  /** Everything this task's harness does differently from another. */
+  private readonly adapter: HarnessAdapter;
 
   constructor(
     private readonly deps: AgentRuntimeDeps,
@@ -391,6 +397,7 @@ export class AgentTask {
     readonly parentTaskId?: string,
   ) {
     this.store = deps.store;
+    this.adapter = deps.harnessAdapters.adapterFor(harness);
     this.permissionBroker = new PermissionBroker(
       taskId,
       deps.store.permissionRequests,
@@ -461,7 +468,7 @@ export class AgentTask {
       // The harness's own invoke hook runs here: whatever its dialect needs
       // in place before the process exists (a config file on disk, env to
       // inject) happens inside the adapter — this code reads none of it.
-      const prep = await harnessAdapterFor(this.harness).onInvoke({
+      const prep = await this.adapter.onInvoke({
         workspacePath: this.workspacePath,
         joinPath: (...parts) => pathutil.join(...parts),
         // The app dir is the app's own; the harness apparatus holds no copy.
@@ -545,11 +552,14 @@ export class AgentTask {
       taskId: this.taskId,
       transport,
       permissionBroker: this.permissionBroker,
+      clientMeta: this.adapter.clientMeta,
       // A subagent's own reasoning and replies (Devin streams them, tagged,
       // once told the client supports subagents) aren't the session agent's
       // words; its result reaches the transcript through the tool call.
       onSessionUpdate: (notification) => {
-        if (!isSubagentChunk(notification.update)) this.handleSessionUpdate(notification);
+        if (!isSubagentChunk(this.adapter, notification.update)) {
+          this.handleSessionUpdate(notification);
+        }
       },
       // Containment in front of the write path, not inside it: a
       // harness-supplied path is input from a process we do not control,
@@ -954,11 +964,9 @@ export class AgentTask {
       return status;
     } catch (error) {
       const message = errorMessage(error);
-      // Logged-out claude-code-acp fails here with "Authentication required"
-      // (docs/architecture/spikes/phase1-auth-spike.md). Auth-blocked state
-      // is task-row state: methods + hint land on the row, the failed
-      // prompt's text is held for a retry after sign-in.
-      if (/authentication required/i.test(message)) {
+      // Auth-blocked state is task-row state: methods + hint land on the
+      // row, the failed prompt's text is held for a retry after sign-in.
+      if (needsSignIn(this.adapter, message)) {
         this.enterAuthBlock({ turnId, text, contextParts });
       }
       this.warn("turn error", message);
@@ -1181,7 +1189,7 @@ export class AgentTask {
     const turnUpdates = this.turnUsageUpdates;
     this.turnUsageUpdates = [];
     const { usage, costTotal } = normalizeTurnUsage({
-      harnessId: this.harness.id,
+      usage: this.adapter.usage,
       response,
       lastUpdate: this.lastUsageUpdate,
       turnUpdates,
@@ -1226,7 +1234,7 @@ export class AgentTask {
    *  own, not the session's. */
   private recordUsageUpdate(update: UsageUpdate): void {
     if (this.currentTurn) this.turnUsageUpdates.push(update);
-    if (!isMainAgent(update)) return;
+    if (!isMainAgent(this.adapter, update)) return;
     this.lastUsageUpdate = update;
     this.announceLimits(update);
     const row = this.store.tasks.get(this.taskId);
@@ -1246,7 +1254,7 @@ export class AgentTask {
    *  account. A session/load replay's are history, so never announced. */
   private announceLimits(update: UsageUpdate): void {
     if (this.currentTurn?.entries instanceof ReplayStage) return;
-    const limits = limitsFrom(update);
+    const limits = limitsFrom(this.adapter, update);
     if (!limits) return;
     const key = JSON.stringify(limits);
     if (key === this.lastLimitsKey) return;
@@ -1405,7 +1413,9 @@ export class AgentTask {
         draft.toolCall = {
           ...previous,
           ...update,
-          title: normalizeMcpToolName(update.title) ?? previous?.title,
+          title:
+            normalizeMcpToolName(update.title, this.adapter.toolNamePrefixes) ??
+            previous?.title,
           locations:
             update.locations ??
             deriveToolLocations(update.rawInput, this.workspacePath) ??
@@ -1428,7 +1438,7 @@ export class AgentTask {
     if (toolCallId) this.toolEventIds.set(toolCallId, id);
     const toolCall: ToolCallUpdate = {
       ...update,
-      title: normalizeMcpToolName(update.title),
+      title: normalizeMcpToolName(update.title, this.adapter.toolNamePrefixes),
       locations:
         update.locations ??
         deriveToolLocations(update.rawInput, this.workspacePath),

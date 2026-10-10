@@ -31,7 +31,7 @@ import {
 } from "@notefig/shared/agent";
 import { defineModule, type CoreHookMap, type Hooks } from "@notefig/core";
 import { platformModule } from "@/core/services";
-import { harnessesModule } from "@/modules/agents/harnesses";
+import { harnessAdaptersModule } from "@/modules/harness-adapters";
 
 export const USAGE_BUCKETS_COLLECTION_ID = "usage-buckets";
 export const USAGE_LIMITS_COLLECTION_ID = "usage-limits";
@@ -239,8 +239,8 @@ declare module "@notefig/core" {
 /** Turns' usage, kept per hour beyond the sessions that spent it. */
 export const usageModule = defineModule({
   name: "usage",
-  // Harnesses: the views read what each one reports (`core.harnesses`).
-  needs: [platformModule, harnessesModule],
+  // Harness adapters: the views read what each harness reports.
+  needs: [platformModule, harnessAdaptersModule],
   register: (ctx) =>
     createUsage({ persistence: ctx.use("platform").db.get(), hooks: ctx.hooks }),
   boot: (usage) => usage.track(),

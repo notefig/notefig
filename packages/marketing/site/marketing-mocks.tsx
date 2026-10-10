@@ -3,7 +3,7 @@ import {
   CircleDashed,
   Star,
 } from "lucide-react";
-import { HarnessLogo } from "@notefig/ui/harness-logo";
+import { HarnessLogo } from "@/components/agent/harness-logo";
 import { BRAND_MARKS, type BrandName } from "./brand-marks";
 import { GITHUB_URL } from "./links";
 

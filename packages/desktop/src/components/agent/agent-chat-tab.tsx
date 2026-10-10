@@ -51,7 +51,7 @@ import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { mentionContextParts } from "./prompt-widget-host";
 import { PermissionCard } from "./permission-card";
 import { AuthCard } from "./auth-card";
-import { HarnessLogo } from "@notefig/ui/harness-logo";
+import { HarnessLogo } from "@/components/agent/harness-logo";
 import { SessionConfigBar } from "./session-config-bar";
 import { SessionUsageChip, TurnUsageLabel } from "./session-usage";
 import {

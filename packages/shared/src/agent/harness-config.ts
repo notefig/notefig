@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { McpServer } from "./acp-types";
 
 /** Substituted with the workspace path when a harness spawns (`args`, `cwd`). */
 export const WORKSPACE_PLACEHOLDER = "${workspace}";
@@ -95,7 +94,7 @@ export const HarnessDefinitionSchema = z.object({
 });
 
 /** How a harness is handed the app's MCP server. Each mode names a harness
- *  adapter (below in this module) that realizes it. */
+ *  adapter that realizes it (desktop `modules/harness-adapters/`). */
 export type McpRegistrationMode = HarnessDefinition["mcpRegistration"];
 
 export type HarnessDefinition = z.infer<typeof HarnessDefinitionSchema>;
@@ -164,73 +163,6 @@ export function buildHarnessResumeCommand(
     .join(quote(params.workspacePath));
 }
 
-/**
- * A harness adapter is the code half of a harness: it hooks into the task
- * lifecycle to do whatever that harness demands before it spawns — write a
- * config file, inject env, put the MCP server on the ACP wire. Built-in
- * harnesses are authored WITH their adapter (BUILT_INS below); a runtime
- * custom harness (from kv.json, data only) has no adapter code of its own
- * and resolves to the generic adapter its `mcpRegistration` mode names.
- * Either way `harnessAdapterFor` is the one lookup, so the agent service
- * invokes a hook and reads none of its meaning.
- *
- * Hooks get their effects (filesystem, warnings) handed in through the
- * context rather than importing a platform, which keeps this package
- * host-free and the adapters unit-testable with plain fakes.
- */
-
-/** The stdio variant of ACP's `McpServer` union — the only one that maps
- *  onto a harness config file's local-command shape. HTTP/SSE servers can
- *  only ride the ACP wire. */
-export type StdioMcpServer = Extract<McpServer, { command: string }>;
-
-export function isStdioMcpServer(
-  server: McpServer | undefined,
-): server is StdioMcpServer {
-  return server !== undefined && "command" in server;
-}
-
-/** What the invoke hook settles for the spawn. */
-export interface HarnessSpawnPrep {
-  /** Merged over the harness's own env for this spawn. */
-  env: Record<string, string>;
-  /** Whether the MCP server rides ACP `session/new.mcpServers`. */
-  passThroughSessionNew: boolean;
-  /** Harness-specific extension fields spread into the ACP `session/new`
-   *  and `session/load` requests verbatim. The service applies them
-   *  without reading them (devin's `additionalDirectories`). */
-  sessionParams: Record<string, unknown>;
-}
-
-/** What an invoke hook may know and do. Deliberately thin: the workspace,
- *  path joining in the host's flavor (win32 vs posix), the app dir the host
- *  owns, and the two effects a dialect has needed so far. */
-export interface HarnessInvokeContext {
-  workspacePath: string;
-  joinPath: (...parts: string[]) => string;
-  /** The app-owned directory name inside the workspace, supplied by the
-   *  host from its own source of truth (desktop's `APP_DIR_NAME`) so this
-   *  package holds no second copy of it. */
-  appDir: string;
-  /** The harness's static env, for dialects that must layer onto a value
-   *  the user set themselves (OpenCode's `OPENCODE_CONFIG_CONTENT`). */
-  harnessEnv: Record<string, string>;
-  /** This task's app-tools endpoint; undefined when the app offers none. */
-  mcpServer: McpServer | undefined;
-  /** Write files, creating parents; failures come back, never throw. */
-  writeFiles: (
-    files: { path: string; content: string }[],
-  ) => Promise<{ failed: { message: string }[] }>;
-  /** Task-scoped console warning. */
-  warn: (label: string, detail?: string) => void;
-}
-
-export interface HarnessAdapter {
-  /** Runs once per task, after the app-tools MCP endpoint is live and
-   *  before the harness process spawns. */
-  onInvoke(context: HarnessInvokeContext): Promise<HarnessSpawnPrep>;
-}
-
 /** The argv and working directory a harness process spawns with. Lives with
  *  the harness apparatus (spawn shape is harness behavior, not definition
  *  data) so every platform host — the desktop Tauri adapter and the web
@@ -251,311 +183,78 @@ export function resolveHarnessSpawn(
   };
 }
 
-const NO_PREP: HarnessSpawnPrep = {
-  env: {},
-  passThroughSessionNew: false,
-  sessionParams: {},
-};
-
 /**
- * "session-new": the adapter takes the server over the wire, in
- * `session/new.mcpServers` (claude-agent-acp — verified in
- * v2-mcp-passthrough-spike.md). Nothing to write, nothing to inject; the
- * only mode that can carry a non-stdio server.
+ * Harnesses Notefig knows how to spawn out of the box. A future
+ * Notefig-owned harness is another entry here; what each one does
+ * differently at run time is its adapter's (desktop
+ * `modules/harness-adapters/`).
  */
-const sessionNewAdapter: HarnessAdapter = {
-  onInvoke: async ({ mcpServer }) => ({
-    ...NO_PREP,
-    passThroughSessionNew: mcpServer !== undefined,
-  }),
-};
-
-/**
- * "opencode-config": inject the server as `OPENCODE_CONFIG_CONTENT` —
- * inline JSON OpenCode merges last, on top of the user's own global /
- * `OPENCODE_CONFIG` / project configs (merge order verified against
- * opencode 1.18.15, MET-65). A value instead of a file: nothing lands in
- * the workspace, nothing to clean up, and browser transports carry it as
- * plain env (the embedded relay command is already worker-local, so no
- * path rewriting).
- */
-const openCodeAdapter: HarnessAdapter = {
-  onInvoke: async ({ mcpServer, harnessEnv }) => {
-    if (!isStdioMcpServer(mcpServer)) return NO_PREP;
-    const config = deepMergeConfigs(
-      parseConfigObject(harnessEnv.OPENCODE_CONFIG_CONTENT),
-      {
-        $schema: "https://opencode.ai/config.json",
-        mcp: {
-          [mcpServer.name]: {
-            type: "local",
-            command: [mcpServer.command, ...mcpServer.args],
-            enabled: true,
-            environment: envRecord(mcpServer),
-          },
-        },
-      },
-    );
-    return {
-      ...NO_PREP,
-      env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(config) },
-    };
-  },
-};
-
-/** Args are positional and unnamed, so they're forwarded by index; env
- *  entries keep their own names on both sides of the hop. */
-const DEVIN_ARG_VAR_PREFIX = "NOTEFIG_MCP_ARG_";
-
-/** Devin's project config file, under the host-supplied app dir. */
-const DEVIN_CONFIG_SEGMENTS = [".devin", "mcp_config.local.json"];
-
-/**
- * "devin-config": devin reads MCP servers only from config files — there is
- * no inline-content env var, `--config` doesn't reach `mcp_config.json`, and
- * `session/new.mcpServers` is not dependable (it connected in one of seven
- * spike runs and never reproduced — devin-acp-mcp-spike.md). The MODEL's
- * tool set is assembled from the SESSION's config scopes (its cwd plus any
- * `additionalDirectories`) — a config merely discoverable from the process
- * cwd connects but never reaches the toolbox (verified 2026-09-11, logged-in
- * devin). So the file lives in the app dir and the session names that dir in
- * `additionalDirectories`, which both connects the server and puts its tools
- * in front of the model; the process spawns in the plain workspace.
- *
- * ONE file serves every devin session in the workspace: the per-task relay
- * port and token are `${env:...}` references devin expands from the spawn
- * env (verified for `command`, `args` and `env` values), so what lands on
- * disk is identical no matter which task wrote it and concurrent tasks
- * can't clobber each other's connection. The file is the app's alone — the
- * user's own `devin` walks up from the workspace and never descends into
- * the app dir — so it is written whole, with nothing of theirs to preserve
- * and nothing of ours to clean up.
- *
- * A file that can't be written is a missing tool set, not a failed task:
- * the harness still spawns, just without the app's tools.
- */
-const devinAdapter: HarnessAdapter = {
-  onInvoke: async ({
-    mcpServer,
-    workspacePath,
-    joinPath,
-    appDir,
-    writeFiles,
-    warn,
-  }) => {
-    if (!isStdioMcpServer(mcpServer)) return NO_PREP;
-    const document = {
-      mcpServers: {
-        [mcpServer.name]: {
-          command: mcpServer.command,
-          args: mcpServer.args.map(
-            (_, index) => `\${env:${DEVIN_ARG_VAR_PREFIX}${index}}`,
-          ),
-          env: Object.fromEntries(
-            (mcpServer.env ?? []).map((entry) => [
-              entry.name,
-              `\${env:${entry.name}}`,
-            ]),
-          ),
-        },
-      },
-    };
-    const written = await writeFiles([
-      {
-        path: joinPath(workspacePath, appDir, ...DEVIN_CONFIG_SEGMENTS),
-        content: JSON.stringify(document, null, 2),
-      },
-    ]);
-    if (written.failed.length > 0) {
-      warn(
-        "harness MCP config write failed; spawning without app tools",
-        written.failed[0].message,
-      );
-      return NO_PREP;
-    }
-    const env: Record<string, string> = {};
-    mcpServer.args.forEach((value, index) => {
-      env[`${DEVIN_ARG_VAR_PREFIX}${index}`] = value;
-    });
-    for (const entry of mcpServer.env ?? []) env[entry.name] = entry.value;
-    return {
-      ...NO_PREP,
-      env,
-      sessionParams: {
-        additionalDirectories: [joinPath(workspacePath, appDir)],
-      },
-    };
-  },
-};
-
-const noneAdapter: HarnessAdapter = { onInvoke: async () => NO_PREP };
-
-/** The generic adapter each registration mode names — the only capability a
- *  runtime custom harness can reach (by its `mcpRegistrationOverride`). */
-const ADAPTER_BY_MODE: Record<McpRegistrationMode, HarnessAdapter> = {
-  "session-new": sessionNewAdapter,
-  "opencode-config": openCodeAdapter,
-  "devin-config": devinAdapter,
-  none: noneAdapter,
-};
-
-/**
- * The adapter that realizes a harness's MCP registration. A built-in carries
- * its own (BUILT_INS); a custom harness — data with no bespoke code — falls
- * back to the generic adapter its mode names.
- */
-export function harnessAdapterFor(harness: HarnessDefinition): HarnessAdapter {
-  return (
-    BUILT_INS.find((entry) => entry.definition.id === harness.id)?.adapter ??
-    ADAPTER_BY_MODE[harness.mcpRegistration]
-  );
-}
-
-/** The ACP env list as a plain record, the shape config files want. */
-function envRecord(server: StdioMcpServer): Record<string, string> {
-  const environment: Record<string, string> = {};
-  for (const entry of server.env ?? []) environment[entry.name] = entry.value;
-  return environment;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** A harness env override may carry its own config content; ours layers on
- *  top rather than clobbering it. Unparseable content degrades to `{}` —
- *  the harness itself would reject it too. */
-function parseConfigObject(raw: string | undefined): Record<string, unknown> {
-  if (!raw) return {};
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return isPlainObject(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Layer `overlay` onto `base` with OpenCode's own config-merge semantics
- * (`mergeConfigConcatArrays`): objects merge recursively, arrays concatenate,
- * scalars from the overlay win — so neither side's nested keys (e.g. the
- * `mcp` map) clobber the other's.
- */
-function deepMergeConfigs(
-  base: Record<string, unknown>,
-  overlay: Record<string, unknown>,
-): Record<string, unknown> {
-  const merged: Record<string, unknown> = { ...base };
-  for (const [key, value] of Object.entries(overlay)) {
-    const existing = merged[key];
-    if (isPlainObject(existing) && isPlainObject(value)) {
-      merged[key] = deepMergeConfigs(existing, value);
-    } else if (Array.isArray(existing) && Array.isArray(value)) {
-      merged[key] = [...existing, ...value];
-    } else {
-      merged[key] = value;
-    }
-  }
-  return merged;
-}
-
-/** A built-in harness paired with the adapter that realizes it — the two
- *  halves of one apparatus. `BUILT_IN_HARNESSES` (the definitions alone) is
- *  derived from this for every caller that only needs the data. */
-interface BuiltInHarness {
-  definition: HarnessDefinition;
-  adapter: HarnessAdapter;
-}
-
-/**
- * Harnesses Metrists knows how to spawn out of the box, each paired with its
- * adapter. A future Metrists-owned harness is another entry here; the
- * definitions alone are exported as `BUILT_IN_HARNESSES` below.
- */
-const BUILT_INS: BuiltInHarness[] = [
+export const BUILT_IN_HARNESSES: HarnessDefinition[] = [
   {
-    adapter: sessionNewAdapter,
-    definition: {
-      id: "claude-code",
-      label: "Claude Code",
-      // The adapter ships inside the app (MET-210); it drives the user's own
-      // Claude Code CLI, found on PATH or via CLAUDE_CODE_EXECUTABLE.
-      command: sidecarCommand("claude-agent-acp"),
-      args: [],
-      env: {},
-      // The bundled adapter is always present; the meaningful availability
-      // signal is the Claude Code CLI itself (which the adapter's auth flow
-      // needs anyway — see authHint).
-      probeCommand: "command -v claude",
-      authHint: "Run `claude /login` in a terminal on this machine.",
-      // Claude sessions are keyed by cwd, so the resume must run from the
-      // workspace (verified in acp-two-way-spike.md — external `--resume`
-      // appends to the same session file). No quotes around the placeholders:
-      // substitution shell-quotes the values itself.
-      resumeCommand: "cd ${workspace} && claude --resume ${sessionId}",
-      mcpRegistration: "session-new",
-    },
+    id: "claude-code",
+    label: "Claude Code",
+    // The adapter ships inside the app (MET-210); it drives the user's own
+    // Claude Code CLI, found on PATH or via CLAUDE_CODE_EXECUTABLE.
+    command: sidecarCommand("claude-agent-acp"),
+    args: [],
+    env: {},
+    // The bundled adapter is always present; the meaningful availability
+    // signal is the Claude Code CLI itself (which the adapter's auth flow
+    // needs anyway — see authHint).
+    probeCommand: "command -v claude",
+    authHint: "Run `claude /login` in a terminal on this machine.",
+    // Claude sessions are keyed by cwd, so the resume must run from the
+    // workspace (verified in acp-two-way-spike.md — external `--resume`
+    // appends to the same session file). No quotes around the placeholders:
+    // substitution shell-quotes the values itself.
+    resumeCommand: "cd ${workspace} && claude --resume ${sessionId}",
+    mcpRegistration: "session-new",
   },
   {
-    adapter: openCodeAdapter,
-    definition: {
-      id: "opencode",
-      label: "OpenCode",
-      // --cwd scopes OpenCode's project detection to the workspace (the spike
-      // relied on it); session/new's cwd alone is not guaranteed to set it.
-      command: "opencode",
-      args: ["acp", "--cwd", "${workspace}"],
-      env: {},
-      authHint: "Run `opencode auth login` in a terminal on this machine.",
-      // OpenCode scopes sessions to the project directory (the spawn above
-      // pins it via --cwd), so the resume runs from the workspace too.
-      resumeCommand: "cd ${workspace} && opencode --session ${sessionId}",
-      mcpRegistration: "opencode-config",
-    },
+    id: "opencode",
+    label: "OpenCode",
+    // --cwd scopes OpenCode's project detection to the workspace (the spike
+    // relied on it); session/new's cwd alone is not guaranteed to set it.
+    command: "opencode",
+    args: ["acp", "--cwd", "${workspace}"],
+    env: {},
+    authHint: "Run `opencode auth login` in a terminal on this machine.",
+    // OpenCode scopes sessions to the project directory (the spawn above
+    // pins it via --cwd), so the resume runs from the workspace too.
+    resumeCommand: "cd ${workspace} && opencode --session ${sessionId}",
+    mcpRegistration: "opencode-config",
   },
   {
-    adapter: devinAdapter,
-    definition: {
-      id: "devin",
-      label: "Devin",
-      // `devin acp` speaks JSON-RPC over stdio and is meant to be spawned by a
-      // client, never run interactively. No `--cwd` equivalent exists: the
-      // session's cwd (session/new) is what scopes its project detection.
-      command: "devin",
-      args: ["acp"],
-      env: {},
-      // `command -v devin` is the whole story here (unlike claude-code's
-      // bundled adapter): the binary IS the harness. A build too old for the `acp` subcommand
-      // can't be told apart by probing — devin parses an unknown subcommand as
-      // a path argument and still exits 0 printing help — so that check is
-      // left to fail loudly at spawn.
-      authHint: "Run `devin auth login` in a terminal on this machine.",
-      // Sessions live in devin's own store keyed by cwd (`devin list` is
-      // per-directory), so the resume runs from the workspace.
-      resumeCommand: "cd ${workspace} && devin --resume ${sessionId}",
-      mcpRegistration: "devin-config",
-    },
+    id: "devin",
+    label: "Devin",
+    // `devin acp` speaks JSON-RPC over stdio and is meant to be spawned by a
+    // client, never run interactively. No `--cwd` equivalent exists: the
+    // session's cwd (session/new) is what scopes its project detection.
+    command: "devin",
+    args: ["acp"],
+    env: {},
+    // `command -v devin` is the whole story here (unlike claude-code's
+    // bundled adapter): the binary IS the harness. A build too old for the `acp` subcommand
+    // can't be told apart by probing — devin parses an unknown subcommand as
+    // a path argument and still exits 0 printing help — so that check is
+    // left to fail loudly at spawn.
+    authHint: "Run `devin auth login` in a terminal on this machine.",
+    // Sessions live in devin's own store keyed by cwd (`devin list` is
+    // per-directory), so the resume runs from the workspace.
+    resumeCommand: "cd ${workspace} && devin --resume ${sessionId}",
+    mcpRegistration: "devin-config",
   },
   {
-    adapter: noneAdapter,
-    definition: {
-      id: "gemini-cli",
-      label: "Gemini CLI",
-      command: "gemini",
-      args: ["--experimental-acp"],
-      env: {},
-      authHint: "Run `gemini` once in a terminal to sign in.",
-      // No capability-matrix row for gemini yet — don't assume pass-through.
-      mcpRegistration: "none",
-    },
+    id: "gemini-cli",
+    label: "Gemini CLI",
+    command: "gemini",
+    args: ["--experimental-acp"],
+    env: {},
+    authHint: "Run `gemini` once in a terminal to sign in.",
+    // No capability-matrix row for gemini yet — don't assume pass-through.
+    mcpRegistration: "none",
   },
 ];
-
-/** The built-in harness definitions alone — for every caller that needs the
- *  data without the adapter (discovery, settings, effective-harness merge). */
-export const BUILT_IN_HARNESSES: HarnessDefinition[] = BUILT_INS.map(
-  (entry) => entry.definition,
-);
 
 /**
  * Per-machine override of a built-in harness, or the settings row for a

@@ -15,7 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@notefig/ui/dropdown-menu";
-import { HarnessLogo } from "@notefig/ui/harness-logo";
+import { HarnessLogo } from "@/components/agent/harness-logo";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
 import { ScrollArea } from "@notefig/ui/scroll-area";
 import {

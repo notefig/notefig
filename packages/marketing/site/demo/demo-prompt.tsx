@@ -11,7 +11,7 @@ import {
   type BlobPhase,
 } from "@notefig/widgets/prompt/state";
 import type { AgentEntry, AgentTurn } from "@notefig/shared/agent";
-import { HarnessLogo } from "@notefig/ui/harness-logo";
+import { HarnessLogo } from "@/components/agent/harness-logo";
 import { AppEmbed } from "./app-embed";
 import { DEMO_FILES, DEMO_ROOT } from "./demo-fixtures";
 import { AgentHost } from "./demo-host";

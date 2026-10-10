@@ -1,10 +1,17 @@
+import { describe, expect, it } from "vitest";
 import {
   BUILT_IN_HARNESSES,
-  harnessAdapterFor,
-  resolveHarnessSpawn,
   type HarnessDefinition,
-  type HarnessInvokeContext,
-} from "./index";
+} from "@notefig/shared/agent";
+import type { HarnessInvokeContext } from "./adapter";
+import { testKv } from "@/testing/test-kv";
+import { createHarnesses } from "@/modules/agents/harnesses";
+import { createHarnessAdapters, harnessLogo } from "./harness-adapters";
+import { needsSignIn } from "./adapter";
+
+const adapters = () =>
+  createHarnessAdapters({ harnesses: createHarnesses({ kv: testKv() }) });
+const { adapterFor } = adapters();
 
 /** The host supplies the app dir from its own source of truth; the tests
  *  pick an arbitrary name and assert the adapters thread it through. */
@@ -46,7 +53,7 @@ const context = (overrides: Partial<HarnessInvokeContext> = {}) => {
 
 const invoke = (id: string, overrides: Partial<HarnessInvokeContext> = {}) => {
   const { ctx, written, warnings } = context(overrides);
-  return harnessAdapterFor(harness(id))
+  return adapterFor(harness(id))
     .onInvoke(ctx)
     .then((prep) => ({ prep, written, warnings }));
 };
@@ -69,6 +76,32 @@ describe("harness adapters", () => {
       sessionParams: {},
     });
     expect(written).toEqual([]);
+  });
+
+  it("gives a custom harness the generic adapter its registration mode names", async () => {
+    const custom = (
+      mcpRegistration: HarnessDefinition["mcpRegistration"],
+    ): HarnessDefinition => ({
+      ...harness("gemini-cli"),
+      id: "custom:lab",
+      command: "lab-acp",
+      mcpRegistration,
+    });
+    const prepFor = (mode: HarnessDefinition["mcpRegistration"]) =>
+      adapterFor(custom(mode)).onInvoke(context().ctx);
+
+    expect((await prepFor("session-new")).passThroughSessionNew).toBe(true);
+    expect((await prepFor("opencode-config")).env).toHaveProperty(
+      "OPENCODE_CONFIG_CONTENT",
+    );
+    expect((await prepFor("devin-config")).sessionParams).toHaveProperty(
+      "additionalDirectories",
+    );
+    expect(await prepFor("none")).toEqual({
+      env: {},
+      passThroughSessionNew: false,
+      sessionParams: {},
+    });
   });
 
   it("hands OpenCode inline config in the env, touching no disk", async () => {
@@ -211,17 +244,74 @@ describe("harness adapters", () => {
   });
 });
 
-describe("resolveHarnessSpawn", () => {
-  it("defaults the cwd to the workspace and templates the args", () => {
-    const spawn = resolveHarnessSpawn(harness("opencode"), "/ws");
-
-    expect(spawn.cwd).toBe("/ws");
-    expect(spawn.args).toEqual(["acp", "--cwd", "/ws"]);
+describe("usage reporting", () => {
+  it("knows what the built-ins report, and believes the data over the table", () => {
+    const { reporting } = adapters();
+    expect(reporting("claude-code")).toEqual({ cost: true, limits: true });
+    expect(reporting("opencode")).toEqual({ cost: true, limits: false });
+    expect(reporting("devin")).toEqual({ cost: false, limits: false });
+    expect(reporting("gemini-cli")).toEqual({ cost: false, limits: false });
+    expect(reporting("custom:1", { cost: true })).toEqual({ cost: true, limits: false });
+    expect(reporting("devin", { limits: true })).toEqual({ cost: false, limits: true });
   });
 
-  it("spawns every built-in harness in the workspace itself", () => {
-    for (const built of BUILT_IN_HARNESSES) {
-      expect(resolveHarnessSpawn(built, "/ws").cwd).toBe("/ws");
+  it("declares nothing for a custom harness, whichever built-in's tools it borrows", () => {
+    const custom = { ...harness("claude-code"), id: "custom:lab" };
+    const reporting = createHarnessAdapters({
+      harnesses: { configured: () => [...BUILT_IN_HARNESSES, custom] },
+    }).reporting;
+    expect(reporting("custom:lab")).toEqual({ cost: false, limits: false });
+    expect(reporting("custom:lab", { cost: true })).toEqual({ cost: true, limits: false });
+  });
+});
+
+describe("logos", () => {
+  it("gives each built-in its own mark, and a custom harness none", () => {
+    const marks = BUILT_IN_HARNESSES.map((built) => harnessLogo(built.id));
+    expect(marks.every((mark) => mark && mark.paths.length > 0)).toBe(true);
+    expect(new Set(marks.map((mark) => mark?.paths[0].d)).size).toBe(marks.length);
+    expect(harnessLogo("custom:lab")).toBeUndefined();
+  });
+});
+
+describe("initialize", () => {
+  it("advertises subagent support to Devin and to custom harnesses that may be Devin", () => {
+    const subagents = { "cognition.ai/subagentSupport": true };
+    expect(adapterFor(harness("devin")).clientMeta).toEqual(subagents);
+    expect(adapterFor({ ...harness("gemini-cli"), id: "custom:lab" }).clientMeta).toEqual(
+      subagents,
+    );
+    for (const id of ["claude-code", "opencode", "gemini-cli"]) {
+      expect(adapterFor(harness(id)).clientMeta).toBeUndefined();
     }
+  });
+});
+
+describe("tool names", () => {
+  it("strips the prefix each harness mints, and either where it's unrecorded", () => {
+    expect(adapterFor(harness("claude-code")).toolNamePrefixes).toEqual(["mcp__notefig__"]);
+    expect(adapterFor(harness("opencode")).toolNamePrefixes).toEqual(["notefig_"]);
+    for (const id of ["devin", "gemini-cli"]) {
+      expect(adapterFor(harness(id)).toolNamePrefixes).toEqual(["mcp__notefig__", "notefig_"]);
+    }
+    expect(
+      adapterFor({ ...harness("claude-code"), id: "custom:lab" }).toolNamePrefixes,
+    ).toEqual(["mcp__notefig__", "notefig_"]);
+  });
+});
+
+describe("sign-in errors", () => {
+  it("reads claude-agent-acp's error as a sign-in for every harness, nothing else", () => {
+    for (const built of BUILT_IN_HARNESSES) {
+      const adapter = adapterFor(built);
+      expect(needsSignIn(adapter, "Authentication required")).toBe(true);
+      expect(needsSignIn(adapter, "Internal error")).toBe(false);
+    }
+  });
+
+  it("asks a harness that words it differently", () => {
+    const adapter = { isAuthError: (message: string) => message === "please log in" };
+    expect(needsSignIn(adapter, "please log in")).toBe(true);
+    expect(needsSignIn(adapter, "Authentication required")).toBe(false);
   });
 });

@@ -15,10 +15,10 @@
  * "is this session still alive?", "what files are in the workspace?" — never
  * questions about the widget.
  *
- * `slots` carries the four surfaces the widget renders but does not own: a
+ * `slots` carries the five surfaces the widget renders but does not own: a
  * markdown renderer backed by the app's conversion worker, the permission
- * and auth cards that speak to the agent service, and the workspace's file
- * icon. They cross as components rather than as duplicated code.
+ * and auth cards that speak to the agent service, the workspace's file
+ * icon, and a harness's brand mark. They cross as components rather than as duplicated code.
  */
 import type { ComponentType } from "react";
 import type {
@@ -184,5 +184,6 @@ export interface PromptWidgetHost {
     PermissionCard: ComponentType<{ taskId: string }>;
     AuthCard: ComponentType<{ task: AgentTaskRow }>;
     FileIcon: ComponentType<{ path: string; className?: string }>;
+    HarnessLogo: ComponentType<{ harnessId: string; className?: string }>;
   };
 }

@@ -86,6 +86,9 @@ export function fakePromptWidgetHost(
       FileIcon: ({ className }) => (
         <span data-testid="file-icon" className={className} />
       ),
+      HarnessLogo: ({ harnessId, className }) => (
+        <span data-testid={`harness-logo-${harnessId}`} className={className} />
+      ),
     },
 
     ...overrides,

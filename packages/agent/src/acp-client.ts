@@ -45,19 +45,18 @@ const PROTOCOL_VERSION = Math.max(...SUPPORTED_ACP_PROTOCOL_VERSIONS);
  * channel. This asymmetry is the whole reason the CLI worker can stay a
  * protocol-ignorant byte pump.
  *
- * `_meta` carries vendor capabilities, which an agent that doesn't know them
- * ignores. Devin sends a subagent's usage only to a client that says it
- * supports subagents; without it a turn that delegates under-reports
- * (docs/architecture/spikes/acp-usage-multistep-spike.md).
+ * `meta` carries the harness's vendor capabilities (its adapter's
+ * `clientMeta`), which an agent that doesn't know them ignores.
  */
 export function capabilitiesForLocus(
   locus: AgentTransport["locus"],
+  meta?: Record<string, unknown>,
 ): ClientCapabilities {
   const fs =
     locus === "local"
       ? { readTextFile: true, writeTextFile: true }
       : { readTextFile: false, writeTextFile: false };
-  return { fs, _meta: { "cognition.ai/subagentSupport": true } };
+  return meta ? { fs, _meta: meta } : { fs };
 }
 
 /**
@@ -205,6 +204,9 @@ export type AcpClientDeps = {
   /** Fired just before connect() rejects on an unsupported negotiated
    *  version — observability hook (desktop wires telemetry). */
   onUnsupportedProtocolVersion?: (negotiated: number) => void;
+  /** Vendor capabilities advertised in `initialize` (the harness adapter's
+   *  `clientMeta`). */
+  clientMeta?: Record<string, unknown>;
 };
 
 /**
@@ -241,7 +243,10 @@ export class NotefigAcpClient implements Client {
 
     const response = await this.connection.initialize({
       protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: capabilitiesForLocus(this.deps.transport.locus),
+      clientCapabilities: capabilitiesForLocus(
+        this.deps.transport.locus,
+        this.deps.clientMeta,
+      ),
     });
     if (!SUPPORTED_ACP_PROTOCOL_VERSIONS.includes(response.protocolVersion)) {
       this.deps.onUnsupportedProtocolVersion?.(response.protocolVersion);

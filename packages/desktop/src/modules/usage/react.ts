@@ -7,7 +7,7 @@ import { useMemo } from "react";
 import { and, gte, lt, useLiveQuery } from "@tanstack/react-db";
 import { useCore } from "@notefig/core/react";
 import { costType } from "@notefig/shared/agent";
-import type { UsageReporting } from "@/modules/agents/harnesses";
+import type { UsageReporting } from "@/modules/harness-adapters";
 import {
   startOfHour,
   type HarnessLimits,
@@ -53,13 +53,14 @@ export function useHarnessLimits(): HarnessLimits[] {
 }
 
 /** What each harness reports about usage, for the views to grey out what a
- *  harness will never fill: `core.harnesses`' table of the built-ins,
- *  overridden by what the loaded series and limits show it has sent. */
+ *  harness will never fill: what its adapter declares
+ *  (`core.harnessAdapters`), overridden by what the loaded series and
+ *  limits show it has sent. */
 export function useHarnessReporting(
   byHarness: UsageSeries,
   limits: HarnessLimits[],
 ): (harnessId: string) => UsageReporting {
-  const { harnesses } = useCore();
+  const { harnessAdapters } = useCore();
   return useMemo(() => {
     const costSeen = new Set<string>();
     for (const point of byHarness.points) {
@@ -73,11 +74,11 @@ export function useHarnessReporting(
     }
     const limitsSeen = new Set(limits.map((row) => row.harnessId));
     return (harnessId) =>
-      harnesses.reporting(harnessId, {
+      harnessAdapters.reporting(harnessId, {
         cost: costSeen.has(harnessId),
         limits: limitsSeen.has(harnessId),
       });
-  }, [harnesses, byHarness, limits]);
+  }, [harnessAdapters, byHarness, limits]);
 }
 
 /** Usage per local day, week, month or quarter over [from, to), split by

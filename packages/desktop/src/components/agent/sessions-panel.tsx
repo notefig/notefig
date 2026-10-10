@@ -59,7 +59,7 @@ import {
   useActiveHarnesses,
   useDefaultHarness,
 } from "@/hooks/use-harness-selection";
-import { HarnessLogo } from "@notefig/ui/harness-logo";
+import { HarnessLogo } from "@/components/agent/harness-logo";
 import {
   StatusGlyph,
   attentionGlyphState,
