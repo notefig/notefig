@@ -5,6 +5,7 @@ import {
   type TokenCounts,
 } from "@notefig/shared/agent";
 import {
+  KNOWN_TOOL_PREFIXES,
   NO_PREP,
   NO_REPORTING,
   acpCostTotal,
@@ -193,6 +194,8 @@ export const devinAdapter: HarnessAdapter = {
   },
   // Its cost is credits, not money, so it is charted apart.
   reporting: NO_REPORTING,
+  // Unrecorded which prefix it mints; strip either.
+  toolNamePrefixes: KNOWN_TOOL_PREFIXES,
   clientMeta: DEVIN_CLIENT_META,
   usage: devinUsage,
   // A subagent's chunks and usage arrive in the parent session, tagged.

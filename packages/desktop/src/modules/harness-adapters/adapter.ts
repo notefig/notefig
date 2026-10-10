@@ -12,13 +12,14 @@
  * context rather than importing a platform, which keeps the adapters
  * unit-testable with plain fakes.
  */
-import type {
-  Cost,
-  McpServer,
-  PromptResponse,
-  SessionNotification,
-  TokenCounts,
-  UsageLimits,
+import {
+  MCP_SERVER_NAME,
+  type Cost,
+  type McpServer,
+  type PromptResponse,
+  type SessionNotification,
+  type TokenCounts,
+  type UsageLimits,
 } from "@notefig/shared/agent";
 
 /** The stdio variant of ACP's `McpServer` union — the only one that maps
@@ -176,12 +177,23 @@ export interface HarnessAdapter {
    *  its subagents into the parent session: `"root"` for the session's own
    *  agent, a subagent's id, or null when it isn't tagged. */
   agentOf?(update: WithMeta): string | null;
+  /** Prefixes it mints the app's MCP tool names under
+   *  (`mcp__notefig__author_blob`), stripped so the transcript and
+   *  `findBlobAuthorTask` see the plain tool name. */
+  toolNamePrefixes: readonly string[];
   /** Its brand mark; none draws a generic bot. */
   logo?: HarnessMark;
   /** The account limits a `usage_update`'s `_meta` carries, for a harness
    *  that reports them there. */
   limits?(meta: Record<string, unknown>): UsageLimits | null;
 }
+
+/** claude-agent-acp's `mcp__<server>__<tool>` (v2-mcp-passthrough-spike.md). */
+export const CLAUDE_TOOL_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
+/** OpenCode's `<server>_<tool>` (v2-opencode-config-mcp-spike.md). */
+export const OPENCODE_TOOL_PREFIX = `${MCP_SERVER_NAME}_`;
+/** For a harness whose prefix was never recorded: strip either. */
+export const KNOWN_TOOL_PREFIXES = [CLAUDE_TOOL_PREFIX, OPENCODE_TOOL_PREFIX];
 
 /** Reports nothing beyond tokens. */
 export const NO_REPORTING: UsageReporting = { cost: false, limits: false };

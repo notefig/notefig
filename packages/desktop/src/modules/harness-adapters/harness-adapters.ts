@@ -14,6 +14,7 @@ import { defineModule } from "@notefig/core";
 import { platformModule } from "@/core/services";
 import { harnessesModule, type HarnessesApi } from "@/modules/agents/harnesses";
 import {
+  KNOWN_TOOL_PREFIXES,
   NO_REPORTING,
   type HarnessAdapter,
   type HarnessMark,
@@ -54,6 +55,7 @@ function customAdapter(registersLike: HarnessAdapter): HarnessAdapter {
   return {
     onInvoke: registersLike.onInvoke,
     reporting: NO_REPORTING,
+    toolNamePrefixes: KNOWN_TOOL_PREFIXES,
     clientMeta: DEVIN_CLIENT_META,
     usage: {
       ...devinUsageByMeta,

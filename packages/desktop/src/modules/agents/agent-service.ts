@@ -11,7 +11,6 @@ import {
   newEventId,
   BUILT_IN_HARNESSES,
   composePrompt,
-  MCP_SERVER_NAME,
   parseCustomHarnessEntries,
   parseHarnessOverrides,
   resolveEffectiveHarnesses,
@@ -249,17 +248,16 @@ function deriveToolLocations(
 }
 
 /**
- * Adapters mint their own MCP tool-name prefixes: claude-agent-acp uses
- * `mcp__<serverName>__<toolName>` (v2-mcp-passthrough-spike.md), OpenCode
- * uses `<serverName>_<toolName>` (v2-opencode-config-mcp-spike.md). Strip
- * whichever is present so transcript entries and `findBlobAuthorTask` see
- * the plain tool name, same as any other tool call.
+ * Harnesses mint their own MCP tool-name prefixes (their adapter's
+ * `toolNamePrefixes`). Strip whichever is present so transcript entries and
+ * `findBlobAuthorTask` see the plain tool name, same as any other tool call.
  */
 function normalizeMcpToolName(
   title: string | null | undefined,
+  prefixes: readonly string[],
 ): string | undefined {
   if (!title) return undefined;
-  for (const prefix of [`mcp__${MCP_SERVER_NAME}__`, `${MCP_SERVER_NAME}_`]) {
+  for (const prefix of prefixes) {
     if (title.startsWith(prefix)) return title.slice(prefix.length);
   }
   return title;
@@ -1416,7 +1414,9 @@ export class AgentTask {
         draft.toolCall = {
           ...previous,
           ...update,
-          title: normalizeMcpToolName(update.title) ?? previous?.title,
+          title:
+            normalizeMcpToolName(update.title, this.adapter.toolNamePrefixes) ??
+            previous?.title,
           locations:
             update.locations ??
             deriveToolLocations(update.rawInput, this.workspacePath) ??
@@ -1439,7 +1439,7 @@ export class AgentTask {
     if (toolCallId) this.toolEventIds.set(toolCallId, id);
     const toolCall: ToolCallUpdate = {
       ...update,
-      title: normalizeMcpToolName(update.title),
+      title: normalizeMcpToolName(update.title, this.adapter.toolNamePrefixes),
       locations:
         update.locations ??
         deriveToolLocations(update.rawInput, this.workspacePath),

@@ -7,6 +7,7 @@ import type {
 } from "@notefig/shared/agent";
 import {
   ACP_USAGE,
+  CLAUDE_TOOL_PREFIX,
   NO_PREP,
   count,
   type HarnessAdapter,
@@ -158,6 +159,7 @@ export const claudeCodeAdapter: HarnessAdapter = {
   }),
   // Cost on `usage_update`; rate-limit windows in its `_meta`.
   reporting: { cost: true, limits: true },
+  toolNamePrefixes: [CLAUDE_TOOL_PREFIX],
   usage: { ...ACP_USAGE, modelRows: claudeModelRows, updateModel: claudeUpdateModel },
   limits: claudeLimits,
   logo: {

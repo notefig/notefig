@@ -285,3 +285,16 @@ describe("initialize", () => {
     }
   });
 });
+
+describe("tool names", () => {
+  it("strips the prefix each harness mints, and either where it's unrecorded", () => {
+    expect(adapterFor(harness("claude-code")).toolNamePrefixes).toEqual(["mcp__notefig__"]);
+    expect(adapterFor(harness("opencode")).toolNamePrefixes).toEqual(["notefig_"]);
+    for (const id of ["devin", "gemini-cli"]) {
+      expect(adapterFor(harness(id)).toolNamePrefixes).toEqual(["mcp__notefig__", "notefig_"]);
+    }
+    expect(
+      adapterFor({ ...harness("claude-code"), id: "custom:lab" }).toolNamePrefixes,
+    ).toEqual(["mcp__notefig__", "notefig_"]);
+  });
+});

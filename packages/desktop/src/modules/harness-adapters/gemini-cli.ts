@@ -1,5 +1,6 @@
 import {
   ACP_USAGE,
+  KNOWN_TOOL_PREFIXES,
   NO_PREP,
   NO_REPORTING,
   type HarnessAdapter,
@@ -10,6 +11,8 @@ import {
 export const geminiCliAdapter: HarnessAdapter = {
   onInvoke: async () => NO_PREP,
   reporting: NO_REPORTING,
+  // Unrecorded which prefix it mints; strip either.
+  toolNamePrefixes: KNOWN_TOOL_PREFIXES,
   usage: ACP_USAGE,
   logo: {
     viewBox: "0 0 24 24",
