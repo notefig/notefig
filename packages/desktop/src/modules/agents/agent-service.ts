@@ -553,6 +553,7 @@ export class AgentTask {
       taskId: this.taskId,
       transport,
       permissionBroker: this.permissionBroker,
+      clientMeta: this.adapter.clientMeta,
       // A subagent's own reasoning and replies (Devin streams them, tagged,
       // once told the client supports subagents) aren't the session agent's
       // words; its result reaches the transcript through the tool call.

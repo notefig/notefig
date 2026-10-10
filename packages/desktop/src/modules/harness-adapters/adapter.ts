@@ -167,6 +167,9 @@ export interface HarnessAdapter {
    *  to grey out what a harness will never fill, rather than show an empty
    *  chart as if nothing had been spent. */
   reporting: UsageReporting;
+  /** Vendor capabilities it reads from `initialize`'s
+   *  `clientCapabilities._meta`. */
+  clientMeta?: Record<string, unknown>;
   /** How it counts a turn. */
   usage: UsageReader;
   /** The agent an update or chunk came from, for a harness that streams

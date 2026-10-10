@@ -25,7 +25,12 @@ import {
   claudeModelRows,
   claudeUpdateModel,
 } from "./claude-code";
-import { devinAdapter, devinAgentOf, devinUsageByMeta } from "./devin";
+import {
+  DEVIN_CLIENT_META,
+  devinAdapter,
+  devinAgentOf,
+  devinUsageByMeta,
+} from "./devin";
 import { geminiCliAdapter } from "./gemini-cli";
 import { openCodeAdapter } from "./opencode";
 
@@ -49,6 +54,7 @@ function customAdapter(registersLike: HarnessAdapter): HarnessAdapter {
   return {
     onInvoke: registersLike.onInvoke,
     reporting: NO_REPORTING,
+    clientMeta: DEVIN_CLIENT_META,
     usage: {
       ...devinUsageByMeta,
       modelRows: claudeModelRows,

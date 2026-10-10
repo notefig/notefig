@@ -108,6 +108,11 @@ export const devinUsageByMeta: UsageReader = {
   cacheInInput: hasDevinMeta,
 };
 
+/** Devin streams a subagent's chunks and usage only to a client that says
+ *  it supports subagents; without it a turn that delegates under-reports
+ *  (acp-usage-multistep-spike.md). */
+export const DEVIN_CLIENT_META = { "cognition.ai/subagentSupport": true };
+
 /**
  * Devin (`devin acp`).
  *
@@ -188,6 +193,7 @@ export const devinAdapter: HarnessAdapter = {
   },
   // Its cost is credits, not money, so it is charted apart.
   reporting: NO_REPORTING,
+  clientMeta: DEVIN_CLIENT_META,
   usage: devinUsage,
   // A subagent's chunks and usage arrive in the parent session, tagged.
   agentOf: devinAgentOf,

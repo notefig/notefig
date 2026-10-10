@@ -272,3 +272,16 @@ describe("logos", () => {
     expect(harnessLogo("custom:lab")).toBeUndefined();
   });
 });
+
+describe("initialize", () => {
+  it("advertises subagent support to Devin and to custom harnesses that may be Devin", () => {
+    const subagents = { "cognition.ai/subagentSupport": true };
+    expect(adapterFor(harness("devin")).clientMeta).toEqual(subagents);
+    expect(adapterFor({ ...harness("gemini-cli"), id: "custom:lab" }).clientMeta).toEqual(
+      subagents,
+    );
+    for (const id of ["claude-code", "opencode", "gemini-cli"]) {
+      expect(adapterFor(harness(id)).clientMeta).toBeUndefined();
+    }
+  });
+});

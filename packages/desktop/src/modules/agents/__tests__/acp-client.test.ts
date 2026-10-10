@@ -17,7 +17,7 @@ import type { SessionNotification } from "@notefig/shared/agent";
 
 type Json = Record<string, unknown>;
 
-function makeClient(initializeResult?: Json) {
+function makeClient(initializeResult?: Json, clientMeta?: Json) {
   const [clientSide, agentSide] = createLoopbackPair();
   const agent = new FakeAgent(agentSide);
   if (initializeResult) agent.initializeResult = initializeResult;
@@ -31,6 +31,7 @@ function makeClient(initializeResult?: Json) {
     onSessionUpdate: (_n: SessionNotification) => {},
     fs: { readTextFile, writeTextFile },
     onUnsupportedProtocolVersion,
+    clientMeta,
   });
   return { client, agent, clientSide, agentSide };
 }
@@ -55,11 +56,16 @@ describe("NotefigAcpClient", () => {
     expect(client.embeddedContextCapability).toBe(true);
   });
 
-  it("tells the agent at initialize that it supports subagents", async () => {
-    const { client, agent } = makeClient();
-    await client.connect();
-    expect(agent.initializeParams?.clientCapabilities).toMatchObject({
-      _meta: { "cognition.ai/subagentSupport": true },
+  it("advertises the harness's vendor capabilities at initialize, and none by default", async () => {
+    const plain = makeClient();
+    await plain.client.connect();
+    expect(plain.agent.initializeParams?.clientCapabilities).not.toHaveProperty("_meta");
+
+    const meta = { "cognition.ai/subagentSupport": true };
+    const tagged = makeClient(undefined, meta);
+    await tagged.client.connect();
+    expect(tagged.agent.initializeParams?.clientCapabilities).toMatchObject({
+      _meta: meta,
     });
   });
 
