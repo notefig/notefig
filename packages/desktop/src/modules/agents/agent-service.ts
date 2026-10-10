@@ -41,6 +41,7 @@ import type {
   HarnessAdapter,
   HarnessAdaptersApi,
   HarnessSpawnPrep,
+  UsageUpdate,
 } from "@/modules/harness-adapters";
 import { MarkdownJoiner } from "@/lib/markdown-joiner-transform";
 import { PermissionBroker } from "./permission-broker";
@@ -62,7 +63,6 @@ import {
   isMainAgent,
   isSubagentChunk,
   normalizeTurnUsage,
-  type UsageUpdate,
 } from "./turn-usage";
 import { limitsFrom } from "./usage-limits";
 import i18n from "@/utils/intl";
@@ -1189,7 +1189,7 @@ export class AgentTask {
     const turnUpdates = this.turnUsageUpdates;
     this.turnUsageUpdates = [];
     const { usage, costTotal } = normalizeTurnUsage({
-      harnessId: this.harness.id,
+      usage: this.adapter.usage,
       response,
       lastUpdate: this.lastUsageUpdate,
       turnUpdates,

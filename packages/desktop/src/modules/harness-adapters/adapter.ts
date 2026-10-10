@@ -12,7 +12,14 @@
  * context rather than importing a platform, which keeps the adapters
  * unit-testable with plain fakes.
  */
-import type { McpServer, UsageLimits } from "@notefig/shared/agent";
+import type {
+  Cost,
+  McpServer,
+  PromptResponse,
+  SessionNotification,
+  TokenCounts,
+  UsageLimits,
+} from "@notefig/shared/agent";
 
 /** The stdio variant of ACP's `McpServer` union — the only one that maps
  *  onto a harness config file's local-command shape. HTTP/SSE servers can
@@ -68,6 +75,77 @@ export type UsageReporting = {
   limits: boolean;
 };
 
+export type UsageUpdate = Extract<
+  SessionNotification["update"],
+  { sessionUpdate: "usage_update" }
+>;
+
+/** One model's share of a turn, as a harness splits it. */
+export type ModelTokens = { model: string; tokens: TokenCounts };
+
+/**
+ * How a harness counts a turn (docs/architecture/spikes/
+ * acp-token-usage-spike.md). The agent subsystem's normalizer
+ * (`turn-usage.ts`) folds these into the shared usage shapes; every vendor
+ * `_meta` field it needs is read here, by the harness that sends it.
+ */
+export interface UsageReader {
+  /** Whether `PromptResponse.usage.inputTokens` already includes cache
+   *  reads (they are taken out, so input is uncached only). */
+  cacheInInput(response: PromptResponse): boolean;
+  /** The session-running cost a `usage_update` reports, if any. */
+  costTotal(update: UsageUpdate): Cost | null;
+  /** The turn's tokens summed from per-request updates, for a harness whose
+   *  `PromptResponse.usage` covers its last request only; null = the
+   *  response stands. */
+  requestTokens(updates: readonly UsageUpdate[]): TokenCounts | null;
+  /** The harness's own per-model split of a turn, if it sends one. */
+  modelRows(response: PromptResponse): ModelTokens[] | null;
+  /** The model a `usage_update` names, if it names one. */
+  updateModel(update: UsageUpdate): string | null;
+}
+
+/** ACP's own `usage_update.cost`, as money. */
+export function acpCostTotal(update: UsageUpdate): Cost | null {
+  const cost = update.cost;
+  return cost && typeof cost.amount === "number"
+    ? { amount: cost.amount, currency: cost.currency, type: "currency" }
+    : null;
+}
+
+/** A harness that reports through ACP's own fields alone. */
+export const ACP_USAGE: UsageReader = {
+  cacheInInput: () => false,
+  costTotal: acpCostTotal,
+  requestTokens: () => null,
+  modelRows: () => null,
+  updateModel: () => null,
+};
+
+/** A non-negative finite count, or 0. */
+export function count(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : 0;
+}
+
+/** ACP's raw token counts as normalized ones; with `cacheInInput`, cache
+ *  reads are taken out of input. */
+export function tokensFrom(
+  raw: NonNullable<PromptResponse["usage"]>,
+  cacheInInput: boolean,
+): TokenCounts {
+  const cacheRead = count(raw.cachedReadTokens);
+  const input = count(raw.inputTokens);
+  return {
+    input: cacheInInput ? Math.max(0, input - cacheRead) : input,
+    cacheRead,
+    cacheWrite: count(raw.cachedWriteTokens),
+    output: count(raw.outputTokens),
+    thought: count(raw.thoughtTokens),
+  };
+}
+
 /** A harness's brand mark as SVG data, drawn in `currentColor` so it
  *  follows the surrounding text in both themes. Data rather than a
  *  component, so nothing reading an adapter pulls React. */
@@ -86,6 +164,8 @@ export interface HarnessAdapter {
    *  to grey out what a harness will never fill, rather than show an empty
    *  chart as if nothing had been spent. */
   reporting: UsageReporting;
+  /** How it counts a turn. */
+  usage: UsageReader;
   /** Its brand mark; none draws a generic bot. */
   logo?: HarnessMark;
   /** The account limits a `usage_update`'s `_meta` carries, for a harness

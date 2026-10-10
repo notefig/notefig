@@ -1,8 +1,18 @@
 import {
+  addTokens,
+  type Cost,
+  type PromptResponse,
+  type TokenCounts,
+} from "@notefig/shared/agent";
+import {
   NO_PREP,
   NO_REPORTING,
+  acpCostTotal,
   isStdioMcpServer,
+  tokensFrom,
   type HarnessAdapter,
+  type UsageReader,
+  type UsageUpdate,
 } from "./adapter";
 
 /** Args are positional and unnamed, so they're forwarded by index; env
@@ -11,6 +21,88 @@ const DEVIN_ARG_VAR_PREFIX = "NOTEFIG_MCP_ARG_";
 
 /** Devin's project config file, under the host-supplied app dir. */
 const DEVIN_CONFIG_SEGMENTS = [".devin", "mcp_config.local.json"];
+
+// ─── Usage ──────────────────────────────────────────────────────────────────
+//
+// Devin counts cache reads inside `inputTokens`. Its `PromptResponse.usage`
+// is its last model request only: it sends one `usage_update` per request
+// with that request's tokens in `_meta`, twice for the main agent (plain,
+// then tagged `subagent_context: root`) and once, tagged with its own id, for
+// each subagent request — so the turn is the sum of the tagged updates
+// (acp-usage-multistep-spike.md). Its credits (`cognition.ai/totalCreditCost`)
+// are a session-running total like others' money: its cost, typed "credits".
+
+/** The unit Devin's `totalCreditCost` counts in. */
+const DEVIN_CREDIT = "devin-credit";
+
+function metaNumber(update: UsageUpdate, key: string): number | null {
+  const value = (update._meta as Record<string, unknown> | null | undefined)?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** Whether an update carries Devin's subagent tag (`root` included). */
+function isTagged(update: UsageUpdate): boolean {
+  const context = (update._meta as Record<string, unknown> | null | undefined)?.[
+    "cognition.ai/subagent_context"
+  ] as { parentAgentId?: unknown } | undefined;
+  return typeof context?.parentAgentId === "string";
+}
+
+/** Money where ACP's `cost` is sent, else Devin's running credit total. */
+function devinCostTotal(update: UsageUpdate): Cost | null {
+  const money = acpCostTotal(update);
+  if (money) return money;
+  const credits = metaNumber(update, "cognition.ai/totalCreditCost");
+  return credits === null
+    ? null
+    : { amount: credits, currency: DEVIN_CREDIT, type: "credits" };
+}
+
+/** Devin's per-request tokens, summed over the turn's tagged updates; null
+ *  when the turn has none (a Devin that sends plain copies only), so the
+ *  response stands. */
+function devinRequestTokens(updates: readonly UsageUpdate[]): TokenCounts | null {
+  let sum: TokenCounts | null = null;
+  for (const update of updates) {
+    if (!isTagged(update)) continue;
+    const input = metaNumber(update, "cognition.ai/inputTokens");
+    if (input === null) continue;
+    const tokens = tokensFrom(
+      {
+        inputTokens: input,
+        outputTokens: metaNumber(update, "cognition.ai/outputTokens") ?? 0,
+        cachedReadTokens: metaNumber(update, "cognition.ai/cachedReadTokens"),
+        cachedWriteTokens: metaNumber(update, "cognition.ai/cachedWriteTokens"),
+        totalTokens: 0,
+      },
+      true,
+    );
+    sum = sum ? addTokens(sum, tokens) : tokens;
+  }
+  return sum;
+}
+
+/** Whether a response carries Devin's `cognition.ai/*` `_meta` — how its
+ *  counting is recognized under a custom harness id. */
+function hasDevinMeta(response: PromptResponse): boolean {
+  const meta = response._meta;
+  return !!meta && Object.keys(meta).some((key) => key.startsWith("cognition.ai/"));
+}
+
+/** How Devin counts; `cacheInInput` holds for Devin itself, while a custom
+ *  harness recognizes it by its `_meta` (`devinUsageByMeta`). */
+const devinUsage: UsageReader = {
+  cacheInInput: () => true,
+  costTotal: devinCostTotal,
+  requestTokens: devinRequestTokens,
+  modelRows: () => null,
+  updateModel: () => null,
+};
+
+export const devinUsageByMeta: UsageReader = {
+  ...devinUsage,
+  cacheInInput: hasDevinMeta,
+};
 
 /**
  * Devin (`devin acp`).
@@ -92,6 +184,7 @@ export const devinAdapter: HarnessAdapter = {
   },
   // Its cost is credits, not money, so it is charted apart.
   reporting: NO_REPORTING,
+  usage: devinUsage,
   // The viewBox is tightened around the path's own bounds (70..356 x
   // 49..377) so it sits at the same optical size as the other logos.
   logo: {

@@ -6,8 +6,7 @@
  * vendor shapes.
  */
 import type { UsageLimits } from "@notefig/shared/agent";
-import type { HarnessAdapter } from "@/modules/harness-adapters";
-import type { UsageUpdate } from "./turn-usage";
+import type { HarnessAdapter, UsageUpdate } from "@/modules/harness-adapters";
 
 /** The account limits a `usage_update` carries, if its harness reports any. */
 export function limitsFrom(

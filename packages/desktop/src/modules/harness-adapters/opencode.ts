@@ -1,4 +1,5 @@
 import {
+  ACP_USAGE,
   NO_PREP,
   isStdioMcpServer,
   type HarnessAdapter,
@@ -40,6 +41,8 @@ export const openCodeAdapter: HarnessAdapter = {
   },
   // Cost on `usage_update`; no account limits.
   reporting: { cost: true, limits: false },
+  // Input excludes cache already; one row for the session's model.
+  usage: ACP_USAGE,
   // Brand mark is two-tone; drawn monochrome (currentColor + opacity) so
   // it themes like the rest.
   logo: {

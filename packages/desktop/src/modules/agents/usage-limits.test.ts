@@ -4,7 +4,7 @@ import { testKv } from "@/testing/test-kv";
 import { createHarnessAdapters } from "@/modules/harness-adapters";
 import { createHarnesses } from "./harnesses";
 import { limitsFrom } from "./usage-limits";
-import type { UsageUpdate } from "./turn-usage";
+import type { UsageUpdate } from "@/modules/harness-adapters";
 
 const { adapterFor } = createHarnessAdapters({
   harnesses: createHarnesses({ kv: testKv() }),

@@ -1,6 +1,25 @@
 import { describe, it, expect } from "vitest";
-import type { PromptResponse } from "@notefig/shared/agent";
-import { isMainAgent, normalizeTurnUsage, type UsageUpdate } from "./turn-usage";
+import { BUILT_IN_HARNESSES, type PromptResponse } from "@notefig/shared/agent";
+import { testKv } from "@/testing/test-kv";
+import { createHarnessAdapters, type UsageUpdate } from "@/modules/harness-adapters";
+import { createHarnesses } from "./harnesses";
+import { isMainAgent, normalizeTurnUsage } from "./turn-usage";
+
+const { adapterFor } = createHarnessAdapters({
+  harnesses: createHarnesses({ kv: testKv() }),
+});
+/** How a harness id counts; an id no built-in has is a custom harness. */
+const usageOf = (id: string) =>
+  adapterFor(
+    BUILT_IN_HARNESSES.find((harness) => harness.id === id) ?? {
+      id,
+      label: id,
+      command: id,
+      args: [],
+      env: {},
+      mcpRegistration: "none",
+    },
+  ).usage;
 
 // Payloads as recorded from each harness in the token-usage spike
 // (docs/architecture/spikes/acp-token-usage-spike.md).
@@ -67,7 +86,7 @@ const devinUpdate = {
 describe("normalizeTurnUsage", () => {
   it("Claude: per-model rows are the total; cost goes to the main model", () => {
     const { usage, costTotal } = normalizeTurnUsage({
-      harnessId: "claude-code",
+      usage: usageOf("claude-code"),
       response: claudeResponse,
       lastUpdate: claudeUpdate,
       model: "default",
@@ -89,7 +108,7 @@ describe("normalizeTurnUsage", () => {
 
   it("opencode: input excludes cache already; one row for the session's model", () => {
     const { usage } = normalizeTurnUsage({
-      harnessId: "opencode",
+      usage: usageOf("opencode"),
       response: opencodeResponse,
       lastUpdate: opencodeUpdate,
       model: "anthropic/claude-sonnet",
@@ -107,7 +126,7 @@ describe("normalizeTurnUsage", () => {
 
   it("Devin: cache reads come out of input; no cost", () => {
     const { usage, costTotal } = normalizeTurnUsage({
-      harnessId: "devin",
+      usage: usageOf("devin"),
       response: devinResponse,
       lastUpdate: devinUpdate,
       model: null,
@@ -121,7 +140,7 @@ describe("normalizeTurnUsage", () => {
 
   it("recognizes Devin's counting under a custom harness id", () => {
     const { usage } = normalizeTurnUsage({
-      harnessId: "custom:1",
+      usage: usageOf("custom:1"),
       response: devinResponse,
       lastUpdate: null,
       model: null,
@@ -133,7 +152,7 @@ describe("normalizeTurnUsage", () => {
   it("cost is the running total's difference; a drop reads as a restart", () => {
     const at = (amount: number, baseline: number) =>
       normalizeTurnUsage({
-        harnessId: "opencode",
+        usage: usageOf("opencode"),
         response: opencodeResponse,
         lastUpdate: { ...opencodeUpdate, cost: { amount, currency: "USD" } },
         model: null,
@@ -173,7 +192,7 @@ describe("normalizeTurnUsage", () => {
     it("sums every request once, not just the last", () => {
       const turnUpdates = requests.flatMap(([i, o, c]) => [req(null, i, o, c), req("root", i, o, c)]);
       const { usage } = normalizeTurnUsage({
-        harnessId: "devin",
+        usage: usageOf("devin"),
         response: lastResponse,
         lastUpdate: turnUpdates.at(-1)!,
         turnUpdates,
@@ -200,7 +219,7 @@ describe("normalizeTurnUsage", () => {
         req("root", 12071, 131, 11936),
       ];
       const { usage } = normalizeTurnUsage({
-        harnessId: "devin",
+        usage: usageOf("devin"),
         response: lastResponse,
         lastUpdate: turnUpdates.at(-1)!,
         turnUpdates,
@@ -214,7 +233,7 @@ describe("normalizeTurnUsage", () => {
 
     it("plain copies alone leave the response standing", () => {
       const { usage } = normalizeTurnUsage({
-        harnessId: "devin",
+        usage: usageOf("devin"),
         response: lastResponse,
         lastUpdate: null,
         turnUpdates: [req(null, 1, 1, 0)],
@@ -231,7 +250,7 @@ describe("normalizeTurnUsage", () => {
           _meta: { ...req("root", 11909, 15, 11776)._meta, "cognition.ai/totalCreditCost": total },
         }) as UsageUpdate;
       const result = normalizeTurnUsage({
-        harnessId: "devin",
+        usage: usageOf("devin"),
         response: lastResponse,
         lastUpdate: withCredits(3.5),
         model: null,
@@ -253,7 +272,7 @@ describe("normalizeTurnUsage", () => {
   it("nothing reported is null usage", () => {
     expect(
       normalizeTurnUsage({
-        harnessId: "opencode",
+        usage: usageOf("opencode"),
         response: { stopReason: "end_turn" },
         lastUpdate: null,
         model: null,
@@ -267,7 +286,7 @@ describe("normalizeTurnUsage", () => {
     // total is already the baseline.
     expect(
       normalizeTurnUsage({
-        harnessId: "claude-code",
+        usage: usageOf("claude-code"),
         response: null,
         lastUpdate: { ...opencodeUpdate, cost: { amount: 0.5, currency: "USD" } },
         model: null,

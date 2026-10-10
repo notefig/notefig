@@ -1,9 +1,18 @@
 import type {
+  PromptResponse,
+  TokenCounts,
   UsageLimitStatus,
   UsageLimitWindow,
   UsageLimits,
 } from "@notefig/shared/agent";
-import { NO_PREP, type HarnessAdapter } from "./adapter";
+import {
+  ACP_USAGE,
+  NO_PREP,
+  count,
+  type HarnessAdapter,
+  type ModelTokens,
+  type UsageUpdate,
+} from "./adapter";
 
 type Meta = Record<string, unknown>;
 
@@ -84,6 +93,56 @@ export function claudeLimits(meta: Meta): UsageLimits | null {
   };
 }
 
+// ─── Usage ──────────────────────────────────────────────────────────────────
+//
+// Claude splits a turn's tokens per model in `_meta.quota.model_usage` — the
+// fuller figure, counting subagents, side calls (titles) and compaction — and
+// reports cost only in total, as ACP's running `usage_update.cost`. The update
+// names the main model in `_claude/model`.
+
+type QuotaTokenCount = {
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  cachedWriteTokens?: number;
+  outputTokens?: number;
+  reasoningOutputTokens?: number;
+};
+
+function quotaTokens(tokenCount: QuotaTokenCount): TokenCounts {
+  return {
+    input: count(tokenCount.inputTokens),
+    cacheRead: count(tokenCount.cachedInputTokens),
+    cacheWrite: count(tokenCount.cachedWriteTokens),
+    output: count(tokenCount.outputTokens),
+    thought: count(tokenCount.reasoningOutputTokens),
+  };
+}
+
+/** Claude's per-model rows (`_meta.quota.model_usage`), when present. */
+export function claudeModelRows(response: PromptResponse): ModelTokens[] | null {
+  const quota = (response._meta as { quota?: unknown } | null | undefined)
+    ?.quota as { model_usage?: unknown } | undefined;
+  if (!Array.isArray(quota?.model_usage)) return null;
+  const rows: ModelTokens[] = [];
+  for (const row of quota.model_usage as unknown[]) {
+    const { model, token_count } = (row ?? {}) as {
+      model?: unknown;
+      token_count?: QuotaTokenCount;
+    };
+    if (typeof model !== "string" || !token_count) continue;
+    rows.push({ model, tokens: quotaTokens(token_count) });
+  }
+  return rows.length > 0 ? rows : null;
+}
+
+/** The model a `usage_update` names (`_claude/model`). */
+export function claudeUpdateModel(update: UsageUpdate): string | null {
+  const model = (update._meta as Record<string, unknown> | null | undefined)?.[
+    "_claude/model"
+  ];
+  return typeof model === "string" ? model : null;
+}
+
 /**
  * Claude Code, through the bundled claude-agent-acp sidecar.
  *
@@ -99,6 +158,7 @@ export const claudeCodeAdapter: HarnessAdapter = {
   }),
   // Cost on `usage_update`; rate-limit windows in its `_meta`.
   reporting: { cost: true, limits: true },
+  usage: { ...ACP_USAGE, modelRows: claudeModelRows, updateModel: claudeUpdateModel },
   limits: claudeLimits,
   logo: {
     viewBox: "0 0 24 24",

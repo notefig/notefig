@@ -2323,7 +2323,8 @@ describe("usage (token & cost)", () => {
       };
     };
 
-    const task = new TaskManager(deps, "/ws").createTask(harness);
+    const devin = BUILT_IN_HARNESSES.find((h) => h.id === "devin")!;
+    const task = new TaskManager(deps, "/ws").createTask(devin);
     await task.start(() => client);
     await runPrompt(task, "count lines with a subagent");
 
