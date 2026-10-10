@@ -181,6 +181,10 @@ export interface HarnessAdapter {
    *  (`mcp__notefig__author_blob`), stripped so the transcript and
    *  `findBlobAuthorTask` see the plain tool name. */
   toolNamePrefixes: readonly string[];
+  /** Whether a failed prompt's error means it needs a sign-in, for a
+   *  harness that says so differently from claude-agent-acp
+   *  (`needsSignIn`). */
+  isAuthError?(message: string): boolean;
   /** Its brand mark; none draws a generic bot. */
   logo?: HarnessMark;
   /** The account limits a `usage_update`'s `_meta` carries, for a harness
@@ -194,6 +198,16 @@ export const CLAUDE_TOOL_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
 export const OPENCODE_TOOL_PREFIX = `${MCP_SERVER_NAME}_`;
 /** For a harness whose prefix was never recorded: strip either. */
 export const KNOWN_TOOL_PREFIXES = [CLAUDE_TOOL_PREFIX, OPENCODE_TOOL_PREFIX];
+
+/** Whether a failed prompt's error means the harness needs a sign-in: its
+ *  own test, else claude-agent-acp's "Authentication required"
+ *  (docs/architecture/spikes/phase1-auth-spike.md). */
+export function needsSignIn(
+  adapter: Pick<HarnessAdapter, "isAuthError">,
+  message: string,
+): boolean {
+  return adapter.isAuthError?.(message) ?? /authentication required/i.test(message);
+}
 
 /** Reports nothing beyond tokens. */
 export const NO_REPORTING: UsageReporting = { cost: false, limits: false };

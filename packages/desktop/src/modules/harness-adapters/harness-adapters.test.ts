@@ -7,6 +7,7 @@ import type { HarnessInvokeContext } from "./adapter";
 import { testKv } from "@/testing/test-kv";
 import { createHarnesses } from "@/modules/agents/harnesses";
 import { createHarnessAdapters, harnessLogo } from "./harness-adapters";
+import { needsSignIn } from "./adapter";
 
 const adapters = () =>
   createHarnessAdapters({ harnesses: createHarnesses({ kv: testKv() }) });
@@ -296,5 +297,21 @@ describe("tool names", () => {
     expect(
       adapterFor({ ...harness("claude-code"), id: "custom:lab" }).toolNamePrefixes,
     ).toEqual(["mcp__notefig__", "notefig_"]);
+  });
+});
+
+describe("sign-in errors", () => {
+  it("reads claude-agent-acp's error as a sign-in for every harness, nothing else", () => {
+    for (const built of BUILT_IN_HARNESSES) {
+      const adapter = adapterFor(built);
+      expect(needsSignIn(adapter, "Authentication required")).toBe(true);
+      expect(needsSignIn(adapter, "Internal error")).toBe(false);
+    }
+  });
+
+  it("asks a harness that words it differently", () => {
+    const adapter = { isAuthError: (message: string) => message === "please log in" };
+    expect(needsSignIn(adapter, "please log in")).toBe(true);
+    expect(needsSignIn(adapter, "Authentication required")).toBe(false);
   });
 });

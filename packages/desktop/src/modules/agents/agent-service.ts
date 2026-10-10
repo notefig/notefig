@@ -36,11 +36,12 @@ import { resolveWorkspacePath } from "@/utils/fs";
 import { path as pathutil, workspaceKey } from "@/utils/path";
 import { APP_DIR_NAME } from "@/utils/app-dir";
 import type { KvApi } from "@/modules/kv";
-import type {
-  HarnessAdapter,
-  HarnessAdaptersApi,
-  HarnessSpawnPrep,
-  UsageUpdate,
+import {
+  needsSignIn,
+  type HarnessAdapter,
+  type HarnessAdaptersApi,
+  type HarnessSpawnPrep,
+  type UsageUpdate,
 } from "@/modules/harness-adapters";
 import { MarkdownJoiner } from "@/lib/markdown-joiner-transform";
 import { PermissionBroker } from "./permission-broker";
@@ -963,11 +964,9 @@ export class AgentTask {
       return status;
     } catch (error) {
       const message = errorMessage(error);
-      // Logged-out claude-code-acp fails here with "Authentication required"
-      // (docs/architecture/spikes/phase1-auth-spike.md). Auth-blocked state
-      // is task-row state: methods + hint land on the row, the failed
-      // prompt's text is held for a retry after sign-in.
-      if (/authentication required/i.test(message)) {
+      // Auth-blocked state is task-row state: methods + hint land on the
+      // row, the failed prompt's text is held for a retry after sign-in.
+      if (needsSignIn(this.adapter, message)) {
         this.enterAuthBlock({ turnId, text, contextParts });
       }
       this.warn("turn error", message);
