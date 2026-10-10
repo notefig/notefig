@@ -19,7 +19,7 @@ import {
   type HarnessMark,
   type UsageReporting,
 } from "./adapter";
-import { claudeCodeAdapter } from "./claude-code";
+import { claudeCodeAdapter, claudeLimits } from "./claude-code";
 import { devinAdapter } from "./devin";
 import { geminiCliAdapter } from "./gemini-cli";
 import { openCodeAdapter } from "./opencode";
@@ -36,9 +36,15 @@ const BUILT_IN_ADAPTERS = new Map<string, HarnessAdapter>([
  *  app's tools the way its mode names (by its `mcpRegistrationOverride`),
  *  borrowing only that from the built-in whose mode it is. It declares
  *  nothing it reports (what it has sent is the only evidence) and has no
- *  brand mark. */
+ *  brand mark. What it sends is read in every known vendor's shape, so a
+ *  custom entry running a known adapter (a fork of claude-agent-acp) still
+ *  shows its limits. */
 function customAdapter(registersLike: HarnessAdapter): HarnessAdapter {
-  return { onInvoke: registersLike.onInvoke, reporting: NO_REPORTING };
+  return {
+    onInvoke: registersLike.onInvoke,
+    reporting: NO_REPORTING,
+    limits: claudeLimits,
+  };
 }
 
 const CUSTOM_ADAPTERS: Record<McpRegistrationMode, HarnessAdapter> = {

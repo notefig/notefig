@@ -1,6 +1,17 @@
 import { describe, it, expect } from "vitest";
+import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
+import { testKv } from "@/testing/test-kv";
+import { createHarnessAdapters } from "@/modules/harness-adapters";
+import { createHarnesses } from "./harnesses";
 import { limitsFrom } from "./usage-limits";
 import type { UsageUpdate } from "./turn-usage";
+
+const { adapterFor } = createHarnessAdapters({
+  harnesses: createHarnesses({ kv: testKv() }),
+});
+const adapterOf = (id: string) =>
+  adapterFor(BUILT_IN_HARNESSES.find((harness) => harness.id === id)!);
+const claude = adapterOf("claude-code");
 
 const update = (meta: Record<string, unknown> | undefined) =>
   ({ sessionUpdate: "usage_update", used: 1, size: 2, _meta: meta }) as UsageUpdate;
@@ -8,6 +19,7 @@ const update = (meta: Record<string, unknown> | undefined) =>
 describe("limitsFrom", () => {
   it("reads Claude's rate-limit windows (as recorded in the token-usage spike)", () => {
     const limits = limitsFrom(
+      claude,
       update({
         "_claude/model": "claude-fable-5-1",
         "_claude/rateLimit": {
@@ -43,6 +55,7 @@ describe("limitsFrom", () => {
 
   it("maps warning and rejection, and leaves unknown windows' length null", () => {
     const limits = limitsFrom(
+      claude,
       update({
         "_claude/rateLimit": {
           status: "rejected",
@@ -56,12 +69,13 @@ describe("limitsFrom", () => {
       windows: [{ id: "mystery", utilization: 1, resetsAt: null, durationMs: null }],
     });
     expect(
-      limitsFrom(update({ "_claude/rateLimit": { status: "allowed_warning" } }))?.status,
+      limitsFrom(claude, update({ "_claude/rateLimit": { status: "allowed_warning" } }))?.status,
     ).toBe("warning");
   });
 
   it("reads the one window an event without unifiedWindows speaks for", () => {
     const limits = limitsFrom(
+      claude,
       update({
         "_claude/rateLimit": {
           status: "allowed_warning",
@@ -82,7 +96,13 @@ describe("limitsFrom", () => {
   });
 
   it("is null when the harness reports no limits", () => {
-    expect(limitsFrom(update(undefined))).toBeNull();
-    expect(limitsFrom(update({ "cognition.ai/inputTokens": 5 }))).toBeNull();
+    expect(limitsFrom(claude, update(undefined))).toBeNull();
+    expect(limitsFrom(claude, update({ "cognition.ai/inputTokens": 5 }))).toBeNull();
+  });
+
+  it("is read only by a harness that reports limits", () => {
+    const meta = { "_claude/rateLimit": { status: "allowed" } };
+    expect(limitsFrom(claude, update(meta))?.status).toBe("ok");
+    expect(limitsFrom(adapterOf("opencode"), update(meta))).toBeNull();
   });
 });

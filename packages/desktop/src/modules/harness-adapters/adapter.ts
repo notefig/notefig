@@ -12,7 +12,7 @@
  * context rather than importing a platform, which keeps the adapters
  * unit-testable with plain fakes.
  */
-import type { McpServer } from "@notefig/shared/agent";
+import type { McpServer, UsageLimits } from "@notefig/shared/agent";
 
 /** The stdio variant of ACP's `McpServer` union — the only one that maps
  *  onto a harness config file's local-command shape. HTTP/SSE servers can
@@ -88,6 +88,9 @@ export interface HarnessAdapter {
   reporting: UsageReporting;
   /** Its brand mark; none draws a generic bot. */
   logo?: HarnessMark;
+  /** The account limits a `usage_update`'s `_meta` carries, for a harness
+   *  that reports them there. */
+  limits?(meta: Record<string, unknown>): UsageLimits | null;
 }
 
 /** Reports nothing beyond tokens. */

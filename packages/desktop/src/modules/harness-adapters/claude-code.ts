@@ -1,4 +1,88 @@
+import type {
+  UsageLimitStatus,
+  UsageLimitWindow,
+  UsageLimits,
+} from "@notefig/shared/agent";
 import { NO_PREP, type HarnessAdapter } from "./adapter";
+
+type Meta = Record<string, unknown>;
+
+const HOUR_MS = 3_600_000;
+
+function isRecord(value: unknown): value is Meta {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function finite(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+// ─── Claude (`_claude/rateLimit`, on usage_update) ──────────────────────────
+//
+// { status: "allowed" | "allowed_warning" | "rejected", resetsAt (s),
+//   rateLimitType, utilization, isUsingOverage, overageStatus,
+//   unifiedWindows?: { five_hour: { utilization, resetsAt (s) }, seven_day, … } }
+//
+// Sent on the SDK's `rate_limit_event`, i.e. only when something changed.
+// `unifiedWindows` is optional; without it the event speaks for the one
+// window `rateLimitType` names, so a report can carry a single window and
+// the store merges windows across reports.
+
+const CLAUDE_WINDOW_DURATIONS: Record<string, number> = {
+  five_hour: 5 * HOUR_MS,
+  seven_day: 7 * 24 * HOUR_MS,
+  seven_day_opus: 7 * 24 * HOUR_MS,
+  seven_day_sonnet: 7 * 24 * HOUR_MS,
+  seven_day_overage_included: 7 * 24 * HOUR_MS,
+};
+
+function claudeStatus(status: unknown): UsageLimitStatus {
+  if (status === "allowed") return "ok";
+  if (status === "allowed_warning") return "warning";
+  if (status === "rejected") return "blocked";
+  return "unknown";
+}
+
+/** One window from `{ utilization, resetsAt (s) }`, or null without a
+ *  utilization to show. */
+function claudeWindow(id: string, fields: Meta): UsageLimitWindow | null {
+  const utilization = finite(fields.utilization);
+  if (utilization === null) return null;
+  const resetsAt = finite(fields.resetsAt);
+  return {
+    id,
+    utilization,
+    resetsAt: resetsAt === null ? null : resetsAt * 1000,
+    durationMs: CLAUDE_WINDOW_DURATIONS[id] ?? null,
+  };
+}
+
+function claudeWindows(rateLimit: Meta): UsageLimitWindow[] {
+  const unified = isRecord(rateLimit.unifiedWindows) ? rateLimit.unifiedWindows : {};
+  const windows = Object.entries(unified).flatMap(([id, fields]) => {
+    const window = isRecord(fields) ? claudeWindow(id, fields) : null;
+    return window ? [window] : [];
+  });
+  // The window the event itself is about, when unifiedWindows left it out.
+  const type = rateLimit.rateLimitType;
+  if (typeof type === "string" && !windows.some((window) => window.id === type)) {
+    const window = claudeWindow(type, rateLimit);
+    if (window) windows.push(window);
+  }
+  return windows;
+}
+
+/** Claude's account limits, from a `usage_update`'s `_meta`. */
+export function claudeLimits(meta: Meta): UsageLimits | null {
+  const rateLimit = meta["_claude/rateLimit"];
+  if (!isRecord(rateLimit)) return null;
+  return {
+    status: claudeStatus(rateLimit.status),
+    windows: claudeWindows(rateLimit),
+    usingOverage:
+      typeof rateLimit.isUsingOverage === "boolean" ? rateLimit.isUsingOverage : null,
+  };
+}
 
 /**
  * Claude Code, through the bundled claude-agent-acp sidecar.
@@ -15,6 +99,7 @@ export const claudeCodeAdapter: HarnessAdapter = {
   }),
   // Cost on `usage_update`; rate-limit windows in its `_meta`.
   reporting: { cost: true, limits: true },
+  limits: claudeLimits,
   logo: {
     viewBox: "0 0 24 24",
     fillRule: "evenodd",

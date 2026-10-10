@@ -38,6 +38,7 @@ import { path as pathutil, workspaceKey } from "@/utils/path";
 import { APP_DIR_NAME } from "@/utils/app-dir";
 import type { KvApi } from "@/modules/kv";
 import type {
+  HarnessAdapter,
   HarnessAdaptersApi,
   HarnessSpawnPrep,
 } from "@/modules/harness-adapters";
@@ -385,6 +386,8 @@ export class AgentTask {
   private lastLimitsKey: string | null = null;
 
   private readonly store: AgentStore;
+  /** Everything this task's harness does differently from another. */
+  private readonly adapter: HarnessAdapter;
 
   constructor(
     private readonly deps: AgentRuntimeDeps,
@@ -395,6 +398,7 @@ export class AgentTask {
     readonly parentTaskId?: string,
   ) {
     this.store = deps.store;
+    this.adapter = deps.harnessAdapters.adapterFor(harness);
     this.permissionBroker = new PermissionBroker(
       taskId,
       deps.store.permissionRequests,
@@ -465,8 +469,7 @@ export class AgentTask {
       // The harness's own invoke hook runs here: whatever its dialect needs
       // in place before the process exists (a config file on disk, env to
       // inject) happens inside the adapter — this code reads none of it.
-      const adapter = this.deps.harnessAdapters.adapterFor(this.harness);
-      const prep = await adapter.onInvoke({
+      const prep = await this.adapter.onInvoke({
         workspacePath: this.workspacePath,
         joinPath: (...parts) => pathutil.join(...parts),
         // The app dir is the app's own; the harness apparatus holds no copy.
@@ -1251,7 +1254,7 @@ export class AgentTask {
    *  account. A session/load replay's are history, so never announced. */
   private announceLimits(update: UsageUpdate): void {
     if (this.currentTurn?.entries instanceof ReplayStage) return;
-    const limits = limitsFrom(update);
+    const limits = limitsFrom(this.adapter, update);
     if (!limits) return;
     const key = JSON.stringify(limits);
     if (key === this.lastLimitsKey) return;
