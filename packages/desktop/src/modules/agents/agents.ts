@@ -26,6 +26,11 @@ export type ActionResult = { ok: true } | { ok: false; error: string };
 
 export type PromptHandle = { turnId: string; completed: Promise<TurnOutcome> };
 
+const NOT_STARTED: TurnOutcome = {
+  status: "error",
+  error: "agent task is not started",
+};
+
 export interface AgentTaskHandle {
   readonly taskId: string;
   /**
@@ -230,13 +235,22 @@ export function createAgents({
       // prompt rides the queue while session/load replays history.
       const task = runtime.getOrRevive(taskId);
       if (!task) {
-        return {
-          turnId: newTurnId(),
-          completed: Promise.resolve<TurnOutcome>({
-            status: "error",
-            error: "agent task is not started",
-          }),
-        };
+        // Revival is waiting for the harness rows (startup): send once the
+        // task is live.
+        const revival = runtime.revive(taskId);
+        if (revival) {
+          const turnId = newTurnId();
+          return {
+            turnId,
+            completed: revival.started.then(
+              () =>
+                runtime.task(taskId)?.prompt(text, { ...options, turnId })
+                  .completed ?? NOT_STARTED,
+              () => NOT_STARTED,
+            ),
+          };
+        }
+        return { turnId: newTurnId(), completed: Promise.resolve(NOT_STARTED) };
       }
       return task.prompt(text, options);
     };

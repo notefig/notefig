@@ -151,6 +151,17 @@ describe("rescan", () => {
     expect(rowsOf(harnesses)).toEqual([]);
   });
 
+  it("is null when the verdicts can't be saved, and the next one still runs", async () => {
+    const { db, harnesses } = await withLegacySettings({}, findingShell());
+    db.breakWrites("disk full");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await harnesses.rescan()).toBeNull();
+    warn.mockRestore();
+
+    db.repairWrites();
+    expect(await harnesses.rescan()).not.toBeNull();
+  });
+
   it("skips a disabled custom entry", async () => {
     const { harnesses } = await withLegacySettings(
       { custom: [customEntry({ enabled: false })] },

@@ -103,7 +103,7 @@ export interface AgentRuntimeDeps {
   harnessAdapters: Pick<HarnessAdaptersApi, "adapterFor">;
   /** Each harness as configured (`core.harnesses`): how a restored session
    *  is spawned again. */
-  harnesses: Pick<HarnessesApi, "harness">;
+  harnesses: Pick<HarnessesApi, "harness" | "ready" | "isReady">;
 }
 
 /**
@@ -727,9 +727,12 @@ export class AgentTask {
       contextParts?: PromptContextPart[];
       /** Enqueue ahead of already-queued prompts (held-prompt retry). */
       front?: boolean;
+      /** A turn id already handed to the sender (a prompt sent before
+       *  the task could revive). */
+      turnId?: string;
     },
   ): { turnId: string; completed: Promise<TurnOutcome> } {
-    const turnId = newTurnId();
+    const turnId = options?.turnId ?? newTurnId();
     const completed = new Promise<TurnOutcome>((resolve) => {
       this.turnResolvers.set(turnId, resolve);
     });
@@ -1867,7 +1870,9 @@ export interface AgentRuntime {
    * live, no restored row) or when revival is impossible (harness
    * definition gone → row flips to "unavailable"). The task is REGISTERED
    * synchronously, so callers may enqueue prompts immediately; they ride
-   * the queue until the load completes.
+   * the queue until the load completes — except while the harness rows are
+   * still loading at startup, when revival waits for them (`started`
+   * covers the wait) and the task registers once they have.
    */
   revive(taskId: string): { started: Promise<void> } | null;
   /**
@@ -1958,6 +1963,12 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
   const live = new Map<string, AgentTask>();
   const managers = new Map<string, TaskManager>();
   let reconciled: Promise<void> | null = null;
+  /** Revivals waiting for the harness rows, by task, and the workspace
+   *  each is in: closing it calls them off. */
+  const waiting = new Map<
+    string,
+    { revival: { started: Promise<void> }; workspaceKey: string; off: boolean }
+  >();
 
   const manager = (workspacePath: string) =>
     managers.get(workspaceKey(workspacePath));
@@ -2000,6 +2011,26 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     if (live.get(taskId)) return null;
     const row = store.tasks.get(taskId);
     if (!row || row.status !== "restored" || !row.sessionId) return null;
+    // Until the harness rows have loaded, a custom entry reads as missing
+    // and an edited built-in as stock: revive once they have.
+    if (!deps.harnesses.isReady()) {
+      const pending = waiting.get(taskId);
+      if (pending) return pending.revival;
+      const entry = {
+        revival: { started: Promise.resolve() },
+        workspaceKey: workspaceKey(row.workspacePath),
+        off: false,
+      };
+      entry.revival.started = deps.harnesses.ready().then(() => {
+        waiting.delete(taskId);
+        if (!entry.off) return revive(taskId)?.started;
+      });
+      entry.revival.started.catch((error) => {
+        console.warn("Agent session revival failed:", errorMessage(error));
+      });
+      waiting.set(taskId, entry);
+      return entry.revival;
+    }
     // Read synchronously: revival registers the task in the same tick, so
     // a prompt can queue at once.
     const harness = deps.harnesses.harness(row.harnessId).definition();
@@ -2028,6 +2059,9 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
 
   const disposeWorkspace = async (workspacePath: string) => {
     const key = workspaceKey(workspacePath);
+    for (const pending of waiting.values()) {
+      if (pending.workspaceKey === key) pending.off = true;
+    }
     const existing = managers.get(key);
     managers.delete(key);
     await existing?.disposeAll();

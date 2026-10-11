@@ -104,6 +104,9 @@ export interface HarnessesApi {
   /** Resolves once the rows have loaded and settings kept by an older
    *  version have moved into them. Every write waits for it. Idempotent. */
   ready(): Promise<void>;
+  /** Whether `ready()` has resolved — until then, a definition read from
+   *  the rows may be the stock built-in, or missing for a custom entry. */
+  isReady(): boolean;
   /** Built-ins with this machine's edits and custom entries applied —
    *  every enabled harness, whether or not its binary was found. Built-ins
    *  alone until the rows have loaded. */
@@ -213,7 +216,12 @@ export function createHarnesses({
   };
 
   let readied: Promise<void> | null = null;
-  const ready = () => (readied ??= rows.preload().then(migrate));
+  let settled = false;
+  const ready = () =>
+    (readied ??= rows
+      .preload()
+      .then(migrate)
+      .then(() => void (settled = true)));
 
   const scans = createScanBatcher({
     proc,
@@ -299,6 +307,7 @@ export function createHarnesses({
   return {
     collection: rows,
     ready,
+    isReady: () => settled,
     configured: () => configuredHarnesses(rows.values()),
     label: (harnessId) => harnessLabel(rows.values(), harnessId),
     harness,
@@ -324,7 +333,8 @@ export function createHarnesses({
  * Spawning a login shell is the expensive part of an install check, so
  * the checks asked for in one tick — `rescan()` asking every handle — run
  * as one script, and their verdicts are recorded together. Records go one
- * after another.
+ * after another; a batch whose record fails resolves null, and the next
+ * batch still runs.
  */
 function createScanBatcher({
   proc,
@@ -346,13 +356,23 @@ function createScanBatcher({
       proc,
       batch.map((item) => item.entry),
     );
+    // A verdict that wasn't saved is reported as "couldn't check": the
+    // caller (Settings' Rescan) says so, and the next launch checks again.
+    let saved = false;
     if (results !== null) {
-      writes = writes.then(() => record(results)).catch((error) => {
-        console.warn("Recording harness install checks failed:", error);
-      });
-      await writes;
+      const write = writes.then(() => record(results));
+      writes = write.catch(() => {});
+      saved = await write.then(
+        () => true,
+        (error) => {
+          console.warn("Recording harness install checks failed:", error);
+          return false;
+        },
+      );
     }
-    for (const item of batch) item.resolve(results?.[item.entry.id] ?? null);
+    for (const item of batch) {
+      item.resolve(saved ? (results?.[item.entry.id] ?? null) : null);
+    }
   };
 
   return {
