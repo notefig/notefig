@@ -10,6 +10,7 @@
  */
 import type {
   AuthMethod,
+  AvailableCommand,
   SessionConfigSelect,
   ToolCallUpdate,
 } from "./acp-types";
@@ -79,6 +80,13 @@ export type AgentTaskRow = {
    * Absent or empty = the harness advertises nothing (picker hidden).
    */
   configOptions?: SessionConfigSelect[];
+  /**
+   * The slash commands and skills the session offers, as the agent last
+   * reported them (`available_commands_update` — Claude sends it right
+   * after session/new, before any turn). Runtime-only like
+   * `configOptions`. Absent = not reported.
+   */
+  commands?: AvailableCommand[];
   /**
    * What the session has spent, summed over its settled turns, plus the
    * latest context fill. Durable: it rides the persisted row, so a restored

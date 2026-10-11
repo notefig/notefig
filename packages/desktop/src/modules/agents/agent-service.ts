@@ -1,6 +1,6 @@
 import "./agent-events";
 import type { EditorsApi } from "@/modules/editors";
-import type { Hooks } from "@notefig/core";
+import type { CoreHookMap, Hooks } from "@notefig/core";
 import type { WorkspaceHistory } from "@/modules/history";
 import type { WorkspaceFiles } from "@/modules/files";
 import type { DocumentsApi } from "@/modules/documents";
@@ -18,6 +18,7 @@ import {
   type SessionNotification,
   type ToolCallUpdate,
   type TurnOutcome,
+  type AvailableCommand,
   type SessionConfigSelect,
   type PromptResponse,
   type SessionUsage,
@@ -1079,6 +1080,32 @@ export class AgentTask {
         draft.configOptions = options;
       });
     }
+    this.announceCatalog({ configOptions: options });
+  }
+
+  /** The session's commands and skills, kept on the row like its settings.
+   *  Arrives between turns (Claude sends it right after session/new) as
+   *  readily as during one, and never becomes a transcript entry. */
+  private writeCommands(commands: AvailableCommand[]): void {
+    if (this.store.tasks.get(this.taskId)) {
+      this.store.tasks.update(this.taskId, (draft) => {
+        draft.commands = commands;
+      });
+    }
+    this.announceCatalog({ commands });
+  }
+
+  /** What this session says its harness offers, for whoever keeps it
+   *  beyond the task (`agent:catalog`). */
+  private announceCatalog(
+    offer: Pick<CoreHookMap["agent:catalog"], "configOptions" | "commands">,
+  ): void {
+    this.deps.hooks.emit("agent:catalog", {
+      taskId: this.taskId,
+      harnessId: this.harness.id,
+      workspacePath: this.workspacePath,
+      ...offer,
+    });
   }
 
   /**
@@ -1310,26 +1337,31 @@ export class AgentTask {
     });
   }
 
-  handleSessionUpdate(notification: SessionNotification): void {
-    const update = notification.update;
-
+  /** The updates that are the task's, not a turn's: they land between
+   *  turns as readily as during one. True when `update` was one. */
+  private handleTaskUpdate(update: SessionUpdate): boolean {
     if (update.sessionUpdate === "usage_update") {
       this.recordUsageUpdate(update);
-      return;
+      return true;
     }
-
-    // Tool calls coalesce at the task level, so a final tool_call_update that
-    // arrives at/after the turn boundary still lands. Handle it before the
-    // active-turn guard below.
+    // Tool calls coalesce at the task level, so a final tool_call_update
+    // that arrives at/after the turn boundary still lands.
     if (isToolCallUpdate(update)) {
       this.upsertToolEntry(update);
-      return;
+      return true;
     }
-
+    if (update.sessionUpdate === "available_commands_update") {
+      this.writeCommands(update.availableCommands);
+      return true;
+    }
     // Mode/config changes are session state the client already folded into
-    // the task row (MET-81); they arrive between turns as readily as during
-    // one and never become transcript entries.
-    if (isSessionConfigUpdate(update)) return;
+    // the task row (MET-81); they never become transcript entries.
+    return isSessionConfigUpdate(update);
+  }
+
+  handleSessionUpdate(notification: SessionNotification): void {
+    const update = notification.update;
+    if (this.handleTaskUpdate(update)) return;
 
     const turn = this.currentTurn;
     if (!turn) return; // other updates need a turn to attach to
@@ -1379,8 +1411,8 @@ export class AgentTask {
         break;
       }
       default:
-        // available_commands_update and the rest — not rendered yet, but
-        // kept as transcript data rather than dropped. Run boundaries are
+        // The rest — not rendered yet, but kept as transcript data rather
+        // than dropped. Run boundaries are
         // left alone.
         turn.entries.insert({
           id: newEventId(),

@@ -171,16 +171,16 @@ test.describe("agent workflows", () => {
       await expect(card).toHaveAttribute("data-tool-status", "completed");
     });
 
-    test("available_commands / current_mode updates are kept as data, never rendered", async ({
+    test("available_commands / current_mode / session_info updates are kept as data, never rendered", async ({
       page,
     }) => {
       const { recording } = await sessionWith(page, "unknown", "unknown-updates.json");
       await sendAndSettle(page, promptTextOf(recording));
 
       await expect(entries(page, "assistant").last()).toContainText("Mode set.");
-      // user, unknown (available_commands), assistant in the collection —
-      // current_mode_update is session state on the task row (MET-81), never
-      // an entry…
+      // user, unknown (session_info), assistant in the collection —
+      // current_mode_update and available_commands_update are session state
+      // on the task row (MET-81, MET-221), never entries…
       expect((await collectionStats(page)).entries).toBe(3);
       // …the unknown one is a row, but an empty one (kept as data only).
       const unknownTexts = await entries(page, "unknown").evaluateAll((nodes) =>
