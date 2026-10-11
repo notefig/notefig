@@ -35,6 +35,11 @@ import {
   type HarnessRow,
   type HarnessSettingsRow,
 } from "@/modules/agents/harness-settings";
+import {
+  catalogFor,
+  type HarnessCatalog,
+  type HarnessCatalogRow,
+} from "@/modules/agents/harness-catalog";
 import { useCore } from "@notefig/core/react";
 
 export type {
@@ -397,4 +402,29 @@ export function useHarnessLabels(): (harnessId: string) => string {
     () => (harnessId: string) => harnessLabel(rows, harnessId),
     [rows],
   );
+}
+
+const NO_CATALOG_ROWS: HarnessCatalogRow[] = [];
+
+/** What a harness offers, live: its settings (the model among them) and its
+ *  commands, the workspace's own over the ones seen anywhere
+ *  (`catalogFor`). Null halves are not known yet. */
+export function useHarnessCatalog(
+  harnessId: string,
+  workspacePath: string | null = null,
+): HarnessCatalog & { loading: boolean } {
+  const { harnessCatalog } = useCore();
+  const { data, isLoading } = useLiveQuery(
+    (q) =>
+      q
+        .from({ row: harnessCatalog.collection })
+        .where(({ row }) => eq(row.harnessId, harnessId)),
+    [harnessCatalog, harnessId],
+  );
+  const rows = data ?? NO_CATALOG_ROWS;
+  const catalog = useMemo(
+    () => catalogFor(rows, workspacePath),
+    [rows, workspacePath],
+  );
+  return { ...catalog, loading: isLoading };
 }
