@@ -9,11 +9,7 @@ import {
   newTaskId,
   newTurnId,
   newEventId,
-  BUILT_IN_HARNESSES,
   composePrompt,
-  parseCustomHarnessEntries,
-  parseHarnessOverrides,
-  resolveEffectiveHarnesses,
   type ContentBlock,
   type HarnessDefinition,
   type McpServer,
@@ -80,11 +76,7 @@ import {
   createMockAgentTransport,
   createMockMcpEndpoint,
 } from "./mock-harness";
-import {
-  HARNESS_SETTINGS_NAMESPACE,
-  HARNESS_OVERRIDES_KEY,
-  HARNESS_CUSTOM_KEY,
-} from "./harness-discovery";
+import type { HarnessesApi } from "./harnesses";
 import { splitLeadingQuote, type AgentsApi } from "./agents";
 
 /** KV namespace for agent state (sessionId per task, workspace trust flag). */
@@ -109,6 +101,9 @@ export interface AgentRuntimeDeps {
   hooks: Pick<Hooks, "emit">;
   /** What each harness does differently (`core.harnessAdapters`). */
   harnessAdapters: Pick<HarnessAdaptersApi, "adapterFor">;
+  /** Each harness as configured (`core.harnesses`): how a restored session
+   *  is spawned again. */
+  harnesses: Pick<HarnessesApi, "harness">;
 }
 
 /**
@@ -2001,33 +1996,13 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       });
   };
 
-  /**
-   * The effective (overridden/custom-aware) definition for a harness id,
-   * read synchronously off the harness-settings KV collection — revival
-   * must register the task in the same tick so a prompt can queue
-   * immediately. Falls back to the built-in definition when settings aren't
-   * loaded yet.
-   */
-  const effectiveHarnessById = (
-    harnessId: string,
-  ): HarnessDefinition | undefined => {
-    const kv = deps.kv.collection(HARNESS_SETTINGS_NAMESPACE);
-    const overrides = parseHarnessOverrides(
-      kv.get(HARNESS_OVERRIDES_KEY)?.value,
-    );
-    const custom = parseCustomHarnessEntries(kv.get(HARNESS_CUSTOM_KEY)?.value);
-    return (
-      resolveEffectiveHarnesses(overrides, custom).find(
-        (h) => h.id === harnessId,
-      ) ?? BUILT_IN_HARNESSES.find((h) => h.id === harnessId)
-    );
-  };
-
   const revive: AgentRuntime["revive"] = (taskId) => {
     if (live.get(taskId)) return null;
     const row = store.tasks.get(taskId);
     if (!row || row.status !== "restored" || !row.sessionId) return null;
-    const harness = effectiveHarnessById(row.harnessId);
+    // Read synchronously: revival registers the task in the same tick, so
+    // a prompt can queue at once.
+    const harness = deps.harnesses.harness(row.harnessId).definition();
     if (!harness) {
       store.tasks.update(taskId, (draft) => {
         draft.status = "unavailable";

@@ -62,6 +62,7 @@ export function testAgents(
 ): TestAgents {
   const store = overrides.store ?? testAgentStore();
   const kv = overrides.kv ?? testKv();
+  const harnesses = testHarnesses({ kv });
   const hooks = overrides.hooks ?? createHooks();
   const fs: AgentRuntimeDeps["fs"] = overrides.fs ?? {
     readFiles: async (paths) => ({
@@ -100,9 +101,8 @@ export function testAgents(
     }),
     agents: () => agents!,
     hooks,
-    harnessAdapters: createHarnessAdapters({
-      harnesses: testHarnesses({ kv }),
-    }),
+    harnessAdapters: createHarnessAdapters({ harnesses }),
+    harnesses,
     ...overrides,
   };
   const runtime = createAgentRuntime(deps);

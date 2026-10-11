@@ -26,6 +26,7 @@ import { layoutModule } from "@/modules/layout";
 import { editorsModule } from "@/modules/editors";
 import { historyModule } from "@/modules/history";
 import { harnessAdaptersModule } from "@/modules/harness-adapters";
+import { harnessesModule } from "./harnesses";
 import { platformModule } from "@/core/services";
 
 declare module "@notefig/core" {
@@ -48,6 +49,7 @@ export const workspaceAgentsModule = defineModule({
     layoutModule,
     editorsModule,
     harnessAdaptersModule,
+    harnessesModule,
   ],
   register: (ctx) => {
     const store = ctx.use("agentStore");
@@ -79,6 +81,7 @@ export const workspaceAgentsModule = defineModule({
       agents: () => agents!,
       hooks: ctx.hooks,
       harnessAdapters: ctx.use("harnessAdapters"),
+      harnesses: ctx.use("harnesses"),
     });
     return (agents = createAgents({
       runtime,

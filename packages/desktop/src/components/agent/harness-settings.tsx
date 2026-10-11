@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Check,
@@ -9,15 +9,6 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
-import {
-  parseCustomHarnessEntries,
-  parseHarnessDiscovery,
-  parseHarnessOverrides,
-  CustomHarnessEntrySchema,
-  HarnessOverrideSchema,
-  type CustomHarnessEntry,
-  type HarnessOverride,
-} from "@notefig/shared/agent";
 import { Button } from "@notefig/ui/button";
 import { Input } from "@notefig/ui/input";
 import { Textarea } from "@notefig/ui/textarea";
@@ -46,28 +37,19 @@ import {
   AlertDialogTitle,
 } from "@notefig/ui/alert-dialog";
 import { cn } from "@notefig/ui/utils";
-import { useKv } from "@/modules/kv/react";
-import {
-  HARNESS_CUSTOM_KEY,
-  HARNESS_DISCOVERY_KEY,
-  HARNESS_OVERRIDES_KEY,
-  HARNESS_SETTINGS_NAMESPACE,
-} from "@/modules/agents/harness-discovery";
+import { useHarnesses } from "@/modules/agents/react";
+import type { HarnessSettingsRow } from "@/modules/agents/harness-settings";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "@/components/agent/harness-logo";
 import {
   builtInHarness,
   definitionToForm,
-  deriveHarnessSettingsRows,
   formToCustomEntry,
   formToOverride,
   newCustomHarnessId,
-  toggleCustomEnabled,
-  toggleOverrideEnabled,
   validateHarnessForm,
   type HarnessFormErrors,
   type HarnessFormState,
-  type HarnessSettingsRow,
 } from "./harness-settings-form";
 import { useCore } from "@notefig/core/react";
 
@@ -95,48 +77,20 @@ function naturalEnabled(row: HarnessSettingsRow): boolean {
  * dot, logo, name; controls behind a … menu), with an add-row at the bottom
  * and an icon-only rescan. Editing expands that row inline into a
  * collapsible form (the rest of the list stays visible); the add-row
- * expands the same way for a new custom entry. All state lives in the
- * `harness-settings` KV namespace, written through useKv so pickers update
+ * expands the same way for a new custom entry. Every edit goes through the
+ * harness's handle (`core.harnesses.harness(id)`), so the pickers update
  * live.
  */
 export function HarnessSettings() {
   const { t } = useTranslation();
-  const kv = useKv<unknown>(HARNESS_SETTINGS_NAMESPACE);
   const { harnesses } = useCore();
-  const rawOverrides = kv.get(HARNESS_OVERRIDES_KEY);
-  const rawCustom = kv.get(HARNESS_CUSTOM_KEY);
-  const rawDiscovery = kv.get(HARNESS_DISCOVERY_KEY);
-
-  const { overrides, custom, rows } = useMemo(() => {
-    const overrides = parseHarnessOverrides(rawOverrides);
-    const custom = parseCustomHarnessEntries(rawCustom);
-    return {
-      overrides,
-      custom,
-      rows: deriveHarnessSettingsRows(
-        overrides,
-        custom,
-        parseHarnessDiscovery(rawDiscovery),
-      ),
-    };
-  }, [rawOverrides, rawCustom, rawDiscovery]);
+  const rows = useHarnesses((harnesses) => harnesses.settingsRows());
 
   const { defaultHarness, setDefaultHarness } = useDefaultHarness();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmResetId, setConfirmResetId] = useState<string | null>(null);
-
-  const writeOverrides = (next: Record<string, HarnessOverride>) =>
-    kv.set(HARNESS_OVERRIDES_KEY, next);
-  const writeCustom = (next: CustomHarnessEntry[]) =>
-    kv.set(HARNESS_CUSTOM_KEY, next);
-
-  const deleteOverride = (id: string) => {
-    const next = { ...overrides };
-    delete next[id];
-    writeOverrides(next);
-  };
 
   const rescan = async () => {
     setScanning(true);
@@ -148,20 +102,8 @@ export function HarnessSettings() {
     }
   };
 
-  const toggleEnabled = (row: HarnessSettingsRow) => {
-    if (row.origin === "custom") {
-      writeCustom(toggleCustomEnabled(custom, row.definition.id, !row.enabled));
-    } else {
-      writeOverrides(
-        toggleOverrideEnabled(
-          overrides,
-          row.definition.id,
-          !row.enabled,
-          naturalEnabled(row),
-        ),
-      );
-    }
-  };
+  const toggleEnabled = (row: HarnessSettingsRow) =>
+    void harnesses.harness(row.definition.id).setEnabled(!row.enabled);
 
   const saveRow = (
     row: HarnessSettingsRow,
@@ -172,37 +114,22 @@ export function HarnessSettings() {
       requireLabel: origin === "custom",
     });
     if (!parsed) return errors;
+    // Saving re-checks the install: the verdict is keyed by harness id
+    // alone, and would otherwise keep describing the executable the
+    // harness pointed at before the edit (or, reverted, the override's).
+    const harness = harnesses.harness(definition.id);
     if (origin === "custom") {
       const entry = formToCustomEntry(parsed, form, definition.id, enabled);
-      const checked = CustomHarnessEntrySchema.safeParse(entry);
-      if (!checked.success) return errors;
-      const nextCustom = custom.map((existing) =>
-        existing.id === definition.id ? checked.data : existing,
-      );
-      writeCustom(nextCustom);
-      // Re-probe with the edited definition, exactly as the new-entry
-      // path does. Discovery results are keyed by harness id alone, so
-      // without this the stored verdict keeps describing the executable
-      // the harness pointed at BEFORE the edit — the pickers and the
-      // welcome screen would then report on the wrong binary.
-      void harnesses.harness(definition.id).rescan();
+      void harness.saveCustom(entry);
     } else {
-      const override = formToOverride(
-        parsed,
-        builtInHarness(definition.id)!,
-        enabled,
-        naturalEnabled(row),
+      void harness.saveOverride(
+        formToOverride(
+          parsed,
+          builtInHarness(definition.id)!,
+          enabled,
+          naturalEnabled(row),
+        ),
       );
-      if (override === null) {
-        deleteOverride(definition.id);
-      } else {
-        const checked = HarnessOverrideSchema.safeParse(override);
-        if (!checked.success) return errors;
-        writeOverrides({ ...overrides, [definition.id]: checked.data });
-      }
-      // Reverting to the built-in re-probes too: the stored result may
-      // describe the override's command, not the built-in's.
-      void harnesses.harness(definition.id).rescan();
     }
     setEditingId(null);
     return null;
@@ -301,18 +228,13 @@ export function HarnessSettings() {
                     requireLabel: true,
                   });
                   if (!parsed) return errors;
-                  const entry = formToCustomEntry(
-                    parsed,
-                    form,
-                    newCustomHarnessId(),
-                    true,
-                  );
-                  const checked = CustomHarnessEntrySchema.safeParse(entry);
-                  if (!checked.success) return errors;
-                  writeCustom([...custom, checked.data]);
+                  const id = newCustomHarnessId();
+                  // Saving checks its install: a found/not-found status
+                  // right away.
+                  void harnesses
+                    .harness(id)
+                    .saveCustom(formToCustomEntry(parsed, form, id, true));
                   setEditingId(null);
-                  // New entry gets a found/not-found status right away.
-                  void harnesses.harness(checked.data.id).rescan();
                   return null;
                 }}
               />
@@ -343,11 +265,9 @@ export function HarnessSettings() {
             <AlertDialogAction
               onClick={() => {
                 if (confirmDeleteRow) {
-                  writeCustom(
-                    custom.filter(
-                      (entry) => entry.id !== confirmDeleteRow.definition.id,
-                    ),
-                  );
+                  void harnesses
+                    .harness(confirmDeleteRow.definition.id)
+                    .remove();
                 }
                 setConfirmDeleteId(null);
               }}
@@ -366,7 +286,9 @@ export function HarnessSettings() {
             setConfirmResetId(open ? confirmResetRow.definition.id : null)
           }
           onConfirm={() => {
-            deleteOverride(confirmResetRow.definition.id);
+            void harnesses
+              .harness(confirmResetRow.definition.id)
+              .saveOverride(null);
             setEditingId(null);
           }}
         />

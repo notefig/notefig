@@ -11,7 +11,6 @@ import { createCore, type AnyModule, type Core } from "@notefig/core";
 import { QueryClient } from "@tanstack/react-query";
 import { platformAdapter } from "@/adapters";
 import { agentStoreModule } from "@/modules/agents/agent-collections";
-import { scanHarnessesModule } from "@/modules/agents/harnesses";
 import { mockAgentModule } from "@/modules/agents/mock-harness";
 import { promptRoundObserverModule } from "@/modules/agents/round-observer";
 import { tunnelModule } from "@/modules/agents/tunnel/tunnel-module";
@@ -86,7 +85,6 @@ export function desktopModules(): AnyModule[] {
     // Reopen the workspaces the user left open; the marketing site seeds
     // its one fixed root instead.
     restoreWorkspacesModule,
-    scanHarnessesModule,
     tunnelModule,
     telemetryModule,
   ];

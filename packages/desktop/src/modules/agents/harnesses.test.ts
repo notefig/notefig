@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
+import { BUILT_IN_HARNESSES, type CustomHarnessEntry } from "@notefig/shared/agent";
 import { testKv } from "@/testing/test-kv";
 import { testHarnesses } from "@/testing/test-harnesses";
 import {
@@ -129,5 +129,130 @@ describe("a harness's rescan", () => {
     const proc = findingShell();
     expect(await testHarnesses({ proc }).harness("custom:gone").rescan()).toBeNull();
     expect(proc.runShellCommand).not.toHaveBeenCalled();
+  });
+});
+
+function customEntry(partial: Partial<CustomHarnessEntry> = {}): CustomHarnessEntry {
+  return {
+    id: "custom:1",
+    label: "Lab",
+    command: "lab-acp",
+    args: [],
+    env: {},
+    mcpRegistrationOverride: "none",
+    enabled: true,
+    ...partial,
+  };
+}
+
+describe("a harness's definition", () => {
+  it("is a built-in with its override, a custom entry, or nothing", async () => {
+    const harnesses = testHarnesses();
+    expect(harnesses.harness("opencode").definition()?.command).toBe("opencode");
+    expect(harnesses.harness("custom:gone").definition()).toBeUndefined();
+
+    await harnesses.harness("opencode").saveOverride({
+      id: "opencode",
+      enabled: true,
+      command: "ocv",
+    });
+    await harnesses.harness("custom:1").saveCustom(customEntry());
+    expect(harnesses.harness("opencode").definition()?.command).toBe("ocv");
+    expect(harnesses.harness("custom:1").definition()?.label).toBe("Lab");
+  });
+});
+
+describe("a harness's settings", () => {
+  it("saves an override and checks the install again", async () => {
+    const proc = findingShell();
+    const harnesses = testHarnesses({ proc });
+    expect(
+      await harnesses
+        .harness("opencode")
+        .saveOverride({ id: "opencode", enabled: true, command: "ocv" }),
+    ).toBe(true);
+    await vi.waitFor(() =>
+      expect(proc.runShellCommand.mock.calls[0]?.[0]).toContain("ocv"),
+    );
+
+    await harnesses.harness("opencode").saveOverride(null);
+    expect(harnesses.harness("opencode").definition()?.command).toBe("opencode");
+  });
+
+  it("writes no override for an id that is no built-in", async () => {
+    const harnesses = testHarnesses();
+    expect(
+      await harnesses
+        .harness("custom:1")
+        .saveOverride({ id: "custom:1", enabled: false }),
+    ).toBe(false);
+  });
+
+  it("adds a custom entry under the handle's id, then replaces it", async () => {
+    const harnesses = testHarnesses();
+    await harnesses.harness("custom:1").saveCustom(customEntry({ id: "custom:other" }));
+    await harnesses.harness("custom:1").saveCustom(customEntry({ label: "Renamed" }));
+    const custom = harnesses.configured().filter((h) => h.id.startsWith("custom:"));
+    expect(custom.map((h) => [h.id, h.label])).toEqual([["custom:1", "Renamed"]]);
+  });
+
+  it("rejects a custom entry the schema rejects, writing nothing", async () => {
+    const harnesses = testHarnesses();
+    expect(
+      await harnesses.harness("custom:1").saveCustom(customEntry({ command: "" })),
+    ).toBe(false);
+    expect(harnesses.harness("custom:1").definition()).toBeUndefined();
+  });
+
+  it("keeps both of two edits made at once", async () => {
+    const harnesses = testHarnesses();
+    await Promise.all([
+      harnesses.harness("custom:1").saveCustom(customEntry()),
+      harnesses.harness("custom:2").saveCustom(customEntry({ id: "custom:2" })),
+    ]);
+    expect(harnesses.harness("custom:1").definition()).toBeDefined();
+    expect(harnesses.harness("custom:2").definition()).toBeDefined();
+  });
+
+  it("switches a built-in off and back on, leaving no override behind", async () => {
+    const harnesses = testHarnesses();
+    await harnesses.harness("opencode").setEnabled(false);
+    expect(harnesses.pickable().map((h) => h.id)).not.toContain("opencode");
+    expect(
+      harnesses.settingsRows().find((row) => row.definition.id === "opencode"),
+    ).toMatchObject({ enabled: false, origin: "builtin" });
+
+    await harnesses.harness("opencode").setEnabled(true);
+    expect(harnesses.pickable().map((h) => h.id)).toContain("opencode");
+    expect(
+      harnesses.settingsRows().find((row) => row.definition.id === "opencode"),
+    ).toMatchObject({ enabled: true, origin: "builtin" });
+  });
+
+  it("switches a custom entry off and removes it", async () => {
+    const harnesses = testHarnesses();
+    await harnesses.harness("custom:1").saveCustom(customEntry());
+    await harnesses.harness("custom:1").setEnabled(false);
+    expect(harnesses.pickable().map((h) => h.id)).not.toContain("custom:1");
+    expect(harnesses.settingsRows().map((row) => row.definition.id)).toContain(
+      "custom:1",
+    );
+
+    await harnesses.harness("custom:1").remove();
+    expect(harnesses.settingsRows().map((row) => row.definition.id)).not.toContain(
+      "custom:1",
+    );
+  });
+});
+
+describe("views", () => {
+  it("offers no built-in the install check didn't find, but reports it", async () => {
+    const proc = {
+      runShellCommand: vi.fn(async () => ({ stdout: "", exitCode: 0 })),
+    };
+    const harnesses = testHarnesses({ proc });
+    await harnesses.rescan();
+    expect(harnesses.pickable()).toEqual([]);
+    expect(harnesses.probed().map((probed) => probed.harness.id)).toContain("devin");
   });
 });

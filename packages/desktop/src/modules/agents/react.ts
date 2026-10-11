@@ -9,14 +9,10 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery, eq, and, inArray } from "@tanstack/react-db";
-import {
-  BUILT_IN_HARNESSES,
-  buildHarnessResumeCommand,
-} from "@notefig/shared/agent";
+import { buildHarnessResumeCommand } from "@notefig/shared/agent";
 import { workspaceKey } from "@/utils/path";
 import { getDesktopOs } from "@/utils/platform";
 import i18n from "@/utils/intl";
-import { useActiveHarnesses } from "@/hooks/use-harness-selection";
 import {
   type AgentStore,
   type AgentTaskRow,
@@ -25,6 +21,14 @@ import {
   type AgentPermissionRequestRow,
 } from "@/modules/agents/agent-collections";
 import type { AgentsApi } from "@/modules/agents/agents";
+import type { HarnessesApi } from "@/modules/agents/harnesses";
+import {
+  HARNESS_CUSTOM_KEY,
+  HARNESS_DISCOVERY_KEY,
+  HARNESS_OVERRIDES_KEY,
+  HARNESS_SETTINGS_NAMESPACE,
+} from "@/modules/agents/harness-discovery";
+import { useKv } from "@/modules/kv/react";
 import { useCore } from "@notefig/core/react";
 
 export type {
@@ -255,12 +259,12 @@ export type AgentSessionActions = {
 };
 
 export function useSessionActions(task: AgentTaskRow): AgentSessionActions {
-  // The task's harness may be disabled or undiscovered by now — fall back
-  // to the built-in definition so its sessions keep their affordances.
-  const harnesses = useActiveHarnesses();
-  const harness =
-    harnesses.find((entry) => entry.id === task.harnessId) ??
-    BUILT_IN_HARNESSES.find((entry) => entry.id === task.harnessId);
+  // As configured, whether or not the pickers offer it now (disabled or
+  // undiscovered), so its sessions keep their affordances.
+  const harness = useHarnesses(
+    (harnesses) => harnesses.harness(task.harnessId).definition(),
+    [task.harnessId],
+  );
   const sessionId = task.sessionId ?? null;
   return {
     sessionId,
@@ -332,4 +336,28 @@ export function describeTaskMeta(meta: AgentTaskMeta): string | null {
   // normal session whose runtime just hasn't spawned yet (MET-54). Nothing
   // to say: each list trails what suits it (the sidebar, a time ago).
   return null;
+}
+
+/**
+ * A read of `core.harnesses` (`harnesses => harnesses.pickable()`), live:
+ * it runs again when a harness's settings or install check change, and
+ * hands back the same value until then, so it is safe in an effect's
+ * dependencies. `read` is taken from the render that runs it; whatever
+ * else it reads goes in `deps` (`[harnessId]`).
+ */
+export function useHarnesses<T>(
+  read: (harnesses: HarnessesApi) => T,
+  deps: readonly unknown[] = [],
+): T {
+  const { harnesses } = useCore();
+  const settings = useKv<unknown>(HARNESS_SETTINGS_NAMESPACE);
+  // Row values are stable references between writes.
+  const overrides = settings.get(HARNESS_OVERRIDES_KEY);
+  const custom = settings.get(HARNESS_CUSTOM_KEY);
+  const discovery = settings.get(HARNESS_DISCOVERY_KEY);
+  // Not keyed on `read`: a fresh closure each render would defeat the memo.
+  return useMemo(
+    () => read(harnesses),
+    [harnesses, overrides, custom, discovery, ...deps],
+  );
 }
