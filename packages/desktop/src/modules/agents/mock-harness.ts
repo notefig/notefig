@@ -219,9 +219,11 @@ export class FakeAgent {
 
   private async newSession(id: number, params: Json): Promise<void> {
     this.newSessionParams = params;
-    await this.answer(id, -32603, () => this.onNewSession(params, this));
-    if (this.commandsAfterNewSession) {
-      this.update(this.newSessionResult.sessionId as string, {
+    let session: Json = null;
+    await this.answer(id, -32603, async () => (session = await this.onNewSession(params, this)));
+    // Only for a session that was opened, under the id it was given.
+    if (this.commandsAfterNewSession && session) {
+      this.update(session.sessionId as string, {
         sessionUpdate: "available_commands_update",
         availableCommands: this.commandsAfterNewSession,
       });
