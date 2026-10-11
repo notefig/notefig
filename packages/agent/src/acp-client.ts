@@ -443,6 +443,18 @@ export class NotefigAcpClient implements Client {
   }
 
   /**
+   * ACP `session/delete`: remove a session from the agent's own history,
+   * when `initialize` advertised `sessionCapabilities.delete`. False,
+   * sending nothing, when it didn't.
+   */
+  async deleteSession(sessionId: string): Promise<boolean> {
+    if (!this.agentCapabilities?.sessionCapabilities?.delete) return false;
+    await this.requireConnection().deleteSession({ sessionId });
+    this.sessionConfigs.delete(sessionId);
+    return true;
+  }
+
+  /**
    * ACP `authenticate` with one of the methods `initialize` advertised.
    * Out-of-band methods (terminal logins — both claude-code and OpenCode
    * today) typically fail here or no-op; the caller treats a rejection as

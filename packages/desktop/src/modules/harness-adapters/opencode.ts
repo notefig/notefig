@@ -3,6 +3,7 @@ import {
   NO_PREP,
   OPENCODE_TOOL_PREFIX,
   isStdioMcpServer,
+  type DiscoveredCatalog,
   type HarnessAdapter,
   type StdioMcpServer,
 } from "./adapter";
@@ -39,6 +40,14 @@ export const openCodeAdapter: HarnessAdapter = {
       ...NO_PREP,
       env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(config) },
     };
+  },
+  // Not by session: OpenCode keeps every ACP session in its history and
+  // can't delete one (spike: 430 → 431), so its models come from
+  // `opencode models` and its commands only from the user's own sessions.
+  async discoverCatalog(io) {
+    const listed = await io.runHarness(["models"]);
+    if (!listed || listed.exitCode !== 0) return null;
+    return parseOpenCodeModels(listed.stdout);
   },
   // Cost on `usage_update`; no account limits.
   reporting: { cost: true, limits: false },
@@ -102,4 +111,32 @@ function deepMergeConfigs(
     }
   }
   return merged;
+}
+
+/**
+ * `opencode models`: one `provider/model` per line, as a model option shaped
+ * like the one an OpenCode session reports (id `model`), so a picker reads
+ * both alike. Lines that aren't a model id (a banner, a warning) are
+ * skipped; none at all is "not found", never an empty list. Which model a
+ * new session starts on isn't listed, so the first stands in.
+ */
+export function parseOpenCodeModels(stdout: string): DiscoveredCatalog | null {
+  const models = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^[\w.-]+\/\S+$/.test(line));
+  if (models.length === 0) return null;
+  return {
+    configOptions: [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: models[0],
+        options: models.map((model) => ({ value: model, name: model })),
+      },
+    ],
+    commands: null,
+  };
 }

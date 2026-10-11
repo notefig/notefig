@@ -14,9 +14,11 @@
  */
 import {
   MCP_SERVER_NAME,
+  type AvailableCommand,
   type Cost,
   type McpServer,
   type PromptResponse,
+  type SessionConfigSelect,
   type SessionNotification,
   type TokenCounts,
   type UsageLimits,
@@ -159,6 +161,28 @@ export type HarnessMark = {
   paths: readonly { d: string; opacity?: number }[];
 };
 
+/** What a harness offers, found without a session the user started. */
+export interface DiscoveredCatalog {
+  /** Its switchable settings, the model among them; null = not found. */
+  configOptions: SessionConfigSelect[] | null;
+  /** Its commands and skills; null = not found. */
+  commands: AvailableCommand[] | null;
+  /** `initialize`'s `agentInfo.version`, when it said. */
+  harnessVersion?: string;
+}
+
+/** What a catalog probe may do — handed in, so an adapter imports no
+ *  platform. Each is null when it couldn't run. */
+export interface CatalogProbeIo {
+  /** Run the harness's own command (not its ACP args) with these args in
+   *  the user's login shell. */
+  runHarness(args: string[]): Promise<{ stdout: string; exitCode: number } | null>;
+  /** Spawn the harness, open a session in a directory that is no
+   *  workspace, keep what it reports for a moment, then close it. Nothing
+   *  is prompted. */
+  probeSession(): Promise<DiscoveredCatalog | null>;
+}
+
 export interface HarnessAdapter {
   /** Runs once per task, after the app-tools MCP endpoint is live and
    *  before the harness process spawns. */
@@ -190,7 +214,15 @@ export interface HarnessAdapter {
   /** The account limits a `usage_update`'s `_meta` carries, for a harness
    *  that reports them there. */
   limits?(meta: Record<string, unknown>): UsageLimits | null;
+  /** Find what it offers before any session the user starts, for the
+   *  harness catalog. None (a custom harness): only its sessions tell. */
+  discoverCatalog?(io: CatalogProbeIo): Promise<DiscoveredCatalog | null>;
 }
+
+/** For a harness whose throwaway session leaves nothing behind: open one
+ *  and keep what it reports. */
+export const discoverBySession: HarnessAdapter["discoverCatalog"] = (io) =>
+  io.probeSession();
 
 /** claude-agent-acp's `mcp__<server>__<tool>` (v2-mcp-passthrough-spike.md). */
 export const CLAUDE_TOOL_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
