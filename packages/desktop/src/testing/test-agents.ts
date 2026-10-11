@@ -20,7 +20,7 @@ import { memoryUrlState } from "./test-core";
 import { testKv } from "./test-kv";
 import type { KvApi } from "@/modules/kv";
 import { createHarnessAdapters } from "@/modules/harness-adapters";
-import { createHarnesses } from "@/modules/agents/harnesses";
+import { testHarnesses } from "./test-harnesses";
 
 /** A fresh, empty agent store. */
 export function testAgentStore(): AgentStore {
@@ -101,7 +101,7 @@ export function testAgents(
     agents: () => agents!,
     hooks,
     harnessAdapters: createHarnessAdapters({
-      harnesses: createHarnesses({ kv }),
+      harnesses: testHarnesses({ kv }),
     }),
     ...overrides,
   };

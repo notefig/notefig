@@ -1,13 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
-import { testKv } from "@/testing/test-kv";
 import { createHarnessAdapters } from "@/modules/harness-adapters";
-import { createHarnesses } from "./harnesses";
+import { testHarnesses } from "@/testing/test-harnesses";
 import { limitsFrom } from "./usage-limits";
 import type { UsageUpdate } from "@/modules/harness-adapters";
 
 const { adapterFor } = createHarnessAdapters({
-  harnesses: createHarnesses({ kv: testKv() }),
+  harnesses: testHarnesses(),
 });
 const adapterOf = (id: string) =>
   adapterFor(BUILT_IN_HARNESSES.find((harness) => harness.id === id)!);

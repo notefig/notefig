@@ -102,7 +102,7 @@ function naturalEnabled(row: HarnessSettingsRow): boolean {
 export function HarnessSettings() {
   const { t } = useTranslation();
   const kv = useKv<unknown>(HARNESS_SETTINGS_NAMESPACE);
-  const { harnessDiscovery: discovery } = useCore();
+  const { harnesses } = useCore();
   const rawOverrides = kv.get(HARNESS_OVERRIDES_KEY);
   const rawCustom = kv.get(HARNESS_CUSTOM_KEY);
   const rawDiscovery = kv.get(HARNESS_DISCOVERY_KEY);
@@ -141,7 +141,7 @@ export function HarnessSettings() {
   const rescan = async () => {
     setScanning(true);
     try {
-      const results = await discovery.refresh(overrides, custom);
+      const results = await harnesses.rescan();
       if (results === null) toast.error(t("harnessRescanFailed"));
     } finally {
       setScanning(false);
@@ -185,7 +185,7 @@ export function HarnessSettings() {
       // without this the stored verdict keeps describing the executable
       // the harness pointed at BEFORE the edit — the pickers and the
       // welcome screen would then report on the wrong binary.
-      void discovery.refresh(overrides, nextCustom);
+      void harnesses.harness(definition.id).rescan();
     } else {
       const override = formToOverride(
         parsed,
@@ -193,21 +193,16 @@ export function HarnessSettings() {
         enabled,
         naturalEnabled(row),
       );
-      let nextOverrides: Record<string, HarnessOverride>;
       if (override === null) {
         deleteOverride(definition.id);
-        // Reverting to the built-in re-probes too: the stored result may
-        // describe the override's command, not the built-in's.
-        nextOverrides = Object.fromEntries(
-          Object.entries(overrides).filter(([id]) => id !== definition.id),
-        );
       } else {
         const checked = HarnessOverrideSchema.safeParse(override);
         if (!checked.success) return errors;
-        nextOverrides = { ...overrides, [definition.id]: checked.data };
-        writeOverrides(nextOverrides);
+        writeOverrides({ ...overrides, [definition.id]: checked.data });
       }
-      void discovery.refresh(nextOverrides, custom);
+      // Reverting to the built-in re-probes too: the stored result may
+      // describe the override's command, not the built-in's.
+      void harnesses.harness(definition.id).rescan();
     }
     setEditingId(null);
     return null;
@@ -314,11 +309,10 @@ export function HarnessSettings() {
                   );
                   const checked = CustomHarnessEntrySchema.safeParse(entry);
                   if (!checked.success) return errors;
-                  const nextCustom = [...custom, checked.data];
-                  writeCustom(nextCustom);
+                  writeCustom([...custom, checked.data]);
                   setEditingId(null);
                   // New entry gets a found/not-found status right away.
-                  void discovery.refresh(overrides, nextCustom);
+                  void harnesses.harness(checked.data.id).rescan();
                   return null;
                 }}
               />

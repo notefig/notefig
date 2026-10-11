@@ -4,13 +4,12 @@ import {
   type HarnessDefinition,
 } from "@notefig/shared/agent";
 import type { HarnessInvokeContext } from "./adapter";
-import { testKv } from "@/testing/test-kv";
-import { createHarnesses } from "@/modules/agents/harnesses";
+import { testHarnesses } from "@/testing/test-harnesses";
 import { createHarnessAdapters, harnessLogo } from "./harness-adapters";
 import { needsSignIn } from "./adapter";
 
 const adapters = () =>
-  createHarnessAdapters({ harnesses: createHarnesses({ kv: testKv() }) });
+  createHarnessAdapters({ harnesses: testHarnesses() });
 const { adapterFor } = adapters();
 
 /** The host supplies the app dir from its own source of truth; the tests
