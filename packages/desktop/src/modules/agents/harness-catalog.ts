@@ -6,9 +6,10 @@
  *
  * Rows come from sessions (`"agent:catalog"`, announced by agent-service,
  * which writes no catalog itself). One row per harness is app-wide: its
- * settings, and the first commands any session reported. One row per
- * harness and workspace holds the commands seen there, a project's own
- * skills included — those are never shown in another workspace.
+ * settings, and the commands a probe finds (steps 7–8 of MET-221). One row
+ * per harness and workspace holds the commands sessions reported there, a
+ * project's own skills included — those are never shown in another
+ * workspace.
  */
 import { createCollection } from "@tanstack/react-db";
 import {
@@ -34,8 +35,8 @@ export interface HarnessCatalogRow {
   /** hct_… */
   catalogId: string;
   harnessId: string;
-  /** Null: app-wide (settings, and commands from wherever first seen).
-   *  Set: the commands seen in that workspace. */
+  /** Null: app-wide (settings, and the commands a probe found). Set: the
+   *  commands sessions reported in that workspace. */
   workspacePath: string | null;
   /** The full list, the model among them; null = not known. Only the
    *  app-wide row has it. */
@@ -46,8 +47,8 @@ export interface HarnessCatalogRow {
   source: "probe" | "session";
   /** When it last did. */
   fetchedAt: number;
-  /** The definition it was reported under (`definitionFingerprint`): a
-   *  row reported under another command, args or env may not hold. */
+  /** The definition everything on the row was reported under
+   *  (`definitionFingerprint`): a report under another clears the rest. */
   definitionFingerprint: string;
 }
 
@@ -157,7 +158,8 @@ export function createHarnessCatalog({
 
   /** Write a harness's row for a workspace (or app-wide), creating it if
    *  it has none. Every field but the ones `change` sets is the stored
-   *  row's, or unknown for a new one. */
+   *  row's — unless that was reported under another definition, when it
+   *  no longer holds and is unknown again, as on a new row. */
   const upsert = (
     harnessId: string,
     workspacePath: string | null,
@@ -166,7 +168,13 @@ export function createHarnessCatalog({
   ): Promise<unknown> => {
     const existing = rowFor(harnessId, workspacePath);
     if (existing) {
+      const sameDefinition =
+        existing.definitionFingerprint === stamp.definitionFingerprint;
       return rows.update(existing.catalogId, (draft) => {
+        if (!sameDefinition) {
+          draft.configOptions = null;
+          draft.commands = null;
+        }
         Object.assign(draft, stamp);
         change(draft);
       }).isPersisted.promise;
@@ -185,26 +193,22 @@ export function createHarnessCatalog({
 
   const write = async (detail: CoreHookMap["agent:catalog"]): Promise<void> => {
     await Promise.all([rows.preload(), harnesses.ready()]);
-    const definition = harnesses.harness(detail.harnessId).definition();
     // A session of a harness deleted since: nothing to keep it for.
-    if (!definition) return;
+    if (!harnesses.harness(detail.harnessId).definition()) return;
     const stamp = {
       source: "session" as const,
       fetchedAt: Date.now(),
-      definitionFingerprint: definitionFingerprint(definition),
+      // The session's own: it may predate an edit, and then its offer is
+      // already stale.
+      definitionFingerprint: definitionFingerprint(detail.harness),
     };
     const { configOptions, commands } = detail;
+    // Commands stay in their workspace: they may be that project's own
+    // skills. App-wide commands are the probe's to find.
     if (commands) {
       await upsert(detail.harnessId, detail.workspacePath, stamp, (row) => {
         row.commands = commands;
       });
-      // Commands from wherever first seen stand in until a probe reports
-      // the harness's own: better than none, outside the workspace too.
-      if (!rowFor(detail.harnessId, null)?.commands) {
-        await upsert(detail.harnessId, null, stamp, (row) => {
-          row.commands = commands;
-        });
-      }
     }
     if (configOptions) {
       await upsert(detail.harnessId, null, stamp, (row) => {

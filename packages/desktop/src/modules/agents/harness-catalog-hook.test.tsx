@@ -9,6 +9,7 @@ import type { Core } from "@notefig/core";
 import { createTestCore } from "@/testing/test-core";
 import { harnessCatalogModule } from "@/modules/agents/harness-catalog";
 import { useHarnessCatalog } from "@/modules/agents/react";
+import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -65,30 +66,30 @@ afterEach(() => {
 });
 
 describe("useHarnessCatalog", () => {
-  it("shows what a session announced, the workspace's commands over the app-wide ones", async () => {
+  it("shows what sessions announced in its workspace, and only there", async () => {
     const read = await renderHook(() => useHarnessCatalog("claude-code", "/ws"));
     expect(read()).toMatchObject({ commands: null, configOptions: null });
+    const harness = BUILT_IN_HARNESSES.find((h) => h.id === "claude-code")!;
 
     await act(async () => {
       core.hooks.emit("agent:catalog", {
         taskId: "task_1",
         harnessId: "claude-code",
+        harness,
         workspacePath: "/other",
-        commands: [{ name: "review", description: "app-wide" }],
+        commands: [{ name: "deploy", description: "elsewhere" }],
       });
       core.hooks.emit("agent:catalog", {
         taskId: "task_2",
         harnessId: "claude-code",
+        harness,
         workspacePath: "/ws",
-        commands: [{ name: "review", description: "here" }, { name: "skill", description: "s" }],
+        commands: [{ name: "skill", description: "here" }],
       });
       await core.use("harnessCatalog").settled();
     });
 
-    expect(read().commands).toEqual([
-      { name: "review", description: "here" },
-      { name: "skill", description: "s" },
-    ]);
+    expect(read().commands).toEqual([{ name: "skill", description: "here" }]);
     expect(read().loading).toBe(false);
   });
 });

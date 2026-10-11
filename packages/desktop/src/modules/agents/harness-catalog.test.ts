@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createHooks, type CoreHookMap, type Hooks } from "@notefig/core";
-import type {
-  AvailableCommand,
-  CustomHarnessEntry,
-  SessionConfigSelect,
+import {
+  BUILT_IN_HARNESSES,
+  type AvailableCommand,
+  type CustomHarnessEntry,
+  type SessionConfigSelect,
 } from "@notefig/shared/agent";
 import { createNodeTestDb, type NodeTestDb } from "@/testing/node-db";
 import { testHarnesses } from "@/testing/test-harnesses";
@@ -34,11 +35,14 @@ const models = (current: string): SessionConfigSelect[] => [
   },
 ];
 
+const claude = BUILT_IN_HARNESSES.find((harness) => harness.id === "claude-code")!;
+
 const report = (
   offer: Partial<CoreHookMap["agent:catalog"]>,
 ): CoreHookMap["agent:catalog"] => ({
   taskId: "task_1",
   harnessId: "claude-code",
+  harness: claude,
   workspacePath: "/ws",
   ...offer,
 });
@@ -70,16 +74,18 @@ describe("harness catalog", () => {
     ({ hooks, catalog } = boot());
   });
 
-  it("keeps a session's commands for its workspace, and app-wide while none are", async () => {
+  it("keeps a session's commands for its workspace alone", async () => {
     hooks.emit("agent:catalog", report({ commands: [command("review")] }));
     await catalog.settled();
 
     const rows = rowsOf("claude-code");
-    expect(rows).toHaveLength(2);
-    expect(rows.every((row) => row.catalogId.startsWith("hct_"))).toBe(true);
-    expect(rows.every((row) => row.source === "session")).toBe(true);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].catalogId).toMatch(/^hct_/);
+    expect(rows[0].source).toBe("session");
     expect(catalogFor(rows, "/ws").commands).toEqual([command("review")]);
-    expect(catalogFor(rows, null).commands).toEqual([command("review")]);
+    // A project's skills are never offered anywhere else.
+    expect(catalogFor(rows, null).commands).toBeNull();
+    expect(catalogFor(rows, "/other").commands).toBeNull();
   });
 
   it("keeps two workspaces' commands apart", async () => {
@@ -94,13 +100,36 @@ describe("harness catalog", () => {
     await catalog.settled();
 
     const rows = rowsOf("claude-code");
-    expect(rows).toHaveLength(3);
     const names = (workspacePath: string | null) =>
       catalogFor(rows, workspacePath).commands?.map((c) => c.name).sort();
     expect(names("/ws")).toEqual(["create-ticket", "review"]);
-    expect(names("/other")).toEqual(["create-ticket", "deploy", "review"]);
-    // App-wide keeps the first list it heard.
-    expect(names(null)).toEqual(["create-ticket", "review"]);
+    expect(names("/other")).toEqual(["deploy", "review"]);
+  });
+
+  it("merges a workspace's commands over the app-wide ones", () => {
+    const row = (workspacePath: string | null, commands: AvailableCommand[]) => ({
+      catalogId: `hct_${workspacePath}`,
+      harnessId: "claude-code",
+      workspacePath,
+      configOptions: null,
+      commands,
+      source: "probe" as const,
+      fetchedAt: 0,
+      definitionFingerprint: "f",
+    });
+    const rows = [
+      row(null, [command("review", "app-wide"), command("help")]),
+      row("/ws", [command("review", "here"), command("skill")]),
+    ];
+    expect(catalogFor(rows, "/ws").commands).toEqual([
+      command("review", "here"),
+      command("help"),
+      command("skill"),
+    ]);
+    expect(catalogFor(rows, "/other").commands).toEqual([
+      command("review", "app-wide"),
+      command("help"),
+    ]);
   });
 
   it("replaces a workspace's commands with the latest report", async () => {
@@ -109,12 +138,8 @@ describe("harness catalog", () => {
     await catalog.settled();
 
     expect(catalogFor(rowsOf("claude-code"), "/ws").commands).toEqual([
-      command("old"),
       command("new"),
     ]);
-    expect(
-      rowsOf("claude-code").find((row) => row.workspacePath === "/ws")?.commands,
-    ).toEqual([command("new")]);
   });
 
   it("keeps a session's settings app-wide, the latest winning", async () => {
@@ -132,14 +157,62 @@ describe("harness catalog", () => {
     expect(catalogFor(rows, "/ws").configOptions).toEqual(models("sonnet"));
   });
 
-  it("stamps a row with the definition it was reported under", async () => {
+  it("stamps a row with the definition the session was spawned with, not today's", async () => {
+    await harnesses
+      .harness("claude-code")
+      .saveOverride({ id: "claude-code", enabled: true, command: "claude-next" });
     hooks.emit("agent:catalog", report({ configOptions: models("opus") }));
     await catalog.settled();
 
-    const definition = harnesses.harness("claude-code").definition()!;
     expect(rowsOf("claude-code")[0].definitionFingerprint).toBe(
-      definitionFingerprint(definition),
+      definitionFingerprint(claude),
     );
+  });
+
+  it("drops what a row kept from another definition when a report comes under a new one", async () => {
+    // As a probe under the stock definition left it.
+    await catalog.collection.preload();
+    await catalog.collection.insert({
+      catalogId: "hct_probe",
+      harnessId: "claude-code",
+      workspacePath: null,
+      configOptions: models("opus"),
+      commands: [command("review")],
+      source: "probe",
+      fetchedAt: 1,
+      definitionFingerprint: definitionFingerprint(claude),
+    }).isPersisted.promise;
+    const edited = { ...claude, command: "claude-next" };
+
+    hooks.emit(
+      "agent:catalog",
+      report({ harness: edited, configOptions: models("sonnet") }),
+    );
+    await catalog.settled();
+
+    const [row] = rowsOf("claude-code");
+    expect(row.configOptions).toEqual(models("sonnet"));
+    expect(row.commands).toBeNull();
+    expect(row.definitionFingerprint).toBe(definitionFingerprint(edited));
+  });
+
+  it("keeps what a row has from the same definition", async () => {
+    await catalog.collection.preload();
+    await catalog.collection.insert({
+      catalogId: "hct_probe",
+      harnessId: "claude-code",
+      workspacePath: null,
+      configOptions: null,
+      commands: [command("review")],
+      source: "probe",
+      fetchedAt: 1,
+      definitionFingerprint: definitionFingerprint(claude),
+    }).isPersisted.promise;
+
+    hooks.emit("agent:catalog", report({ configOptions: models("opus") }));
+    await catalog.settled();
+
+    expect(rowsOf("claude-code")[0].commands).toEqual([command("review")]);
   });
 
   it("keeps nothing for a harness that no longer exists", async () => {
@@ -167,7 +240,7 @@ describe("harness catalog", () => {
       report({ harnessId: "custom:lab", commands: [command("x")] }),
     );
     await catalog.settled();
-    expect(catalogFor(rowsOf("custom:lab"), null).commands).toEqual([
+    expect(catalogFor(rowsOf("custom:lab"), "/ws").commands).toEqual([
       command("x"),
     ]);
   });
