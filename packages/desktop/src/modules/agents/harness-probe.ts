@@ -50,6 +50,9 @@ export async function probeHarnessSession({
   timeoutMs?: number;
 }): Promise<DiscoveredCatalog | null> {
   const taskId = newTaskId();
+  /** The transport once its start() has landed — never closed before:
+   *  a desktop transport closed mid-start marks itself closed without a
+   *  process to kill, and then ignores the close that would. */
   let transport: AgentTransport | null = null;
   let configOptions: SessionConfigSelect[] | null = null;
   let commands: AvailableCommand[] | null = null;
@@ -59,14 +62,14 @@ export async function probeHarnessSession({
 
   const probe = async (): Promise<DiscoveredCatalog> => {
     const started = createTransport({ taskId, harness, workspacePath: cwd });
-    transport = started;
     await started.start();
-    // A process that came up after the deadline: the close at the deadline
-    // found nothing to stop, so stop it now.
+    // A process that came up after the deadline: nothing stopped it then,
+    // so stop it now.
     if (abandoned) {
       await started.close().catch(() => {});
       throw new Error("probe timed out");
     }
+    transport = started;
     const client = new NotefigAcpClient({
       taskId,
       transport: started,

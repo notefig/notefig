@@ -118,20 +118,34 @@ describe("probeHarnessSession", () => {
   });
 
   it("stops a harness that finishes starting after the deadline", async () => {
+    // A desktop transport's close: before start lands it only marks the
+    // transport closed, with no process to kill, and ignores later closes.
     const [client, agentSide] = createLoopbackPair();
     new FakeAgent(agentSide);
     let finishStart!: () => void;
+    let started = false;
+    let closed = false;
+    let killed = false;
     vi.spyOn(client, "start").mockImplementation(
-      () => new Promise<void>((resolve) => (finishStart = resolve)),
+      () =>
+        new Promise<void>((resolve) => {
+          finishStart = () => {
+            started = true;
+            resolve();
+          };
+        }),
     );
-    const close = vi.spyOn(client, "close");
+    vi.spyOn(client, "close").mockImplementation(async () => {
+      if (closed) return;
+      closed = true;
+      killed = started;
+    });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     expect(await probe(() => client, { timeoutMs: 20 })).toBeNull();
-    close.mockClear();
     finishStart();
 
-    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    await vi.waitFor(() => expect(killed).toBe(true));
     warn.mockRestore();
   });
 
