@@ -713,6 +713,34 @@ export class AgentTask {
     }
   }
 
+  /** Queued prompts are transcript state: entry + turn row exist from the
+   *  moment of send, and runTurn promotes (not re-inserts) them. */
+  private recordQueuedTurn(turnId: string, text: string): void {
+    const now = Date.now();
+    this.store.entries.insert({
+      id: newEventId(),
+      taskId: this.taskId,
+      turnId,
+      type: "user",
+      text,
+      createdAt: now,
+    });
+    this.store.turns.insert({
+      turnId,
+      taskId: this.taskId,
+      sessionId: this.sessionId ?? "",
+      status: "queued",
+      startedAt: now,
+    });
+    // Enqueue is activity even when it doesn't change status (queueing onto
+    // a busy task) — bump so the session list orders by last touch.
+    if (this.store.tasks.get(this.taskId)) {
+      this.store.tasks.update(this.taskId, (draft) => {
+        draft.updatedAt = now;
+      });
+    }
+  }
+
   /**
    * Send a user prompt. Enqueue always succeeds — this never throws. While a
    * turn runs the prompt queues FIFO, visible in the transcript as a
@@ -736,32 +764,7 @@ export class AgentTask {
     const completed = new Promise<TurnOutcome>((resolve) => {
       this.turnResolvers.set(turnId, resolve);
     });
-    const now = Date.now();
-
-    // Queued prompts are transcript state: entry + turn row exist from the
-    // moment of send, and runTurn promotes (not re-inserts) them.
-    this.store.entries.insert({
-      id: newEventId(),
-      taskId: this.taskId,
-      turnId,
-      type: "user",
-      text,
-      createdAt: now,
-    });
-    this.store.turns.insert({
-      turnId,
-      taskId: this.taskId,
-      sessionId: this.sessionId ?? "",
-      status: "queued",
-      startedAt: now,
-    });
-    // Enqueue is activity even when it doesn't change status (queueing onto
-    // a busy task) — bump so the session list orders by last touch.
-    if (this.store.tasks.get(this.taskId)) {
-      this.store.tasks.update(this.taskId, (draft) => {
-        draft.updatedAt = now;
-      });
-    }
+    this.recordQueuedTurn(turnId, text);
 
     // Sort the task into one of three states: dead (settle the turn now),
     // spawning (queue — start()'s tail drains, or settles errors on failure),
