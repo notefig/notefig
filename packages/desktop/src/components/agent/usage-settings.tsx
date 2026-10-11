@@ -51,8 +51,8 @@ import {
 import type { UsageReporting } from "@/modules/harness-adapters";
 import {
   useActiveHarnesses,
-  useHarnessLabels,
 } from "@/hooks/use-harness-selection";
+import { useHarnessLabels } from "@/modules/agents/react";
 import { SettingsSectionActions } from "@/components/editor/settings-section";
 import { useClock } from "@/hooks/use-clock";
 import { formatCost, formatTokens } from "@/utils/usage-format";

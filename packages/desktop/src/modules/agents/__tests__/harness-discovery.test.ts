@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { candidateProbeEntries, discoverHarnesses } from "../harness-discovery";
-import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
+import { discoverHarnesses } from "../harness-discovery";
 
 const runShellCommand = vi.fn();
 const proc = { runShellCommand };
@@ -65,54 +64,5 @@ describe("discoverHarnesses", () => {
     expect(script).toContain("command -v claude");
     expect(script).not.toContain("command -v 'npx'");
     expect(script).toContain("command -v 'bar'");
-  });
-});
-
-describe("candidateProbeEntries", () => {
-  it("uses built-in commands and probes when there are no overrides", () => {
-    const entries = candidateProbeEntries({}, []);
-    expect(entries).toEqual(
-      BUILT_IN_HARNESSES.map((h) => ({
-        id: h.id,
-        command: h.command,
-        probeCommand: h.probeCommand,
-      })),
-    );
-  });
-
-  it("prefers an override's command over the built-in default", () => {
-    const entries = candidateProbeEntries(
-      { opencode: { id: "opencode", enabled: true, command: "ocv" } },
-      [],
-    );
-    expect(entries.find((e) => e.id === "opencode")).toEqual({
-      id: "opencode",
-      command: "ocv",
-    });
-  });
-
-  it("includes enabled custom entries and excludes disabled ones", () => {
-    const entries = candidateProbeEntries({}, [
-      {
-        id: "custom:1",
-        label: "L",
-        command: "custom-bin",
-        args: [],
-        env: {},
-        mcpRegistrationOverride: "none",
-        enabled: true,
-      },
-      {
-        id: "custom:2",
-        label: "L2",
-        command: "other-bin",
-        args: [],
-        env: {},
-        mcpRegistrationOverride: "none",
-        enabled: false,
-      },
-    ]);
-    expect(entries).toContainEqual({ id: "custom:1", command: "custom-bin" });
-    expect(entries.find((e) => e.id === "custom:2")).toBeUndefined();
   });
 });

@@ -34,7 +34,7 @@ import { useTheme } from "@/components/theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { usePublishAppStatus } from "@/hooks/use-app-status";
 import { useOpenSettings } from "@/hooks/use-workspace-panels";
-import { useProbedHarnesses } from "@/hooks/use-harness-selection";
+import { useProbedHarnesses } from "@/modules/agents/react";
 import {
   useOpenProject,
   useOpenProjectFromPicker,

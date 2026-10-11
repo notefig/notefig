@@ -30,7 +30,6 @@ import type {
   TurnUsage,
 } from "@notefig/shared/agent";
 import { sortEntriesChronologically } from "@notefig/shared/agent";
-import { useHarnessLabel } from "@/hooks/use-harness-selection";
 import { Button } from "@notefig/ui/button";
 import {
   MessageScrollerProvider,
@@ -39,6 +38,7 @@ import {
 import { Markdown } from "@/components/ui/markdown";
 import { cn } from "@notefig/ui/utils";
 import {
+  useHarnessLabels,
   useTaskRow,
   useTaskEntries,
   useTaskTurns,
@@ -1319,7 +1319,7 @@ export function PromptBox({
   composerRef: RefObject<PromptEditorHandle>;
 }) {
   const { t } = useTranslation();
-  const harnessLabel = useHarnessLabel(harnessId);
+  const harnessLabel = useHarnessLabels()(harnessId);
   const sessionUsage = useTaskRow(taskId)?.usage;
   return (
     <div className="pointer-events-auto rounded-2xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">

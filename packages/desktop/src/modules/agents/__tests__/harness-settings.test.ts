@@ -6,7 +6,6 @@ import {
 } from "@notefig/shared/agent";
 import {
   deriveHarnessSettingsRows,
-  toggleCustomEnabled,
   toggleOverrideEnabled,
 } from "../harness-settings";
 
@@ -146,13 +145,5 @@ describe("toggle helpers", () => {
     );
     // No row + natural state = still no row.
     expect(toggleOverrideEnabled({}, "opencode", true, true)).toEqual({});
-  });
-
-  it("toggleCustomEnabled updates immutably", () => {
-    const entries = [customEntry(), customEntry({ id: "custom:2" })];
-    const next = toggleCustomEnabled(entries, "custom:2", false);
-    expect(next[1].enabled).toBe(false);
-    expect(next[0].enabled).toBe(true);
-    expect(entries[1].enabled).toBe(true);
   });
 });

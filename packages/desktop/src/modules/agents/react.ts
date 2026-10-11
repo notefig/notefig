@@ -9,7 +9,12 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery, eq, and, inArray } from "@tanstack/react-db";
-import { buildHarnessResumeCommand } from "@notefig/shared/agent";
+import {
+  BUILT_IN_HARNESSES,
+  buildHarnessResumeCommand,
+  type HarnessDefinition,
+  type ProbedHarness,
+} from "@notefig/shared/agent";
 import { workspaceKey } from "@/utils/path";
 import { getDesktopOs } from "@/utils/platform";
 import i18n from "@/utils/intl";
@@ -21,14 +26,15 @@ import {
   type AgentPermissionRequestRow,
 } from "@/modules/agents/agent-collections";
 import type { AgentsApi } from "@/modules/agents/agents";
-import type { HarnessesApi } from "@/modules/agents/harnesses";
 import {
-  HARNESS_CUSTOM_KEY,
-  HARNESS_DISCOVERY_KEY,
-  HARNESS_OVERRIDES_KEY,
-  HARNESS_SETTINGS_NAMESPACE,
-} from "@/modules/agents/harness-discovery";
-import { useKv } from "@/modules/kv/react";
+  harnessDefinition,
+  harnessLabel,
+  harnessSettingsRows,
+  pickableHarnesses,
+  probedHarnesses,
+  type HarnessRow,
+  type HarnessSettingsRow,
+} from "@/modules/agents/harness-settings";
 import { useCore } from "@notefig/core/react";
 
 export type {
@@ -261,9 +267,12 @@ export type AgentSessionActions = {
 export function useSessionActions(task: AgentTaskRow): AgentSessionActions {
   // As configured, whether or not the pickers offer it now (disabled or
   // undiscovered), so its sessions keep their affordances.
-  const harness = useHarnesses(
-    (harnesses) => harnesses.harness(task.harnessId).definition(),
-    [task.harnessId],
+  const rows = useHarnessRows();
+  const harness = useMemo(
+    () =>
+      harnessDefinition(rows, task.harnessId) ??
+      BUILT_IN_HARNESSES.find((builtIn) => builtIn.id === task.harnessId),
+    [rows, task.harnessId],
   );
   const sessionId = task.sessionId ?? null;
   return {
@@ -338,26 +347,54 @@ export function describeTaskMeta(meta: AgentTaskMeta): string | null {
   return null;
 }
 
-/**
- * A read of `core.harnesses` (`harnesses => harnesses.pickable()`), live:
- * it runs again when a harness's settings or install check change, and
- * hands back the same value until then, so it is safe in an effect's
- * dependencies. `read` is taken from the render that runs it; whatever
- * else it reads goes in `deps` (`[harnessId]`).
- */
-export function useHarnesses<T>(
-  read: (harnesses: HarnessesApi) => T,
-  deps: readonly unknown[] = [],
-): T {
+const NO_HARNESS_ROWS: HarnessRow[] = [];
+
+/** Every harness row (`core.harnesses.collection`), live; none while they
+ *  load, which every view reads as the built-ins, stock. */
+function useHarnessRows(): HarnessRow[] {
   const { harnesses } = useCore();
-  const settings = useKv<unknown>(HARNESS_SETTINGS_NAMESPACE);
-  // Row values are stable references between writes.
-  const overrides = settings.get(HARNESS_OVERRIDES_KEY);
-  const custom = settings.get(HARNESS_CUSTOM_KEY);
-  const discovery = settings.get(HARNESS_DISCOVERY_KEY);
-  // Not keyed on `read`: a fresh closure each render would defeat the memo.
+  const { data } = useLiveQuery(
+    (q) => q.from({ harness: harnesses.collection }),
+    [harnesses],
+  );
+  return data ?? NO_HARNESS_ROWS;
+}
+
+/** What the pickers offer, live (`pickableHarnesses`). Not tunnel-aware:
+ *  `useActiveHarnesses` narrows it to what a paired worker has. */
+export function usePickableHarnesses(): HarnessDefinition[] {
+  const rows = useHarnessRows();
+  return useMemo(() => pickableHarnesses(rows), [rows]);
+}
+
+/**
+ * Every configured harness with the startup scan's verdict attached —
+ * the readiness view, as opposed to `usePickableHarnesses`'s pickable one.
+ * Nothing here spawns or connects: it reads the verdicts the launch scan
+ * already recorded, and stays correct as that scan lands.
+ *
+ * Deliberately NOT tunnel-aware. The welcome screen runs before any
+ * workspace exists, so there is no worker to ask; on web the local probe
+ * can't run at all and every row simply reports "unknown", which the UI
+ * renders as an absence rather than a claim.
+ */
+export function useProbedHarnesses(): ProbedHarness[] {
+  const rows = useHarnessRows();
+  return useMemo(() => probedHarnesses(rows), [rows]);
+}
+
+/** Every harness as the settings list shows it, live. */
+export function useHarnessSettingsRows(): HarnessSettingsRow[] {
+  const rows = useHarnessRows();
+  return useMemo(() => harnessSettingsRows(rows), [rows]);
+}
+
+/** A harness's display name by id, live: a renamed custom entry shows its
+ *  new name without a reload. */
+export function useHarnessLabels(): (harnessId: string) => string {
+  const rows = useHarnessRows();
   return useMemo(
-    () => read(harnesses),
-    [harnesses, overrides, custom, discovery, ...deps],
+    () => (harnessId: string) => harnessLabel(rows, harnessId),
+    [rows],
   );
 }

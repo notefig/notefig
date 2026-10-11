@@ -37,7 +37,7 @@ import {
   AlertDialogTitle,
 } from "@notefig/ui/alert-dialog";
 import { cn } from "@notefig/ui/utils";
-import { useHarnesses } from "@/modules/agents/react";
+import { useHarnessSettingsRows } from "@/modules/agents/react";
 import type { HarnessSettingsRow } from "@/modules/agents/harness-settings";
 import { useDefaultHarness } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "@/components/agent/harness-logo";
@@ -84,7 +84,7 @@ function naturalEnabled(row: HarnessSettingsRow): boolean {
 export function HarnessSettings() {
   const { t } = useTranslation();
   const { harnesses } = useCore();
-  const rows = useHarnesses((harnesses) => harnesses.settingsRows());
+  const rows = useHarnessSettingsRows();
 
   const { defaultHarness, setDefaultHarness } = useDefaultHarness();
   const [editingId, setEditingId] = useState<string | null>(null);

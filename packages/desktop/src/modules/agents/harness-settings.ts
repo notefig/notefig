@@ -1,17 +1,122 @@
 /**
- * The harness settings as stored, seen as rows — every configured harness,
- * enabled or not — and the immutable edits the harnesses module applies to
- * them. No React, no storage: `core.harnesses` reads and writes through
- * these.
+ * A harness as this machine records it — `HarnessRow`, one per harness in
+ * the `harnesses` collection — and every view over those rows: what the
+ * pickers offer, what the welcome screen reports, what settings lists. No
+ * React, no storage: `core.harnesses` and the hooks in `react.ts` read
+ * through these, so a view computed synchronously and one computed from a
+ * live query can't disagree.
  */
 import {
+  BUILT_IN_HARNESSES,
+  describeProbedHarnesses,
+  filterDiscoveredHarnesses,
   isMaterialOverride,
   resolveEffectiveHarnesses,
   type CustomHarnessEntry,
   type HarnessDefinition,
   type HarnessDiscoveryResult,
   type HarnessOverride,
+  type ProbedHarness,
 } from "@notefig/shared/agent";
+
+/**
+ * What this machine records about one harness. A built-in has a row once
+ * there is something to record (an edit, an install check) and is shown
+ * without one; a custom entry exists only as its row. Only the edit is
+ * stored, never the definition it makes: a built-in's own defaults change
+ * with the app, and an untouched field must follow them.
+ */
+export interface HarnessRow {
+  /** The harness id: a built-in's, or a custom entry's `custom:<uuid>`. */
+  id: string;
+  /** A built-in's edit on this machine, its on/off switch included. */
+  override?: HarnessOverride;
+  /** A custom entry, whole. */
+  custom?: CustomHarnessEntry;
+  /** What the last install check found. */
+  install?: HarnessDiscoveryResult;
+  /** When the row was first written; custom entries list in this order. */
+  createdAt: number;
+}
+
+/** The rows as the three settings the views are defined over. */
+function settingsOf(rows: Iterable<HarnessRow>) {
+  const overrides: Record<string, HarnessOverride> = {};
+  const custom: CustomHarnessEntry[] = [];
+  const discovery: Record<string, HarnessDiscoveryResult> = {};
+  const sorted = [...rows].sort((a, b) => a.createdAt - b.createdAt);
+  for (const row of sorted) {
+    if (row.override) overrides[row.id] = row.override;
+    if (row.custom) custom.push(row.custom);
+    if (row.install) discovery[row.id] = row.install;
+  }
+  return { overrides, custom, discovery };
+}
+
+/** Every enabled harness, built-ins with their edits applied, whether or
+ *  not its binary was found. */
+export function configuredHarnesses(
+  rows: Iterable<HarnessRow>,
+): HarnessDefinition[] {
+  const { overrides, custom } = settingsOf(rows);
+  return resolveEffectiveHarnesses(overrides, custom);
+}
+
+/** What the pickers offer: configured and enabled, minus built-ins the
+ *  install check affirmatively didn't find (an explicitly configured entry
+ *  always shows). */
+export function pickableHarnesses(
+  rows: Iterable<HarnessRow>,
+): HarnessDefinition[] {
+  const { overrides, custom, discovery } = settingsOf(rows);
+  return filterDiscoveredHarnesses(
+    resolveEffectiveHarnesses(overrides, custom),
+    overrides,
+    custom,
+    discovery,
+  );
+}
+
+/** Every configured harness with its install check attached — the
+ *  readiness view. */
+export function probedHarnesses(rows: Iterable<HarnessRow>): ProbedHarness[] {
+  const { overrides, custom, discovery } = settingsOf(rows);
+  return describeProbedHarnesses(overrides, custom, discovery);
+}
+
+/** Every harness as the settings list shows it, the ones the pickers hide
+ *  included. */
+export function harnessSettingsRows(
+  rows: Iterable<HarnessRow>,
+): HarnessSettingsRow[] {
+  const { overrides, custom, discovery } = settingsOf(rows);
+  return deriveHarnessSettingsRows(overrides, custom, discovery);
+}
+
+/** One harness's definition as configured, on or off: a built-in with its
+ *  edit applied, or a custom entry; undefined for an id that names
+ *  nothing (a deleted entry). */
+export function harnessDefinition(
+  rows: Iterable<HarnessRow>,
+  harnessId: string,
+): HarnessDefinition | undefined {
+  return harnessSettingsRows(rows).find(
+    (row) => row.definition.id === harnessId,
+  )?.definition;
+}
+
+/** A harness's display name: as configured, else the raw id (a deleted
+ *  entry's sessions keep it). */
+export function harnessLabel(
+  rows: Iterable<HarnessRow>,
+  harnessId: string,
+): string {
+  return (
+    harnessDefinition(rows, harnessId)?.label ??
+    BUILT_IN_HARNESSES.find((harness) => harness.id === harnessId)?.label ??
+    harnessId
+  );
+}
 
 export type HarnessSettingsRow = {
   definition: HarnessDefinition;
@@ -89,14 +194,4 @@ export function toggleOverrideEnabled(
     return next;
   }
   return { ...overrides, [id]: { ...(existing ?? { id, enabled }), enabled } };
-}
-
-export function toggleCustomEnabled(
-  custom: CustomHarnessEntry[],
-  id: string,
-  enabled: boolean,
-): CustomHarnessEntry[] {
-  return custom.map((entry) =>
-    entry.id === id ? { ...entry, enabled } : entry,
-  );
 }

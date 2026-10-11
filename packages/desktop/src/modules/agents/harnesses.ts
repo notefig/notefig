@@ -4,74 +4,84 @@
  * needs the same few answers, and this is where the agent subsystem gives
  * them, so no view carries a table of harness quirks of its own:
  *
- * - the configured definitions: built-ins merged with this machine's
- *   overrides and custom entries, read live from the harness settings KV;
- * - a label for any id, including one whose custom entry was deleted (its
- *   sessions keep the raw id);
+ * - `collection`: what this machine records about each harness (its edit
+ *   or custom entry, its last install check), persisted. The hooks in
+ *   `react.ts` are live queries over it, and every view is computed from
+ *   its rows (`harness-settings.ts`);
+ * - the configured definitions and a label for any id, including one
+ *   whose custom entry was deleted (its sessions keep the raw id);
  * - each harness's own handle (`harness(id)`), which does what is done to
  *   one harness — its definition, its settings edits, checking it is
  *   installed. What is done to all of them (`rescan()`) is each handle's,
- *   in turn;
- * - the views over all of them: what the pickers offer, what the welcome
- *   screen reports, what the settings list shows.
- *
- * The settings live in the `harness-settings` KV namespace, and nothing
- * outside this module reads or writes it.
+ *   in turn.
  *
  * What a harness does differently at run time is its adapter's
  * (`core.harnessAdapters`).
  */
+import { createCollection } from "@tanstack/react-db";
+import {
+  persistedCollectionOptions,
+  type PersistedCollectionPersistence,
+} from "@tanstack/db-sqlite-persistence-core";
 import {
   BUILT_IN_HARNESSES,
   CustomHarnessEntrySchema,
   HarnessOverrideSchema,
-  describeProbedHarnesses,
-  filterDiscoveredHarnesses,
   parseCustomHarnessEntries,
   parseHarnessDiscovery,
   parseHarnessOverrides,
-  resolveEffectiveHarnesses,
   type CustomHarnessEntry,
   type HarnessDefinition,
   type HarnessDiscoveryResult,
   type HarnessOverride,
-  type ProbedHarness,
 } from "@notefig/shared/agent";
 import { defineModule } from "@notefig/core";
 import { platformModule } from "@/core/services";
 import { kvModule, type KvApi } from "@/modules/kv";
 import {
-  HARNESS_CUSTOM_KEY,
-  HARNESS_DISCOVERY_KEY,
-  HARNESS_OVERRIDES_KEY,
-  HARNESS_SETTINGS_NAMESPACE,
-  candidateProbeEntries,
   discoverHarnesses,
   type ProbeEntry,
   type Proc,
 } from "./harness-discovery";
 import {
-  deriveHarnessSettingsRows,
-  toggleCustomEnabled,
+  configuredHarnesses,
+  harnessDefinition,
+  harnessLabel,
   toggleOverrideEnabled,
-  type HarnessSettingsRow,
+  type HarnessRow,
 } from "./harness-settings";
+
+/** The collection id, and so the SQLite table the rows land in. */
+export const HARNESSES_COLLECTION_ID = "harnesses";
+
+function createHarnessesCollection(persistence: PersistedCollectionPersistence) {
+  return createCollection(
+    persistedCollectionOptions<HarnessRow, string>({
+      id: HARNESSES_COLLECTION_ID,
+      getKey: (row) => row.id,
+      persistence,
+    }),
+  );
+}
+
+export type HarnessesCollection = ReturnType<typeof createHarnessesCollection>;
 
 /** One harness — `core.harnesses.harness(id)`. */
 export interface Harness {
   readonly id: string;
-  /** Its definition as configured: a built-in with this machine's override
-   *  applied, or a custom entry. The stock built-in while the settings
-   *  load; undefined for an id that names nothing (a deleted entry). */
+  /** Its definition as configured, on or off: a built-in with this
+   *  machine's edit applied, or a custom entry. The stock built-in while
+   *  the rows load; undefined for an id that names nothing (a deleted
+   *  entry). */
   definition(): HarnessDefinition | undefined;
-  /** Replace a built-in's per-machine edit; null goes back to stock. The
-   *  install is checked again, since the command may have changed. False,
-   *  with nothing written, for an override the schema rejects or an id
-   *  that is no built-in. */
+  /** Replace a built-in's edit on this machine; null goes back to stock.
+   *  The install is checked again, since the command may have changed.
+   *  False, with nothing written, for an override the schema rejects or an
+   *  id that is no built-in. */
   saveOverride(override: HarnessOverride | null): Promise<boolean>;
   /** Add or replace the custom entry with this handle's id (the entry's own
    *  `id` is ignored), then check its install. False, with nothing
-   *  written, for an entry the schema rejects. */
+   *  written, for an entry the schema rejects or a built-in's id. */
   saveCustom(entry: CustomHarnessEntry): Promise<boolean>;
   /** Offer it in the pickers or not. A built-in switched back to its
    *  natural state (on when found or never checked, off when not found)
@@ -81,91 +91,139 @@ export interface Harness {
   remove(): Promise<void>;
   /** Check whether its binary is on this machine — its definition's
    *  `probeCommand`, else `command -v` on its spawn command — and record
-   *  the verdict, so the pickers update live. Null when the check couldn't
-   *  run (no shell on this platform, a timeout) or the id names no
-   *  harness: that records nothing, since "couldn't check" must never read
-   *  as "not installed". */
+   *  the verdict. Null when the check couldn't run (no shell on this
+   *  platform, a timeout) or the id names no harness: that records
+   *  nothing, since "couldn't check" must never read as "not installed". */
   rescan(): Promise<HarnessDiscoveryResult | null>;
 }
 
 export interface HarnessesApi {
-  /** Built-ins with this machine's overrides and custom entries applied —
-   *  every harness as configured, whether or not its binary was found.
-   *  Built-ins alone until the settings have loaded. */
+  /** What this machine records about each harness, persisted; the source
+   *  of every view (`harness-settings.ts`). */
+  readonly collection: HarnessesCollection;
+  /** Resolves once the rows have loaded and settings kept by an older
+   *  version have moved into them. Every write waits for it. Idempotent. */
+  ready(): Promise<void>;
+  /** Built-ins with this machine's edits and custom entries applied —
+   *  every enabled harness, whether or not its binary was found. Built-ins
+   *  alone until the rows have loaded. */
   configured(): HarnessDefinition[];
-  /** A harness's display name: configured first, built-in next, the raw id
-   *  last. */
+  /** A harness's display name: as configured, else the raw id. */
   label(harnessId: string): string;
-  /** The harness with this id; the handle reads its settings when used, so
-   *  it holds for an entry added or edited after it was taken. */
+  /** The harness with this id; the handle reads its row when used, so it
+   *  holds for an entry added or edited after it was taken. */
   harness(harnessId: string): Harness;
   /** Rescan every built-in and every enabled custom entry (each handle's
    *  `rescan`). Null when the check couldn't run. */
   rescan(): Promise<Record<string, HarnessDiscoveryResult> | null>;
-  /** What the pickers offer: configured and enabled, minus built-ins the
-   *  install check affirmatively didn't find (an explicitly configured
-   *  entry always shows). */
-  pickable(): HarnessDefinition[];
-  /** Every configured harness with its install check attached — the
-   *  readiness view. Nothing is spawned; it reads the last verdicts. */
-  probed(): ProbedHarness[];
-  /** Every configured harness as the settings list shows it, the ones the
-   *  pickers hide included. */
-  settingsRows(): HarnessSettingsRow[];
 }
 
+/**
+ * Where harness settings lived before they were rows: one KV namespace
+ * holding every override, every custom entry and every install verdict.
+ * Read once, by the migration, and then deleted.
+ */
+const LEGACY_NAMESPACE = "harness-settings";
+const LEGACY_KEYS = {
+  overrides: "overrides",
+  custom: "custom",
+  discovery: "discovery",
+} as const;
+
 export function createHarnesses({
+  persistence,
   kv,
   proc,
 }: {
-  kv: Pick<KvApi, "collection" | "write">;
+  persistence: PersistedCollectionPersistence;
+  /** Read once, for settings kept by an older version. */
+  kv: Pick<KvApi, "read" | "remove">;
   proc: Proc;
 }): HarnessesApi {
-  const settings = kv.collection(HARNESS_SETTINGS_NAMESPACE);
-  const overrides = () =>
-    parseHarnessOverrides(settings.get(HARNESS_OVERRIDES_KEY)?.value);
-  const custom = () =>
-    parseCustomHarnessEntries(settings.get(HARNESS_CUSTOM_KEY)?.value);
-  const discovery = () =>
-    parseHarnessDiscovery(settings.get(HARNESS_DISCOVERY_KEY)?.value);
-  const configured = () => resolveEffectiveHarnesses(overrides(), custom());
+  const rows = createHarnessesCollection(persistence);
   const isBuiltIn = (harnessId: string) =>
     BUILT_IN_HARNESSES.some((harness) => harness.id === harnessId);
 
-  /** Each edit reads the settings it changes once the last edit has
-   *  landed, so two quick edits never write over each other. */
-  let edits: Promise<unknown> = Promise.resolve();
-  const edit = <T>(apply: () => Promise<T>): Promise<T> => {
-    const next = edits.then(async () => {
-      await settings.preload();
-      return apply();
-    });
-    edits = next.catch(() => undefined);
-    return next;
+  /**
+   * Write a harness's row, creating it if it has none. A write issued
+   * before the rows have loaded would be dropped as already applied (see
+   * `workspaces.ts`), so every write waits for `ready()`; after that the
+   * read and the write happen in one tick, so two edits at once both land.
+   */
+  const upsert = (
+    harnessId: string,
+    change: (row: HarnessRow) => void,
+  ): Promise<unknown> => {
+    if (rows.has(harnessId)) {
+      return rows.update(harnessId, change).isPersisted.promise;
+    }
+    const row: HarnessRow = { id: harnessId, createdAt: Date.now() };
+    change(row);
+    return rows.insert(row).isPersisted.promise;
   };
-  const writeOverrides = (next: Record<string, HarnessOverride>) =>
-    kv.write(HARNESS_SETTINGS_NAMESPACE, HARNESS_OVERRIDES_KEY, next);
-  const writeCustom = (next: CustomHarnessEntry[]) =>
-    kv.write(HARNESS_SETTINGS_NAMESPACE, HARNESS_CUSTOM_KEY, next);
 
-  /** What checking `harnessId` runs — a disabled custom entry included,
-   *  when it is asked for by name. */
-  const probeEntryFor = (harnessId: string): ProbeEntry | undefined =>
-    candidateProbeEntries(
-      overrides(),
-      custom().map((entry) => ({ ...entry, enabled: true })),
-    ).find((entry) => entry.id === harnessId);
+  /** Move the settings an older version kept in KV into rows, then delete
+   *  them. Rows already written win nothing over them: the KV is only ever
+   *  there before the first launch with rows. */
+  const migrate = async () => {
+    const [rawOverrides, rawCustom, rawDiscovery] = await Promise.all([
+      kv.read<unknown>(LEGACY_NAMESPACE, LEGACY_KEYS.overrides),
+      kv.read<unknown>(LEGACY_NAMESPACE, LEGACY_KEYS.custom),
+      kv.read<unknown>(LEGACY_NAMESPACE, LEGACY_KEYS.discovery),
+    ]);
+    if (
+      rawOverrides === undefined &&
+      rawCustom === undefined &&
+      rawDiscovery === undefined
+    ) {
+      return;
+    }
+    const writes: Promise<unknown>[] = [];
+    const now = Date.now();
+    for (const [id, override] of Object.entries(
+      parseHarnessOverrides(rawOverrides),
+    )) {
+      if (!isBuiltIn(id)) continue;
+      writes.push(upsert(id, (row) => void (row.override = override)));
+    }
+    // Their order in the list is their order in the rows.
+    parseCustomHarnessEntries(rawCustom).forEach((entry, index) => {
+      if (isBuiltIn(entry.id)) return;
+      writes.push(
+        upsert(entry.id, (row) => {
+          row.custom = entry;
+          row.createdAt = now + index;
+        }),
+      );
+    });
+    const custom = new Set(
+      parseCustomHarnessEntries(rawCustom).map((entry) => entry.id),
+    );
+    for (const [id, install] of Object.entries(
+      parseHarnessDiscovery(rawDiscovery),
+    )) {
+      // A verdict for a custom entry deleted since is not carried over.
+      if (!isBuiltIn(id) && !custom.has(id)) continue;
+      writes.push(upsert(id, (row) => void (row.install = install)));
+    }
+    await Promise.all(writes);
+    await Promise.all(
+      Object.values(LEGACY_KEYS).map((key) => kv.remove(LEGACY_NAMESPACE, key)),
+    );
+  };
+
+  let readied: Promise<void> | null = null;
+  const ready = () => (readied ??= rows.preload().then(migrate));
 
   const scans = createScanBatcher({
     proc,
-    // Merged over the last verdicts: a check of one harness leaves the
-    // others' standing.
     record: async (results) => {
-      await settings.preload();
-      await kv.write(HARNESS_SETTINGS_NAMESPACE, HARNESS_DISCOVERY_KEY, {
-        ...discovery(),
-        ...results,
-      });
+      await ready();
+      await Promise.all(
+        Object.values(results).map((install) =>
+          upsert(install.harnessId, (row) => void (row.install = install)),
+        ),
+      );
     },
   });
 
@@ -173,103 +231,100 @@ export function createHarnesses({
     const handle: Harness = {
       id: harnessId,
       definition: () =>
-        configured().find((harness) => harness.id === harnessId) ??
+        harnessDefinition(rows.values(), harnessId) ??
         BUILT_IN_HARNESSES.find((harness) => harness.id === harnessId),
       async saveOverride(override) {
         if (!isBuiltIn(harnessId)) return false;
         const checked =
           override === null ? null : HarnessOverrideSchema.safeParse(override);
         if (checked && !checked.success) return false;
-        await edit(() => {
-          const next = { ...overrides() };
-          if (checked) next[harnessId] = { ...checked.data, id: harnessId };
-          else delete next[harnessId];
-          return writeOverrides(next);
-        });
+        await ready();
+        if (checked || rows.has(harnessId)) {
+          await upsert(harnessId, (row) => {
+            row.override = checked ? { ...checked.data, id: harnessId } : undefined;
+          });
+        }
         void handle.rescan();
         return true;
       },
       async saveCustom(entry) {
+        if (isBuiltIn(harnessId)) return false;
         const checked = CustomHarnessEntrySchema.safeParse({
           ...entry,
           id: harnessId,
         });
         if (!checked.success) return false;
-        await edit(() => {
-          const current = custom();
-          const next = current.some((existing) => existing.id === harnessId)
-            ? current.map((existing) =>
-                existing.id === harnessId ? checked.data : existing,
-              )
-            : [...current, checked.data];
-          return writeCustom(next);
-        });
+        await ready();
+        await upsert(harnessId, (row) => void (row.custom = checked.data));
         void handle.rescan();
         return true;
       },
-      setEnabled: (enabled) =>
-        edit(() => {
-          const current = custom();
-          if (current.some((entry) => entry.id === harnessId)) {
-            return writeCustom(toggleCustomEnabled(current, harnessId, enabled));
-          }
-          if (!isBuiltIn(harnessId)) return Promise.resolve();
-          return writeOverrides(
-            toggleOverrideEnabled(
-              overrides(),
-              harnessId,
-              enabled,
-              discovery()[harnessId]?.found !== false,
-            ),
-          );
-        }),
-      remove: () =>
-        edit(() =>
-          writeCustom(custom().filter((entry) => entry.id !== harnessId)),
-        ),
+      async setEnabled(enabled) {
+        await ready();
+        const row = rows.get(harnessId);
+        if (row?.custom) {
+          await upsert(harnessId, (draft) => {
+            draft.custom = { ...row.custom!, enabled };
+          });
+          return;
+        }
+        if (!isBuiltIn(harnessId)) return;
+        const next = toggleOverrideEnabled(
+          row?.override ? { [harnessId]: row.override } : {},
+          harnessId,
+          enabled,
+          row?.install?.found !== false,
+        )[harnessId];
+        if (next || row) {
+          await upsert(harnessId, (draft) => void (draft.override = next));
+        }
+      },
+      async remove() {
+        await ready();
+        if (!rows.get(harnessId)?.custom) return;
+        await rows.delete(harnessId).isPersisted.promise;
+      },
       async rescan() {
-        await settings.preload();
-        const entry = probeEntryFor(harnessId);
-        return entry ? scans.scan(entry) : null;
+        await ready();
+        // A disabled entry too, when it is asked for by name.
+        const definition = handle.definition();
+        if (!definition) return null;
+        const { command, probeCommand } = definition;
+        return scans.scan({ id: harnessId, command, probeCommand });
       },
     };
     return handle;
   };
 
   return {
-    configured,
-    label(harnessId) {
-      return (
-        configured().find((harness) => harness.id === harnessId)?.label ??
-        BUILT_IN_HARNESSES.find((harness) => harness.id === harnessId)?.label ??
-        harnessId
-      );
-    },
+    collection: rows,
+    ready,
+    configured: () => configuredHarnesses(rows.values()),
+    label: (harnessId) => harnessLabel(rows.values(), harnessId),
     harness,
     async rescan() {
-      await settings.preload();
-      const ids = candidateProbeEntries(overrides(), custom()).map(
-        (entry) => entry.id,
-      );
+      await ready();
+      const custom = [...rows.values()]
+        .filter((row) => row.custom && row.custom.enabled !== false)
+        .sort((a, b) => a.createdAt - b.createdAt);
+      const ids = [
+        ...BUILT_IN_HARNESSES.map((builtIn) => builtIn.id),
+        ...custom.map((row) => row.id),
+      ];
       const verdicts = await Promise.all(ids.map((id) => harness(id).rescan()));
       if (verdicts.some((verdict) => verdict === null)) return null;
       return Object.fromEntries(
         verdicts.map((verdict) => [verdict!.harnessId, verdict!]),
       );
     },
-    pickable: () =>
-      filterDiscoveredHarnesses(configured(), overrides(), custom(), discovery()),
-    probed: () => describeProbedHarnesses(overrides(), custom(), discovery()),
-    settingsRows: () =>
-      deriveHarnessSettingsRows(overrides(), custom(), discovery()),
   };
 }
 
 /**
  * Spawning a login shell is the expensive part of an install check, so
  * the checks asked for in one tick — `rescan()` asking every handle — run
- * as one script, and their verdicts are recorded in one write. Writes go
- * one after another, each over what the last one left.
+ * as one script, and their verdicts are recorded together. Records go one
+ * after another.
  */
 function createScanBatcher({
   proc,
@@ -317,17 +372,23 @@ declare module "@notefig/core" {
 }
 
 /**
- * The launch scan is the module's boot: one install check of every harness
- * per app session. Where there is no shell (a browser) it comes back
- * "couldn't check" and records nothing; a failure is logged and never
- * fails startup — the last verdicts stand until a check succeeds.
+ * The boot loads the rows (moving an older version's settings into them)
+ * and then runs the launch scan: one install check of every harness per
+ * app session. Where there is no shell (a browser) it comes back "couldn't
+ * check" and records nothing; a failure is logged and never fails startup
+ * — the last verdicts stand until a check succeeds.
  */
 export const harnessesModule = defineModule({
   name: "harnesses",
-  // Platform: an install check runs a shell script.
+  // Platform: the rows' database, and the shell an install check runs in.
+  // KV: settings an older version kept there.
   needs: [platformModule, kvModule],
   register: (ctx) =>
-    createHarnesses({ kv: ctx.use("kv"), proc: ctx.use("platform").proc }),
+    createHarnesses({
+      persistence: ctx.use("platform").db.get(),
+      kv: ctx.use("kv"),
+      proc: ctx.use("platform").proc,
+    }),
   boot: (harnesses) => {
     void harnesses.rescan().catch((error) => {
       console.warn("Startup harness discovery failed:", error);

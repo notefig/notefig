@@ -1,10 +1,5 @@
 import type { IPlatformAdapter } from "@/adapters/platform-adapter.interface";
-import {
-  BUILT_IN_HARNESSES,
-  type CustomHarnessEntry,
-  type HarnessDiscoveryResult,
-  type HarnessOverride,
-} from "@notefig/shared/agent";
+import type { HarnessDiscoveryResult } from "@notefig/shared/agent";
 
 /**
  * All domain knowledge for harness discovery lives here: the probe script,
@@ -13,12 +8,7 @@ import {
  * word "harness".
  *
  * Each harness's handle (`core.harnesses.harness(id).rescan()`) runs it.
- * The KV keys are exported as the single source of the storage layout.
  */
-export const HARNESS_SETTINGS_NAMESPACE = "harness-settings";
-export const HARNESS_OVERRIDES_KEY = "overrides";
-export const HARNESS_CUSTOM_KEY = "custom";
-export const HARNESS_DISCOVERY_KEY = "discovery";
 
 const SENTINEL_PREFIX = "__MHD";
 const SENTINEL_SUFFIX = "__END__";
@@ -101,26 +91,4 @@ export async function discoverHarnesses(
     };
   });
   return results;
-}
-
-/** Candidate probe entries: built-ins (overridden command/probe win) plus
- *  enabled custom entries. */
-export function candidateProbeEntries(
-  overrides: Record<string, HarnessOverride>,
-  custom: CustomHarnessEntry[],
-): ProbeEntry[] {
-  const builtins = BUILT_IN_HARNESSES.map((h) => ({
-    id: h.id,
-    command: overrides[h.id]?.command ?? h.command,
-    // Same inherit rule as resolveEffectiveHarnesses.
-    probeCommand: overrides[h.id]?.probeCommand ?? h.probeCommand,
-  }));
-  const customEntries = custom
-    .filter((c) => c.enabled !== false)
-    .map((c) => ({
-      id: c.id,
-      command: c.command,
-      probeCommand: c.probeCommand,
-    }));
-  return [...builtins, ...customEntries];
 }
