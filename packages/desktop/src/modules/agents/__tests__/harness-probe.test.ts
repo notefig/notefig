@@ -97,6 +97,44 @@ describe("probeHarnessSession", () => {
     expect(close).toHaveBeenCalled();
   });
 
+  it("grants nothing, even a request that offers an allow option", async () => {
+    const { agent, createTransport } = harnessProcess();
+    let answer: unknown;
+    agent.onNewSession = async (_params, a) => {
+      answer = await a.request("session/request_permission", {
+        sessionId: "sess_test",
+        toolCall: { toolCallId: "tc1", title: "Run setup" },
+        options: [
+          { optionId: "yes", name: "Allow", kind: "allow_always" },
+          { optionId: "no", name: "Reject", kind: "reject_once" },
+        ],
+      });
+      return { sessionId: "sess_test" };
+    };
+
+    await probe(createTransport);
+
+    expect(answer).toEqual({ outcome: { outcome: "cancelled" } });
+  });
+
+  it("stops a harness that finishes starting after the deadline", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    new FakeAgent(agentSide);
+    let finishStart!: () => void;
+    vi.spyOn(client, "start").mockImplementation(
+      () => new Promise<void>((resolve) => (finishStart = resolve)),
+    );
+    const close = vi.spyOn(client, "close");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(await probe(() => client, { timeoutMs: 20 })).toBeNull();
+    close.mockClear();
+    finishStart();
+
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    warn.mockRestore();
+  });
+
   it("finds nothing when the harness won't spawn", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const catalog = await probe(() => {

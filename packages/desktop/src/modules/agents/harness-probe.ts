@@ -54,14 +54,25 @@ export async function probeHarnessSession({
   let configOptions: SessionConfigSelect[] | null = null;
   let commands: AvailableCommand[] | null = null;
 
+  /** Past the deadline: whatever is still starting is stopped as it lands. */
+  let abandoned = false;
+
   const probe = async (): Promise<DiscoveredCatalog> => {
-    transport = createTransport({ taskId, harness, workspacePath: cwd });
-    await transport.start();
+    const started = createTransport({ taskId, harness, workspacePath: cwd });
+    transport = started;
+    await started.start();
+    // A process that came up after the deadline: the close at the deadline
+    // found nothing to stop, so stop it now.
+    if (abandoned) {
+      await started.close().catch(() => {});
+      throw new Error("probe timed out");
+    }
     const client = new NotefigAcpClient({
       taskId,
-      transport,
+      transport: started,
       // Never prompted, so nothing should ask; anything that does is
-      // refused.
+      // refused, allow options or not.
+      autoGrant: false,
       permissionBroker: {
         request: async () => ({ outcome: { outcome: "cancelled" } }),
       },
@@ -80,7 +91,7 @@ export async function probeHarnessSession({
       clientMeta: adapter.clientMeta,
     });
     const initialized = await client.connect();
-    const { sessionId } = await client.newSession(transport.agentCwd ?? cwd);
+    const { sessionId } = await client.newSession(started.agentCwd ?? cwd);
     await new Promise((resolve) => setTimeout(resolve, settleMs));
     // Leave nothing in the harness's history where it lets us; a close
     // (or neither) otherwise — the process stops either way.
@@ -99,7 +110,10 @@ export async function probeHarnessSession({
     return await Promise.race([
       probe(),
       new Promise<null>((resolve) => {
-        timer = setTimeout(() => resolve(null), timeoutMs);
+        timer = setTimeout(() => {
+          abandoned = true;
+          resolve(null);
+        }, timeoutMs);
       }),
     ]);
   } catch (error) {

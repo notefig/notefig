@@ -207,6 +207,11 @@ export type AcpClientDeps = {
   /** Vendor capabilities advertised in `initialize` (the harness adapter's
    *  `clientMeta`). */
   clientMeta?: Record<string, unknown>;
+  /** False: grant nothing on our own — every permission request goes to
+   *  the broker, allow options or not (a catalog probe, which asks for
+   *  nothing). Default true: a request offering an allow option is
+   *  granted. */
+  autoGrant?: boolean;
 };
 
 /**
@@ -515,7 +520,7 @@ export class NotefigAcpClient implements Client {
     const grant =
       request.options.find((o) => o.kind === "allow_always") ??
       request.options.find((o) => o.kind === "allow_once");
-    if (grant) {
+    if (grant && this.deps.autoGrant !== false) {
       return { outcome: { outcome: "selected", optionId: grant.optionId } };
     }
     // No allow option offered (only reject kinds) — hand it to the UI rather
