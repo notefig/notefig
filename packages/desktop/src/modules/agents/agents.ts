@@ -235,22 +235,14 @@ export function createAgents({
       // prompt rides the queue while session/load replays history.
       const task = runtime.getOrRevive(taskId);
       if (!task) {
-        // Revival is waiting for the harness rows (startup): send once the
-        // task is live.
-        const revival = runtime.revive(taskId);
-        if (revival) {
-          const turnId = newTurnId();
-          return {
-            turnId,
-            completed: revival.started.then(
-              () =>
-                runtime.task(taskId)?.prompt(text, { ...options, turnId })
-                  .completed ?? NOT_STARTED,
-              () => NOT_STARTED,
-            ),
-          };
-        }
-        return { turnId: newTurnId(), completed: Promise.resolve(NOT_STARTED) };
+        // Revival is waiting for the harness rows (startup): the prompt is
+        // recorded now and joins the queue once the task is live.
+        return (
+          runtime.promptWhileReviving(taskId, text, options) ?? {
+            turnId: newTurnId(),
+            completed: Promise.resolve(NOT_STARTED),
+          }
+        );
       }
       return task.prompt(text, options);
     };
@@ -326,7 +318,7 @@ export function createAgents({
         return sent;
       },
       removeQueuedPrompt(turnId) {
-        runtime.task(taskId)?.removeQueuedPrompt(turnId);
+        runtime.removeQueuedPrompt(taskId, turnId);
       },
       async isReachable() {
         if (runtime.task(taskId)) return true;

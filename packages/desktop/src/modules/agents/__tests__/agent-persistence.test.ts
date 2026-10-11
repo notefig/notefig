@@ -667,16 +667,54 @@ describe("revival before the harness rows have loaded", () => {
     await runtime.disposeWorkspace("/ws");
   });
 
-  it("sends a prompt once the task is live", async () => {
+  it("records a prompt at once and sends it once the task is live", async () => {
     const { runtime, agents } = await startingUp();
 
     const sent = agents.task("task_a").prompt("wake up");
+    // Recorded as any queued prompt is, so a widget waiting on it finds it.
+    expect(store.turns.get(sent.turnId)?.status).toBe("queued");
+    expect(
+      store.entries.toArray.some(
+        (entry) => entry.turnId === sent.turnId && entry.text === "wake up",
+      ),
+    ).toBe(true);
 
     expect(await sent.completed).toMatchObject({ status: "completed" });
     expect(
       store.turns.toArray.find((turn) => turn.turnId === sent.turnId)?.status,
     ).toBe("completed");
     await runtime.disposeWorkspace("/ws");
+  });
+
+  it("takes a held prompt back", async () => {
+    const { runtime, agents, agent } = await startingUp();
+    const prompted: unknown[] = [];
+    agent.onPrompt = async (params) => {
+      prompted.push(params);
+      return { stopReason: "end_turn" };
+    };
+
+    const sent = agents.task("task_a").prompt("never mind");
+    agents.task("task_a").removeQueuedPrompt(sent.turnId);
+
+    expect(await sent.completed).toEqual({ status: "cancelled" });
+    expect(store.turns.get(sent.turnId)).toBeUndefined();
+    await runtime.revive("task_a")!.started;
+    expect(prompted).toEqual([]);
+    await runtime.disposeWorkspace("/ws");
+  });
+
+  it("is called off, its held prompts cancelled, when every workspace goes (the tunnel drops)", async () => {
+    const { runtime, agents, spawned } = await startingUp();
+
+    const sent = agents.task("task_a").prompt("wake up");
+    const revival = runtime.revive("task_a")!;
+    await runtime.disposeAll();
+    await revival.started;
+
+    expect(spawned).toEqual([]);
+    expect(await sent.completed).toEqual({ status: "cancelled" });
+    expect(store.turns.get(sent.turnId)?.status).toBe("cancelled");
   });
 
   it("is called off when its workspace closes first", async () => {
