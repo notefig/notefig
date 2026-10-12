@@ -545,7 +545,7 @@ function createCatalogProbes({
     // Only a session of this definition, reporting while the probe ran,
     // knows better than it what version is in use.
     const seen = sessionVersions.get(harnessId);
-    const reported =
+    const versionReportedDuring =
       seen && seen.fingerprint === fingerprint && seen.at >= since
         ? seen.version
         : undefined;
@@ -555,7 +555,7 @@ function createCatalogProbes({
         fingerprint,
         since,
         at: now(),
-        sessionVersion: reported,
+        versionReportedDuring,
       }),
     );
   };

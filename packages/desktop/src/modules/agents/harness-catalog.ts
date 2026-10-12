@@ -127,10 +127,11 @@ export function needsProbe(
  * The catalog after a probe of the definition `fingerprint` names, begun at
  * `since`, found `found`. Only what it found replaces anything: nothing
  * found is never an empty list. Settings a session of the same definition
- * reported while it ran are newer, and stay. When a session has since
- * reported another version than the probe saw (`sessionVersion`), the
- * findings are kept but not as fresh: the next check probes the version in
- * use.
+ * reported while it ran are newer, and stay. When a session of the same
+ * definition reported another version than the probe saw while the probe
+ * ran (`versionReportedDuring` — the caller passes no other), the findings
+ * are kept but not as fresh: the next check probes the version in use. A
+ * version reported before the probe began says nothing about it.
  */
 export function catalogWithProbe(
   current: HarnessCatalog | undefined,
@@ -139,14 +140,21 @@ export function catalogWithProbe(
     fingerprint,
     since,
     at,
-    sessionVersion,
-  }: { fingerprint: string; since: number; at: number; sessionVersion?: string },
+    versionReportedDuring,
+  }: {
+    fingerprint: string;
+    since: number;
+    at: number;
+    versionReportedDuring?: string;
+  },
 ): HarnessCatalog {
   const kept = current?.definitionFingerprint === fingerprint ? current : undefined;
   const reportedSince =
     kept?.source === "session" && kept.fetchedAt >= since && kept.configOptions !== null;
   const stillCurrent =
-    !sessionVersion || !found.harnessVersion || sessionVersion === found.harnessVersion;
+    !versionReportedDuring ||
+    !found.harnessVersion ||
+    versionReportedDuring === found.harnessVersion;
   return {
     configOptions:
       found.configOptions?.length && !reportedSince
