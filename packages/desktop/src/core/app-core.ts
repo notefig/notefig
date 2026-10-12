@@ -15,7 +15,6 @@ import { mockAgentModule } from "@/modules/agents/mock-harness";
 import { promptRoundObserverModule } from "@/modules/agents/round-observer";
 import { tunnelModule } from "@/modules/agents/tunnel/tunnel-module";
 import { workspaceAgentsModule } from "@/modules/agents/workspace-agents";
-import { harnessCatalogModule } from "@/modules/agents/harness-catalog";
 import { treeInlineEditModule } from "@/modules/tree-inline-edit";
 import { sharedSessionsModule } from "@/modules/shared-sessions";
 import { treeExpansionModule } from "@/modules/tree-expansion";
@@ -74,7 +73,6 @@ export function runtimeModules(): AnyModule[] {
     workspaceAgentsModule,
     sharedSessionsModule,
     usageModule,
-    harnessCatalogModule,
     treeExpansionModule,
     lastToolModule,
   ];

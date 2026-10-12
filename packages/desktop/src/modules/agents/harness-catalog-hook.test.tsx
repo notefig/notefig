@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
@@ -7,13 +7,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { CoreProvider } from "@notefig/core/react";
 import type { Core } from "@notefig/core";
 import { createTestCore } from "@/testing/test-core";
-import { harnessCatalogModule } from "@/modules/agents/harness-catalog";
+import { harnessesModule } from "@/modules/agents/harnesses";
 import { useHarnessCatalog } from "@/modules/agents/react";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 
 let container: HTMLDivElement;
 let root: Root;
-// The module as booted, so its rows come from what sessions announce.
+// The module as booted, so its catalog comes from what sessions announce.
 let core: Core;
 
 function Probe<T>({ use, onValue }: { use: () => T; onValue: (v: T) => void }) {
@@ -47,7 +47,7 @@ async function renderHook<T>(use: () => T): Promise<() => T> {
 
 beforeEach(async () => {
   core = createTestCore({
-    modules: [harnessCatalogModule],
+    modules: [harnessesModule],
     platform: {
       proc: {
         runShellCommand: () => Promise.reject(new Error("no shell here")),
@@ -66,30 +66,42 @@ afterEach(() => {
 });
 
 describe("useHarnessCatalog", () => {
-  it("shows what sessions announced in its workspace, and only there", async () => {
-    const read = await renderHook(() => useHarnessCatalog("claude-code", "/ws"));
+  it("shows what sessions announced for that harness, and only it", async () => {
+    const read = await renderHook(() => useHarnessCatalog("claude-code"));
     expect(read()).toMatchObject({ commands: null, configOptions: null });
-    const harness = BUILT_IN_HARNESSES.find((h) => h.id === "claude-code")!;
+    const harness = (id: string) => BUILT_IN_HARNESSES.find((h) => h.id === id)!;
+    const model = (current: string) => [
+      {
+        id: "model",
+        name: "Model",
+        category: "model" as const,
+        type: "select" as const,
+        currentValue: current,
+        options: [{ value: current, name: current }],
+      },
+    ];
 
     await act(async () => {
       core.hooks.emit("agent:catalog", {
         taskId: "task_1",
-        harnessId: "claude-code",
-        harness,
-        workspacePath: "/other",
-        commands: [{ name: "deploy", description: "elsewhere" }],
+        harnessId: "opencode",
+        harness: harness("opencode"),
+        workspacePath: "/ws",
+        configOptions: model("gpt"),
       });
       core.hooks.emit("agent:catalog", {
         taskId: "task_2",
         harnessId: "claude-code",
-        harness,
+        harness: harness("claude-code"),
         workspacePath: "/ws",
-        commands: [{ name: "skill", description: "here" }],
+        configOptions: model("opus"),
       });
-      await core.use("harnessCatalog").settled();
+      await vi.waitFor(() =>
+        expect(core.use("harnesses").collection.get("claude-code")?.catalog).toBeDefined(),
+      );
     });
 
-    expect(read().commands).toEqual([{ name: "skill", description: "here" }]);
+    expect(read().configOptions).toEqual(model("opus"));
     expect(read().loading).toBe(false);
   });
 });

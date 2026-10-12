@@ -30,7 +30,6 @@ const ID_PREFIXES = {
   diagnostic: "dg",
   usage: "usg",
   usageLimits: "ulm",
-  harnessCatalog: "hct",
 } as const;
 
 export type IdPrefix = keyof typeof ID_PREFIXES;
@@ -116,12 +115,6 @@ export function newUsageBucketId(): string {
 /** A harness's stored account limits (one row per harness). */
 export function newUsageLimitsId(): string {
   return createId("usageLimits", "ascending");
-}
-
-/** A harness catalog row: what one harness offers, app-wide or in one
- *  workspace. */
-export function newHarnessCatalogId(): string {
-  return createId("harnessCatalog", "ascending");
 }
 
 /**
