@@ -385,6 +385,52 @@ describe("probing a harness's catalog", () => {
     expect(catalogOf(harnesses)?.probedAt).toBe(clock);
   });
 
+  it("probes the new definition when it is edited during a probe of the old one", async () => {
+    const { probe, calls, release } = heldProbe();
+    const harnesses = await harnessesWith(probe);
+    const claudeCode = harnesses.harness("claude-code");
+
+    const probing = claudeCode.refreshCatalog();
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    await edit(harnesses);
+    const afterEdit = claudeCode.refreshCatalog();
+    release();
+    await Promise.all([probing, afterEdit]);
+
+    expect(calls).toHaveLength(2);
+    expect(catalogOf(harnesses)?.definitionFingerprint).toBe(
+      definitionFingerprint(claudeCode.definition()!),
+    );
+  });
+
+  it("doesn't start a queued probe of a harness switched off before its turn", async () => {
+    const { probe, calls, release } = heldProbe();
+    const harnesses = await harnessesWith(probe);
+
+    const first = harnesses.harness("claude-code").refreshCatalog();
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    const queued = harnesses.harness("devin").refreshCatalog();
+    await harnesses.harness("devin").setEnabled(false);
+    release();
+    await Promise.all([first, queued]);
+
+    expect(calls).toEqual(["claude-code"]);
+  });
+
+  it("takes a probe's version over one a session reported before it began", async () => {
+    const { probe, calls } = fakeProbe(async () => ({ ...found(), harnessVersion: "2.0.0" }));
+    const harnesses = await harnessesWith(probe);
+    const claudeCode = harnesses.harness("claude-code");
+    await claudeCode.recordOffer(report({ harnessVersion: "1.0.0" }));
+
+    clock += 1;
+    await claudeCode.refreshCatalog();
+    await claudeCode.refreshCatalog();
+
+    expect(catalogOf(harnesses)).toMatchObject({ probedAt: clock, harnessVersion: "2.0.0" });
+    expect(calls).toHaveLength(1);
+  });
+
   it("writes nothing when the probe finds nothing or throws, and waits before trying again", async () => {
     let result: () => Promise<DiscoveredCatalog | null> = async () => found("opus");
     const { probe, calls } = fakeProbe(() => result());

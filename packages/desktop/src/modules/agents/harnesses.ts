@@ -300,7 +300,7 @@ export function createHarnesses({
   });
 
   /** The version each harness's sessions last reported, this app session. */
-  const sessionVersions = new Map<string, string>();
+  const sessionVersions = new Map<string, SessionVersion>();
   const catalogs = createCatalogProbes({
     probe,
     now,
@@ -394,7 +394,13 @@ export function createHarnesses({
       async recordOffer(offer) {
         await ready();
         if (!handle.definition()) return;
-        if (offer.harnessVersion) sessionVersions.set(harnessId, offer.harnessVersion);
+        if (offer.harnessVersion) {
+          sessionVersions.set(harnessId, {
+            version: offer.harnessVersion,
+            fingerprint: definitionFingerprint(offer.harness),
+            at: now(),
+          });
+        }
         const catalog = catalogWithSession(
           rows.get(harnessId)?.catalog,
           offer,
@@ -465,11 +471,22 @@ export function createHarnesses({
   return api;
 }
 
+/** A queued probe whose harness was switched off or edited before its turn. */
+const SKIPPED = Symbol("skipped");
+
+/** A harness version a session reported, under which definition, when. */
+interface SessionVersion {
+  version: string;
+  fingerprint: string;
+  at: number;
+}
+
 /**
  * Each harness's catalog probe, run when its catalog is stale: one at a
  * time across harnesses, since each spawns a harness process; one per
- * harness at once, however many ask; and not again soon after one found
- * nothing.
+ * harness at once, however many ask — an ask during a probe looks again
+ * once it is done, since it may come from an edit the probe predates; and
+ * not again soon after one found nothing.
  */
 function createCatalogProbes({
   probe,
@@ -482,7 +499,7 @@ function createCatalogProbes({
 }: {
   probe?: CatalogProbe;
   now: () => number;
-  sessionVersions: ReadonlyMap<string, string>;
+  sessionVersions: ReadonlyMap<string, SessionVersion>;
   /** Its definition if it may be probed at all, else undefined. */
   probeable: (harnessId: string) => Promise<HarnessDefinition | undefined>;
   catalogOf: (harnessId: string) => HarnessCatalog | undefined;
@@ -491,6 +508,8 @@ function createCatalogProbes({
 }) {
   let queue: Promise<unknown> = Promise.resolve();
   const inFlight = new Map<string, Promise<void>>();
+  /** The look again asked for during a harness's probe, shared. */
+  const again = new Map<string, Promise<void>>();
   const failedAt = new Map<string, number>();
 
   const stale = async (harnessId: string) => {
@@ -506,9 +525,16 @@ function createCatalogProbes({
     if (!definition) return;
     const fingerprint = definitionFingerprint(definition);
     const since = now();
-    const probing = queue.then(() => catalogProbe.run(definition));
+    const probing = queue.then(async () => {
+      // Its turn may come long after it was asked for: by then the harness
+      // may be switched off or edited, and its process must not start.
+      const current = await probeable(harnessId);
+      if (!current || definitionFingerprint(current) !== fingerprint) return SKIPPED;
+      return catalogProbe.run(definition);
+    });
     queue = probing.catch(() => {});
     const found = await probing.catch(() => null);
+    if (found === SKIPPED) return;
     if (!found || (!found.configOptions?.length && !found.commands?.length)) {
       failedAt.set(harnessId, now());
       return;
@@ -516,28 +542,47 @@ function createCatalogProbes({
     failedAt.delete(harnessId);
     const current = definitionOf(harnessId);
     if (!current || definitionFingerprint(current) !== fingerprint) return;
+    // Only a session of this definition, reporting while the probe ran,
+    // knows better than it what version is in use.
+    const seen = sessionVersions.get(harnessId);
+    const reported =
+      seen && seen.fingerprint === fingerprint && seen.at >= since
+        ? seen.version
+        : undefined;
     await write(
       harnessId,
       catalogWithProbe(catalogOf(harnessId), found, {
         fingerprint,
         since,
         at: now(),
-        sessionVersion: sessionVersions.get(harnessId),
+        sessionVersion: reported,
       }),
     );
   };
 
+  const refresh = (harnessId: string, catalogProbe: CatalogProbe): Promise<void> => {
+    const pending = inFlight.get(harnessId);
+    if (pending) {
+      let next = again.get(harnessId);
+      if (!next) {
+        next = pending.then(() => {
+          again.delete(harnessId);
+          return refresh(harnessId, catalogProbe);
+        });
+        again.set(harnessId, next);
+      }
+      return next;
+    }
+    const probing = run(harnessId, catalogProbe)
+      .catch((error) => console.warn(`Probing ${harnessId}'s catalog failed:`, error))
+      .finally(() => inFlight.delete(harnessId));
+    inFlight.set(harnessId, probing);
+    return probing;
+  };
+
   return {
-    refresh(harnessId: string): Promise<void> {
-      if (!probe) return Promise.resolve();
-      const pending = inFlight.get(harnessId);
-      if (pending) return pending;
-      const probing = run(harnessId, probe)
-        .catch((error) => console.warn(`Probing ${harnessId}'s catalog failed:`, error))
-        .finally(() => inFlight.delete(harnessId));
-      inFlight.set(harnessId, probing);
-      return probing;
-    },
+    refresh: (harnessId: string): Promise<void> =>
+      probe ? refresh(harnessId, probe) : Promise.resolve(),
   };
 }
 
