@@ -33,6 +33,14 @@
         {
           "kind": "update",
           "update": {
+            "sessionUpdate": "session_info_update",
+            "title": "Greeting"
+          },
+          "at": 180
+        },
+        {
+          "kind": "update",
+          "update": {
             "sessionUpdate": "current_mode_update",
             "currentModeId": "architect"
           },

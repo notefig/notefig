@@ -6,6 +6,8 @@
  */
 import type {
   AgentTurnStatus,
+  AvailableCommand,
+  SessionConfigSelect,
   ToolCallUpdate,
   TurnUsage,
   UsageLimits,
@@ -73,6 +75,19 @@ declare module "@notefig/core" {
      *  into `UsageLimits`. Limits belong to the harness account, not the
      *  session: the task is only where the report arrived. Raised when the
      *  report changes. */
+    /** A session reported what its harness offers: its switchable
+     *  settings (the model among them) or its commands and skills. Raised
+     *  each time either changes, a session/load's included — it is the
+     *  harness's current offer, not history. Only the half that changed is
+     *  set. Commands may be the workspace's own (a project's skills), so
+     *  the workspace rides along. */
+    "agent:catalog": {
+      taskId: string;
+      harnessId: string;
+      workspacePath: string;
+      configOptions?: SessionConfigSelect[];
+      commands?: AvailableCommand[];
+    };
     "agent:usage-limits": {
       taskId: string;
       harnessId: string;
