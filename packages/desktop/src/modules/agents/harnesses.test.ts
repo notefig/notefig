@@ -353,3 +353,32 @@ describe("views over the rows", () => {
     );
   });
 });
+
+describe("a harness's usage reporting", () => {
+  it("knows what the built-ins report, and believes the data over the table", () => {
+    const harnesses = testHarnesses();
+    const reporting = (id: string, seen?: { cost?: boolean; limits?: boolean }) =>
+      harnesses.harness(id).reporting(seen);
+    expect(reporting("claude-code")).toEqual({ cost: true, limits: true });
+    expect(reporting("opencode")).toEqual({ cost: true, limits: false });
+    expect(reporting("devin")).toEqual({ cost: false, limits: false });
+    expect(reporting("gemini-cli")).toEqual({ cost: false, limits: false });
+    expect(reporting("custom:1", { cost: true })).toEqual({ cost: true, limits: false });
+    expect(reporting("devin", { limits: true })).toEqual({ cost: false, limits: true });
+  });
+
+  it("declares nothing for a custom harness, whichever built-in's tools it borrows", async () => {
+    const harnesses = testHarnesses();
+    const lab = harnesses.harness("custom:lab");
+    await lab.saveCustom(customEntry({ mcpRegistrationOverride: "session-new" }));
+    expect(lab.reporting()).toEqual({ cost: false, limits: false });
+    expect(lab.reporting({ cost: true })).toEqual({ cost: true, limits: false });
+  });
+
+  it("still knows a built-in switched off", async () => {
+    const { harnesses } = await withLegacySettings({
+      overrides: { "claude-code": { id: "claude-code", enabled: false } },
+    });
+    expect(harnesses.harness("claude-code").reporting()).toEqual({ cost: true, limits: true });
+  });
+});

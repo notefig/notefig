@@ -91,6 +91,8 @@ declare module "@notefig/core" {
       workspacePath: string;
       configOptions?: SessionConfigSelect[];
       commands?: AvailableCommand[];
+      /** The harness's version, as its `initialize` said. */
+      harnessVersion?: string;
     };
     "agent:usage-limits": {
       taskId: string;

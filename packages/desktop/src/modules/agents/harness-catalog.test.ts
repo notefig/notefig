@@ -1,13 +1,20 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createHooks, type CoreHookMap } from "@notefig/core";
 import {
   BUILT_IN_HARNESSES,
+  type AvailableCommand,
+  type HarnessDefinition,
   type SessionConfigSelect,
 } from "@notefig/shared/agent";
+import type { DiscoveredCatalog } from "@/modules/harness-adapters";
 import { createNodeTestDb, type NodeTestDb } from "@/testing/node-db";
 import { testHarnesses } from "@/testing/test-harnesses";
 import type { HarnessesApi } from "./harnesses";
-import { definitionFingerprint } from "./harness-catalog";
+import {
+  CATALOG_REFRESH_MS,
+  definitionFingerprint,
+  type CatalogProbe,
+} from "./harness-catalog";
 
 const models = (current: string): SessionConfigSelect[] => [
   {
@@ -144,5 +151,332 @@ describe("definitionFingerprint", () => {
     expect(definitionFingerprint(base)).not.toBe(
       definitionFingerprint({ ...base, env: { A: "1", B: "3" } }),
     );
+  });
+});
+
+describe("probing a harness's catalog", () => {
+  let db: NodeTestDb;
+  let clock: number;
+
+  const command = (name: string): AvailableCommand => ({ name, description: name });
+
+  const found = (current = "opus"): DiscoveredCatalog => ({
+    configOptions: models(current),
+    commands: [command("review")],
+    harnessVersion: "1.0.0",
+  });
+
+  /** A probe that finds what `run` returns, and counts. */
+  function fakeProbe(
+    run: (definition: HarnessDefinition) => Promise<DiscoveredCatalog | null> = async () =>
+      found(),
+  ) {
+    const calls: string[] = [];
+    const probe: CatalogProbe = {
+      has: (definition) => !definition.id.startsWith("custom:"),
+      run: vi.fn(async (definition: HarnessDefinition) => {
+        calls.push(definition.id);
+        return run(definition);
+      }),
+    };
+    return { probe, calls };
+  }
+
+  /** A probe that holds its first run until released. */
+  function heldProbe(result: () => DiscoveredCatalog = () => found()) {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const fake = fakeProbe(async () => {
+      if (fake.calls.length === 1) await held;
+      return result();
+    });
+    return { ...fake, release: () => release() };
+  }
+
+  async function harnessesWith(probe?: CatalogProbe, proc?: Parameters<typeof testHarnesses>[0]) {
+    const harnesses = testHarnesses({ db, probe, now: () => clock, ...proc });
+    await harnesses.ready();
+    return harnesses;
+  }
+
+  const catalogOf = (harnesses: HarnessesApi, harnessId = "claude-code") =>
+    harnesses.collection.get(harnessId)?.catalog;
+
+  const edit = (harnesses: HarnessesApi) =>
+    harnesses
+      .harness("claude-code")
+      .saveOverride({ id: "claude-code", enabled: true, env: { DEBUG: "1" } });
+
+  beforeEach(() => {
+    db = createNodeTestDb();
+    clock = 1_000_000;
+  });
+
+  it("probes a harness never probed once, concurrent asks sharing it", async () => {
+    const { probe, calls } = fakeProbe();
+    const harnesses = await harnessesWith(probe);
+    const claudeCode = harnesses.harness("claude-code");
+
+    await Promise.all([claudeCode.refreshCatalog(), claudeCode.refreshCatalog()]);
+
+    expect(calls).toEqual(["claude-code"]);
+    expect(catalogOf(harnesses)).toEqual({
+      configOptions: models("opus"),
+      commands: [command("review")],
+      source: "probe",
+      fetchedAt: clock,
+      probedAt: clock,
+      harnessVersion: "1.0.0",
+      definitionFingerprint: definitionFingerprint(claude),
+    });
+  });
+
+  it("doesn't probe again while the findings stand, and does once a week has passed", async () => {
+    const { probe, calls } = fakeProbe();
+    const harnesses = await harnessesWith(probe);
+    const claudeCode = harnesses.harness("claude-code");
+    await claudeCode.refreshCatalog();
+
+    clock += CATALOG_REFRESH_MS - 1;
+    await claudeCode.refreshCatalog();
+    expect(calls).toHaveLength(1);
+
+    clock += 1;
+    await claudeCode.refreshCatalog();
+    expect(calls).toHaveLength(2);
+  });
+
+  it("probes every enabled harness in turn, the stale ones only", async () => {
+    const { probe, calls } = fakeProbe();
+    const harnesses = await harnessesWith(probe);
+    await harnesses.harness("devin").setEnabled(false);
+    await harnesses.harness("claude-code").refreshCatalog();
+
+    await harnesses.refreshCatalogs();
+
+    expect(calls).toEqual(["claude-code", "opencode", "gemini-cli"]);
+  });
+
+  it("probes a harness its install check finds", async () => {
+    const { probe, calls } = fakeProbe();
+    const proc = {
+      runShellCommand: vi.fn(async () => ({ stdout: "__MHD0__/bin/claude__END__", exitCode: 0 })),
+    };
+    const harnesses = await harnessesWith(probe, { proc });
+
+    await harnesses.harness("claude-code").rescan();
+
+    await vi.waitFor(() => expect(catalogOf(harnesses)?.probedAt).toBe(clock));
+    expect(calls).toEqual(["claude-code"]);
+  });
+
+  it("probes again after the harness is edited", async () => {
+    const { probe, calls } = fakeProbe();
+    const harnesses = await harnessesWith(probe);
+    await harnesses.harness("claude-code").refreshCatalog();
+
+    await edit(harnesses);
+    await harnesses.harness("claude-code").refreshCatalog();
+
+    expect(calls).toHaveLength(2);
+    expect(catalogOf(harnesses)?.definitionFingerprint).toBe(
+      definitionFingerprint(harnesses.harness("claude-code").definition()!),
+    );
+  });
+
+  it("probes again after an edit even when a session under the new definition reported first", async () => {
+    const { probe, calls } = fakeProbe();
+    const harnesses = await harnessesWith(probe);
+    const claudeCode = harnesses.harness("claude-code");
+    await claudeCode.refreshCatalog();
+
+    await edit(harnesses);
+    await claudeCode.recordOffer(
+      report({
+        harness: claudeCode.definition()!,
+        harnessVersion: "1.0.0",
+        configOptions: models("sonnet"),
+      }),
+    );
+    await claudeCode.refreshCatalog();
+
+    expect(calls).toHaveLength(2);
+    expect(catalogOf(harnesses)?.commands).toEqual([command("review")]);
+  });
+
+  it("drops a probe's findings when the harness was edited while it ran", async () => {
+    const { probe, calls, release } = heldProbe();
+    const harnesses = await harnessesWith(probe);
+
+    const probing = harnesses.harness("claude-code").refreshCatalog();
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    await edit(harnesses);
+    release();
+    await probing;
+
+    expect(catalogOf(harnesses)).toBeUndefined();
+  });
+
+  it("keeps settings a session reported while the probe ran", async () => {
+    const { probe, calls, release } = heldProbe(() => found("opus"));
+    const harnesses = await harnessesWith(probe);
+    const claudeCode = harnesses.harness("claude-code");
+
+    const probing = claudeCode.refreshCatalog();
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    await claudeCode.recordOffer(report({ configOptions: models("sonnet") }));
+    release();
+    await probing;
+
+    expect(catalogOf(harnesses)?.configOptions).toEqual(models("sonnet"));
+    expect(catalogOf(harnesses)?.commands).toEqual([command("review")]);
+  });
+
+  it("saves its own settings when the session that reported during it ran an older definition", async () => {
+    const { probe, calls, release } = heldProbe(() => found("opus"));
+    const harnesses = await harnessesWith(probe);
+    await edit(harnesses);
+    const claudeCode = harnesses.harness("claude-code");
+
+    const probing = claudeCode.refreshCatalog();
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    // A session started before the edit, on the stock definition.
+    await claudeCode.recordOffer(report({ configOptions: models("sonnet") }));
+    release();
+    await probing;
+
+    expect(catalogOf(harnesses)?.configOptions).toEqual(models("opus"));
+  });
+
+  it("keeps a probe's findings but not as fresh when a session reported another version meanwhile", async () => {
+    const { probe, calls, release } = heldProbe();
+    const harnesses = await harnessesWith(probe);
+    const claudeCode = harnesses.harness("claude-code");
+
+    const probing = claudeCode.refreshCatalog();
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    await claudeCode.recordOffer(report({ harnessVersion: "2.0.0" }));
+    release();
+    await probing;
+
+    expect(catalogOf(harnesses)?.commands).toEqual([command("review")]);
+    expect(catalogOf(harnesses)?.probedAt).toBeUndefined();
+    await claudeCode.refreshCatalog();
+    expect(calls).toHaveLength(2);
+  });
+
+  it("probes again once a session reports another harness version", async () => {
+    // The harness was updated after the first probe.
+    const { probe, calls } = fakeProbe(async () => ({
+      ...found(),
+      harnessVersion: calls.length === 1 ? "1.0.0" : "1.1.0",
+    }));
+    const harnesses = await harnessesWith(probe);
+    const claudeCode = harnesses.harness("claude-code");
+    await claudeCode.refreshCatalog();
+
+    await claudeCode.recordOffer(report({ harnessVersion: "1.0.0" }));
+    await claudeCode.refreshCatalog();
+    expect(calls).toHaveLength(1);
+
+    await claudeCode.recordOffer(report({ harnessVersion: "1.1.0" }));
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    await claudeCode.refreshCatalog();
+    expect(catalogOf(harnesses)?.probedAt).toBe(clock);
+  });
+
+  it("writes nothing when the probe finds nothing or throws, and waits before trying again", async () => {
+    let result: () => Promise<DiscoveredCatalog | null> = async () => found("opus");
+    const { probe, calls } = fakeProbe(() => result());
+    const harnesses = await harnessesWith(probe);
+    const claudeCode = harnesses.harness("claude-code");
+    await claudeCode.refreshCatalog();
+    const before = catalogOf(harnesses);
+
+    clock += CATALOG_REFRESH_MS;
+    result = async () => null;
+    await claudeCode.refreshCatalog();
+    expect(catalogOf(harnesses)).toEqual(before);
+
+    // Backing off: no second probe straight away.
+    await claudeCode.refreshCatalog();
+    expect(calls).toHaveLength(2);
+
+    clock += 11 * 60 * 1000;
+    result = async () => {
+      throw new Error("crashed");
+    };
+    await claudeCode.refreshCatalog();
+    expect(calls).toHaveLength(3);
+    expect(catalogOf(harnesses)).toEqual(before);
+  });
+
+  it("never replaces a list with an empty one", async () => {
+    let result = found("opus");
+    const { probe } = fakeProbe(async () => result);
+    const harnesses = await harnessesWith(probe);
+    const claudeCode = harnesses.harness("claude-code");
+    await claudeCode.refreshCatalog();
+
+    clock += CATALOG_REFRESH_MS;
+    result = { configOptions: models("sonnet"), commands: [] };
+    await claudeCode.refreshCatalog();
+
+    expect(catalogOf(harnesses)?.configOptions).toEqual(models("sonnet"));
+    expect(catalogOf(harnesses)?.commands).toEqual([command("review")]);
+  });
+
+  it("runs one probe at a time across harnesses", async () => {
+    let running = 0;
+    let most = 0;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const { probe, calls } = fakeProbe(async () => {
+      running++;
+      most = Math.max(most, running);
+      if (calls.length === 1) await held;
+      running--;
+      return found();
+    });
+    const harnesses = await harnessesWith(probe);
+
+    const first = harnesses.harness("claude-code").refreshCatalog();
+    const second = harnesses.harness("devin").refreshCatalog();
+    await vi.waitFor(() => expect(calls).toEqual(["claude-code"]));
+    release();
+    await Promise.all([first, second]);
+
+    expect(calls).toEqual(["claude-code", "devin"]);
+    expect(most).toBe(1);
+  });
+
+  it("never probes without a probe (a browser, the tunnel)", async () => {
+    const harnesses = await harnessesWith(undefined);
+    await harnesses.refreshCatalogs();
+    expect(harnesses.collection.size).toBe(0);
+  });
+
+  it("never probes a harness switched off, one not found, or one with no probe", async () => {
+    const proc = { runShellCommand: vi.fn(async () => ({ stdout: "", exitCode: 0 })) };
+    const { probe, calls } = fakeProbe();
+    const harnesses = await harnessesWith(probe, { proc });
+    await harnesses.harness("devin").rescan();
+    await harnesses.harness("gemini-cli").setEnabled(false);
+    await harnesses.harness("custom:lab").saveCustom({
+      id: "custom:lab",
+      label: "Lab",
+      command: "lab-acp",
+      args: [],
+      env: {},
+      mcpRegistrationOverride: "none",
+      enabled: true,
+    });
+
+    await harnesses.harness("devin").refreshCatalog();
+    await harnesses.harness("gemini-cli").refreshCatalog();
+    await harnesses.harness("custom:lab").refreshCatalog();
+
+    expect(harnesses.collection.get("devin")?.install?.found).toBe(false);
+    expect(calls).toEqual([]);
   });
 });
