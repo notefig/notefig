@@ -22,6 +22,7 @@ import { CoreProvider } from "@notefig/core/react";
 import { createTestCore } from "@/testing/test-core";
 import { testAgents } from "@/testing/test-agents";
 import { kvModule } from "@/modules/kv";
+import { harnessesModule } from "@/modules/agents/harnesses";
 import { createSharedSessions } from "@/modules/shared-sessions";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -37,6 +38,7 @@ beforeEach(() => {
   core = createTestCore({
     modules: [
       kvModule,
+      harnessesModule,
       defineModule({ name: "agentStore", register: () => store }),
       defineModule({
         name: "agents",

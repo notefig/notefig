@@ -9,11 +9,7 @@ import {
   newTaskId,
   newTurnId,
   newEventId,
-  BUILT_IN_HARNESSES,
   composePrompt,
-  parseCustomHarnessEntries,
-  parseHarnessOverrides,
-  resolveEffectiveHarnesses,
   type ContentBlock,
   type HarnessDefinition,
   type McpServer,
@@ -71,6 +67,7 @@ import {
   ReplayStage,
   type AgentEntryWriter,
   type AgentStore,
+  type AgentTaskRow,
   type AgentTaskStatus,
   type AgentTurn,
   type AgentTurnStatus,
@@ -80,11 +77,7 @@ import {
   createMockAgentTransport,
   createMockMcpEndpoint,
 } from "./mock-harness";
-import {
-  HARNESS_SETTINGS_NAMESPACE,
-  HARNESS_OVERRIDES_KEY,
-  HARNESS_CUSTOM_KEY,
-} from "./harness-discovery";
+import type { HarnessesApi } from "./harnesses";
 import { splitLeadingQuote, type AgentsApi } from "./agents";
 
 /** KV namespace for agent state (sessionId per task, workspace trust flag). */
@@ -109,6 +102,9 @@ export interface AgentRuntimeDeps {
   hooks: Pick<Hooks, "emit">;
   /** What each harness does differently (`core.harnessAdapters`). */
   harnessAdapters: Pick<HarnessAdaptersApi, "adapterFor">;
+  /** Each harness as configured (`core.harnesses`): how a restored session
+   *  is spawned again. */
+  harnesses: Pick<HarnessesApi, "harness" | "ready" | "isReady">;
 }
 
 /**
@@ -275,6 +271,64 @@ function errorMessage(error: unknown): string {
     return String((error as { message: unknown }).message);
   }
   return String(error);
+}
+
+
+type PromptOptions = {
+  contextParts?: PromptContextPart[];
+  /** Enqueue ahead of already-queued prompts (held-prompt retry). */
+  front?: boolean;
+};
+
+/** A prompt sent while its task waited to revive: recorded, not queued. */
+type HeldPrompt = {
+  turnId: string;
+  text: string;
+  options?: PromptOptions;
+  resolve: (outcome: TurnOutcome) => void;
+};
+
+type WaitingRevival = {
+  revival: { started: Promise<void> };
+  workspaceKey: string;
+  off: boolean;
+  prompts: HeldPrompt[];
+};
+
+/** Queued prompts are transcript state: entry + turn row exist from the
+ *  moment of send, and runTurn promotes (not re-inserts) them. */
+function recordQueuedTurn(
+  store: AgentStore,
+  {
+    taskId,
+    sessionId,
+    turnId,
+    text,
+  }: { taskId: string; sessionId: string | null; turnId: string; text: string },
+): void {
+  const now = Date.now();
+  store.entries.insert({
+    id: newEventId(),
+    taskId,
+    turnId,
+    type: "user",
+    text,
+    createdAt: now,
+  });
+  store.turns.insert({
+    turnId,
+    taskId,
+    sessionId: sessionId ?? "",
+    status: "queued",
+    startedAt: now,
+  });
+  // Enqueue is activity even when it doesn't change status (queueing onto
+  // a busy task) — bump so the session list orders by last touch.
+  if (store.tasks.get(taskId)) {
+    store.tasks.update(taskId, (draft) => {
+      draft.updatedAt = now;
+    });
+  }
 }
 
 /**
@@ -728,42 +782,31 @@ export class AgentTask {
    */
   prompt(
     text: string,
-    options?: {
-      contextParts?: PromptContextPart[];
-      /** Enqueue ahead of already-queued prompts (held-prompt retry). */
-      front?: boolean;
-    },
+    options?: PromptOptions,
   ): { turnId: string; completed: Promise<TurnOutcome> } {
     const turnId = newTurnId();
+    recordQueuedTurn(this.store, {
+      taskId: this.taskId,
+      sessionId: this.sessionId,
+      turnId,
+      text,
+    });
+    return this.enqueuePrompt(turnId, text, options);
+  }
+
+  /**
+   * Queue a prompt whose turn is already recorded — one sent while the
+   * task waited to revive (`AgentRuntime.promptWhileReviving`) — exactly as
+   * `prompt` queues its own.
+   */
+  enqueuePrompt(
+    turnId: string,
+    text: string,
+    options?: PromptOptions,
+  ): { turnId: string; completed: Promise<TurnOutcome> } {
     const completed = new Promise<TurnOutcome>((resolve) => {
       this.turnResolvers.set(turnId, resolve);
     });
-    const now = Date.now();
-
-    // Queued prompts are transcript state: entry + turn row exist from the
-    // moment of send, and runTurn promotes (not re-inserts) them.
-    this.store.entries.insert({
-      id: newEventId(),
-      taskId: this.taskId,
-      turnId,
-      type: "user",
-      text,
-      createdAt: now,
-    });
-    this.store.turns.insert({
-      turnId,
-      taskId: this.taskId,
-      sessionId: this.sessionId ?? "",
-      status: "queued",
-      startedAt: now,
-    });
-    // Enqueue is activity even when it doesn't change status (queueing onto
-    // a busy task) — bump so the session list orders by last touch.
-    if (this.store.tasks.get(this.taskId)) {
-      this.store.tasks.update(this.taskId, (draft) => {
-        draft.updatedAt = now;
-      });
-    }
 
     // Sort the task into one of three states: dead (settle the turn now),
     // spawning (queue — start()'s tail drains, or settles errors on failure),
@@ -1872,7 +1915,9 @@ export interface AgentRuntime {
    * live, no restored row) or when revival is impossible (harness
    * definition gone → row flips to "unavailable"). The task is REGISTERED
    * synchronously, so callers may enqueue prompts immediately; they ride
-   * the queue until the load completes.
+   * the queue until the load completes — except while the harness rows are
+   * still loading at startup, when revival waits for them (`started`
+   * covers the wait) and the task registers once they have.
    */
   revive(taskId: string): { started: Promise<void> } | null;
   /**
@@ -1883,6 +1928,21 @@ export interface AgentRuntime {
    * or can't be revived.
    */
   getOrRevive(taskId: string): AgentTask | undefined;
+  /**
+   * A prompt for a task whose revival is waiting for the harness rows
+   * (startup): its turn is recorded now, as any queued prompt's, and it
+   * joins the task's queue once the task is live — or settles, cancelled
+   * or failed, when the revival is called off or can't happen. Null when
+   * no revival is waiting.
+   */
+  promptWhileReviving(
+    taskId: string,
+    text: string,
+    options?: PromptOptions,
+  ): { turnId: string; completed: Promise<TurnOutcome> } | null;
+  /** Take a queued prompt back: the live task's, or one held for a
+   *  revival. */
+  removeQueuedPrompt(taskId: string, turnId: string): void;
   /**
    * Remove a session everywhere: live runtime (if any), transcript rows,
    * and the persisted row. The "unavailable" delete affordance; also the
@@ -1963,6 +2023,10 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
   const live = new Map<string, AgentTask>();
   const managers = new Map<string, TaskManager>();
   let reconciled: Promise<void> | null = null;
+  /** Revivals waiting for the harness rows, by task: the workspace each
+   *  is in (closing it calls them off), and the prompts sent meanwhile,
+   *  recorded and held for the task. */
+  const waiting = new Map<string, WaitingRevival>();
 
   const manager = (workspacePath: string) =>
     managers.get(workspaceKey(workspacePath));
@@ -2001,33 +2065,91 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       });
   };
 
-  /**
-   * The effective (overridden/custom-aware) definition for a harness id,
-   * read synchronously off the harness-settings KV collection — revival
-   * must register the task in the same tick so a prompt can queue
-   * immediately. Falls back to the built-in definition when settings aren't
-   * loaded yet.
-   */
-  const effectiveHarnessById = (
-    harnessId: string,
-  ): HarnessDefinition | undefined => {
-    const kv = deps.kv.collection(HARNESS_SETTINGS_NAMESPACE);
-    const overrides = parseHarnessOverrides(
-      kv.get(HARNESS_OVERRIDES_KEY)?.value,
+  /** A revival asked for before the harness rows loaded: it runs once
+   *  they have, unless its workspace closed first, and then hands the task
+   *  the prompts sent meanwhile — or settles them, when there's no task. */
+  const waitForHarnesses = (taskId: string, row: AgentTaskRow): WaitingRevival => {
+    const pending = waiting.get(taskId);
+    if (pending) return pending;
+    const entry: WaitingRevival = {
+      revival: { started: Promise.resolve() },
+      workspaceKey: workspaceKey(row.workspacePath),
+      off: false,
+      prompts: [],
+    };
+    const settle = () => {
+      waiting.delete(taskId);
+      handOver(taskId, entry);
+    };
+    entry.revival.started = deps.harnesses.ready().then(
+      () => {
+        const started = entry.off ? undefined : revive(taskId)?.started;
+        settle();
+        return started;
+      },
+      (error: unknown) => {
+        settle();
+        throw error;
+      },
     );
-    const custom = parseCustomHarnessEntries(kv.get(HARNESS_CUSTOM_KEY)?.value);
-    return (
-      resolveEffectiveHarnesses(overrides, custom).find(
-        (h) => h.id === harnessId,
-      ) ?? BUILT_IN_HARNESSES.find((h) => h.id === harnessId)
-    );
+    entry.revival.started.catch((error) => {
+      console.warn("Agent session revival failed:", errorMessage(error));
+    });
+    waiting.set(taskId, entry);
+    return entry;
+  };
+
+  const handOver = (taskId: string, entry: WaitingRevival) => {
+    const task = live.get(taskId);
+    for (const prompt of entry.prompts) {
+      if (task) {
+        void task
+          .enqueuePrompt(prompt.turnId, prompt.text, prompt.options)
+          .completed.then(prompt.resolve);
+        continue;
+      }
+      settleHeldPrompt(
+        taskId,
+        prompt,
+        entry.off
+          ? { status: "cancelled" }
+          : { status: "error", error: "agent task is not started" },
+      );
+    }
+  };
+
+  /** A held prompt that will never run: its row to the outcome, its handle
+   *  resolved, the settle announced — as a task settles a queued turn. */
+  const settleHeldPrompt = (
+    taskId: string,
+    prompt: HeldPrompt,
+    outcome: Extract<TurnOutcome, { status: "cancelled" | "error" }>,
+  ) => {
+    if (store.turns.get(prompt.turnId)) {
+      store.turns.update(prompt.turnId, (draft) => {
+        draft.status = outcome.status;
+        if (outcome.status === "error") draft.error = outcome.error;
+      });
+    }
+    prompt.resolve(outcome);
+    deps.hooks.emit("agent:turn-settled", {
+      taskId,
+      turnId: prompt.turnId,
+      status: outcome.status,
+      at: Date.now(),
+    });
   };
 
   const revive: AgentRuntime["revive"] = (taskId) => {
     if (live.get(taskId)) return null;
     const row = store.tasks.get(taskId);
     if (!row || row.status !== "restored" || !row.sessionId) return null;
-    const harness = effectiveHarnessById(row.harnessId);
+    // Until the harness rows have loaded, a custom entry reads as missing
+    // and an edited built-in as stock: revive once they have.
+    if (!deps.harnesses.isReady()) return waitForHarnesses(taskId, row).revival;
+    // Read synchronously: revival registers the task in the same tick, so
+    // a prompt can queue at once.
+    const harness = deps.harnesses.harness(row.harnessId).definition();
     if (!harness) {
       store.tasks.update(taskId, (draft) => {
         draft.status = "unavailable";
@@ -2053,6 +2175,9 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
 
   const disposeWorkspace = async (workspacePath: string) => {
     const key = workspaceKey(workspacePath);
+    for (const pending of waiting.values()) {
+      if (pending.workspaceKey === key) pending.off = true;
+    }
     const existing = managers.get(key);
     managers.delete(key);
     await existing?.disposeAll();
@@ -2092,6 +2217,44 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       if (task) return task;
       revive(taskId);
       return live.get(taskId);
+    },
+    promptWhileReviving(taskId, text, options) {
+      const entry = waiting.get(taskId);
+      const row = store.tasks.get(taskId);
+      if (!entry || !row) return null;
+      const turnId = newTurnId();
+      recordQueuedTurn(store, {
+        taskId,
+        sessionId: row.sessionId ?? null,
+        turnId,
+        text,
+      });
+      const completed = new Promise<TurnOutcome>((resolve) => {
+        entry.prompts.push({ turnId, text, options, resolve });
+      });
+      return { turnId, completed };
+    },
+    removeQueuedPrompt(taskId, turnId) {
+      const task = live.get(taskId);
+      if (task) {
+        task.removeQueuedPrompt(turnId);
+        return;
+      }
+      const entry = waiting.get(taskId);
+      const index = entry?.prompts.findIndex((p) => p.turnId === turnId) ?? -1;
+      if (!entry || index === -1) return;
+      const [prompt] = entry.prompts.splice(index, 1);
+      for (const e of store.entriesForTask(taskId)) {
+        if (e.turnId === turnId) store.entries.delete(e.id);
+      }
+      store.turns.delete(turnId);
+      prompt.resolve({ status: "cancelled" });
+      deps.hooks.emit("agent:turn-settled", {
+        taskId,
+        turnId,
+        status: "cancelled",
+        at: Date.now(),
+      });
     },
     async delete(taskId) {
       const row = store.tasks.get(taskId);
@@ -2145,6 +2308,8 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     },
     disposeWorkspace,
     async disposeAll() {
+      // Every workspace's, including revivals that have no manager yet.
+      for (const pending of waiting.values()) pending.off = true;
       for (const workspacePath of [...managers.keys()]) {
         await disposeWorkspace(workspacePath);
       }

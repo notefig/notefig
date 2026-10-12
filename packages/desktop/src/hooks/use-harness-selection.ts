@@ -1,23 +1,10 @@
 import { useMemo } from "react";
-import type { HarnessDefinition } from "@notefig/shared/agent";
-import type { ProbedHarness } from "@notefig/shared/agent";
 import {
   BUILT_IN_HARNESSES,
-  describeProbedHarnesses,
-  filterDiscoveredHarnesses,
-  parseCustomHarnessEntries,
-  parseHarnessDiscovery,
-  parseHarnessOverrides,
-  resolveEffectiveHarnesses,
+  type HarnessDefinition,
 } from "@notefig/shared/agent";
-import { useCore } from "@notefig/core/react";
+import { usePickableHarnesses } from "@/modules/agents/react";
 import { useKv } from "@/modules/kv/react";
-import {
-  HARNESS_CUSTOM_KEY,
-  HARNESS_DISCOVERY_KEY,
-  HARNESS_OVERRIDES_KEY,
-  HARNESS_SETTINGS_NAMESPACE,
-} from "@/modules/agents/harness-discovery";
 import { useTunnelConnection } from "@/hooks/use-tunnel-connection";
 
 /**
@@ -39,34 +26,6 @@ function useWorkerAvailableIds(): Set<string> | null {
 }
 
 const DEFAULT_HARNESS_KEY = "default-harness";
-
-/**
- * The pickable harness list: built-ins merged with any per-machine
- * overrides, plus custom entries (MET-67), then filtered by discovery —
- * built-ins whose binary the startup scan didn't find are hidden (they'd
- * just fail at spawn), while explicitly configured entries always show
- * (see `filterDiscoveredHarnesses`). KV rows are schema-validated before
- * they can reach a spawn spec (kv.json is a plain file on disk — corrupt or
- * hand-edited rows are dropped, not spawned).
- */
-function useEffectiveHarnesses(): HarnessDefinition[] {
-  const settings = useKv<unknown>(HARNESS_SETTINGS_NAMESPACE);
-  // Row values are stable references between KV mutations, so plain
-  // reference deps suffice.
-  const rawOverrides = settings.get(HARNESS_OVERRIDES_KEY);
-  const rawCustom = settings.get(HARNESS_CUSTOM_KEY);
-  const rawDiscovery = settings.get(HARNESS_DISCOVERY_KEY);
-  return useMemo(() => {
-    const overrides = parseHarnessOverrides(rawOverrides);
-    const custom = parseCustomHarnessEntries(rawCustom);
-    return filterDiscoveredHarnesses(
-      resolveEffectiveHarnesses(overrides, custom),
-      overrides,
-      custom,
-      parseHarnessDiscovery(rawDiscovery),
-    );
-  }, [rawOverrides, rawCustom, rawDiscovery]);
-}
 
 /**
  * Harness choice for the "new session" affordances. New sessions start on
@@ -102,7 +61,7 @@ export function useDefaultHarness(): {
  * install/sign-in hint on failure.
  */
 export function useActiveHarnesses(): HarnessDefinition[] {
-  const effective = useEffectiveHarnesses();
+  const effective = usePickableHarnesses();
   const workerIds = useWorkerAvailableIds();
   return useMemo(() => {
     const base = effective.length > 0 ? effective : BUILT_IN_HARNESSES;
@@ -114,46 +73,4 @@ export function useActiveHarnesses(): HarnessDefinition[] {
     const filtered = base.filter((harness) => workerIds.has(harness.id));
     return filtered.length > 0 ? filtered : base;
   }, [effective, workerIds]);
-}
-
-/**
- * Every configured harness with the startup scan's verdict attached —
- * the readiness view, as opposed to `useActiveHarnesses`'s pickable view.
- * Nothing here spawns or connects: it reads the `discovery` KV the
- * once-per-session scan (`ensureStartupHarnessDiscovery`) already wrote, so
- * it costs a KV read and stays correct as that scan lands (useKv is live).
- *
- * Deliberately NOT tunnel-aware. The welcome screen runs before any
- * workspace exists, so there is no worker to ask; on web the local probe
- * can't run at all and every row simply reports "unknown", which the UI
- * renders as an absence rather than a claim.
- */
-export function useProbedHarnesses(): ProbedHarness[] {
-  const settings = useKv<unknown>(HARNESS_SETTINGS_NAMESPACE);
-  const rawOverrides = settings.get(HARNESS_OVERRIDES_KEY);
-  const rawCustom = settings.get(HARNESS_CUSTOM_KEY);
-  const rawDiscovery = settings.get(HARNESS_DISCOVERY_KEY);
-  return useMemo(
-    () =>
-      describeProbedHarnesses(
-        parseHarnessOverrides(rawOverrides),
-        parseCustomHarnessEntries(rawCustom),
-        parseHarnessDiscovery(rawDiscovery),
-      ),
-    [rawOverrides, rawCustom, rawDiscovery],
-  );
-}
-
-/** A harness's display name (`core.harnesses.label`), live: a renamed
- *  custom entry shows its new name without a reload. */
-export function useHarnessLabel(harnessId: string): string {
-  return useHarnessLabels()(harnessId);
-}
-
-/** The same lookup for many ids at once (a list keyed by harness). */
-export function useHarnessLabels(): (harnessId: string) => string {
-  const { harnesses } = useCore();
-  // Only for the subscription: the label itself reads the same rows.
-  useKv(HARNESS_SETTINGS_NAMESPACE);
-  return (harnessId) => harnesses.label(harnessId);
 }

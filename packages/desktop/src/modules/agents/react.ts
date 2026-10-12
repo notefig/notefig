@@ -12,11 +12,12 @@ import { useLiveQuery, eq, and, inArray } from "@tanstack/react-db";
 import {
   BUILT_IN_HARNESSES,
   buildHarnessResumeCommand,
+  type HarnessDefinition,
+  type ProbedHarness,
 } from "@notefig/shared/agent";
 import { workspaceKey } from "@/utils/path";
 import { getDesktopOs } from "@/utils/platform";
 import i18n from "@/utils/intl";
-import { useActiveHarnesses } from "@/hooks/use-harness-selection";
 import {
   type AgentStore,
   type AgentTaskRow,
@@ -25,6 +26,15 @@ import {
   type AgentPermissionRequestRow,
 } from "@/modules/agents/agent-collections";
 import type { AgentsApi } from "@/modules/agents/agents";
+import {
+  harnessDefinition,
+  harnessLabel,
+  harnessSettingsRows,
+  pickableHarnesses,
+  probedHarnesses,
+  type HarnessRow,
+  type HarnessSettingsRow,
+} from "@/modules/agents/harness-settings";
 import { useCore } from "@notefig/core/react";
 
 export type {
@@ -255,12 +265,15 @@ export type AgentSessionActions = {
 };
 
 export function useSessionActions(task: AgentTaskRow): AgentSessionActions {
-  // The task's harness may be disabled or undiscovered by now — fall back
-  // to the built-in definition so its sessions keep their affordances.
-  const harnesses = useActiveHarnesses();
-  const harness =
-    harnesses.find((entry) => entry.id === task.harnessId) ??
-    BUILT_IN_HARNESSES.find((entry) => entry.id === task.harnessId);
+  // As configured, whether or not the pickers offer it now (disabled or
+  // undiscovered), so its sessions keep their affordances.
+  const rows = useHarnessRows();
+  const harness = useMemo(
+    () =>
+      harnessDefinition(rows, task.harnessId) ??
+      BUILT_IN_HARNESSES.find((builtIn) => builtIn.id === task.harnessId),
+    [rows, task.harnessId],
+  );
   const sessionId = task.sessionId ?? null;
   return {
     sessionId,
@@ -332,4 +345,56 @@ export function describeTaskMeta(meta: AgentTaskMeta): string | null {
   // normal session whose runtime just hasn't spawned yet (MET-54). Nothing
   // to say: each list trails what suits it (the sidebar, a time ago).
   return null;
+}
+
+const NO_HARNESS_ROWS: HarnessRow[] = [];
+
+/** Every harness row (`core.harnesses.collection`), live; none while they
+ *  load, which every view reads as the built-ins, stock. */
+function useHarnessRows(): HarnessRow[] {
+  const { harnesses } = useCore();
+  const { data } = useLiveQuery(
+    (q) => q.from({ harness: harnesses.collection }),
+    [harnesses],
+  );
+  return data ?? NO_HARNESS_ROWS;
+}
+
+/** What the pickers offer, live (`pickableHarnesses`). Not tunnel-aware:
+ *  `useActiveHarnesses` narrows it to what a paired worker has. */
+export function usePickableHarnesses(): HarnessDefinition[] {
+  const rows = useHarnessRows();
+  return useMemo(() => pickableHarnesses(rows), [rows]);
+}
+
+/**
+ * Every configured harness with the startup scan's verdict attached —
+ * the readiness view, as opposed to `usePickableHarnesses`'s pickable one.
+ * Nothing here spawns or connects: it reads the verdicts the launch scan
+ * already recorded, and stays correct as that scan lands.
+ *
+ * Deliberately NOT tunnel-aware. The welcome screen runs before any
+ * workspace exists, so there is no worker to ask; on web the local probe
+ * can't run at all and every row simply reports "unknown", which the UI
+ * renders as an absence rather than a claim.
+ */
+export function useProbedHarnesses(): ProbedHarness[] {
+  const rows = useHarnessRows();
+  return useMemo(() => probedHarnesses(rows), [rows]);
+}
+
+/** Every harness as the settings list shows it, live. */
+export function useHarnessSettingsRows(): HarnessSettingsRow[] {
+  const rows = useHarnessRows();
+  return useMemo(() => harnessSettingsRows(rows), [rows]);
+}
+
+/** A harness's display name by id, live: a renamed custom entry shows its
+ *  new name without a reload. */
+export function useHarnessLabels(): (harnessId: string) => string {
+  const rows = useHarnessRows();
+  return useMemo(
+    () => (harnessId: string) => harnessLabel(rows, harnessId),
+    [rows],
+  );
 }

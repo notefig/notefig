@@ -7,7 +7,7 @@ import {
   bootAgentTaskRow,
   parsePersistedAgentTask,
 } from "../agent-persistence";
-import type { AgentRuntime } from "../agent-service";
+import type { AgentRuntime, AgentRuntimeDeps } from "../agent-service";
 import {
   createAgentStore,
   type AgentStore,
@@ -15,6 +15,7 @@ import {
 } from "../agent-collections";
 import { createNodeTestDb, type NodeTestDb } from "@/testing/node-db";
 import { fakeMcpEndpoint, testAgents } from "@/testing/test-agents";
+import { testKv } from "@/testing/test-kv";
 
 // The tasks collection persists into a real (in-memory) SQLite through the
 // same driver the desktop uses, so these tests exercise write-through and the
@@ -23,6 +24,7 @@ import { fakeMcpEndpoint, testAgents } from "@/testing/test-agents";
 let db: NodeTestDb;
 let store: AgentStore;
 let runtime: AgentRuntime;
+let harnesses: AgentRuntimeDeps["harnesses"];
 /** What the next spawned harness process talks over. */
 let transportFactory: (() => AgentTransport) | null;
 /** The status of each task that has a live runtime, as boot sees it. */
@@ -64,14 +66,19 @@ beforeEach(async () => {
   store = createAgentStore(db.get());
   transportFactory = null;
   live = new Map();
-  ({ runtime } = testAgents({
+  let deps;
+  ({ runtime, deps } = testAgents({
     store,
     proc: {
       createMcpEndpoint: () => fakeMcpEndpoint(),
       createAgentTransport: () => transportFactory!(),
     },
   }));
+  harnesses = deps.harnesses;
   await store.tasks.preload(); // start the collection (idempotent)
+  // As at runtime once startup has loaded them; the revival that comes
+  // before has a test of its own.
+  await harnesses.ready();
 });
 
 describe("pure helpers", () => {
@@ -609,5 +616,115 @@ describe("revival via session/load", () => {
     expect(runtime.revive("task_missing")).toBeNull();
     store.tasks.insert(taskRow({ status: "error" }));
     expect(runtime.revive("task_a")).toBeNull();
+  });
+});
+
+describe("revival before the harness rows have loaded", () => {
+  /** A runtime whose custom harness is still in the settings an older
+   *  version kept, so its rows are not loaded until something waits. */
+  async function startingUp() {
+    const kv = testKv();
+    await kv.write("harness-settings", "custom", [
+      {
+        id: "custom:lab",
+        label: "Lab",
+        command: "lab-acp",
+        args: [],
+        env: {},
+        mcpRegistrationOverride: "none",
+        enabled: true,
+      },
+    ]);
+    const spawned: string[] = [];
+    const agents = testAgents({
+      store,
+      kv,
+      proc: {
+        createMcpEndpoint: () => fakeMcpEndpoint(),
+        createAgentTransport: ({ harness }) => {
+          spawned.push(harness.command);
+          return transportFactory!();
+        },
+      },
+    });
+    store.tasks.insert(taskRow({ status: "restored", harnessId: "custom:lab" }));
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    transportFactory = () => client;
+    agent.onLoadSession = async () => ({});
+    agent.onPrompt = async () => ({ stopReason: "end_turn" });
+    return { ...agents, spawned, agent };
+  }
+
+  it("waits for them, so a custom harness's session revives with its command", async () => {
+    const { runtime, spawned, agent } = await startingUp();
+
+    await runtime.revive("task_a")!.started;
+
+    expect(spawned).toEqual(["lab-acp"]);
+    expect(agent.loadSessionParams).toMatchObject({ sessionId: "sess_1" });
+    expect(store.tasks.get("task_a")!.status).not.toBe("unavailable");
+    await runtime.disposeWorkspace("/ws");
+  });
+
+  it("records a prompt at once and sends it once the task is live", async () => {
+    const { runtime, agents } = await startingUp();
+
+    const sent = agents.task("task_a").prompt("wake up");
+    // Recorded as any queued prompt is, so a widget waiting on it finds it.
+    expect(store.turns.get(sent.turnId)?.status).toBe("queued");
+    expect(
+      store.entries.toArray.some(
+        (entry) => entry.turnId === sent.turnId && entry.text === "wake up",
+      ),
+    ).toBe(true);
+
+    expect(await sent.completed).toMatchObject({ status: "completed" });
+    expect(
+      store.turns.toArray.find((turn) => turn.turnId === sent.turnId)?.status,
+    ).toBe("completed");
+    await runtime.disposeWorkspace("/ws");
+  });
+
+  it("takes a held prompt back", async () => {
+    const { runtime, agents, agent } = await startingUp();
+    const prompted: unknown[] = [];
+    agent.onPrompt = async (params) => {
+      prompted.push(params);
+      return { stopReason: "end_turn" };
+    };
+
+    const sent = agents.task("task_a").prompt("never mind");
+    agents.task("task_a").removeQueuedPrompt(sent.turnId);
+
+    expect(await sent.completed).toEqual({ status: "cancelled" });
+    expect(store.turns.get(sent.turnId)).toBeUndefined();
+    await runtime.revive("task_a")!.started;
+    expect(prompted).toEqual([]);
+    await runtime.disposeWorkspace("/ws");
+  });
+
+  it("is called off, its held prompts cancelled, when every workspace goes (the tunnel drops)", async () => {
+    const { runtime, agents, spawned } = await startingUp();
+
+    const sent = agents.task("task_a").prompt("wake up");
+    const revival = runtime.revive("task_a")!;
+    await runtime.disposeAll();
+    await revival.started;
+
+    expect(spawned).toEqual([]);
+    expect(await sent.completed).toEqual({ status: "cancelled" });
+    expect(store.turns.get(sent.turnId)?.status).toBe("cancelled");
+  });
+
+  it("is called off when its workspace closes first", async () => {
+    const { runtime, spawned } = await startingUp();
+
+    const revival = runtime.revive("task_a")!;
+    await runtime.disposeWorkspace("/ws");
+    await revival.started;
+
+    expect(spawned).toEqual([]);
+    expect(store.tasks.get("task_a")!.status).toBe("restored");
   });
 });

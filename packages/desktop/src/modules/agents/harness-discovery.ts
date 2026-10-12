@@ -1,16 +1,5 @@
 import type { IPlatformAdapter } from "@/adapters/platform-adapter.interface";
-import type { KvApi } from "@/modules/kv";
-import {
-  BUILT_IN_HARNESSES,
-  parseCustomHarnessEntries,
-  parseHarnessOverrides,
-  type CustomHarnessEntry,
-  type HarnessDiscoveryResult,
-  type HarnessOverride,
-} from "@notefig/shared/agent";
-import { defineModule } from "@notefig/core";
-import { kvModule } from "@/modules/kv";
-import { platformModule } from "@/core/services";
+import type { HarnessDiscoveryResult } from "@notefig/shared/agent";
 
 /**
  * All domain knowledge for harness discovery lives here: the probe script,
@@ -18,13 +7,8 @@ import { platformModule } from "@/core/services";
  * is a generic "run this script locally" primitive — it never hears the
  * word "harness".
  *
- * The KV keys are exported as the single source of the storage layout;
- * use-harness-selection.ts (and the future settings UI) import them.
+ * Each harness's handle (`core.harnesses.harness(id).rescan()`) runs it.
  */
-export const HARNESS_SETTINGS_NAMESPACE = "harness-settings";
-export const HARNESS_OVERRIDES_KEY = "overrides";
-export const HARNESS_CUSTOM_KEY = "custom";
-export const HARNESS_DISCOVERY_KEY = "discovery";
 
 const SENTINEL_PREFIX = "__MHD";
 const SENTINEL_SUFFIX = "__END__";
@@ -76,7 +60,7 @@ function parseProbeOutput(
  * transient failure. Callers skip persistence on null, leaving entries in
  * the no-data (visible) state.
  */
-type Proc = Pick<IPlatformAdapter["proc"], "runShellCommand">;
+export type Proc = Pick<IPlatformAdapter["proc"], "runShellCommand">;
 
 export async function discoverHarnesses(
   proc: Proc,
@@ -108,104 +92,3 @@ export async function discoverHarnesses(
   });
   return results;
 }
-
-/** Candidate probe entries: built-ins (overridden command/probe win) plus
- *  enabled custom entries. */
-export function candidateProbeEntries(
-  overrides: Record<string, HarnessOverride>,
-  custom: CustomHarnessEntry[],
-): ProbeEntry[] {
-  const builtins = BUILT_IN_HARNESSES.map((h) => ({
-    id: h.id,
-    command: overrides[h.id]?.command ?? h.command,
-    // Same inherit rule as resolveEffectiveHarnesses.
-    probeCommand: overrides[h.id]?.probeCommand ?? h.probeCommand,
-  }));
-  const customEntries = custom
-    .filter((c) => c.enabled !== false)
-    .map((c) => ({
-      id: c.id,
-      command: c.command,
-      probeCommand: c.probeCommand,
-    }));
-  return [...builtins, ...customEntries];
-}
-
-/** Harness discovery — `core.harnessDiscovery`. */
-export interface HarnessDiscovery {
-  /** Run discovery for every known harness and persist the results.
-   *  Trigger sites: app startup, settings "Rescan". Read-only w.r.t.
-   *  `overrides`/`custom` — discovery only ever writes the `discovery` key.
-   *  The write goes through the KV collection, so useKv subscribers — the
-   *  pickers — update live rather than on next launch (same rationale as
-   *  the auth mark in agent-service.ts). A failed probe (null) persists
-   *  nothing: existing results stay as they were. */
-  refresh(
-    overrides: Record<string, HarnessOverride>,
-    custom: CustomHarnessEntry[],
-  ): Promise<Record<string, HarnessDiscoveryResult> | null>;
-  /** Fire-and-forget startup trigger: one scan per app session, reading
-   *  the current settings straight from KV (this runs outside React).
-   *  Failures are logged, never thrown — a failed probe must not affect app
-   *  startup, and the stale/absent `discovery` KV simply persists until the
-   *  next successful scan. */
-  startup(): void;
-}
-
-export function createHarnessDiscovery({
-  proc,
-  kv,
-}: {
-  proc: Proc;
-  kv: Pick<KvApi, "read" | "write">;
-}): HarnessDiscovery {
-  let startupScanStarted = false;
-  const refresh: HarnessDiscovery["refresh"] = async (overrides, custom) => {
-    const results = await discoverHarnesses(
-      proc,
-      candidateProbeEntries(overrides, custom),
-    );
-    if (results === null) return null;
-    await kv.write(HARNESS_SETTINGS_NAMESPACE, HARNESS_DISCOVERY_KEY, results);
-    return results;
-  };
-  return {
-    refresh,
-    startup() {
-      if (startupScanStarted) return;
-      startupScanStarted = true;
-      void (async () => {
-        try {
-          const [rawOverrides, rawCustom] = await Promise.all([
-            kv.read<unknown>(HARNESS_SETTINGS_NAMESPACE, HARNESS_OVERRIDES_KEY),
-            kv.read<unknown>(HARNESS_SETTINGS_NAMESPACE, HARNESS_CUSTOM_KEY),
-          ]);
-          await refresh(
-            parseHarnessOverrides(rawOverrides),
-            parseCustomHarnessEntries(rawCustom),
-          );
-        } catch (error) {
-          console.warn("Startup harness discovery failed:", error);
-        }
-      })();
-    },
-  };
-}
-
-declare module "@notefig/core" {
-  interface CoreModules {
-    harnessDiscovery: HarnessDiscovery;
-  }
-}
-
-/** One harness-discovery scan per app session. */
-export const harnessDiscoveryModule = defineModule({
-  name: "harnessDiscovery",
-  needs: [platformModule, kvModule],
-  register: (ctx) =>
-    createHarnessDiscovery({
-      proc: ctx.use("platform").proc,
-      kv: ctx.use("kv"),
-    }),
-  boot: (discovery) => discovery.startup(),
-});

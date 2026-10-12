@@ -20,7 +20,7 @@ import { memoryUrlState } from "./test-core";
 import { testKv } from "./test-kv";
 import type { KvApi } from "@/modules/kv";
 import { createHarnessAdapters } from "@/modules/harness-adapters";
-import { createHarnesses } from "@/modules/agents/harnesses";
+import { testHarnesses } from "./test-harnesses";
 
 /** A fresh, empty agent store. */
 export function testAgentStore(): AgentStore {
@@ -62,6 +62,7 @@ export function testAgents(
 ): TestAgents {
   const store = overrides.store ?? testAgentStore();
   const kv = overrides.kv ?? testKv();
+  const harnesses = testHarnesses({ kv });
   const hooks = overrides.hooks ?? createHooks();
   const fs: AgentRuntimeDeps["fs"] = overrides.fs ?? {
     readFiles: async (paths) => ({
@@ -100,9 +101,8 @@ export function testAgents(
     }),
     agents: () => agents!,
     hooks,
-    harnessAdapters: createHarnessAdapters({
-      harnesses: createHarnesses({ kv }),
-    }),
+    harnessAdapters: createHarnessAdapters({ harnesses }),
+    harnesses,
     ...overrides,
   };
   const runtime = createAgentRuntime(deps);

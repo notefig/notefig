@@ -1,12 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { BUILT_IN_HARNESSES, type PromptResponse } from "@notefig/shared/agent";
-import { testKv } from "@/testing/test-kv";
 import { createHarnessAdapters, type UsageUpdate } from "@/modules/harness-adapters";
-import { createHarnesses } from "./harnesses";
+import { testHarnesses } from "@/testing/test-harnesses";
 import { isMainAgent, normalizeTurnUsage } from "./turn-usage";
 
 const { adapterFor } = createHarnessAdapters({
-  harnesses: createHarnesses({ kv: testKv() }),
+  harnesses: testHarnesses(),
 });
 /** How a harness id counts; an id no built-in has is a custom harness. */
 const usageOf = (id: string) =>
