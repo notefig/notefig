@@ -984,9 +984,11 @@ export class AgentTask {
       // (mcp-server.ts), not a prompt preamble — prompts carry only user
       // content and context parts.
       const blocks = await this.promptBlocks(queued, this.client);
-      // Stopped (or the task closed) while a setting switched: the turn is
-      // settled already, and its prompt must not go.
-      if (!blocks) return "cancelled";
+      // Stopped, failed (the harness exited) or closed while a setting
+      // switched: the turn is settled already and its prompt must not go.
+      // Its own status stands — an error stops the drain, so the prompts
+      // behind it stay queued instead of failing on a closed connection.
+      if (!blocks) return this.settledStatus(turnId);
       const response = await this.client.prompt(sessionId, blocks);
       // A turn that reached the model clears any auth block and marks this
       // harness signed in on this machine (the only reliable signal — there
@@ -1080,6 +1082,11 @@ export class AgentTask {
       category,
     });
     return { ok: true };
+  }
+
+  /** How a turn was settled — by a cancel, or by the harness exiting. */
+  private settledStatus(turnId: string): AgentTurnStatus {
+    return this.store.turns.get(turnId)?.status ?? "cancelled";
   }
 
   /** What goes on the wire for a prompt: its settings switched to first,

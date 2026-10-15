@@ -2299,6 +2299,47 @@ describe("a prompt's directives, stopped", () => {
   });
 });
 
+describe("a prompt's directives, the harness gone", () => {
+  it("fails only the turn whose model was switching when the harness exited", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.newSessionResult = {
+      sessionId: "sess_gone",
+      models: {
+        currentModelId: "opus",
+        availableModels: [
+          { modelId: "opus", name: "Opus" },
+          { modelId: "sonnet", name: "Sonnet" },
+        ],
+      },
+    };
+    let switchStarted = false;
+    agent.onSetModel = () => {
+      switchStarted = true;
+      return new Promise(() => {});
+    };
+    let prompted = false;
+    agent.onPrompt = async () => {
+      prompted = true;
+      return { stopReason: "end_turn" };
+    };
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    await task.start(() => client);
+
+    task.prompt("first", { config: [{ category: "model", value: "sonnet" }] });
+    task.prompt("second");
+    await vi.waitFor(() => expect(switchStarted).toBe(true));
+    await client.close();
+
+    await vi.waitFor(() =>
+      expect(turnFor(task.taskId).map((turn) => turn.status)).toEqual(["error", "queued"]),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(turnFor(task.taskId).map((turn) => turn.status)).toEqual(["error", "queued"]);
+    expect(prompted).toBe(false);
+  });
+});
+
 describe("usage (token & cost)", () => {
   const usageUpdate = (used: number, cost?: number) => ({
     sessionUpdate: "usage_update",
