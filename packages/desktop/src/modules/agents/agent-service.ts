@@ -36,7 +36,9 @@ import type { KvApi } from "@/modules/kv";
 import {
   needsSignIn,
   type HarnessAdapter,
+  type DiscoveredCatalog,
   type HarnessAdaptersApi,
+  type HarnessInvokeContext,
   type HarnessSpawnPrep,
   type UsageUpdate,
 } from "@/modules/harness-adapters";
@@ -126,11 +128,15 @@ class StartupTimeoutError extends Error {
   }
 }
 
-function withStartupTimeout<T>(promise: Promise<T>, step: string): Promise<T> {
+function withStartupTimeout<T>(
+  promise: Promise<T>,
+  step: string,
+  timeoutMs = STARTUP_STEP_TIMEOUT_MS,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new StartupTimeoutError(step)),
-      STARTUP_STEP_TIMEOUT_MS,
+      timeoutMs,
     );
     promise.then(
       (value) => {
@@ -204,6 +210,20 @@ function isSessionConfigUpdate(update: SessionUpdate): boolean {
     update.sessionUpdate === "current_mode_update" ||
     update.sessionUpdate === "config_option_update"
   );
+}
+
+/** The harness adapter's invoke hook, as a task and a catalog probe both
+ *  run it before spawning: the env and session params its dialect needs. */
+function invokeHarness(
+  adapter: Pick<HarnessAdapter, "onInvoke">,
+  context: Omit<HarnessInvokeContext, "joinPath" | "appDir">,
+): Promise<HarnessSpawnPrep> {
+  return adapter.onInvoke({
+    ...context,
+    joinPath: (...parts) => pathutil.join(...parts),
+    // The app dir is the app's own; the harness apparatus holds no copy.
+    appDir: APP_DIR_NAME,
+  });
 }
 
 function emptySessionUsage(): SessionUsage {
@@ -523,11 +543,8 @@ export class AgentTask {
       // The harness's own invoke hook runs here: whatever its dialect needs
       // in place before the process exists (a config file on disk, env to
       // inject) happens inside the adapter — this code reads none of it.
-      const prep = await this.adapter.onInvoke({
+      const prep = await invokeHarness(this.adapter, {
         workspacePath: this.workspacePath,
-        joinPath: (...parts) => pathutil.join(...parts),
-        // The app dir is the app's own; the harness apparatus holds no copy.
-        appDir: APP_DIR_NAME,
         harnessEnv: this.harness.env,
         mcpServer: mcpEndpoint.mcpServer,
         writeFiles: (files) => this.deps.fs.writeFiles(files),
@@ -1832,6 +1849,140 @@ export class AgentTask {
       // exiting afterward — it's a distinct, deletable end state, not an error.
       this.setStatus("error");
     }
+  }
+}
+
+/** How long a probe's session is given to report after it opens: Claude
+ *  sends its commands, Devin its settings, within this (spike: ~0.4–2s). */
+const PROBE_SETTLE_MS = 2_000;
+/** Each step of a probe (spawn, initialize, session/new, discard): a
+ *  harness that hangs is "not found". Shorter than a task's, which the
+ *  user is waiting on and a probe is not. */
+const PROBE_STEP_TIMEOUT_MS = 10_000;
+
+/**
+ * The throwaway session a harness's catalog probe opens
+ * (`CatalogProbeIo.probeSession`). It starts the way a task does — the
+ * adapter's invoke hook, the transport, `initialize`, `session/new` with
+ * the adapter's session params, each step under a startup timeout — but
+ * offers no MCP server, never runs in a workspace (the harness would load
+ * that project's hooks and servers before the user asked for anything),
+ * and prompts nothing. It keeps what the session reports for a moment —
+ * its settings, and the commands Claude sends right after `session/new` —
+ * then deletes or closes it and stops the process.
+ */
+export async function probeHarnessSession({
+  harness,
+  adapter,
+  createTransport,
+  cwd,
+  settleMs = PROBE_SETTLE_MS,
+  timeoutMs = PROBE_STEP_TIMEOUT_MS,
+}: {
+  harness: HarnessDefinition;
+  adapter: Pick<HarnessAdapter, "onInvoke" | "clientMeta">;
+  /** The platform's (`proc.createAgentTransport`). */
+  createTransport: AgentRuntimeDeps["proc"]["createAgentTransport"];
+  /** A directory that is no workspace. */
+  cwd: string;
+  settleMs?: number;
+  timeoutMs?: number;
+}): Promise<DiscoveredCatalog | null> {
+  const taskId = newTaskId();
+  /** The transport once its start() has landed — never closed before:
+   *  a desktop transport closed mid-start marks itself closed without a
+   *  process to kill, and then ignores the close that would. */
+  let transport: AgentTransport | null = null;
+  let configOptions: SessionConfigSelect[] | null = null;
+  let commands: AvailableCommand[] | null = null;
+  const refuse = () => Promise.reject(new Error("no files in a probe"));
+
+  try {
+    // No MCP server, so every adapter settles no files; it's still asked,
+    // so the session opens with the env and params a task's would.
+    const prep = await invokeHarness(adapter, {
+      workspacePath: cwd,
+      harnessEnv: harness.env,
+      mcpServer: undefined,
+      writeFiles: refuse,
+      warn: (label, detail) =>
+        console.warn(`[probe ${harness.id}] ${label}`, detail ?? ""),
+    });
+    const started = createTransport({
+      taskId,
+      harness,
+      workspacePath: cwd,
+      extraEnv: prep.env,
+    });
+    const starting = started.start();
+    try {
+      await withStartupTimeout(starting, "spawn", timeoutMs);
+    } catch (error) {
+      // A process that comes up after the deadline: nothing stops it then,
+      // so stop it as it lands.
+      void starting.then(() => started.close()).catch(() => {});
+      throw error;
+    }
+    transport = started;
+    const client = new NotefigAcpClient({
+      taskId,
+      transport: started,
+      // Never prompted, so nothing should ask; anything that does is
+      // refused, allow options or not.
+      autoGrant: false,
+      permissionBroker: {
+        request: async () => ({ outcome: { outcome: "cancelled" } }),
+      },
+      onSessionUpdate: ({ update }) => {
+        if (update.sessionUpdate === "available_commands_update") {
+          commands = update.availableCommands;
+        }
+      },
+      onSessionConfigChange: (_sessionId, options) => {
+        configOptions = options;
+      },
+      fs: { readTextFile: refuse, writeTextFile: refuse },
+      clientMeta: adapter.clientMeta,
+    });
+    const initialized = await withStartupTimeout(
+      client.connect(),
+      "initialize",
+      timeoutMs,
+    );
+    const { sessionId } = await withStartupTimeout(
+      client.newSession(started.agentCwd ?? cwd, [], prep.sessionParams),
+      "session/new",
+      timeoutMs,
+    );
+    await new Promise((resolve) => setTimeout(resolve, settleMs));
+    // Leave nothing in the harness's history where it lets us; a close
+    // (or neither) otherwise — the process stops either way.
+    await withStartupTimeout(
+      discardSession(client, sessionId),
+      "session/delete",
+      timeoutMs,
+    ).catch(() => {});
+    return {
+      configOptions,
+      commands,
+      ...(initialized.agentInfo?.version
+        ? { harnessVersion: initialized.agentInfo.version }
+        : {}),
+    };
+  } catch (error) {
+    console.warn(`Probing ${harness.id} for its catalog failed:`, error);
+    return null;
+  } finally {
+    await (transport as AgentTransport | null)?.close().catch(() => {});
+  }
+}
+
+async function discardSession(client: NotefigAcpClient, sessionId: string) {
+  try {
+    if (await client.deleteSession(sessionId)) return;
+    await client.closeSession(sessionId);
+  } catch {
+    // Unsupported, or the harness is already going: the process stops next.
   }
 }
 

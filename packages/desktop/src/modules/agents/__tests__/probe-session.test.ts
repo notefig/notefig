@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { createLoopbackPair } from "@notefig/agent";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { FakeAgent } from "../mock-harness";
-import { probeHarnessSession } from "../harness-probe";
+import { probeHarnessSession } from "../agent-service";
 
 const claude = BUILT_IN_HARNESSES.find((harness) => harness.id === "claude-code")!;
 
@@ -21,13 +21,19 @@ function harnessProcess() {
   return { agent, close, spawned, createTransport };
 }
 
+/** An adapter whose invoke hook settles nothing, as every one does
+ *  without an MCP server. */
+const noPrep = {
+  onInvoke: async () => ({ env: {}, passThroughSessionNew: false, sessionParams: {} }),
+};
+
 const probe = (
   createTransport: Parameters<typeof probeHarnessSession>[0]["createTransport"],
   overrides: Partial<Parameters<typeof probeHarnessSession>[0]> = {},
 ) =>
   probeHarnessSession({
     harness: claude,
-    adapter: {},
+    adapter: noPrep,
     createTransport,
     cwd: "/tmp/probe",
     settleMs: 10,
@@ -65,6 +71,28 @@ describe("probeHarnessSession", () => {
     expect(agent.deleteSessionParams).toEqual({ sessionId: "sess_probe" });
     expect(agent.closeSessionParams).toBeNull();
     expect(close).toHaveBeenCalled();
+  });
+
+  it("spawns and opens the session as the adapter's invoke hook settles, with no MCP server", async () => {
+    const { agent, createTransport } = harnessProcess();
+    const onInvoke = vi.fn(async () => ({
+      env: { HARNESS_FLAG: "1" },
+      passThroughSessionNew: false,
+      sessionParams: { additionalDirectories: [] },
+    }));
+
+    await probe(createTransport, { adapter: { onInvoke } });
+
+    expect(onInvoke).toHaveBeenCalledWith(
+      expect.objectContaining({ workspacePath: "/tmp/probe", mcpServer: undefined }),
+    );
+    expect(createTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ extraEnv: { HARNESS_FLAG: "1" } }),
+    );
+    expect(agent.newSessionParams).toMatchObject({
+      mcpServers: [],
+      additionalDirectories: [],
+    });
   });
 
   it("closes the session where the harness can't delete one", async () => {
