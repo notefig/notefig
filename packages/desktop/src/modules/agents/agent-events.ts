@@ -7,6 +7,7 @@
 import type {
   AgentTurnStatus,
   AvailableCommand,
+  HarnessDefinition,
   SessionConfigSelect,
   ToolCallUpdate,
   TurnUsage,
@@ -84,6 +85,9 @@ declare module "@notefig/core" {
     "agent:catalog": {
       taskId: string;
       harnessId: string;
+      /** What the session was spawned with — the definition its offer
+       *  holds for, which a later edit may have changed. */
+      harness: HarnessDefinition;
       workspacePath: string;
       configOptions?: SessionConfigSelect[];
       commands?: AvailableCommand[];
