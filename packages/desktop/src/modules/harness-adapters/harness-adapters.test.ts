@@ -3,7 +3,11 @@ import {
   BUILT_IN_HARNESSES,
   type HarnessDefinition,
 } from "@notefig/shared/agent";
-import type { HarnessInvokeContext } from "./adapter";
+import type {
+  CatalogProbeIo,
+  DiscoveredCatalog,
+  HarnessInvokeContext,
+} from "./adapter";
 import { testHarnesses } from "@/testing/test-harnesses";
 import { createHarnessAdapters, harnessLogo } from "./harness-adapters";
 import { needsSignIn } from "./adapter";
@@ -312,5 +316,86 @@ describe("sign-in errors", () => {
     const adapter = { isAuthError: (message: string) => message === "please log in" };
     expect(needsSignIn(adapter, "please log in")).toBe(true);
     expect(needsSignIn(adapter, "Authentication required")).toBe(false);
+  });
+});
+
+describe("catalog discovery", () => {
+  const found: DiscoveredCatalog = {
+    configOptions: null,
+    commands: [{ name: "review", description: "Review" }],
+  };
+  const io = (
+    shell: { stdout: string; exitCode: number } | null = null,
+  ): CatalogProbeIo & { ran: string[][]; probed: number } => {
+    const record = {
+      ran: [] as string[][],
+      probed: 0,
+      async runHarness(args: string[]) {
+        record.ran.push(args);
+        return shell;
+      },
+      async probeSession() {
+        record.probed++;
+        return found;
+      },
+    };
+    return record;
+  };
+
+  it.each(["claude-code", "devin", "gemini-cli"])(
+    "%s opens a throwaway session",
+    async (id) => {
+      const probe = io();
+      expect(await adapterFor(harness(id)).discoverCatalog!(probe)).toBe(found);
+      expect(probe.probed).toBe(1);
+      expect(probe.ran).toEqual([]);
+    },
+  );
+
+  it("OpenCode lists its models and opens no session (it can't delete one)", async () => {
+    const probe = io({
+      stdout: "Some banner\nanthropic/claude-sonnet-4-5\nopenai/gpt-5.1-codex\n\n",
+      exitCode: 0,
+    });
+    const catalog = await adapterFor(harness("opencode")).discoverCatalog!(probe);
+
+    expect(probe.ran).toEqual([["models"]]);
+    expect(probe.probed).toBe(0);
+    expect(catalog).toEqual({
+      configOptions: [
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "anthropic/claude-sonnet-4-5",
+          options: [
+            { value: "anthropic/claude-sonnet-4-5", name: "anthropic/claude-sonnet-4-5" },
+            { value: "openai/gpt-5.1-codex", name: "openai/gpt-5.1-codex" },
+          ],
+        },
+      ],
+      commands: null,
+    });
+  });
+
+  it("OpenCode finds nothing when the listing fails or lists no model", async () => {
+    const opencode = adapterFor(harness("opencode"));
+    expect(await opencode.discoverCatalog!(io(null))).toBeNull();
+    expect(
+      await opencode.discoverCatalog!(io({ stdout: "error", exitCode: 1 })),
+    ).toBeNull();
+    expect(
+      await opencode.discoverCatalog!(io({ stdout: "no models\n", exitCode: 0 })),
+    ).toBeNull();
+  });
+
+  it("a custom harness has no probe: only its sessions tell", () => {
+    const custom: HarnessDefinition = {
+      ...harness("claude-code"),
+      id: "custom:lab",
+      mcpRegistration: "session-new",
+    };
+    expect(adapterFor(custom).discoverCatalog).toBeUndefined();
   });
 });

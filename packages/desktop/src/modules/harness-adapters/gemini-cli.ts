@@ -4,11 +4,13 @@ import {
   NO_PREP,
   NO_REPORTING,
   type HarnessAdapter,
+  discoverBySession,
 } from "./adapter";
 
 /** Gemini CLI. No capability-matrix row yet, so "none": it gets no app
  *  tools. */
 export const geminiCliAdapter: HarnessAdapter = {
+  discoverCatalog: discoverBySession,
   onInvoke: async () => NO_PREP,
   reporting: NO_REPORTING,
   // Unrecorded which prefix it mints; strip either.

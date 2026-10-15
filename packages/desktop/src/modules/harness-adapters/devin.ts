@@ -15,6 +15,7 @@ import {
   type UsageReader,
   type UsageUpdate,
   type WithMeta,
+  discoverBySession,
 } from "./adapter";
 
 /** Args are positional and unnamed, so they're forwarded by index; env
@@ -141,6 +142,8 @@ export const DEVIN_CLIENT_META = { "cognition.ai/subagentSupport": true };
  * the harness still spawns, just without the app's tools.
  */
 export const devinAdapter: HarnessAdapter = {
+  // Its probe session is closed, and deleted where it says it can (~0.4s).
+  discoverCatalog: discoverBySession,
   onInvoke: async ({
     mcpServer,
     workspacePath,

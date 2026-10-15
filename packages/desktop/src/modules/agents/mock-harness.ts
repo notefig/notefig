@@ -131,6 +131,8 @@ export class FakeAgent {
    *  as "close unsupported". */
   onCloseSession: (params: Json, agent: FakeAgent) => Promise<Json> =
     async () => ({});
+  /** Captured `session/delete` params (the catalog probe cleaning up). */
+  deleteSessionParams: Json | null = null;
   /** `session/cancel` notification hook (the harness aborts its scenario). */
   onCancel: (params: Json, agent: FakeAgent) => void = () => {};
   /** Captured params of the last `session/set_mode` / `session/set_model`
@@ -230,16 +232,20 @@ export class FakeAgent {
     }
   }
 
-  private async handle(msg: Json): Promise<void> {
-    // A response to one of our client-directed requests (no method field).
-    if (msg.method === undefined && msg.id !== undefined) {
-      const cb = this.pendingClientRequests.get(msg.id);
-      if (cb) {
-        this.pendingClientRequests.delete(msg.id);
-        cb(msg.result);
-      }
-      return;
+  /** A response to one of our client-directed requests (no method
+   *  field): hand it to whoever asked. False when `msg` is none. */
+  private handleClientResponse(msg: Json): boolean {
+    if (msg.method !== undefined || msg.id === undefined) return false;
+    const cb = this.pendingClientRequests.get(msg.id);
+    if (cb) {
+      this.pendingClientRequests.delete(msg.id);
+      cb(msg.result);
     }
+    return true;
+  }
+
+  private async handle(msg: Json): Promise<void> {
+    if (this.handleClientResponse(msg)) return;
 
     const { id, method, params } = msg;
     switch (method) {
@@ -252,8 +258,8 @@ export class FakeAgent {
         this.loadSessionParams = params;
         return this.answer(id, -32603, () => this.onLoadSession(params, this));
       case "session/close":
-        this.closeSessionParams = params;
-        return this.answer(id, -32601, () => this.onCloseSession(params, this));
+      case "session/delete":
+        return this.endSession(id, method, params);
       case "authenticate":
         return this.answer(id, -32000, () => this.onAuthenticate(params, this));
       case "session/prompt":
@@ -265,6 +271,17 @@ export class FakeAgent {
         if (this.handleSessionSetting(id, method, params)) return;
         if (id !== undefined) this.respondError(id, -32601, "not implemented");
     }
+  }
+
+  /** `session/close` (scripted) and `session/delete` (always succeeds):
+   *  capture the params, answer. */
+  private async endSession(id: number, method: string, params: Json) {
+    if (method === "session/delete") {
+      this.deleteSessionParams = params;
+      return this.respond(id, {});
+    }
+    this.closeSessionParams = params;
+    return this.answer(id, -32601, () => this.onCloseSession(params, this));
   }
 
   /** The three session-setting methods (MET-81): capture the params, answer

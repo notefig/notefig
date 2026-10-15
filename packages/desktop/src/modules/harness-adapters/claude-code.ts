@@ -13,6 +13,7 @@ import {
   type HarnessAdapter,
   type ModelTokens,
   type UsageUpdate,
+  discoverBySession,
 } from "./adapter";
 
 type Meta = Record<string, unknown>;
@@ -153,6 +154,8 @@ export function claudeUpdateModel(update: UsageUpdate): string | null {
  * only mode that can carry a non-stdio server.
  */
 export const claudeCodeAdapter: HarnessAdapter = {
+  // A session that is never prompted writes no session file (spike: ~1–2s).
+  discoverCatalog: discoverBySession,
   onInvoke: async ({ mcpServer }) => ({
     ...NO_PREP,
     passThroughSessionNew: mcpServer !== undefined,
