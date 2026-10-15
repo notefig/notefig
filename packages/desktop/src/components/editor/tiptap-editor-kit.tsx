@@ -7,10 +7,13 @@ import { EditorImage } from "./editor-image-node";
 import { BlobNodeView } from "./blobs/blob-node-view";
 import { FrontmatterNode } from "./frontmatter-node";
 import { widgetRendererNodes, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
+// By path, not through the barrel: @pierre/diffs registers custom elements
+// on import, and the barrel also loads in the markdown worker, which has none.
+import { codeHighlight } from "@notefig/widgets/code-highlight";
 import {
   createSchemaExtensions,
   MarkdownImageBase,
-  CodeBlockLowlight,
+  CodeBlock,
 } from "./editor-schema-kit";
 
 /**
@@ -30,13 +33,17 @@ export const MarkdownImage = MarkdownImageBase.extend({
 /**
  * Renders every code block through BlobNodeView, which itself dispatches on
  * the `language` attr: metrists:* fences render as interactive blob widgets,
- * everything else falls back to the ordinary code block chrome. Schema is
- * unchanged (CodeBlockLowlight's own attrs/parsing), so this is presentation
- * only — the worker's markdown round-trip is unaffected.
+ * everything else falls back to the ordinary code block chrome, highlighted
+ * like the code viewer (`codeHighlight`). Schema is unchanged (CodeBlock's
+ * own attrs/parsing), so this is presentation only — the worker's markdown
+ * round-trip is unaffected.
  */
-export const MarkdownCodeBlock = CodeBlockLowlight.extend({
+export const MarkdownCodeBlock = CodeBlock.extend({
   addNodeView() {
     return ReactNodeViewRenderer(BlobNodeView);
+  },
+  addProseMirrorPlugins() {
+    return [...(this.parent?.() ?? []), codeHighlight()];
   },
 });
 
