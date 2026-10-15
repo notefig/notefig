@@ -13,8 +13,9 @@
  *   whose custom entry was deleted (its sessions keep the raw id);
  * - each harness's own handle (`harness(id)`), which does what is done to
  *   one harness — its definition, its settings edits, checking it is
- *   installed, keeping what its sessions report it offers. What is done
- *   to all of them (`rescan()`, `track()`) is each handle's, in turn.
+ *   installed, keeping what it offers — as its sessions report it, and
+ *   as the harness probe (`harness-probe.ts`) finds it. What is done to
+ *   all of them (`rescan()`, `track()`) is each handle's, in turn.
  *
  * What a harness does differently at run time is its adapter's
  * (`core.harnessAdapters`).
@@ -39,7 +40,7 @@ import {
 import { defineModule, type Hooks } from "@notefig/core";
 import { platformModule } from "@/core/services";
 import { kvModule, type KvApi } from "@/modules/kv";
-import { catalogWithSession, type SessionOffer } from "./harness-catalog";
+import type { HarnessCatalog } from "@/modules/harness-adapters";
 import {
   discoverHarnesses,
   type ProbeEntry,
@@ -97,10 +98,11 @@ export interface Harness {
    *  platform, a timeout) or the id names no harness: that records
    *  nothing, since "couldn't check" must never read as "not installed". */
   rescan(): Promise<HarnessDiscoveryResult | null>;
-  /** Keep what one of its sessions reported it offers on its row
-   *  (`catalogWithSession`). Nothing for an id that names no harness (a
-   *  session of a custom entry deleted since). */
-  recordOffer(offer: SessionOffer): Promise<void>;
+  /** Keep what it offers on its row: each list reported replaces the
+   *  one kept, unless it is empty — an empty report never replaces a known
+   *  list. Nothing for an id that names no harness (a session of a custom
+   *  entry deleted since). */
+  recordOffer(offer: Partial<HarnessCatalog>): Promise<void>;
 }
 
 export interface HarnessesApi {
@@ -148,7 +150,6 @@ export function createHarnesses({
   kv,
   proc,
   hooks,
-  now = Date.now,
 }: {
   persistence: PersistedCollectionPersistence;
   /** Read once, for settings kept by an older version. */
@@ -156,7 +157,6 @@ export function createHarnesses({
   proc: Proc;
   /** Where sessions announce what their harness offers. */
   hooks: Pick<Hooks, "on">;
-  now?: () => number;
 }): HarnessesApi {
   const rows = createHarnessesCollection(persistence);
   const isBuiltIn = (harnessId: string) =>
@@ -318,12 +318,16 @@ export function createHarnesses({
       async recordOffer(offer) {
         await ready();
         if (!handle.definition()) return;
-        const catalog = catalogWithSession(
-          rows.get(harnessId)?.catalog,
-          offer,
-          now(),
-        );
-        if (catalog) await upsert(harnessId, (row) => void (row.catalog = catalog));
+        const kept = rows.get(harnessId)?.catalog;
+        const configOptions = offer.configOptions?.length ? offer.configOptions : null;
+        const commands = offer.commands?.length ? offer.commands : null;
+        if (!configOptions && !commands) return;
+        await upsert(harnessId, (row) => {
+          row.catalog = {
+            configOptions: configOptions ?? kept?.configOptions ?? null,
+            commands: commands ?? kept?.commands ?? null,
+          };
+        });
       },
     };
     return handle;
@@ -353,8 +357,10 @@ export function createHarnesses({
     },
     track: () =>
       hooks.on("agent:catalog", (detail) => {
+        // A session's commands may be its workspace's own skills, which
+        // shouldn't show in another project (MET-223): only its settings.
         harness(detail.harnessId)
-          .recordOffer(detail)
+          .recordOffer({ configOptions: detail.configOptions })
           .catch((error) => console.error("Failed to record a harness's catalog:", error));
       }),
   };

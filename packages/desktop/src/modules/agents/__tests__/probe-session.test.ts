@@ -41,11 +41,10 @@ const probe = (
   });
 
 describe("probeHarnessSession", () => {
-  it("keeps what the session reports, its version included, then deletes it and stops the harness", async () => {
+  it("keeps what the session reports, then deletes it and stops the harness", async () => {
     const { agent, close, spawned, createTransport } = harnessProcess();
     agent.initializeResult = {
       ...agent.initializeResult,
-      agentInfo: { name: "claude-agent-acp", version: "0.31.0" },
       agentCapabilities: { sessionCapabilities: { delete: {} } },
     };
     agent.newSessionResult = {
@@ -66,7 +65,6 @@ describe("probeHarnessSession", () => {
         expect.objectContaining({ id: "model", currentValue: "opus" }),
       ],
       commands: [{ name: "review", description: "Review" }],
-      harnessVersion: "0.31.0",
     });
     expect(agent.deleteSessionParams).toEqual({ sessionId: "sess_probe" });
     expect(agent.closeSessionParams).toBeNull();

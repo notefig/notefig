@@ -3,7 +3,7 @@ import {
   NO_PREP,
   OPENCODE_TOOL_PREFIX,
   isStdioMcpServer,
-  type DiscoveredCatalog,
+  type HarnessCatalog,
   type HarnessAdapter,
   type StdioMcpServer,
 } from "./adapter";
@@ -120,7 +120,7 @@ function deepMergeConfigs(
  * skipped; none at all is "not found", never an empty list. Which model a
  * new session starts on isn't listed, so the first stands in.
  */
-export function parseOpenCodeModels(stdout: string): DiscoveredCatalog | null {
+export function parseOpenCodeModels(stdout: string): HarnessCatalog | null {
   const models = stdout
     .split(/\r?\n/)
     .map((line) => line.trim())

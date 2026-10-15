@@ -2,7 +2,7 @@ export * from "./harness-adapters";
 export { needsSignIn, tokensFrom } from "./adapter";
 export type {
   CatalogProbeIo,
-  DiscoveredCatalog,
+  HarnessCatalog,
   HarnessAdapter,
   HarnessInvokeContext,
   HarnessMark,

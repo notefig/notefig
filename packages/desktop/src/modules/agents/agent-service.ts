@@ -36,7 +36,7 @@ import type { KvApi } from "@/modules/kv";
 import {
   needsSignIn,
   type HarnessAdapter,
-  type DiscoveredCatalog,
+  type HarnessCatalog,
   type HarnessAdaptersApi,
   type HarnessInvokeContext,
   type HarnessSpawnPrep,
@@ -1120,7 +1120,6 @@ export class AgentTask {
     this.deps.hooks.emit("agent:catalog", {
       taskId: this.taskId,
       harnessId: this.harness.id,
-      harness: this.harness,
       workspacePath: this.workspacePath,
       ...offer,
     });
@@ -1887,7 +1886,7 @@ export async function probeHarnessSession({
   cwd: string;
   settleMs?: number;
   timeoutMs?: number;
-}): Promise<DiscoveredCatalog | null> {
+}): Promise<HarnessCatalog | null> {
   const taskId = newTaskId();
   /** The transport once its start() has landed — never closed before:
    *  a desktop transport closed mid-start marks itself closed without a
@@ -1944,11 +1943,7 @@ export async function probeHarnessSession({
       fs: { readTextFile: refuse, writeTextFile: refuse },
       clientMeta: adapter.clientMeta,
     });
-    const initialized = await withStartupTimeout(
-      client.connect(),
-      "initialize",
-      timeoutMs,
-    );
+    await withStartupTimeout(client.connect(), "initialize", timeoutMs);
     const { sessionId } = await withStartupTimeout(
       client.newSession(started.agentCwd ?? cwd, [], prep.sessionParams),
       "session/new",
@@ -1962,13 +1957,7 @@ export async function probeHarnessSession({
       "session/delete",
       timeoutMs,
     ).catch(() => {});
-    return {
-      configOptions,
-      commands,
-      ...(initialized.agentInfo?.version
-        ? { harnessVersion: initialized.agentInfo.version }
-        : {}),
-    };
+    return { configOptions, commands };
   } catch (error) {
     console.warn(`Probing ${harness.id} for its catalog failed:`, error);
     return null;

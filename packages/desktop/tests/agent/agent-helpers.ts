@@ -24,16 +24,18 @@ export async function startMockSession(
   /** Extra `session/new` answer fields the mock agent advertises — `modes`,
    *  `models`, `configOptions` — for the session-settings pickers (MET-81). */
   session?: Record<string, unknown>,
+  /** Commands and skills the mock agent reports right after `session/new`. */
+  commands?: Record<string, unknown>[],
 ): Promise<void> {
   await openWorkspace(page, workspacePath);
   // The open set is persisted, so a reload with the sessions view in the
   // URL comes back into the same workspace.
   await page.goto("/?sidebarView=sessions");
-  if (session) {
+  if (session || commands) {
     await page.evaluate(
-      (session) =>
-        (window as any).__mockAgent.configure({ scenario: "echo", session }),
-      session,
+      ({ session, commands }) =>
+        (window as any).__mockAgent.configure({ scenario: "echo", session, commands }),
+      { session, commands },
     );
   }
   await page

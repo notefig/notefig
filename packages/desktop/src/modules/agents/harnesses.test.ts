@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
+import { createHooks } from "@notefig/core";
 import {
   BUILT_IN_HARNESSES,
   type CustomHarnessEntry,
+  type SessionConfigSelect,
 } from "@notefig/shared/agent";
 import { createKv } from "@/modules/kv";
 import { createNodeTestDb } from "@/testing/node-db";
@@ -350,6 +352,90 @@ describe("views over the rows", () => {
   it("are the built-ins, stock, before any row exists", () => {
     expect(pickableHarnesses([]).map((h) => h.id)).toEqual(
       BUILT_IN_HARNESSES.map((h) => h.id),
+    );
+  });
+});
+
+describe("what a harness offers", () => {
+  const models = (...values: string[]): SessionConfigSelect[] => [
+    {
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: values[0],
+      options: values.map((value) => ({ value, name: value })),
+    },
+  ];
+  const review = [{ name: "review", description: "Review" }];
+
+  async function ready() {
+    const harnesses = testHarnesses();
+    await harnesses.ready();
+    return harnesses;
+  }
+
+  it("keeps each list reported, the latest replacing the last", async () => {
+    const harnesses = await ready();
+    const claude = harnesses.harness("claude-code");
+
+    await claude.recordOffer({ configOptions: models("opus") });
+    await claude.recordOffer({ commands: review });
+    await claude.recordOffer({ configOptions: models("sonnet") });
+
+    expect(harnesses.collection.get("claude-code")?.catalog).toEqual({
+      configOptions: models("sonnet"),
+      commands: review,
+    });
+  });
+
+  it("never replaces a known list with an empty one", async () => {
+    const harnesses = await ready();
+    const claude = harnesses.harness("claude-code");
+    await claude.recordOffer({ configOptions: models("opus"), commands: review });
+
+    await claude.recordOffer({ configOptions: [], commands: [] });
+
+    expect(harnesses.collection.get("claude-code")?.catalog).toEqual({
+      configOptions: models("opus"),
+      commands: review,
+    });
+  });
+
+  it("keeps nothing for a harness that is gone, or a report with nothing in it", async () => {
+    const harnesses = await ready();
+
+    await harnesses.harness("custom:gone").recordOffer({ configOptions: models("opus") });
+    await harnesses.harness("opencode").recordOffer({ configOptions: [] });
+
+    expect(harnesses.collection.has("custom:gone")).toBe(false);
+    expect(harnesses.collection.has("opencode")).toBe(false);
+  });
+
+  it("keeps what sessions announce, but not their commands, across a relaunch", async () => {
+    const db = createNodeTestDb();
+    const hooks = createHooks();
+    const harnesses = testHarnesses({ db, hooks });
+    await harnesses.ready();
+    const stop = harnesses.track();
+
+    // A session's commands may be its workspace's own skills (MET-223).
+    hooks.emit("agent:catalog", {
+      taskId: "task_1",
+      harnessId: "claude-code",
+      workspacePath: "/ws",
+      configOptions: models("opus"),
+      commands: review,
+    });
+    await expect
+      .poll(() => harnesses.collection.get("claude-code")?.catalog)
+      .toEqual({ configOptions: models("opus"), commands: null });
+    stop();
+
+    const relaunched = testHarnesses({ db });
+    await relaunched.ready();
+    expect(relaunched.collection.get("claude-code")?.catalog?.configOptions).toEqual(
+      models("opus"),
     );
   });
 });

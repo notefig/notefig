@@ -22,13 +22,11 @@ export function testHarnesses({
   kv = createKv(() => db.get()),
   proc = NO_SHELL,
   hooks = createHooks(),
-  now,
 }: {
   db?: ReturnType<typeof createNodeTestDb>;
   kv?: KvApi;
   proc?: Proc;
   hooks?: Pick<Hooks, "on">;
-  now?: () => number;
 } = {}): HarnessesApi {
-  return createHarnesses({ persistence: db.get(), kv, proc, hooks, now });
+  return createHarnesses({ persistence: db.get(), kv, proc, hooks });
 }

@@ -161,14 +161,13 @@ export type HarnessMark = {
   paths: readonly { d: string; opacity?: number }[];
 };
 
-/** What a harness offers, found without a session the user started. */
-export interface DiscoveredCatalog {
-  /** Its switchable settings, the model among them; null = not found. */
+/** What a harness offers: what a probe found, or a session reported, and
+ *  what its row keeps (`HarnessRow.catalog`). */
+export interface HarnessCatalog {
+  /** Its switchable settings, the model among them; null = not known. */
   configOptions: SessionConfigSelect[] | null;
-  /** Its commands and skills; null = not found. */
+  /** Its commands and skills; null = not known. */
   commands: AvailableCommand[] | null;
-  /** `initialize`'s `agentInfo.version`, when it said. */
-  harnessVersion?: string;
 }
 
 /** What a catalog probe may do — handed in, so an adapter imports no
@@ -180,7 +179,7 @@ export interface CatalogProbeIo {
   /** Spawn the harness, open a session in a directory that is no
    *  workspace, keep what it reports for a moment, then close it. Nothing
    *  is prompted. */
-  probeSession(): Promise<DiscoveredCatalog | null>;
+  probeSession(): Promise<HarnessCatalog | null>;
 }
 
 export interface HarnessAdapter {
@@ -216,7 +215,7 @@ export interface HarnessAdapter {
   limits?(meta: Record<string, unknown>): UsageLimits | null;
   /** Find what it offers before any session the user starts, for the
    *  harness catalog. None (a custom harness): only its sessions tell. */
-  discoverCatalog?(io: CatalogProbeIo): Promise<DiscoveredCatalog | null>;
+  discoverCatalog?(io: CatalogProbeIo): Promise<HarnessCatalog | null>;
 }
 
 /** For a harness whose throwaway session leaves nothing behind: open one

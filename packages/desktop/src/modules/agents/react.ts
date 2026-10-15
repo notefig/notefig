@@ -35,7 +35,7 @@ import {
   type HarnessRow,
   type HarnessSettingsRow,
 } from "@/modules/agents/harness-settings";
-import type { HarnessCatalog } from "@/modules/agents/harness-catalog";
+import type { HarnessCatalog } from "@/modules/harness-adapters";
 import { useCore } from "@notefig/core/react";
 
 export type {
@@ -404,7 +404,7 @@ export function useHarnessLabels(): (harnessId: string) => string {
  *  among them) and its commands. Null halves are not known yet. */
 export function useHarnessCatalog(
   harnessId: string,
-): Pick<HarnessCatalog, "configOptions" | "commands"> & { loading: boolean } {
+): HarnessCatalog & { loading: boolean } {
   const { harnesses } = useCore();
   const { data, isLoading } = useLiveQuery(
     (q) =>

@@ -11,6 +11,7 @@ import { createCore, type AnyModule, type Core } from "@notefig/core";
 import { QueryClient } from "@tanstack/react-query";
 import { platformAdapter } from "@/adapters";
 import { agentStoreModule } from "@/modules/agents/agent-collections";
+import { harnessProbeModule } from "@/modules/agents/harness-probe";
 import { mockAgentModule } from "@/modules/agents/mock-harness";
 import { promptRoundObserverModule } from "@/modules/agents/round-observer";
 import { tunnelModule } from "@/modules/agents/tunnel/tunnel-module";
@@ -85,6 +86,9 @@ export function desktopModules(): AnyModule[] {
     // Reopen the workspaces the user left open; the marketing site seeds
     // its one fixed root instead.
     restoreWorkspacesModule,
+    // Finds what each harness offers before a session does; never in a
+    // browser or mock mode, which have no harness to spawn.
+    harnessProbeModule,
     tunnelModule,
     telemetryModule,
   ];

@@ -5,7 +5,7 @@ import {
 } from "@notefig/shared/agent";
 import type {
   CatalogProbeIo,
-  DiscoveredCatalog,
+  HarnessCatalog,
   HarnessInvokeContext,
 } from "./adapter";
 import { testHarnesses } from "@/testing/test-harnesses";
@@ -320,7 +320,7 @@ describe("sign-in errors", () => {
 });
 
 describe("catalog discovery", () => {
-  const found: DiscoveredCatalog = {
+  const found: HarnessCatalog = {
     configOptions: null,
     commands: [{ name: "review", description: "Review" }],
   };
