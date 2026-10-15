@@ -62,6 +62,57 @@ function summarizeDirPrefix(item: MentionCandidate): string | null {
   return `${dirs[0]}/…/${dirs[dirs.length - 1]}/`;
 }
 
+/** A row's one-line label: its muted context (a file's directory, a
+ *  directive's namespace), its name kept whole, and a directive's
+ *  description trailing. */
+function rowParts(item: MentionRow): { context: string | null; name: string; detail?: string } {
+  if (item.kind === "file") {
+    return { context: summarizeDirPrefix(item.file), name: item.file.title };
+  }
+  const { namespace, value, label, description } = item.directive;
+  // A namespace reads as what picking it inserts: "@model:".
+  if (value === null) return { context: null, name: `@${label}` };
+  return { context: `${namespace}: `, name: label, detail: description };
+}
+
+/** Icon and label, laid out alike for files and directives. */
+function MentionRowLabel({ item }: { item: MentionRow }) {
+  const { FileIcon, DirectiveIcon } = usePromptWidgetHost().slots;
+  const { context, name, detail } = rowParts(item);
+  const iconClass = "h-3.5 w-3.5 shrink-0 text-muted-foreground";
+  return (
+    <>
+      {item.kind === "file" ? (
+        <FileIcon path={item.file.path} className={iconClass} />
+      ) : (
+        <DirectiveIcon namespace={item.directive.namespace} className={iconClass} />
+      )}
+      {/* One combined label. A file keeps its name whole and its directory
+          truncates first; a directive keeps its namespace whole — it says
+          what the row is — and its name truncates. */}
+      <span className="flex min-w-0 items-baseline" dir="ltr">
+        {context && (
+          <span
+            className={cn(
+              "whitespace-pre text-muted-foreground",
+              item.kind === "file" ? "min-w-0 truncate" : "shrink-0",
+            )}
+          >
+            {context}
+          </span>
+        )}
+        <span className={item.kind === "file" ? "shrink-0" : "min-w-0 truncate"}>{name}</span>
+        {detail && (
+          // Gives way long before the name does.
+          <span className="ms-1.5 min-w-0 shrink-[100] truncate text-muted-foreground">
+            {detail}
+          </span>
+        )}
+      </span>
+    </>
+  );
+}
+
 export function SuggestionList({
   items,
   selectedIndex,
@@ -74,7 +125,6 @@ export function SuggestionList({
   onHover: (index: number) => void;
 }) {
   const { t } = useTranslation();
-  const { FileIcon } = usePromptWidgetHost().slots;
   return (
     <div
       role="listbox"
@@ -92,45 +142,15 @@ export function SuggestionList({
             event.preventDefault();
             onPick(index);
           }}
-          onMouseEnter={() => onHover(index)}
+          // Movement, not entry: rows re-rendered under a still pointer
+          // must not take the selection from the keyboard.
+          onMouseMove={() => onHover(index)}
           className={cn(
             "flex cursor-pointer items-center gap-1 rounded-sm px-1.5 py-0.5 text-start text-xs",
             index === selectedIndex && "bg-accent text-accent-foreground",
           )}
         >
-          {item.kind === "file" ? (
-            <>
-              <FileIcon
-                path={item.file.path}
-                className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-              />
-              {/* One combined label: the name stays whole, the dir summary
-                  truncates first. */}
-              <span className="flex min-w-0 items-baseline" dir="ltr">
-                <span className="min-w-0 truncate text-muted-foreground">
-                  {summarizeDirPrefix(item.file)}
-                </span>
-                <span className="shrink-0">{item.file.title}</span>
-              </span>
-            </>
-          ) : item.directive.value === null ? (
-            // A namespace reads as what picking it inserts: "@model:".
-            <span className="shrink-0" dir="ltr">
-              @{item.directive.label}
-            </span>
-          ) : (
-            <span className="flex min-w-0 items-baseline gap-1" dir="ltr">
-              <span className="shrink-0 text-muted-foreground">
-                {item.directive.namespace}:
-              </span>
-              <span className="shrink-0">{item.directive.label}</span>
-              {item.directive.description && (
-                <span className="min-w-0 truncate text-muted-foreground">
-                  {item.directive.description}
-                </span>
-              )}
-            </span>
-          )}
+          <MentionRowLabel item={item} />
         </button>
       ))}
     </div>
@@ -143,10 +163,10 @@ export function SuggestionPortal({
   popup,
   selectedIndex,
   pick,
-  setSelectedIndex,
+  choose,
 }: Pick<
   ReturnType<typeof useMentionSuggestion>,
-  "popup" | "selectedIndex" | "pick" | "setSelectedIndex"
+  "popup" | "selectedIndex" | "pick" | "choose"
 >) {
   if (!popup || popup.items.length === 0) return null;
   return createPortal(
@@ -154,7 +174,7 @@ export function SuggestionPortal({
       items={popup.items}
       selectedIndex={selectedIndex}
       onPick={(index) => pick(popup, index)}
-      onHover={setSelectedIndex}
+      onHover={(index) => choose(popup, index)}
     />,
     popup.container,
   );
@@ -171,6 +191,17 @@ export function useMentionSuggestion() {
   const selectedIndexRef = useRef(selectedIndex);
   selectedIndexRef.current = selectedIndex;
   const unmountPopup = useRef<(() => void) | null>(null);
+  /** The row the user moved to (arrows, pointer), by key. It stays
+   *  selected while typing narrows the list and still holds it; until then
+   *  the selection is the top row, the best match. */
+  const chosenKey = useRef<string | null>(null);
+
+  const choose = useCallback((state: SuggestionPopupState, index: number) => {
+    const item = state.items[index];
+    if (!item) return;
+    chosenKey.current = mentionRowKey(item);
+    setSelectedIndex(index);
+  }, []);
 
   const applySuggestion = useCallback(
     (props: SuggestionProps<MentionRow>) => {
@@ -178,7 +209,11 @@ export function useMentionSuggestion() {
         if (!previous) return previous;
         return { ...previous, items: props.items, command: props.command };
       });
-      setSelectedIndex(0);
+      const kept = props.items.findIndex((item) => mentionRowKey(item) === chosenKey.current);
+      // An update without rows is the next query's still loading: the
+      // choice waits for its rows rather than being dropped.
+      if (kept === -1 && props.items.length > 0) chosenKey.current = null;
+      setSelectedIndex(Math.max(kept, 0));
     },
     [],
   );
@@ -197,13 +232,12 @@ export function useMentionSuggestion() {
       if (action === "pick") pick(state, selectedIndexRef.current);
       else {
         const step = action === "next" ? 1 : -1;
-        setSelectedIndex(
-          (index) => (index + step + state.items.length) % state.items.length,
-        );
+        const count = state.items.length;
+        choose(state, (selectedIndexRef.current + step + count) % count);
       }
       return true;
     },
-    [pick],
+    [pick, choose],
   );
 
   const renderer = useCallback<SuggestionRenderer>(
@@ -213,6 +247,7 @@ export function useMentionSuggestion() {
         container.className = "z-50";
         unmountPopup.current = props.mount?.(container) ?? null;
         setPopup({ container, items: props.items, command: props.command });
+        chosenKey.current = null;
         setSelectedIndex(0);
       },
       onUpdate: applySuggestion,
@@ -226,7 +261,7 @@ export function useMentionSuggestion() {
     [applySuggestion, suggestionKeyDown],
   );
 
-  return { popup, popupRef, selectedIndex, setSelectedIndex, pick, renderer };
+  return { popup, popupRef, selectedIndex, choose, pick, renderer };
 }
 
 /**

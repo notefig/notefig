@@ -5,6 +5,7 @@ import {
   type PromptWidgetHost,
 } from "@notefig/widgets";
 import { FileTypeIcon } from "@/components/editor/file-type-icon";
+import { DirectiveIcon } from "@/components/agent/directive-icon";
 import { HarnessLogo } from "@/components/agent/harness-logo";
 import { Markdown } from "@/components/ui/markdown";
 import { DEMO_FILES } from "./demo-fixtures";
@@ -78,6 +79,7 @@ const demoHost: PromptWidgetHost = {
     PermissionCard: () => null,
     AuthCard: () => null,
     FileIcon: FileTypeIcon,
+    DirectiveIcon,
     HarnessLogo,
   },
 };

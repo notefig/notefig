@@ -85,6 +85,9 @@ export function fakePromptWidgetHost(
         <div data-testid="permission-card">{taskId}</div>
       ),
       AuthCard: ({ task }) => <div data-testid="auth-card">{task.taskId}</div>,
+      DirectiveIcon: ({ namespace, className }) => (
+        <span data-testid={`directive-icon-${namespace}`} className={className} />
+      ),
       FileIcon: ({ className }) => (
         <span data-testid="file-icon" className={className} />
       ),

@@ -35,6 +35,7 @@ import {
 } from "@/hooks/use-harness-selection";
 import { canOpenFile } from "@/modules/editors";
 import { FileTypeIcon } from "@/components/editor/file-type-icon";
+import { DirectiveIcon } from "./directive-icon";
 import { HarnessLogo } from "./harness-logo";
 import { Markdown } from "@/components/ui/markdown";
 import { useCore } from "@notefig/core/react";
@@ -232,6 +233,7 @@ const slots: PromptWidgetHost["slots"] = {
   PermissionCard: ({ taskId }) => <PermissionCard taskId={taskId} bare />,
   AuthCard: ({ task }) => <AuthCard task={task} bare />,
   FileIcon: FileTypeIcon,
+  DirectiveIcon,
   HarnessLogo,
 };
 

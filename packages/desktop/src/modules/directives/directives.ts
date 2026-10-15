@@ -50,9 +50,11 @@ export type DirectiveMatch = { namespace: string } & (
 export interface DirectivesApi {
   register(namespace: DirectiveNamespace): () => void;
   /**
-   * The menu's rows for what follows an "@". `<namespace>:<query>` lists
-   * that namespace's candidates. Anything else lists the namespaces it
-   * starts, then every namespace's candidates it matches.
+   * The menu's rows for what follows an "@", members first-class like
+   * files: `<namespace>:<query>` lists that namespace's members it matches;
+   * a query that starts a namespace's name lists its members (`@mo` —
+   * every model); any other lists the members it matches (`@son` — Sonnet).
+   * A bare "@" lists the namespaces, as a hint of what can follow.
    */
   search(query: string, ctx: DirectiveContext, limit: number): DirectiveMatch[];
   /** Whether `<namespace>:<value>` names a candidate now. */
@@ -144,15 +146,19 @@ export function createDirectives(): DirectivesApi {
           .map((candidate) => ({ namespace: parsed.namespace.name, ...candidate }));
       }
       const all = [...namespaces.values()];
-      const starts: DirectiveMatch[] = all
-        .filter(({ name }) => name.startsWith(query.toLowerCase()))
-        .map(({ name }) => ({ namespace: name, value: null, label: `${name}:` }));
-      const matches: DirectiveMatch[] = query
-        ? all.flatMap(({ name, candidates }) =>
-            rank(candidates(ctx), query).map((candidate) => ({ namespace: name, ...candidate })),
-          )
-        : [];
-      return [...starts, ...matches].slice(0, limit);
+      if (!query) {
+        return all
+          .map(({ name }) => ({ namespace: name, value: null, label: `${name}:` }) as const)
+          .slice(0, limit);
+      }
+      const named = query.toLowerCase();
+      return all
+        .flatMap(({ name, candidates }) =>
+          (name.startsWith(named) ? candidates(ctx) : rank(candidates(ctx), query)).map(
+            (candidate) => ({ namespace: name, ...candidate }),
+          ),
+        )
+        .slice(0, limit);
     },
     isDirective,
     resolve(text, ctx) {

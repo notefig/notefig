@@ -210,6 +210,8 @@ export interface PromptWidgetHost {
     PermissionCard: ComponentType<{ taskId: string }>;
     AuthCard: ComponentType<{ task: AgentTaskRow }>;
     FileIcon: ComponentType<{ path: string; className?: string }>;
+    /** A directive namespace's mark, sized and placed like `FileIcon`. */
+    DirectiveIcon: ComponentType<{ namespace: string; className?: string }>;
     HarnessLogo: ComponentType<{ harnessId: string; className?: string }>;
   };
 }

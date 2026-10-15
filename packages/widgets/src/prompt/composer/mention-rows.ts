@@ -11,9 +11,9 @@ import type { DirectiveOption, MentionCandidate, PromptWidgetHost } from "../hos
 /** How many files the menu lists for a query; directives are capped
  *  apart, so a namespace's long list never hides the files. */
 export const SUGGESTION_LIMIT = 8;
-/** Directive rows for a query that names no namespace: a hint that they
- *  exist, not the namespace's whole list. */
-const UNSCOPED_DIRECTIVE_LIMIT = 3;
+/** Directive rows for a query that names no namespace: enough to pick
+ *  from while typing, few enough that the files stay in view. */
+const UNSCOPED_DIRECTIVE_LIMIT = 5;
 
 export type MentionRow =
   | { kind: "file"; file: MentionCandidate }

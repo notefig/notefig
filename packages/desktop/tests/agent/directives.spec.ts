@@ -84,6 +84,38 @@ test("in the chat, a model and a skill are picked as chips and acted on at send"
   expect(blocks[blocks.length - 1]).toEqual({ type: "text", text: "/review" });
 });
 
+test("members are offered while typing, and a row moved to stays selected as the query grows", async ({
+  page,
+}) => {
+  await setupTestDatabase(page, "directives-typing");
+  await startMockSession(
+    page,
+    "/workspace/directives-typing",
+    { configOptions: [modelOption] },
+    commands,
+  );
+  await composer(page).click();
+  const option = (name: string) => menu(page).getByRole("option", { name });
+
+  // Starting a namespace's name lists its members, each with its icon.
+  await page.keyboard.type("@mo");
+  await expect(option("model: Opus")).toHaveAttribute("aria-selected", "true");
+  await expect(option("model: Sonnet").locator("svg")).toHaveCount(1);
+  await page.keyboard.press("ArrowDown");
+  await expect(option("model: Sonnet")).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.type("d");
+  await expect(option("model: Opus")).toBeVisible();
+  await expect(option("model: Sonnet")).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Enter");
+  await expect(composer(page)).toContainText("@model: Sonnet");
+
+  // A member's own name finds it too, top row first.
+  await page.keyboard.type("@rev");
+  await expect(option("skill: review Review the branch")).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Enter");
+  await expect(composer(page)).toContainText("@skill: review");
+});
+
 test("an unknown directive is sent as the text it is", async ({ page }) => {
   await setupTestDatabase(page, "directives-unknown");
   await startMockSession(page, "/workspace/directives-unknown", {

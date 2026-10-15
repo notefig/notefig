@@ -22,7 +22,7 @@ describe("the @ menu's rows", () => {
       workspacePath: "/ws",
       taskId: "t",
       query: "op",
-      limit: 3,
+      limit: 5,
     });
     searchMentionRows(host, { workspacePath: "/ws", taskId: null, query: "model:" });
     expect(searchDirectives).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 8 }));

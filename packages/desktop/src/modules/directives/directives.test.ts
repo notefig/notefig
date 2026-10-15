@@ -27,17 +27,27 @@ function directives() {
 }
 
 describe("directives", () => {
-  it("lists the namespaces a query starts, then the values it matches", () => {
+  it("lists the namespaces for a bare @, and members as soon as a query names or matches them", () => {
     const api = directives();
 
     expect(api.search("", ctx, 8)).toEqual([
       { namespace: "model", value: null, label: "model:" },
       { namespace: "skill", value: null, label: "skill:" },
     ]);
+    // A query that starts a namespace's name lists its members.
+    expect(api.search("mo", ctx, 8).map((match) => match.value)).toEqual([
+      "opus",
+      "sonnet",
+      "anthropic/haiku",
+    ]);
+    // Any other lists the members it matches, in any namespace.
     expect(api.search("so", ctx, 8)).toEqual([
       { namespace: "model", value: "sonnet", label: "Sonnet", description: "Fast" },
     ]);
-    expect(api.search("m", ctx, 8)[0]).toEqual({ namespace: "model", value: null, label: "model:" });
+    expect(api.search("rev", ctx, 8)).toEqual([
+      { namespace: "skill", value: "review", label: "review" },
+    ]);
+    expect(api.search("mo", ctx, 2)).toHaveLength(2);
   });
 
   it("lists one namespace's values, prefix matches first", () => {
