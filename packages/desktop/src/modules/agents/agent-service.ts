@@ -13,7 +13,8 @@ import {
   type ContentBlock,
   type HarnessDefinition,
   type McpServer,
-  type PromptContextPart,
+  type PromptConfigChange,
+  type PromptExtras,
   type RequestPermissionResponse,
   type SessionNotification,
   type ToolCallUpdate,
@@ -35,6 +36,7 @@ import { APP_DIR_NAME } from "@/utils/app-dir";
 import type { KvApi } from "@/modules/kv";
 import {
   needsSignIn,
+  placeCommands,
   type HarnessAdapter,
   type HarnessCatalog,
   type HarnessAdaptersApi,
@@ -64,6 +66,7 @@ import {
   normalizeTurnUsage,
 } from "./turn-usage";
 import { limitsFrom } from "./usage-limits";
+import { settingChoices } from "./session-config";
 import i18n from "@/utils/intl";
 import { captureEvent } from "@/telemetry/telemetry";
 import {
@@ -295,11 +298,13 @@ function errorMessage(error: unknown): string {
 }
 
 
-type PromptOptions = {
-  contextParts?: PromptContextPart[];
+type PromptOptions = PromptExtras & {
   /** Enqueue ahead of already-queued prompts (held-prompt retry). */
   front?: boolean;
 };
+
+/** A prompt waiting for its turn, with everything it was sent with. */
+type QueuedPrompt = PromptExtras & { turnId: string; text: string };
 
 /** A prompt sent while its task waited to revive: recorded, not queued. */
 type HeldPrompt = {
@@ -405,11 +410,7 @@ export class AgentTask {
    * their user entry + a `"queued"` turn row immediately, and `runTurn`
    * promotes those rows to `"running"` when the queue reaches them.
    */
-  private readonly pendingPrompts: {
-    turnId: string;
-    text: string;
-    contextParts?: PromptContextPart[];
-  }[] = [];
+  private readonly pendingPrompts: QueuedPrompt[] = [];
   /** turnId → resolver for that turn's prompt-handle `completed` promise. */
   private readonly turnResolvers = new Map<
     string,
@@ -424,11 +425,7 @@ export class AgentTask {
    * original turnId so the retry re-queues the existing transcript rows
    * instead of inserting a duplicate user entry + turn.
    */
-  private heldPrompt?: {
-    turnId: string;
-    text: string;
-    contextParts?: PromptContextPart[];
-  };
+  private heldPrompt?: QueuedPrompt;
   /**
    * While auth-blocked, new prompts queue without starting a drain — running
    * them would just fail the same way and displace the held prompt. Cleared
@@ -843,8 +840,9 @@ export class AgentTask {
       return { turnId, completed };
     }
 
-    const entry = { turnId, text, contextParts: options?.contextParts };
-    if (options?.front) this.pendingPrompts.unshift(entry);
+    const { front, ...extras } = options ?? {};
+    const entry: QueuedPrompt = { turnId, text, ...extras };
+    if (front) this.pendingPrompts.unshift(entry);
     else this.pendingPrompts.push(entry);
     // Kick the drain unless a turn is in flight (live or replay — a
     // session/load replay holds currentTurn for its whole window, manual
@@ -931,8 +929,7 @@ export class AgentTask {
     this.draining = true;
     try {
       while (!this.disposed && this.pendingPrompts.length > 0) {
-        const { turnId, text, contextParts } = this.pendingPrompts.shift()!;
-        const status = await this.runTurn(turnId, text, contextParts);
+        const status = await this.runTurn(this.pendingPrompts.shift()!);
         // Don't march the rest of the queue through the same failure (e.g.
         // an auth block); remaining rows stay visibly queued and resume on
         // the next successful send.
@@ -943,11 +940,8 @@ export class AgentTask {
     }
   }
 
-  private async runTurn(
-    turnId: string,
-    text: string,
-    contextParts?: PromptContextPart[],
-  ): Promise<AgentTurnStatus> {
+  private async runTurn(queued: QueuedPrompt): Promise<AgentTurnStatus> {
+    const { turnId, text, contextParts, commands, config } = queued;
     if (!this.client || !this.sessionId) {
       this.settleQueuedTurn(turnId, {
         status: "error",
@@ -989,13 +983,18 @@ export class AgentTask {
       // Tool steering rides the MCP server's own initialize.instructions
       // (mcp-server.ts), not a prompt preamble — prompts carry only user
       // content and context parts.
-      const blocks = composePrompt({
-        text,
-        contextParts,
-        capabilities: {
-          embeddedContext: this.client.embeddedContextCapability,
-        },
-      });
+      await this.switchSettings(config);
+      const blocks = placeCommands(
+        this.adapter,
+        composePrompt({
+          text,
+          contextParts,
+          capabilities: {
+            embeddedContext: this.client.embeddedContextCapability,
+          },
+        }),
+        commands,
+      );
       const response = await this.client.prompt(this.sessionId, blocks);
       // A turn that reached the model clears any auth block and marks this
       // harness signed in on this machine (the only reliable signal — there
@@ -1028,7 +1027,7 @@ export class AgentTask {
       // Auth-blocked state is task-row state: methods + hint land on the
       // row, the failed prompt's text is held for a retry after sign-in.
       if (needsSignIn(this.adapter, message)) {
-        this.enterAuthBlock({ turnId, text, contextParts });
+        this.enterAuthBlock(queued);
       }
       this.warn("turn error", message);
       const status = this.finishTurn(undefined, "error", message);
@@ -1089,6 +1088,27 @@ export class AgentTask {
       category,
     });
     return { ok: true };
+  }
+
+  /**
+   * The settings a prompt asked for (a `@model:` directive), switched to
+   * before its turn: by category, against what the session offers now. One
+   * it doesn't offer, or one the harness refuses, is skipped — the prompt
+   * still goes, on the setting the row shows.
+   */
+  private async switchSettings(changes: PromptConfigChange[] = []): Promise<void> {
+    for (const { category, value } of changes) {
+      const option = this.store.tasks
+        .get(this.taskId)
+        ?.configOptions?.find((entry) => entry.category === category);
+      if (!option || option.currentValue === value) continue;
+      if (!settingChoices(option).some((choice) => choice.value === value)) {
+        this.warn("setting not offered", `${category}=${value}`);
+        continue;
+      }
+      const switched = await this.setConfigOption(option.id, value);
+      if (!switched.ok) this.warn("setting switch failed", switched.error);
+    }
   }
 
   private writeConfigOptions(options: SessionConfigSelect[]): void {
@@ -1166,11 +1186,7 @@ export class AgentTask {
   }
 
   /** Auth-blocked is task-row state (Stage 4): methods + hint, held prompt. */
-  private enterAuthBlock(held: {
-    turnId: string;
-    text: string;
-    contextParts?: PromptContextPart[];
-  }): void {
+  private enterAuthBlock(held: QueuedPrompt): void {
     this.authBlocked = true;
     this.heldPrompt = held;
     this.authHintValue = this.client?.authHint ?? this.harness.authHint;

@@ -11,6 +11,7 @@
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { PROMPT_DRAFT_NODE_NAME } from "../node";
+import { isDirectiveToken } from "./mention-rows";
 
 // ─── The mention text contract ──────────────────────────────────────────
 // Mentions are stateless text: picking a file inserts a literal
@@ -140,6 +141,12 @@ export function extractMentionPaths(
 
 // ─── draft string ⇄ document content ────────────────────────
 
+/** A revived chip's label: a file reads as its name, a directive
+ *  (`model:opus`) as itself. */
+function chipLabel(token: string): string {
+  return isDirectiveToken(token) ? token : token.slice(token.lastIndexOf("/") + 1);
+}
+
 /** The inline content of a draft: text runs, and a chip for every token
  *  that resolves to a workspace file. */
 export function draftToInline(
@@ -153,13 +160,7 @@ export function draftToInline(
       if (segment.type === "text") {
         if (segment.value) inline.push({ type: "text", text: segment.value });
       } else {
-        inline.push({
-          type: "mention",
-          attrs: {
-            id: segment.value,
-            label: segment.value.slice(segment.value.lastIndexOf("/") + 1),
-          },
-        });
+        inline.push({ type: "mention", attrs: { id: segment.value, label: chipLabel(segment.value) } });
       }
     }
   }

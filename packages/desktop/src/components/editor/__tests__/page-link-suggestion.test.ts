@@ -16,6 +16,7 @@ import {
   PageLinkSuggestion,
   pageLinkLabel,
   type MentionCandidate,
+  type MentionRow,
   type MentionService,
 } from "@notefig/widgets";
 import { pageLinkHref } from "@/components/editor/tiptap-link-utils";
@@ -28,11 +29,13 @@ const CANDIDATES: MentionCandidate[] = [
   { relativePath: "docs/other.md", title: "other.md", path: "/ws/docs/other.md" },
 ];
 
+const ROWS: MentionRow[] = CANDIDATES.map((file) => ({ kind: "file", file }));
+
 function testService() {
-  const onStart = vi.fn<(props: SuggestionProps<MentionCandidate>) => void>();
+  const onStart = vi.fn<(props: SuggestionProps<MentionRow>) => void>();
   const service: MentionService = {
     hasResults: () => true,
-    search: () => CANDIDATES,
+    search: () => ROWS,
     onStart,
     onUpdate: vi.fn(),
     onKeyDown: () => false,
@@ -97,9 +100,9 @@ describe("page-link suggestion", () => {
     // arrive through onUpdate.
     expect(service.onUpdate).toHaveBeenCalled();
     const updated = vi.mocked(service.onUpdate).mock.calls.at(-1)![0];
-    expect(updated.items).toEqual(CANDIDATES);
+    expect(updated.items).toEqual(ROWS);
     const props = onStart.mock.calls[0][0];
-    props.command({ id: "notes.md", label: "notes.md" } as never);
+    props.command(ROWS[0]);
 
     const html = editor.getHTML();
     expect(html).toContain('href="notes.md"');
@@ -115,7 +118,7 @@ describe("page-link suggestion", () => {
 
     await typeAt(editor, "@");
     const props = onStart.mock.calls[0][0];
-    props.command({ id: "docs/other.md", label: "other.md" } as never);
+    props.command(ROWS[1]);
 
     expect(editor.getHTML()).toContain('href="other.md"');
   });
@@ -160,7 +163,7 @@ describe("page-link suggestion", () => {
     // pick inserts a mention chip, not a link.
     expect(onStart).toHaveBeenCalledTimes(1);
     const props = onStart.mock.calls[0][0];
-    props.command({ id: "notes.md", label: "notes.md" } as never);
+    props.command(ROWS[0]);
     // The pick landed as a mention chip inside the draft, not a link.
     let mentionInDraft = false;
     let anyLink = false;

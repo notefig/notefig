@@ -22,6 +22,7 @@ import { Extension } from "@tiptap/core";
 import { PluginKey } from "@tiptap/pm/state";
 import Suggestion from "@tiptap/suggestion";
 import { getMentionService } from "./prompt/composer/mention-bridge";
+import type { MentionRow } from "./prompt/composer/mention-rows";
 import { selectionDraft } from "./prompt/doc-helpers";
 
 /** Link text: the file name, with a page's ".md" dropped — the link names
@@ -66,8 +67,9 @@ export const PageLinkSuggestion = Extension.create<PageLinkSuggestionOptions>({
           // Inside a draft the widget's own suggestion owns "@".
           return !selectionDraft({ selection: { $from } });
         },
+        // Files only: a directive means nothing in the document's prose.
         items: ({ query }) =>
-          getMentionService(documentPath)?.search(query) ?? [],
+          getMentionService(documentPath)?.search(query, { directives: false }) ?? [],
         // Pinned directly under the "@" (the anchor is the suggestion
         // decoration, whose left edge is the trigger char). Fixed strategy
         // sidesteps offset-parent math inside the dock/editor stack.
@@ -75,7 +77,9 @@ export const PageLinkSuggestion = Extension.create<PageLinkSuggestionOptions>({
         offset: { mainAxis: 2, crossAxis: 0 },
         floatingUi: { strategy: "fixed" },
         command: ({ editor, range, props }) => {
-          const { id, label } = props as { id: string; label: string };
+          const row = props as MentionRow;
+          if (row.kind !== "file") return;
+          const { relativePath: id, title: label } = row.file;
           editor
             .chain()
             .focus()

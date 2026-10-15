@@ -11,7 +11,7 @@
 import {
   newTurnId,
   type HarnessDefinition,
-  type PromptContextPart,
+  type PromptExtras,
   type RequestPermissionResponse,
   type TurnOutcome,
 } from "@notefig/shared/agent";
@@ -37,10 +37,7 @@ export interface AgentTaskHandle {
    * Enqueue a prompt — infallible, never throws. A missing/disposed task
    * returns a handle whose `completed` is already resolved as an error.
    */
-  prompt(
-    text: string,
-    options?: { contextParts?: PromptContextPart[]; front?: boolean },
-  ): PromptHandle;
+  prompt(text: string, options?: PromptExtras & { front?: boolean }): PromptHandle;
   /**
    * The in-document widget's send path (MET-68): callers hand over plain
    * editor-derived facts (document path, ProseMirror position, whether the
@@ -65,10 +62,10 @@ export interface AgentTaskHandle {
        *  the same from/to to `document_read_range`. */
       reference?: { text: string; from: number; to: number };
     },
-    /** Additional parts riding along with the widget context — file
-     *  @-mentions (MET-80). Kept even on the empty-doc branch, which
-     *  otherwise carries no contextParts. */
-    extraContextParts?: PromptContextPart[],
+    /** What rides along with the widget context: file @-mentions (MET-80)
+     *  as context parts — kept even on the empty-doc branch, which otherwise
+     *  carries none — and the prompt's directives (commands, settings). */
+    extras?: PromptExtras,
   ): PromptHandle;
   /** Remove one queued (not yet running) prompt. */
   removeQueuedPrompt(turnId: string): void;
@@ -250,7 +247,7 @@ export function createAgents({
     const sendFromWidget = (
       text: string,
       widget: Parameters<AgentTaskHandle["promptFromWidget"]>[1],
-      extraContextParts: PromptContextPart[],
+      { contextParts: extraContextParts = [], ...directives }: PromptExtras,
     ): PromptHandle => {
       if (widget.isDocEmpty) {
         // The one deliberately-embedded exception: the agent can't
@@ -262,12 +259,10 @@ export function createAgents({
         // parts (file:// links) still ride along; the steering keys on the
         // widget-context URI scheme, not resource_link presence.
         const framing = `${widget.path} is currently empty. Author directly into it — do not just describe what you would write. When finished, deliver a brief confirmation (or any issues) via the \`widget_respond\` tool, not as plain chat text.\n\n`;
-        return promptImpl(
-          framing + text,
-          extraContextParts.length
-            ? { contextParts: extraContextParts }
-            : undefined,
-        );
+        return promptImpl(framing + text, {
+          ...directives,
+          ...(extraContextParts.length ? { contextParts: extraContextParts } : {}),
+        });
       }
       const uri = encodeWidgetContextUri({
         path: widget.path,
@@ -292,6 +287,7 @@ export function createAgents({
             .join("\n")}\n\n${text}`
         : text;
       return promptImpl(quoted, {
+        ...directives,
         contextParts: [
           { kind: "resource_link", path: uri },
           ...extraContextParts,
@@ -302,8 +298,8 @@ export function createAgents({
     return {
       taskId,
       prompt: promptImpl,
-      promptFromWidget(text, widget, extraContextParts = []) {
-        const sent = sendFromWidget(text, widget, extraContextParts);
+      promptFromWidget(text, widget, extras = {}) {
+        const sent = sendFromWidget(text, widget, extras);
         // The round begins in the widget's document — announced here, by
         // the one send path, so no caller can send without it.
         hooks.emit("widget:round-started", {

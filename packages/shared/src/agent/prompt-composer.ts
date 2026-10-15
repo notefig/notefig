@@ -15,6 +15,26 @@ export interface PromptContextPart {
   name?: string;
 }
 
+/** A command or skill a prompt runs. Where its `/name` goes in the prompt
+ *  is the harness's (its adapter's `placeCommand`). */
+export interface PromptCommand {
+  name: string;
+}
+
+/** A session setting switched to just before a prompt's turn, by the
+ *  setting's category (`model`, `thought_level`). */
+export interface PromptConfigChange {
+  category: string;
+  value: string;
+}
+
+/** What a prompt carries besides its text, and keeps while it is queued. */
+export interface PromptExtras {
+  contextParts?: PromptContextPart[];
+  commands?: PromptCommand[];
+  config?: PromptConfigChange[];
+}
+
 export interface ComposePromptInput {
   text: string;
   contextParts?: PromptContextPart[];

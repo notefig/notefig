@@ -156,6 +156,10 @@ export function claudeUpdateModel(update: UsageUpdate): string | null {
 export const claudeCodeAdapter: HarnessAdapter = {
   // A session that is never prompted writes no session file (spike: ~1–2s).
   discoverCatalog: discoverBySession,
+  // claude-agent-acp runs a command only from the prompt's LAST block, as
+  // text starting with "/" — anywhere else it is prose (MET-222 spike, on
+  // 0.81.2). The blocks before it still reach the model.
+  placeCommand: (blocks, name) => [...blocks, { type: "text", text: `/${name}` }],
   onInvoke: async ({ mcpServer }) => ({
     ...NO_PREP,
     passThroughSessionNew: mcpServer !== undefined,

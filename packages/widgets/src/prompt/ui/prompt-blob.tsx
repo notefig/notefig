@@ -183,7 +183,8 @@ function useDraftIO(editor: Editor, blobId: string, workspacePath: string) {
       const found = range();
       if (!found) return;
       const isPath = (token: string) =>
-        host.isWorkspaceFile(workspacePath, token);
+        host.isWorkspaceFile(workspacePath, token) ||
+        host.isDirective({ workspacePath, taskId: null, token });
       const tr = editor.state.tr.replaceWith(
         found.from,
         found.to,

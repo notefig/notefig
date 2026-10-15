@@ -61,6 +61,8 @@ export function fakePromptWidgetHost(
 
     isWorkspaceFile: vi.fn(() => false),
     searchWorkspaceFiles: vi.fn(() => []),
+    searchDirectives: vi.fn(() => []),
+    isDirective: vi.fn(() => false),
     // Posix slicing is enough for tests; the real host owns the platform's
     // path flavor.
     toRelativePath: vi.fn((root: string, absolute: string) =>

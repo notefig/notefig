@@ -5,7 +5,6 @@ import {
   useImperativeHandle,
   useRef,
 } from "react";
-import { createPortal } from "react-dom";
 import { cn } from "@notefig/ui/utils";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -18,11 +17,11 @@ import {
   draftToDoc,
 } from "./draft-text";
 import {
-  SuggestionList,
-  SUGGESTION_LIMIT,
+  SuggestionPortal,
   useMentionSuggestion,
   type SuggestionRenderer,
 } from "./mention-menu";
+import { insertMentionRow, searchMentionRows, type MentionRow } from "./mention-rows";
 
 /** Re-exported from their own modules: this file is the standalone composer,
  *  and the mention contract is shared with the widget's in-document draft. */
@@ -42,15 +41,15 @@ export {
  *
  * The value contract stays a plain string: chips serialize to the exact
  * `@<relativePath>` text the submit paths already re-parse
- * (prompt-mentions.ts), and setting a draft string revives chips for every
- * token that resolves to a real file (segmentMentions). Hosts keep their
+ * (draft-text.ts), and setting a draft string revives chips for every
+ * token that resolves to a real file or a directive (segmentMentions). Hosts keep their
  * own key maps via `onKeyDown` — it runs before the editor's handling
  * except while the suggestion popup is open, when the popup owns
  * Arrows/Enter/Tab/Escape.
  *
- * Adding more cues later (e.g. "/" commands) means appending an entry to
- * the Mention extension's `suggestions` array — the popup and keyboard
- * wiring are already per-trigger.
+ * Directives (`@model:opus`, `@skill:review`) ride the same "@" trigger:
+ * the host lists them with the files (mention-rows.ts), and a new namespace
+ * is the host's to register — nothing here changes.
  */
 export interface PromptEditorHandle {
   /** Focus the composer, caret at the end. False when it can't take focus
@@ -65,7 +64,7 @@ export interface PromptEditorHandle {
  *  registration instead — see composer/mention-node.ts. */
 function promptExtensions(
   host: PromptWidgetHost,
-  workspacePath: string,
+  { workspacePath, taskId = null }: { workspacePath: string; taskId?: string | null },
   placeholder: string,
   renderer: SuggestionRenderer,
 ) {
@@ -95,7 +94,9 @@ function promptExtensions(
     promptMentionNode({
       char: "@",
       items: ({ query }: { query: string }) =>
-        host.searchWorkspaceFiles(workspacePath, query, SUGGESTION_LIMIT),
+        searchMentionRows(host, { workspacePath, taskId, query }),
+      command: ({ editor, range, props }) =>
+        insertMentionRow(editor, range, props as unknown as MentionRow),
       // Pinned directly under the "@" (the anchor is the suggestion
       // decoration, whose left edge is the trigger char). Fixed strategy
       // sidesteps offset-parent math inside the dock/editor stack.
@@ -173,10 +174,28 @@ function usePromptEditorSync({
   }, [liveEditor]);
 }
 
+/** Whether a token is a chip: a workspace file or a directive. Stable
+ *  across renders for the same workspace and session: it feeds an effect
+ *  dependency, and a fresh closure each render would re-set the content. */
+function useIsMention(
+  host: PromptWidgetHost,
+  workspacePath: string,
+  taskId: string | null = null,
+) {
+  return useCallback(
+    (token: string) =>
+      host.isWorkspaceFile(workspacePath, token) ||
+      host.isDirective({ workspacePath, taskId, token }),
+    [host, workspacePath, taskId],
+  );
+}
+
 export const PromptEditor = forwardRef<
   PromptEditorHandle,
   {
     workspacePath: string;
+    /** The session this composer prompts, for what its directives offer. */
+    taskId?: string | null;
     value: string;
     onChange: (value: string) => void;
     /** Host key map (deriveComposerKeyAction etc.). Runs first — except
@@ -191,6 +210,7 @@ export const PromptEditor = forwardRef<
 >(function PromptEditor(
   {
     workspacePath,
+    taskId,
     value,
     onChange,
     onKeyDown,
@@ -202,21 +222,15 @@ export const PromptEditor = forwardRef<
   ref,
 ) {
   const host = usePromptWidgetHost();
-  // Stable across renders for the same workspace: it feeds an effect
-  // dependency, and a fresh closure each render would re-set the content.
-  const isPath = useCallback(
-    (token: string) => host.isWorkspaceFile(workspacePath, token),
-    [host, workspacePath],
-  );
+  const isPath = useIsMention(host, workspacePath, taskId);
   const onKeyDownRef = useRef(onKeyDown);
   onKeyDownRef.current = onKeyDown;
   const lastEmitted = useRef(value);
-  const { popup, popupRef, selectedIndex, setSelectedIndex, pick, renderer } =
-    useMentionSuggestion();
+  const { popupRef, renderer, ...portal } = useMentionSuggestion();
 
   const editor = useEditor(
     {
-      extensions: promptExtensions(host, workspacePath, placeholder, renderer),
+      extensions: promptExtensions(host, { workspacePath, taskId }, placeholder, renderer),
       content: draftToDoc(isPath, value),
       editable: !disabled,
       autofocus: autoFocus ? "end" : false,
@@ -244,7 +258,7 @@ export const PromptEditor = forwardRef<
     },
     // Recreating on placeholder change is fine: it only flips alongside
     // `disabled` (session load), and content re-seeds from the draft prop.
-    [workspacePath, placeholder],
+    [workspacePath, taskId, placeholder],
   );
 
   usePromptEditorSync({ editor, value, isPath, disabled, lastEmitted });
@@ -271,17 +285,7 @@ export const PromptEditor = forwardRef<
           className,
         )}
       />
-      {popup &&
-        popup.items.length > 0 &&
-        createPortal(
-          <SuggestionList
-            items={popup.items}
-            selectedIndex={selectedIndex}
-            onPick={(index) => pick(popup, index)}
-            onHover={setSelectedIndex}
-          />,
-          popup.container,
-        )}
+      <SuggestionPortal {...portal} />
     </>
   );
 });

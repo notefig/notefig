@@ -21,19 +21,17 @@ import { cn } from "@notefig/ui/utils";
 import { usePromptWidgetHost } from "../host-context";
 import type { MentionCandidate } from "../host";
 import { registerMentionService } from "./mention-bridge";
-
-/** How many rows the file search returns for a query. */
-export const SUGGESTION_LIMIT = 8;
+import { mentionRowKey, searchMentionRows, type MentionRow } from "./mention-rows";
 
 export interface SuggestionPopupState {
   container: HTMLElement;
-  items: MentionCandidate[];
-  command: (attrs: { id: string; label: string }) => void;
+  items: MentionRow[];
+  command: (row: MentionRow) => void;
 }
 
 export type SuggestionRenderer = () => {
-  onStart: (props: SuggestionProps<MentionCandidate>) => void;
-  onUpdate: (props: SuggestionProps<MentionCandidate>) => void;
+  onStart: (props: SuggestionProps<MentionRow>) => void;
+  onUpdate: (props: SuggestionProps<MentionRow>) => void;
   onKeyDown: (props: SuggestionKeyDownProps) => boolean;
   onExit: () => void;
 };
@@ -70,7 +68,7 @@ export function SuggestionList({
   onPick,
   onHover,
 }: {
-  items: MentionCandidate[];
+  items: MentionRow[];
   selectedIndex: number;
   onPick: (index: number) => void;
   onHover: (index: number) => void;
@@ -85,7 +83,7 @@ export function SuggestionList({
     >
       {items.map((item, index) => (
         <button
-          key={item.path}
+          key={mentionRowKey(item)}
           type="button"
           role="option"
           aria-selected={index === selectedIndex}
@@ -100,21 +98,65 @@ export function SuggestionList({
             index === selectedIndex && "bg-accent text-accent-foreground",
           )}
         >
-          <FileIcon
-            path={item.path}
-            className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-          />
-          {/* One combined label: the name stays whole, the dir summary
-              truncates first. */}
-          <span className="flex min-w-0 items-baseline" dir="ltr">
-            <span className="min-w-0 truncate text-muted-foreground">
-              {summarizeDirPrefix(item)}
+          {item.kind === "file" ? (
+            <>
+              <FileIcon
+                path={item.file.path}
+                className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+              />
+              {/* One combined label: the name stays whole, the dir summary
+                  truncates first. */}
+              <span className="flex min-w-0 items-baseline" dir="ltr">
+                <span className="min-w-0 truncate text-muted-foreground">
+                  {summarizeDirPrefix(item.file)}
+                </span>
+                <span className="shrink-0">{item.file.title}</span>
+              </span>
+            </>
+          ) : item.directive.value === null ? (
+            // A namespace reads as what picking it inserts: "@model:".
+            <span className="shrink-0" dir="ltr">
+              @{item.directive.label}
             </span>
-            <span className="shrink-0">{item.title}</span>
-          </span>
+          ) : (
+            <span className="flex min-w-0 items-baseline gap-1" dir="ltr">
+              <span className="shrink-0 text-muted-foreground">
+                {item.directive.namespace}:
+              </span>
+              <span className="shrink-0">{item.directive.label}</span>
+              {item.directive.description && (
+                <span className="min-w-0 truncate text-muted-foreground">
+                  {item.directive.description}
+                </span>
+              )}
+            </span>
+          )}
         </button>
       ))}
     </div>
+  );
+}
+
+/** The open popup's list, portalled into the container the suggestion
+ *  plugin mounted; nothing while it has no rows. */
+export function SuggestionPortal({
+  popup,
+  selectedIndex,
+  pick,
+  setSelectedIndex,
+}: Pick<
+  ReturnType<typeof useMentionSuggestion>,
+  "popup" | "selectedIndex" | "pick" | "setSelectedIndex"
+>) {
+  if (!popup || popup.items.length === 0) return null;
+  return createPortal(
+    <SuggestionList
+      items={popup.items}
+      selectedIndex={selectedIndex}
+      onPick={(index) => pick(popup, index)}
+      onHover={setSelectedIndex}
+    />,
+    popup.container,
   );
 }
 
@@ -131,14 +173,10 @@ export function useMentionSuggestion() {
   const unmountPopup = useRef<(() => void) | null>(null);
 
   const applySuggestion = useCallback(
-    (props: SuggestionProps<MentionCandidate>) => {
+    (props: SuggestionProps<MentionRow>) => {
       setPopup((previous) => {
         if (!previous) return previous;
-        return {
-          ...previous,
-          items: props.items,
-          command: (attrs) => props.command(attrs as never),
-        };
+        return { ...previous, items: props.items, command: props.command };
       });
       setSelectedIndex(0);
     },
@@ -147,8 +185,7 @@ export function useMentionSuggestion() {
 
   const pick = useCallback((state: SuggestionPopupState, index: number) => {
     const item = state.items[index];
-    if (!item) return;
-    state.command({ id: item.relativePath, label: item.title });
+    if (item) state.command(item);
   }, []);
 
   const suggestionKeyDown = useCallback(
@@ -175,11 +212,7 @@ export function useMentionSuggestion() {
         const container = document.createElement("div");
         container.className = "z-50";
         unmountPopup.current = props.mount?.(container) ?? null;
-        setPopup({
-          container,
-          items: props.items,
-          command: (attrs) => props.command(attrs as never),
-        });
+        setPopup({ container, items: props.items, command: props.command });
         setSelectedIndex(0);
       },
       onUpdate: applySuggestion,
@@ -197,15 +230,6 @@ export function useMentionSuggestion() {
 }
 
 /**
- * Prop → editor synchronization. useEditor can hand out an instance that
- * has since been destroyed (the dock unmounts tabs, and StrictMode
- * double-mounts): Editor.destroy() nulls commandManager while the
- * `commands` getter has no guard, so every imperative entry point checks
- * isDestroyed first (crash report 2026-08-21, focus on a stale chat-tab
- * handle) — re-checked inside each effect too, since a StrictMode cleanup
- * can destroy the instance between render and effect.
-
-/**
  * The popup for a document's prompt drafts. Mounted beside the editor (like
  * the link and table menus) because the suggestion plugin is registered on
  * the document, not on a per-widget editor — one menu serves every widget in
@@ -219,8 +243,7 @@ export function PromptMentionMenu({
   workspacePath: string;
 }) {
   const host = usePromptWidgetHost();
-  const { popup, popupRef, selectedIndex, setSelectedIndex, pick, renderer } =
-    useMentionSuggestion();
+  const { popupRef, renderer, ...portal } = useMentionSuggestion();
 
   // One renderer instance for the plugin to drive, registered for as long as
   // this document's editor is on screen.
@@ -232,8 +255,11 @@ export function PromptMentionMenu({
     if (!live) return;
     return registerMentionService(documentPath, {
       hasResults: () => (popupRef.current?.items.length ?? 0) > 0,
-      search: (query) =>
-        host.searchWorkspaceFiles(workspacePath, query, SUGGESTION_LIMIT),
+      // The document's drafts each prompt their own session, which the
+      // shared menu can't tell apart: directives offer what the workspace's
+      // session (or a new one) would.
+      search: (query, options) =>
+        searchMentionRows(host, { workspacePath, taskId: null, query, ...options }),
       onStart: live.onStart,
       onUpdate: live.onUpdate,
       onKeyDown: live.onKeyDown,
@@ -241,14 +267,5 @@ export function PromptMentionMenu({
     });
   }, [documentPath, workspacePath, host, popupRef]);
 
-  if (!popup || popup.items.length === 0) return null;
-  return createPortal(
-    <SuggestionList
-      items={popup.items}
-      selectedIndex={selectedIndex}
-      onPick={(index) => pick(popup, index)}
-      onHover={setSelectedIndex}
-    />,
-    popup.container,
-  );
+  return <SuggestionPortal {...portal} />;
 }

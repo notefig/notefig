@@ -61,6 +61,7 @@ import {
   getMentionService,
   mentionPopupHasResults,
 } from "./composer/mention-bridge";
+import { insertMentionRow, type MentionRow } from "./composer/mention-rows";
 import { dispatchComposerKey } from "./composer/key-bridge";
 import { PROMPT_MENTION_NAME } from "./composer/mention-node";
 import { readDraftNode } from "./composer/draft-text";
@@ -629,11 +630,12 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
             : null;
         },
       }),
-      // The "@" file mention, scoped to drafts. Registered here rather than
+      // The "@" mention (files, and directives like `@model:`), scoped to
+      // drafts. Registered here rather than
       // as a standalone extension so the scoping travels with the widget
       // that owns it: `allow` is the whole of it — outside a draft the
       // trigger never starts, so "@" stays ordinary prose everywhere else.
-      Suggestion({
+      Suggestion<MentionRow, MentionRow>({
         editor: this.editor,
         char: "@",
         allow: ({ state, range }) =>
@@ -650,16 +652,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
         placement: "bottom-start",
         offset: { mainAxis: 2, crossAxis: 0 },
         floatingUi: { strategy: "fixed" },
-        command: ({ editor, range, props }) => {
-          editor
-            .chain()
-            .focus()
-            .insertContentAt(range, [
-              { type: "mention", attrs: props },
-              { type: "text", text: " " },
-            ])
-            .run();
-        },
+        command: ({ editor, range, props }) => insertMentionRow(editor, range, props),
         render: () => ({
           onStart: (props) =>
             getMentionService(options.filePath)?.onStart(props),

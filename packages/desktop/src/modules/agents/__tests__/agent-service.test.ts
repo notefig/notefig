@@ -2205,6 +2205,56 @@ describe("session config options (MET-81)", () => {
   });
 });
 
+describe("a prompt's directives", () => {
+  it("switches its settings before its turn, skips one not offered, and places its commands", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.newSessionResult = {
+      sessionId: "sess_dir",
+      models: {
+        currentModelId: "opus",
+        availableModels: [
+          { modelId: "opus", name: "Opus" },
+          { modelId: "sonnet", name: "Sonnet" },
+        ],
+      },
+    };
+    const order: string[] = [];
+    const setModel = agent.onSetModel;
+    agent.onSetModel = async (params, a) => {
+      order.push(`model ${params.modelId}`);
+      return setModel(params, a);
+    };
+    let blocks: unknown;
+    agent.onPrompt = async (params) => {
+      order.push("prompt");
+      blocks = params.prompt;
+      return { stopReason: "end_turn" };
+    };
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    await task.start(() => client);
+
+    const { completed } = task.prompt("fix it", {
+      config: [
+        { category: "model", value: "nope" },
+        { category: "model", value: "sonnet" },
+      ],
+      commands: [{ name: "review" }],
+    });
+    await completed;
+
+    expect(order).toEqual(["model sonnet", "prompt"]);
+    expect(
+      store.tasks.get(task.taskId)?.configOptions?.[0].currentValue,
+    ).toBe("sonnet");
+    // Claude runs a command from the last block only.
+    expect(blocks).toEqual([
+      { type: "text", text: "fix it" },
+      { type: "text", text: "/review" },
+    ]);
+  });
+});
+
 describe("usage (token & cost)", () => {
   const usageUpdate = (used: number, cost?: number) => ({
     sessionUpdate: "usage_update",
