@@ -2255,6 +2255,50 @@ describe("a prompt's directives", () => {
   });
 });
 
+describe("a prompt's directives, stopped", () => {
+  it("never sends a prompt whose turn was stopped while its model switched", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.newSessionResult = {
+      sessionId: "sess_stop",
+      models: {
+        currentModelId: "opus",
+        availableModels: [
+          { modelId: "opus", name: "Opus" },
+          { modelId: "sonnet", name: "Sonnet" },
+        ],
+      },
+    };
+    let release!: () => void;
+    const switching = new Promise<void>((resolve) => (release = resolve));
+    const setModel = agent.onSetModel;
+    let switchStarted = false;
+    agent.onSetModel = async (params, a) => {
+      switchStarted = true;
+      await switching;
+      return setModel(params, a);
+    };
+    let prompted = false;
+    agent.onPrompt = async () => {
+      prompted = true;
+      return { stopReason: "end_turn" };
+    };
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    await task.start(() => client);
+
+    const { completed } = task.prompt("fix it", {
+      config: [{ category: "model", value: "sonnet" }],
+    });
+    await vi.waitFor(() => expect(switchStarted).toBe(true));
+    await task.cancel();
+    release();
+
+    expect((await completed).status).toBe("cancelled");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(prompted).toBe(false);
+  });
+});
+
 describe("usage (token & cost)", () => {
   const usageUpdate = (used: number, cost?: number) => ({
     sessionUpdate: "usage_update",

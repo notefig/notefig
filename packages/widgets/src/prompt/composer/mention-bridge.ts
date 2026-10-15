@@ -25,9 +25,13 @@ export interface MentionService {
    *  it: an open suggestion owns Arrows/Enter/Tab/Escape, but an active
    *  suggestion with no matches must not eat them. */
   hasResults(): boolean;
-  /** The search behind the popup's rows: directives and workspace files,
-   *  or files alone. */
-  search(query: string, options?: { directives?: boolean }): Promise<MentionRow[]> | MentionRow[];
+  /** The search behind the popup's rows: directives (for the session the
+   *  caret's widget is bound to, if any) and workspace files, or files
+   *  alone. */
+  search(
+    query: string,
+    options?: { directives?: boolean; taskId?: string | null },
+  ): Promise<MentionRow[]> | MentionRow[];
   onStart(props: SuggestionProps<MentionRow>): void;
   onUpdate(props: SuggestionProps<MentionRow>): void;
   onKeyDown(props: SuggestionKeyDownProps): boolean;

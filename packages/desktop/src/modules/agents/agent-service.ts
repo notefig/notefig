@@ -941,7 +941,7 @@ export class AgentTask {
   }
 
   private async runTurn(queued: QueuedPrompt): Promise<AgentTurnStatus> {
-    const { turnId, text, contextParts, commands, config } = queued;
+    const { turnId, text } = queued;
     if (!this.client || !this.sessionId) {
       this.settleQueuedTurn(turnId, {
         status: "error",
@@ -983,19 +983,11 @@ export class AgentTask {
       // Tool steering rides the MCP server's own initialize.instructions
       // (mcp-server.ts), not a prompt preamble — prompts carry only user
       // content and context parts.
-      await this.switchSettings(config);
-      const blocks = placeCommands(
-        this.adapter,
-        composePrompt({
-          text,
-          contextParts,
-          capabilities: {
-            embeddedContext: this.client.embeddedContextCapability,
-          },
-        }),
-        commands,
-      );
-      const response = await this.client.prompt(this.sessionId, blocks);
+      const blocks = await this.promptBlocks(queued, this.client);
+      // Stopped (or the task closed) while a setting switched: the turn is
+      // settled already, and its prompt must not go.
+      if (!blocks) return "cancelled";
+      const response = await this.client.prompt(sessionId, blocks);
       // A turn that reached the model clears any auth block and marks this
       // harness signed in on this machine (the only reliable signal — there
       // is no ahead-of-time probe, per the auth spike). Written through the
@@ -1088,6 +1080,26 @@ export class AgentTask {
       category,
     });
     return { ok: true };
+  }
+
+  /** What goes on the wire for a prompt: its settings switched to first,
+   *  then its text and parts, with its commands where the harness runs
+   *  them. Null when its turn was stopped meanwhile. */
+  private async promptBlocks(
+    { turnId, text, contextParts, commands, config }: QueuedPrompt,
+    client: NotefigAcpClient,
+  ): Promise<ContentBlock[] | null> {
+    await this.switchSettings(config);
+    if (this.disposed || this.currentTurn?.turnId !== turnId) return null;
+    return placeCommands(
+      this.adapter,
+      composePrompt({
+        text,
+        contextParts,
+        capabilities: { embeddedContext: client.embeddedContextCapability },
+      }),
+      commands,
+    );
   }
 
   /**

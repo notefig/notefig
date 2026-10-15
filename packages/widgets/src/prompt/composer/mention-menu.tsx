@@ -255,11 +255,11 @@ export function PromptMentionMenu({
     if (!live) return;
     return registerMentionService(documentPath, {
       hasResults: () => (popupRef.current?.items.length ?? 0) > 0,
-      // The document's drafts each prompt their own session, which the
-      // shared menu can't tell apart: directives offer what the workspace's
-      // session (or a new one) would.
-      search: (query, options) =>
-        searchMentionRows(host, { workspacePath, taskId: null, query, ...options }),
+      // A draft's widget may be bound to its own session (the plugin says
+      // which); an unbound one offers what the workspace's session, or a
+      // new one, would.
+      search: (query, { directives, taskId = null } = {}) =>
+        searchMentionRows(host, { workspacePath, taskId, query, directives }),
       onStart: live.onStart,
       onUpdate: live.onUpdate,
       onKeyDown: live.onKeyDown,

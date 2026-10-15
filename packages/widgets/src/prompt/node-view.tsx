@@ -54,7 +54,11 @@ import {
 } from "./doc-helpers";
 import type { PromptReference } from "./doc-helpers";
 import { PromptBlob } from "./ui/prompt-blob";
-import { adoptPersistedPromptBinding, bindPromptBlobDocument } from "./store";
+import {
+  adoptPersistedPromptBinding,
+  bindPromptBlobDocument,
+  getPromptBlob,
+} from "./store";
 import { promptChangeTrackingPlugin } from "./change-tracking";
 import { promptChangeGutterPlugin } from "./change-gutter";
 import {
@@ -644,8 +648,12 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
               selection: { $from: state.doc.resolve(range.from) },
             }),
           ),
-        items: ({ query }) =>
-          getMentionService(options.filePath)?.search(query) ?? [],
+        // Directives offer what the caret's widget's own session does.
+        items: ({ query, editor }) => {
+          const draft = selectionDraft(editor.state);
+          const taskId = draft ? getPromptBlob(draft.blobId).boundTaskId : null;
+          return getMentionService(options.filePath)?.search(query, { taskId }) ?? [];
+        },
         // Pinned directly under the "@" (the anchor is the suggestion
         // decoration, whose left edge is the trigger char). Fixed strategy
         // sidesteps offset-parent math inside the dock/editor stack.
