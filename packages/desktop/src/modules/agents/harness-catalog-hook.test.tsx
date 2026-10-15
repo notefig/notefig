@@ -9,7 +9,6 @@ import type { Core } from "@notefig/core";
 import { createTestCore } from "@/testing/test-core";
 import { harnessesModule } from "@/modules/agents/harnesses";
 import { useHarnessCatalog } from "@/modules/agents/react";
-import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -69,7 +68,6 @@ describe("useHarnessCatalog", () => {
   it("shows what sessions announced for that harness, and only it", async () => {
     const read = await renderHook(() => useHarnessCatalog("claude-code"));
     expect(read()).toMatchObject({ commands: null, configOptions: null });
-    const harness = (id: string) => BUILT_IN_HARNESSES.find((h) => h.id === id)!;
     const model = (current: string) => [
       {
         id: "model",
@@ -85,14 +83,12 @@ describe("useHarnessCatalog", () => {
       core.hooks.emit("agent:catalog", {
         taskId: "task_1",
         harnessId: "opencode",
-        harness: harness("opencode"),
         workspacePath: "/ws",
         configOptions: model("gpt"),
       });
       core.hooks.emit("agent:catalog", {
         taskId: "task_2",
         harnessId: "claude-code",
-        harness: harness("claude-code"),
         workspacePath: "/ws",
         configOptions: model("opus"),
       });

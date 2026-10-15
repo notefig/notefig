@@ -18,7 +18,7 @@ import {
   type HarnessOverride,
   type ProbedHarness,
 } from "@notefig/shared/agent";
-import type { HarnessCatalog } from "./harness-catalog";
+import type { HarnessCatalog } from "@/modules/harness-adapters";
 
 /**
  * What this machine records about one harness. A built-in has a row once

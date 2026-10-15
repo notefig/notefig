@@ -101,7 +101,7 @@ export function testAgents(
     }),
     agents: () => agents!,
     hooks,
-    harnessAdapters: createHarnessAdapters(),
+    harnessAdapters: createHarnessAdapters({ harnesses }),
     harnesses,
     ...overrides,
   };

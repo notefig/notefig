@@ -787,6 +787,9 @@ export type MockAgentConfig = {
    *  `modes`, `models`, `configOptions` — so specs can seed the session's
    *  switchable settings (MET-81). Default: none advertised. */
   session?: Json;
+  /** Commands and skills every mock session reports right after
+   *  `session/new`, as Claude does. Default: none. */
+  commands?: Json[];
 };
 
 const scenarioRegistry = new Map<string, MockScenarioFactory>([
@@ -908,6 +911,7 @@ function attachScenarioAgent(
 
   agent.onNewSession = async (params) => {
     workspacePath = params?.cwd ?? "";
+    agent.commandsAfterNewSession = activeConfig.commands ?? null;
     return {
       sessionId: `mock_session_${++mockSessionCounter}`,
       ...(activeConfig.session ?? {}),

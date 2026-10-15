@@ -2153,7 +2153,6 @@ describe("session config options (MET-81)", () => {
     expect(announced).toContainEqual({
       taskId: task.taskId,
       harnessId: harness.id,
-      harness,
       workspacePath: "/ws",
       commands,
     });

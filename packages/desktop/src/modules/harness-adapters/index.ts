@@ -1,8 +1,8 @@
 export * from "./harness-adapters";
-export { NO_REPORTING, needsSignIn, tokensFrom } from "./adapter";
+export { needsSignIn, tokensFrom } from "./adapter";
 export type {
   CatalogProbeIo,
-  DiscoveredCatalog,
+  HarnessCatalog,
   HarnessAdapter,
   HarnessInvokeContext,
   HarnessMark,

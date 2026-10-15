@@ -12,7 +12,6 @@ import {
   composePrompt,
   type ContentBlock,
   type HarnessDefinition,
-  type InitializeResponse,
   type McpServer,
   type PromptContextPart,
   type RequestPermissionResponse,
@@ -37,7 +36,7 @@ import type { KvApi } from "@/modules/kv";
 import {
   needsSignIn,
   type HarnessAdapter,
-  type DiscoveredCatalog,
+  type HarnessCatalog,
   type HarnessAdaptersApi,
   type HarnessInvokeContext,
   type HarnessSpawnPrep,
@@ -457,8 +456,6 @@ export class AgentTask {
   /** The harness's running cost at the last settled turn; null until the
    *  first one, when the task row's saved total stands in. */
   private costBaseline: number | null = null;
-  /** What the harness said of itself at `initialize`. */
-  private initialized: InitializeResponse | null = null;
   /** The last account limits announced, so an unchanged report is quiet. */
   private lastLimitsKey: string | null = null;
 
@@ -573,10 +570,7 @@ export class AgentTask {
       // Bring the transport live before any ACP traffic; spawn failure
       // surfaces here as an AgentTransportError and marks the task errored.
       await transport.start();
-      this.initialized = await withStartupTimeout(
-        this.client.connect(),
-        "initialize",
-      );
+      await withStartupTimeout(this.client.connect(), "initialize");
       // Note: we do NOT surface authHint here — the adapter always advertises
       // authMethods regardless of login (see the auth spike), so the hint only
       // becomes meaningful when a prompt actually fails with "auth required".
@@ -1126,9 +1120,7 @@ export class AgentTask {
     this.deps.hooks.emit("agent:catalog", {
       taskId: this.taskId,
       harnessId: this.harness.id,
-      harness: this.harness,
       workspacePath: this.workspacePath,
-      harnessVersion: this.initialized?.agentInfo?.version,
       ...offer,
     });
   }
@@ -1894,7 +1886,7 @@ export async function probeHarnessSession({
   cwd: string;
   settleMs?: number;
   timeoutMs?: number;
-}): Promise<DiscoveredCatalog | null> {
+}): Promise<HarnessCatalog | null> {
   const taskId = newTaskId();
   /** The transport once its start() has landed — never closed before:
    *  a desktop transport closed mid-start marks itself closed without a
@@ -1951,11 +1943,7 @@ export async function probeHarnessSession({
       fs: { readTextFile: refuse, writeTextFile: refuse },
       clientMeta: adapter.clientMeta,
     });
-    const initialized = await withStartupTimeout(
-      client.connect(),
-      "initialize",
-      timeoutMs,
-    );
+    await withStartupTimeout(client.connect(), "initialize", timeoutMs);
     const { sessionId } = await withStartupTimeout(
       client.newSession(started.agentCwd ?? cwd, [], prep.sessionParams),
       "session/new",
@@ -1969,13 +1957,7 @@ export async function probeHarnessSession({
       "session/delete",
       timeoutMs,
     ).catch(() => {});
-    return {
-      configOptions,
-      commands,
-      ...(initialized.agentInfo?.version
-        ? { harnessVersion: initialized.agentInfo.version }
-        : {}),
-    };
+    return { configOptions, commands };
   } catch (error) {
     console.warn(`Probing ${harness.id} for its catalog failed:`, error);
     return null;
