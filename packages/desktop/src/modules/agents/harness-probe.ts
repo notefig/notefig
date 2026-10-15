@@ -104,8 +104,12 @@ export function createHarnessProbe({
     // edit has asked for another look already.
     const current = probeable(harnessId);
     if (!current || probedAs(current) !== as) return;
-    await kv.write<Probed>(KV_NAMESPACE, harnessId, { as, at: now() });
+    // The catalog first: a launch cut off between the two finds no marker
+    // and probes again, never a marker vouching for a catalog not saved.
+    // The row change this write makes is looked at after this probe, by
+    // which time the marker is there.
     await harnesses.harness(harnessId).recordOffer(found);
+    await kv.write<Probed>(KV_NAMESPACE, harnessId, { as, at: now() });
   };
 
   /** Look at each harness asked about, one at a time; one asked about

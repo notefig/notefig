@@ -228,6 +228,24 @@ describe("the harness probe", () => {
     expect(catalogOf()).toEqual(found("sonnet"));
   });
 
+  it("probes again when its catalog was never saved, even after a probe found it", async () => {
+    await only("claude-code");
+    const failing = {
+      ...harnesses,
+      harness: (id: string) => ({
+        ...harnesses.harness(id),
+        recordOffer: () => Promise.reject(new Error("disk full")),
+      }),
+    };
+    await createHarnessProbe({ harnesses: failing, adapterFor, proc: NO_PROC, kv, now: () => clock })
+      .check(["claude-code"]);
+
+    await probe().check(["claude-code"]);
+
+    expect(calls).toEqual(["claude-code", "claude-code"]);
+    expect(catalogOf()).toEqual(found());
+  });
+
   it("never probes a harness switched off, not found, or with no way to be", async () => {
     await harnesses.harness("custom:lab").saveCustom({
       id: "custom:lab",
