@@ -45,11 +45,9 @@ export function settingNamespace(
         (entry) => entry.category === category,
       );
       return option
-        ? settingChoices(option).map((choice) => ({
-            value: choice.value,
-            label: choice.name,
-            ...(choice.description ? { description: choice.description } : {}),
-          }))
+        ? // Names only: a setting's choices are told apart by name, and
+          // their descriptions crowd the menu.
+          settingChoices(option).map((choice) => ({ value: choice.value, label: choice.name }))
         : [];
     },
     resolve: (values) => ({ config: [{ category, value: values[values.length - 1] }] }),

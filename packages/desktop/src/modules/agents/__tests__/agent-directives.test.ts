@@ -47,6 +47,12 @@ describe("the agents' directives", () => {
     ]);
   });
 
+  it("lists models by name alone, without their descriptions", () => {
+    const described = { ...models("opus"), options: [{ value: "opus", name: "Opus", description: "Most capable" }] };
+    const model = settingNamespace(sources({ configOptions: [described] }), { name: "model", category: "model" });
+    expect(model.candidates(live)).toEqual([{ value: "opus", label: "Opus" }]);
+  });
+
   it("offers nothing a harness hasn't reported", () => {
     const model = settingNamespace(sources(), { name: "model", category: "model" });
     expect(model.candidates(none)).toEqual([]);
