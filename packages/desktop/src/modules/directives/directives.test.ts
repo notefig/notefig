@@ -27,53 +27,6 @@ function directives() {
 }
 
 describe("directives", () => {
-  it("lists the namespaces for a bare @, and members as soon as a query names or matches them", () => {
-    const api = directives();
-
-    expect(api.search("", ctx, 8)).toEqual([
-      { namespace: "model", value: null, label: "model:" },
-      { namespace: "skill", value: null, label: "skill:" },
-    ]);
-    // A query that starts a namespace's name lists its members.
-    expect(api.search("mo", ctx, 8).map((match) => match.value)).toEqual([
-      "opus",
-      "sonnet",
-      "anthropic/haiku",
-    ]);
-    // Any other lists the members it matches, in any namespace.
-    expect(api.search("so", ctx, 8)).toEqual([
-      { namespace: "model", value: "sonnet", label: "Sonnet", description: "Fast" },
-    ]);
-    expect(api.search("rev", ctx, 8)).toEqual([
-      { namespace: "skill", value: "review", label: "review" },
-    ]);
-    expect(api.search("mo", ctx, 2)).toHaveLength(2);
-  });
-
-  it("lists one namespace's values, prefix matches first", () => {
-    const api = directives();
-
-    expect(api.search("model:", ctx, 8).map((match) => match.value)).toEqual([
-      "opus",
-      "sonnet",
-      "anthropic/haiku",
-    ]);
-    expect(api.search("model:ha", ctx, 8).map((match) => match.value)).toEqual([
-      "anthropic/haiku",
-    ]);
-    expect(api.search("model:", ctx, 1)).toHaveLength(1);
-  });
-
-  it("names a directive only for a registered namespace's current value", () => {
-    const api = directives();
-
-    expect(api.isDirective("model:opus", ctx)).toBe(true);
-    expect(api.isDirective("model:anthropic/haiku", ctx)).toBe(true);
-    expect(api.isDirective("model:nope", ctx)).toBe(false);
-    expect(api.isDirective("effort:high", ctx)).toBe(false);
-    expect(api.isDirective("notes.md", ctx)).toBe(false);
-  });
-
   it("takes known directives out of the text and asks for what they mean", () => {
     const api = directives();
 
@@ -107,14 +60,16 @@ describe("directives", () => {
     expect(api.resolve("@skill:review", ctx).text).toBe("");
   });
 
-  it("hands each namespace its context, and forgets one unregistered", () => {
+  it("hands the suggestion each namespace as a source bound to its context, and forgets one unregistered", () => {
     const api = createDirectives();
     const candidates = vi.fn(() => [{ value: "high", label: "High" }]);
     const off = api.register({ name: "effort", candidates, resolve: () => ({}) });
 
-    expect(api.isDirective("effort:high", ctx)).toBe(true);
+    const [source] = api.sources(ctx);
+    expect(source.name).toBe("effort");
+    expect(source.candidates()).toEqual([{ value: "high", label: "High" }]);
     expect(candidates).toHaveBeenCalledWith(ctx);
     off();
-    expect(api.isDirective("effort:high", ctx)).toBe(false);
+    expect(api.sources(ctx)).toEqual([]);
   });
 });

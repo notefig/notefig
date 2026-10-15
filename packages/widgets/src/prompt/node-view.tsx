@@ -62,11 +62,11 @@ import {
 import { promptChangeTrackingPlugin } from "./change-tracking";
 import { promptChangeGutterPlugin } from "./change-gutter";
 import {
+  documentMenu,
   getMentionService,
   mentionPopupHasResults,
 } from "./composer/mention-bridge";
-import { insertMentionRow, type MentionRow } from "./composer/mention-rows";
-import { suggestionCaretRepaint } from "./composer/caret-repaint";
+import { mentionSuggestion, type MentionRow } from "./composer/mention-suggestion";
 import { dispatchComposerKey } from "./composer/key-bridge";
 import { PROMPT_MENTION_NAME } from "./composer/mention-node";
 import { readDraftNode } from "./composer/draft-text";
@@ -635,9 +635,6 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
             : null;
         },
       }),
-      // WebKit leaves the caret stale inside the "@" mention's highlight
-      // (this and the page links' share the class).
-      suggestionCaretRepaint(),
       // The "@" mention (files, and directives like `@model:`), scoped to
       // drafts. Registered here rather than
       // as a standalone extension so the scoping travels with the widget
@@ -645,34 +642,20 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // trigger never starts, so "@" stays ordinary prose everywhere else.
       Suggestion<MentionRow, MentionRow>({
         editor: this.editor,
-        char: "@",
         allow: ({ state, range }) =>
           Boolean(
             selectionDraft({
               selection: { $from: state.doc.resolve(range.from) },
             }),
           ),
-        // Directives offer what the caret's widget's own session does.
-        items: ({ query, editor }) => {
-          const draft = selectionDraft(editor.state);
-          const taskId = draft ? getPromptBlob(draft.blobId).boundTaskId : null;
-          return getMentionService(options.filePath)?.search(query, { taskId }) ?? [];
-        },
-        // Pinned directly under the "@" (the anchor is the suggestion
-        // decoration, whose left edge is the trigger char). Fixed strategy
-        // sidesteps offset-parent math inside the dock/editor stack.
-        placement: "bottom-start",
-        offset: { mainAxis: 2, crossAxis: 0 },
-        floatingUi: { strategy: "fixed" },
-        command: ({ editor, range, props }) => insertMentionRow(editor, range, props),
-        render: () => ({
-          onStart: (props) =>
-            getMentionService(options.filePath)?.onStart(props),
-          onUpdate: (props) =>
-            getMentionService(options.filePath)?.onUpdate(props),
-          onKeyDown: (props) =>
-            getMentionService(options.filePath)?.onKeyDown(props) ?? false,
-          onExit: () => getMentionService(options.filePath)?.onExit(),
+        ...mentionSuggestion({
+          // Directives offer what the caret's widget's own session does.
+          search: (query) => {
+            const draft = selectionDraft(this.editor.state);
+            const taskId = draft ? getPromptBlob(draft.blobId).boundTaskId : null;
+            return getMentionService(options.filePath)?.search(query, { taskId }) ?? [];
+          },
+          render: documentMenu(options.filePath),
         }),
       }),
     ];

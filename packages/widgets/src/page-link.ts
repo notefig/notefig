@@ -21,8 +21,8 @@
 import { Extension } from "@tiptap/core";
 import { PluginKey } from "@tiptap/pm/state";
 import Suggestion from "@tiptap/suggestion";
-import { getMentionService } from "./prompt/composer/mention-bridge";
-import type { MentionRow } from "./prompt/composer/mention-rows";
+import { documentMenu, getMentionService } from "./prompt/composer/mention-bridge";
+import { mentionSuggestion, type MentionRow } from "./prompt/composer/mention-suggestion";
 import { selectionDraft } from "./prompt/doc-helpers";
 
 /** Link text: the file name, with a page's ".md" dropped — the link names
@@ -54,10 +54,9 @@ export const PageLinkSuggestion = Extension.create<PageLinkSuggestionOptions>({
     // Unconfigured instances (a shared kit, the worker) contribute nothing.
     if (!documentPath) return [];
     return [
-      Suggestion({
+      Suggestion<MentionRow, MentionRow>({
         pluginKey: pageLinkPluginKey,
         editor: this.editor,
-        char: "@",
         allow: ({ state, range }) => {
           const $from = state.doc.resolve(range.from);
           // Code blocks (and any other markless textblock) take no link.
@@ -67,40 +66,29 @@ export const PageLinkSuggestion = Extension.create<PageLinkSuggestionOptions>({
           // Inside a draft the widget's own suggestion owns "@".
           return !selectionDraft({ selection: { $from } });
         },
-        // Files only: a directive means nothing in the document's prose.
-        items: ({ query }) =>
-          getMentionService(documentPath)?.search(query, { directives: false }) ?? [],
-        // Pinned directly under the "@" (the anchor is the suggestion
-        // decoration, whose left edge is the trigger char). Fixed strategy
-        // sidesteps offset-parent math inside the dock/editor stack.
-        placement: "bottom-start",
-        offset: { mainAxis: 2, crossAxis: 0 },
-        floatingUi: { strategy: "fixed" },
-        command: ({ editor, range, props }) => {
-          const row = props as MentionRow;
-          if (row.kind !== "file") return;
-          const { relativePath: id, title: label } = row.file;
-          editor
-            .chain()
-            .focus()
-            .insertContentAt(range, [
-              {
-                type: "text",
-                text: pageLinkLabel(label),
-                marks: [{ type: "link", attrs: { href: buildHref(id) } }],
-              },
-              // Unmarked, so typing on lands outside the link.
-              { type: "text", text: " " },
-            ])
-            .run();
-        },
-        render: () => ({
-          onStart: (props) => getMentionService(documentPath)?.onStart(props),
-          onUpdate: (props) =>
-            getMentionService(documentPath)?.onUpdate(props),
-          onKeyDown: (props) =>
-            getMentionService(documentPath)?.onKeyDown(props) ?? false,
-          onExit: () => getMentionService(documentPath)?.onExit(),
+        ...mentionSuggestion({
+          // Files only: a directive means nothing in the document's prose.
+          search: (query) =>
+            getMentionService(documentPath)?.search(query, { directives: false }) ?? [],
+          // A link, not a chip; and a file only.
+          insert: (editor, range, row) => {
+            if (row.kind !== "file") return;
+            const { relativePath: id, title: label } = row.file;
+            editor
+              .chain()
+              .focus()
+              .insertContentAt(range, [
+                {
+                  type: "text",
+                  text: pageLinkLabel(label),
+                  marks: [{ type: "link", attrs: { href: buildHref(id) } }],
+                },
+                // Unmarked, so typing on lands outside the link.
+                { type: "text", text: " " },
+              ])
+              .run();
+          },
+          render: documentMenu(documentPath),
         }),
       }),
     ];

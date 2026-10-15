@@ -43,6 +43,7 @@ import {
 } from "@notefig/shared/agent";
 import { draftToNode, readDraftNode } from "../composer/draft-text";
 import { mentionPopupHasResults } from "../composer/mention-bridge";
+import { hostIsMention } from "../composer/mention-suggestion";
 import { registerComposerKeyHandler } from "../composer/key-bridge";
 import { WidgetResponseView } from "./widget-response-view";
 import { usePromptChangeCounts } from "../change-store";
@@ -183,9 +184,7 @@ function useDraftIO(editor: Editor, blobId: string, workspacePath: string) {
       const found = range();
       if (!found) return;
       const taskId = getPromptBlob(blobId).boundTaskId;
-      const isPath = (token: string) =>
-        host.isWorkspaceFile(workspacePath, token) ||
-        host.isDirective({ workspacePath, taskId, token });
+      const isPath = hostIsMention(host, { workspacePath, taskId });
       const tr = editor.state.tr.replaceWith(
         found.from,
         found.to,

@@ -1,6 +1,6 @@
 import {
   forwardRef,
-  useCallback,
+  useMemo,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -12,7 +12,6 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { usePromptWidgetHost } from "../host-context";
 import type { PromptWidgetHost } from "../host";
 import { promptMentionNode } from "./mention-node";
-import { SuggestionCaretRepaint } from "./caret-repaint";
 import {
   DRAFT_TEXT_SERIALIZERS,
   draftToDoc,
@@ -22,7 +21,7 @@ import {
   useMentionSuggestion,
   type SuggestionRenderer,
 } from "./mention-menu";
-import { insertMentionRow, searchMentionRows, type MentionRow } from "./mention-rows";
+import { hostIsMention, hostMentionSearch, mentionSuggestion } from "./mention-suggestion";
 
 /** Re-exported from their own modules: this file is the standalone composer,
  *  and the mention contract is shared with the widget's in-document draft. */
@@ -49,7 +48,7 @@ export {
  * Arrows/Enter/Tab/Escape.
  *
  * Directives (`@model:opus`, `@skill:review`) ride the same "@" trigger:
- * the host lists them with the files (mention-rows.ts), and a new namespace
+ * the host lists them with the files (mention-suggestion.ts), and a new namespace
  * is the host's to register — nothing here changes.
  */
 export interface PromptEditorHandle {
@@ -92,20 +91,11 @@ function promptExtensions(
     // showOnlyWhenEditable: false — the chat composer disables the editor
     // during session load, and the loading placeholder is the only signal.
     Placeholder.configure({ placeholder, showOnlyWhenEditable: false }),
-    SuggestionCaretRepaint,
     promptMentionNode({
-      char: "@",
-      items: ({ query }: { query: string }) =>
-        searchMentionRows(host, { workspacePath, taskId, query }),
-      command: ({ editor, range, props }) =>
-        insertMentionRow(editor, range, props as unknown as MentionRow),
-      // Pinned directly under the "@" (the anchor is the suggestion
-      // decoration, whose left edge is the trigger char). Fixed strategy
-      // sidesteps offset-parent math inside the dock/editor stack.
-      placement: "bottom-start",
-      offset: { mainAxis: 2, crossAxis: 0 },
-      floatingUi: { strategy: "fixed" },
-      render: renderer,
+      ...mentionSuggestion({
+        search: hostMentionSearch(host, { workspacePath, taskId }),
+        render: renderer,
+      }),
     }),
   ];
 }
@@ -176,22 +166,6 @@ function usePromptEditorSync({
   }, [liveEditor]);
 }
 
-/** Whether a token is a chip: a workspace file or a directive. Stable
- *  across renders for the same workspace and session: it feeds an effect
- *  dependency, and a fresh closure each render would re-set the content. */
-function useIsMention(
-  host: PromptWidgetHost,
-  workspacePath: string,
-  taskId: string | null = null,
-) {
-  return useCallback(
-    (token: string) =>
-      host.isWorkspaceFile(workspacePath, token) ||
-      host.isDirective({ workspacePath, taskId, token }),
-    [host, workspacePath, taskId],
-  );
-}
-
 export const PromptEditor = forwardRef<
   PromptEditorHandle,
   {
@@ -224,7 +198,13 @@ export const PromptEditor = forwardRef<
   ref,
 ) {
   const host = usePromptWidgetHost();
-  const isPath = useIsMention(host, workspacePath, taskId);
+  // Stable across renders for the same workspace and session: it feeds an
+  // effect dependency, and a fresh closure each render would re-set the
+  // content.
+  const isPath = useMemo(
+    () => hostIsMention(host, { workspacePath, taskId: taskId ?? null }),
+    [host, workspacePath, taskId],
+  );
   const onKeyDownRef = useRef(onKeyDown);
   onKeyDownRef.current = onKeyDown;
   const lastEmitted = useRef(value);

@@ -63,8 +63,7 @@ const demoHost: PromptWidgetHost = {
   // Chips still resolve — isWorkspaceFile above knows the files.
   searchWorkspaceFiles: () => [],
   // The demo has no sessions to offer models or skills from.
-  searchDirectives: () => [],
-  isDirective: () => false,
+  directives: () => [],
   toRelativePath: (root, absolute) =>
     absolute.startsWith(`${root}/`) ? absolute.slice(root.length + 1) : undefined,
 

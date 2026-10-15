@@ -27,6 +27,7 @@ import type {
   AgentTaskRow,
   AgentTurn,
 } from "@notefig/shared/agent";
+import type { DirectiveSource } from "./composer/mention-suggestion";
 
 /** Where in the document a widget's prompt was sent from. */
 export interface WidgetPromptTarget {
@@ -75,19 +76,6 @@ export interface MentionCandidate {
   title: string;
   /** Absolute path — for the file-type icon only. */
   path: string;
-}
-
-/**
- * A row of the "@" menu that isn't a file: a directive namespace to type
- * into (`value: null`, picking it leaves `@<namespace>:` to keep typing), or
- * one of its values (`@model:opus`). Which namespaces exist, and what they
- * offer, is the app's.
- */
-export interface DirectiveOption {
-  namespace: string;
-  value: string | null;
-  label: string;
-  description?: string;
 }
 
 export interface PromptWidgetHost {
@@ -180,16 +168,10 @@ export interface PromptWidgetHost {
   ): string | undefined;
 
   // ── directives, for "@<namespace>:<value>" ──────────────────────────
-  /** The menu's directive rows for what follows an "@". `taskId` is the
-   *  session the prompt would go to, when the composer knows it. */
-  searchDirectives(args: {
-    workspacePath: string;
-    taskId: string | null;
-    query: string;
-    limit: number;
-  }): DirectiveOption[];
-  /** Does `<namespace>:<value>` name a directive now (so it is a chip)? */
-  isDirective(args: { workspacePath: string; taskId: string | null; token: string }): boolean;
+  /** The directive namespaces registered with the "@" suggestion, offering
+   *  what the prompt's session would: `taskId`'s, when the composer knows
+   *  it. Which exist, and what they do at send, is the app's. */
+  directives(args: { workspacePath: string; taskId: string | null }): DirectiveSource[];
 
   // ── app chrome ───────────────────────────────────────────────────────
   openFile(path: string): void;
