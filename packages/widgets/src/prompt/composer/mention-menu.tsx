@@ -113,6 +113,27 @@ function MentionRowLabel({ item }: { item: MentionRow }) {
   );
 }
 
+/** Where the pointer was at the page's last mousemove. A document listener
+ *  in the bubble phase hears each move after React's handlers have, so a
+ *  row compares a move with where the pointer was before it — anywhere on
+ *  the page, so the first move onto a fresh menu counts too. */
+let lastPointer: { x: number; y: number } | null = null;
+let trackingPointer = false;
+
+function trackPointer() {
+  if (trackingPointer) return;
+  trackingPointer = true;
+  document.addEventListener("mousemove", (event) => {
+    lastPointer = { x: event.clientX, y: event.clientY };
+  });
+}
+
+/** Whether this mousemove moved the pointer, rather than repeating where it
+ *  already was (or where it rests before it has ever moved). */
+function pointerMoved(event: { clientX: number; clientY: number }): boolean {
+  return !!lastPointer && (lastPointer.x !== event.clientX || lastPointer.y !== event.clientY);
+}
+
 export function SuggestionList({
   items,
   selectedIndex,
@@ -125,8 +146,6 @@ export function SuggestionList({
   onHover: (index: number) => void;
 }) {
   const { t } = useTranslation();
-  /** Where the pointer last was over the list; none until it moves here. */
-  const pointer = useRef<{ x: number; y: number } | null>(null);
   return (
     <div
       role="listbox"
@@ -149,10 +168,7 @@ export function SuggestionList({
           // same spot — taking it as a choice moved the selection to the
           // pointer's row a beat after each keystroke.
           onMouseMove={(event) => {
-            const at = { x: event.clientX, y: event.clientY };
-            const last = pointer.current;
-            pointer.current = at;
-            if (last && (last.x !== at.x || last.y !== at.y)) onHover(index);
+            if (pointerMoved(event)) onHover(index);
           }}
           className={cn(
             "flex cursor-pointer items-center gap-1 rounded-sm px-1.5 py-0.5 text-start text-xs",
@@ -200,6 +216,9 @@ export function useMentionSuggestion() {
   const selectedIndexRef = useRef(selectedIndex);
   selectedIndexRef.current = selectedIndex;
   const unmountPopup = useRef<(() => void) | null>(null);
+  // From the composer's mount, not the menu's: a menu's first rows must
+  // already know where the pointer was before it opened.
+  useEffect(trackPointer, []);
   /** The row the user moved to (arrows, pointer), by key. It stays
    *  selected while typing narrows the list and still holds it; until then
    *  the selection is the top row, the best match. */

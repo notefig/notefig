@@ -128,10 +128,9 @@ test("a pointer resting on the menu doesn't take the selection as the rows chang
   const selected = () =>
     rows.evaluateAll((els) => els.findIndex((el) => el.getAttribute("aria-selected") === "true"));
 
-  // A real move onto a row selects it.
+  // A real move onto a row selects it — the first one, in a single step.
   const box = (await rows.nth(2).boundingBox())!;
   const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  await page.mouse.move(at.x, at.y - 2);
   await page.mouse.move(at.x, at.y);
   await expect.poll(selected).toBe(2);
 
