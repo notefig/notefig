@@ -116,6 +116,37 @@ test("members are offered while typing, and a row moved to stays selected as the
   await expect(composer(page)).toContainText("@skill: review");
 });
 
+test("a pointer resting on the menu doesn't take the selection as the rows change", async ({
+  page,
+}) => {
+  await setupTestDatabase(page, "directives-pointer");
+  const skills = Array.from({ length: 5 }, (_, i) => ({ name: `skill-${i}`, description: "" }));
+  await startMockSession(page, "/workspace/directives-pointer", { configOptions: [] }, skills);
+  await composer(page).click();
+  await page.keyboard.type("@sk");
+  const rows = menu(page).getByRole("option");
+  const selected = () =>
+    rows.evaluateAll((els) => els.findIndex((el) => el.getAttribute("aria-selected") === "true"));
+
+  // A real move onto a row selects it.
+  const box = (await rows.nth(2).boundingBox())!;
+  const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.move(at.x, at.y - 2);
+  await page.mouse.move(at.x, at.y);
+  await expect.poll(selected).toBe(2);
+
+  // The keyboard takes it back; typing re-renders the rows under the still
+  // pointer, and the browser's follow-up mousemove at the same spot (sent
+  // here by hand — headless browsers don't) must not take it again.
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.type("i");
+  await expect.poll(selected).toBe(0);
+  await rows.nth(2).dispatchEvent("mousemove", { clientX: at.x, clientY: at.y, bubbles: true });
+  await page.waitForTimeout(200);
+  expect(await selected()).toBe(0);
+});
+
 test("an unknown directive is sent as the text it is", async ({ page }) => {
   await setupTestDatabase(page, "directives-unknown");
   await startMockSession(page, "/workspace/directives-unknown", {

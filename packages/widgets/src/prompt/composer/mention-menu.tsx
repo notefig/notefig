@@ -125,6 +125,8 @@ export function SuggestionList({
   onHover: (index: number) => void;
 }) {
   const { t } = useTranslation();
+  /** Where the pointer last was over the list; none until it moves here. */
+  const pointer = useRef<{ x: number; y: number } | null>(null);
   return (
     <div
       role="listbox"
@@ -142,9 +144,16 @@ export function SuggestionList({
             event.preventDefault();
             onPick(index);
           }}
-          // Movement, not entry: rows re-rendered under a still pointer
-          // must not take the selection from the keyboard.
-          onMouseMove={() => onHover(index)}
+          // The pointer's own movement only. The browser follows a layout
+          // change under a still pointer with a synthetic mousemove at the
+          // same spot — taking it as a choice moved the selection to the
+          // pointer's row a beat after each keystroke.
+          onMouseMove={(event) => {
+            const at = { x: event.clientX, y: event.clientY };
+            const last = pointer.current;
+            pointer.current = at;
+            if (last && (last.x !== at.x || last.y !== at.y)) onHover(index);
+          }}
           className={cn(
             "flex cursor-pointer items-center gap-1 rounded-sm px-1.5 py-0.5 text-start text-xs",
             index === selectedIndex && "bg-accent text-accent-foreground",
@@ -205,14 +214,21 @@ export function useMentionSuggestion() {
 
   const applySuggestion = useCallback(
     (props: SuggestionProps<MentionRow>) => {
+      // The plugin announces each query twice: once while its rows load
+      // (no items), then with them. The rows on screen stay until the new
+      // ones arrive — emptying them in between tears the list down and back
+      // up on every keystroke, resets the selection, and hands the keys to
+      // the editor for that moment.
+      if (props.loading) {
+        setPopup((previous) => previous && { ...previous, command: props.command });
+        return;
+      }
       setPopup((previous) => {
         if (!previous) return previous;
         return { ...previous, items: props.items, command: props.command };
       });
       const kept = props.items.findIndex((item) => mentionRowKey(item) === chosenKey.current);
-      // An update without rows is the next query's still loading: the
-      // choice waits for its rows rather than being dropped.
-      if (kept === -1 && props.items.length > 0) chosenKey.current = null;
+      if (kept === -1) chosenKey.current = null;
       setSelectedIndex(Math.max(kept, 0));
     },
     [],
