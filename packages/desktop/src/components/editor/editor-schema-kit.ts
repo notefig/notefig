@@ -27,8 +27,7 @@ import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
-import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
-import { common, createLowlight } from "lowlight";
+import CodeBlock from "@tiptap/extension-code-block";
 import {
   editorWidgets,
   registerContentlessNodeName,
@@ -41,14 +40,12 @@ import {
 // its own contentless nodes; this one is ours to declare.
 registerContentlessNodeName("frontmatter");
 
-export { CodeBlockLowlight };
+export { CodeBlock };
 
 // The widget protocol owns this constant (widgets are why it exists);
 // re-exported so editor-store.ts / use-editor-file-sync.ts keep importing
 // the whole schema vocabulary from one place.
 export { UI_ONLY_TRANSACTION_META } from "@notefig/widgets";
-
-export const lowlight = createLowlight(common);
 
 /**
  * The widget node names that may stand in for a list item's leading
@@ -510,7 +507,7 @@ export const AutoDirection = Extension.create({
  */
 export function createSchemaExtensions(
   image: typeof MarkdownImageBase = MarkdownImageBase,
-  codeBlock: typeof CodeBlockLowlight = CodeBlockLowlight,
+  codeBlock: typeof CodeBlock = CodeBlock,
   widgets: Node[] = widgetSchemaNodes(),
   frontmatter: typeof FrontmatterNodeBase = FrontmatterNodeBase,
 ) {
@@ -548,7 +545,7 @@ export function createSchemaExtensions(
     TableRow,
     TableCell,
     TableHeader,
-    codeBlock.configure({ lowlight }),
+    codeBlock,
     ...widgets,
     // After Markdown: its onBeforeCreate patches the parser tiptap-markdown
     // constructs in its own onBeforeCreate, and hooks run in list order.

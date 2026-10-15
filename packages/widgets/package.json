@@ -20,6 +20,7 @@
   "dependencies": {
     "@notefig/shared": "*",
     "@notefig/ui": "*",
+    "@pierre/diffs": "^1.3.6",
     "@tanstack/react-hotkeys": "^0.4.1",
     "lucide-react": "^0.454.0",
     "sonner": "^1.7.4"

@@ -186,3 +186,14 @@ ul[data-type="taskList"] > li > div p {
 .drag-handle[data-dragging="true"] {
   cursor: grabbing;
 }
+
+/* Code blocks follow the app's theme. Their tokens are coloured by the
+   code viewer's Shiki (`codeHighlight`, @notefig/widgets): each carries the
+   light colour, and the dark one as --shiki-dark, shown here under .dark. */
+.ProseMirror pre {
+  background-color: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+.dark .ProseMirror pre code span[style] {
+  color: var(--shiki-dark) !important;
+}

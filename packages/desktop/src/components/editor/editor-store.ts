@@ -21,7 +21,6 @@ import {
   widgetMinimapExtension,
   PageLinkSuggestion,
 } from "@notefig/widgets";
-import { lowlight } from "@/components/editor/editor-schema-kit";
 import {
   closeDocumentSync,
   flushDocumentSync,
@@ -321,9 +320,8 @@ function createMarkdownInstance(
       workspaceRoot,
       filePath,
     } as any),
-    // filePath lets BlobNodeView address answerBlob at the right document;
-    // lowlight must be re-specified since configure() replaces options wholesale.
-    MarkdownCodeBlock.configure({ lowlight, filePath } as any),
+    // filePath lets BlobNodeView address answerBlob at the right document.
+    MarkdownCodeBlock.configure({ filePath } as any),
     // filePath/basePath scope the widgets to this document and its
     // workspace; they also arm the prompt widget's empty-doc keeper
     // (unconfigured schema-only instances never self-insert).
