@@ -64,7 +64,7 @@ test("in the chat, a model and a skill are picked as chips and acted on at send"
 
   // A bare "@" offers the namespaces; picking one keeps typing into it.
   await page.keyboard.type("@");
-  await menu(page).getByRole("option", { name: "@model:" }).click();
+  await menu(page).getByRole("option", { name: "model:" }).click();
   await menu(page).getByRole("option", { name: /Sonnet/ }).click();
   await expect(composer(page)).toContainText("@model: Sonnet");
   // Picking changes nothing yet.

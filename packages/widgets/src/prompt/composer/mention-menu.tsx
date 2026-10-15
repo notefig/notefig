@@ -70,8 +70,8 @@ function rowParts(item: MentionRow): { context: string | null; name: string; det
     return { context: summarizeDirPrefix(item.file), name: item.file.title };
   }
   const { namespace, value, label, description } = item.directive;
-  // A namespace reads as what picking it inserts: "@model:".
-  if (value === null) return { context: null, name: `@${label}` };
+  // A namespace reads as itself: "model:".
+  if (value === null) return { context: null, name: label };
   return { context: `${namespace}: `, name: label, detail: description };
 }
 
