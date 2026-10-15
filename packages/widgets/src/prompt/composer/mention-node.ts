@@ -24,10 +24,15 @@
 import { mergeAttributes } from "@tiptap/core";
 import Mention from "@tiptap/extension-mention";
 import type { SuggestionOptions } from "@tiptap/suggestion";
+import { suggestionCaretRepaint } from "./mention-suggestion";
 
 export const PROMPT_MENTION_NAME = "mention";
 
 const MentionWithMarkdown = Mention.extend({
+  // Every surface with "@" has this node, so the WebKit caret fix rides it.
+  addProseMirrorPlugins() {
+    return [...(this.parent?.() ?? []), suggestionCaretRepaint()];
+  },
   addStorage() {
     return {
       markdown: {

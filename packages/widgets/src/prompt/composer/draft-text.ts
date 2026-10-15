@@ -11,7 +11,7 @@
 import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { PROMPT_DRAFT_NODE_NAME } from "../node";
-import { isDirectiveToken } from "./mention-rows";
+import { isDirectiveToken } from "./mention-suggestion";
 
 // ─── The mention text contract ──────────────────────────────────────────
 // Mentions are stateless text: picking a file inserts a literal

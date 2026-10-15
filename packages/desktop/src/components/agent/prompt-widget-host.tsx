@@ -351,15 +351,8 @@ export function usePromptWidgetHost(): PromptWidgetHost {
       },
       toRelativePath: relativeTreePath,
 
-      searchDirectives: ({ workspacePath: path, taskId, query, limit }) =>
-        directives.search(
-          query,
-          directiveContext(core, path, taskId, latest.current.defaultHarness.id),
-          limit,
-        ),
-      isDirective: ({ workspacePath: path, taskId, token }) =>
-        directives.isDirective(
-          token,
+      directives: ({ workspacePath: path, taskId }) =>
+        directives.sources(
           directiveContext(core, path, taskId, latest.current.defaultHarness.id),
         ),
 

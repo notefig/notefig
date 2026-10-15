@@ -7,10 +7,17 @@
  * and the tokens leave the text.
  *
  * Namespaces register here, from the modules that own what they offer; the
- * composers, the widget host and this registry know none of them.
+ * composers, the widget host and this registry know none of them. The "@"
+ * suggestion (`@notefig/widgets`) searches what they offer, as sources;
+ * this is what they do when a prompt is sent.
  */
 import { defineModule } from "@notefig/core";
-import { segmentMentions } from "@notefig/widgets";
+import {
+  findDirective,
+  segmentMentions,
+  type DirectiveCandidate,
+  type DirectiveSource,
+} from "@notefig/widgets";
 import type { PromptExtras } from "@notefig/shared/agent";
 
 /** Where a directive is being picked or sent. */
@@ -22,66 +29,29 @@ export interface DirectiveContext {
   harnessId: string;
 }
 
-export interface DirectiveCandidate {
-  value: string;
-  label: string;
-  description?: string;
-}
-
 /** What directives ask a prompt to be sent with. */
 export type DirectiveExtras = Pick<PromptExtras, "commands" | "config">;
 
-export interface DirectiveNamespace {
-  /** The token's namespace: `model` is `@model:<value>`. */
-  name: string;
+/** A namespace as registered: a suggestion source given its context, and
+ *  what its values do to a prompt. */
+export interface DirectiveNamespace extends Pick<DirectiveSource, "name"> {
   /** What can be picked now, read from live rows. */
   candidates(ctx: DirectiveContext): DirectiveCandidate[];
   /** What a prompt is sent with for this namespace's values, in order. */
   resolve(values: string[], ctx: DirectiveContext): DirectiveExtras;
 }
 
-/** A row of the "@" menu: a namespace to type into (no value), or one of
- *  its candidates. */
-export type DirectiveMatch = { namespace: string } & (
-  | { value: null; label: string; description?: undefined }
-  | DirectiveCandidate
-);
-
 export interface DirectivesApi {
   register(namespace: DirectiveNamespace): () => void;
-  /**
-   * The menu's rows for what follows an "@", members first-class like
-   * files: `<namespace>:<query>` lists that namespace's members it matches;
-   * a query that starts a namespace's name lists its members (`@mo` —
-   * every model); any other lists the members it matches (`@son` — Sonnet).
-   * A bare "@" lists the namespaces, as a hint of what can follow.
-   */
-  search(query: string, ctx: DirectiveContext, limit: number): DirectiveMatch[];
-  /** Whether `<namespace>:<value>` names a candidate now. */
-  isDirective(token: string, ctx: DirectiveContext): boolean;
+  /** Every namespace as the "@" suggestion's source, offering what it does
+   *  in this context. */
+  sources(ctx: DirectiveContext): DirectiveSource[];
   /**
    * A finished prompt without its directives, and what they ask it to be
    * sent with. Tokens that name nothing stay as text. A prompt that was
    * nothing but settings keeps its text, so there is something to send.
    */
   resolve(text: string, ctx: DirectiveContext): { text: string; extras: DirectiveExtras };
-}
-
-/** Prefix matches first, then substring ones, on value or label. */
-function rank(candidates: DirectiveCandidate[], query: string): DirectiveCandidate[] {
-  const needle = query.toLowerCase();
-  const at = (candidate: DirectiveCandidate) =>
-    Math.min(
-      ...[candidate.value, candidate.label].map((text) => {
-        const index = text.toLowerCase().indexOf(needle);
-        return index === -1 ? Infinity : index === 0 ? 0 : 1;
-      }),
-    );
-  return candidates
-    .map((candidate) => ({ candidate, at: at(candidate) }))
-    .filter(({ at }) => at !== Infinity)
-    .sort((a, b) => a.at - b.at)
-    .map(({ candidate }) => candidate);
 }
 
 /** `text` without the mentions `isDirective` accepts, and those mentions
@@ -115,21 +85,11 @@ function mergeExtras(all: DirectiveExtras[]): DirectiveExtras {
 
 export function createDirectives(): DirectivesApi {
   const namespaces = new Map<string, DirectiveNamespace>();
-
-  /** The namespace and value of `<namespace>:<value>`, if it names one. */
-  const parse = (token: string) => {
-    const colon = token.indexOf(":");
-    const namespace = colon > 0 ? namespaces.get(token.slice(0, colon)) : undefined;
-    return namespace ? { namespace, value: token.slice(colon + 1) } : null;
-  };
-
-  const isDirective = (token: string, ctx: DirectiveContext) => {
-    const parsed = parse(token);
-    return (
-      !!parsed &&
-      parsed.namespace.candidates(ctx).some((candidate) => candidate.value === parsed.value)
-    );
-  };
+  const sources = (ctx: DirectiveContext): DirectiveSource[] =>
+    [...namespaces.values()].map(({ name, candidates }) => ({
+      name,
+      candidates: () => candidates(ctx),
+    }));
 
   return {
     register(namespace) {
@@ -138,34 +98,14 @@ export function createDirectives(): DirectivesApi {
         if (namespaces.get(namespace.name) === namespace) namespaces.delete(namespace.name);
       };
     },
-    search(query, ctx, limit) {
-      const parsed = parse(query);
-      if (parsed) {
-        return rank(parsed.namespace.candidates(ctx), parsed.value)
-          .slice(0, limit)
-          .map((candidate) => ({ namespace: parsed.namespace.name, ...candidate }));
-      }
-      const all = [...namespaces.values()];
-      if (!query) {
-        return all
-          .map(({ name }) => ({ namespace: name, value: null, label: `${name}:` }) as const)
-          .slice(0, limit);
-      }
-      const named = query.toLowerCase();
-      return all
-        .flatMap(({ name, candidates }) =>
-          (name.startsWith(named) ? candidates(ctx) : rank(candidates(ctx), query)).map(
-            (candidate) => ({ namespace: name, ...candidate }),
-          ),
-        )
-        .slice(0, limit);
-    },
-    isDirective,
+    sources,
     resolve(text, ctx) {
-      const { stripped, tokens } = stripDirectives(text, (token) => isDirective(token, ctx));
+      const offered = sources(ctx);
+      const { stripped, tokens } = stripDirectives(text, (token) => !!findDirective(offered, token));
       const values = new Map<DirectiveNamespace, string[]>();
       for (const token of tokens) {
-        const { namespace, value } = parse(token)!;
+        const { source, value } = findDirective(offered, token)!;
+        const namespace = namespaces.get(source.name)!;
         values.set(namespace, [...(values.get(namespace) ?? []), value]);
       }
       const extras = mergeExtras(

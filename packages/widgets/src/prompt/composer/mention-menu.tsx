@@ -21,7 +21,7 @@ import { cn } from "@notefig/ui/utils";
 import { usePromptWidgetHost } from "../host-context";
 import type { MentionCandidate } from "../host";
 import { registerMentionService } from "./mention-bridge";
-import { mentionRowKey, searchMentionRows, type MentionRow } from "./mention-rows";
+import { hostMentionSearch, mentionRowKey, type MentionRow } from "./mention-suggestion";
 
 export interface SuggestionPopupState {
   container: HTMLElement;
@@ -329,7 +329,7 @@ export function PromptMentionMenu({
       // which); an unbound one offers what the workspace's session, or a
       // new one, would.
       search: (query, { directives, taskId = null } = {}) =>
-        searchMentionRows(host, { workspacePath, taskId, query, directives }),
+        hostMentionSearch(host, { workspacePath, taskId, directives })(query),
       onStart: live.onStart,
       onUpdate: live.onUpdate,
       onKeyDown: live.onKeyDown,

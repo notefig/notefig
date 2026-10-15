@@ -18,7 +18,7 @@
  * editor per file, and its menu outlives nothing.
  */
 import type { SuggestionProps, SuggestionKeyDownProps } from "@tiptap/suggestion";
-import type { MentionRow } from "./mention-rows";
+import type { MentionRow } from "./mention-suggestion";
 
 export interface MentionService {
   /** True while the popup is showing rows. The composer's key map defers to
@@ -60,4 +60,16 @@ export function getMentionService(
 /** Whether the document's mention popup is currently claiming the keyboard. */
 export function mentionPopupHasResults(documentPath: string): boolean {
   return services.get(documentPath)?.hasResults() ?? false;
+}
+
+/** A document suggestion's menu, driven through the registry: the plugin
+ *  was built outside React, so it reaches the live menu at call time. */
+export function documentMenu(documentPath: string) {
+  return () => ({
+    onStart: (props: SuggestionProps<MentionRow>) => services.get(documentPath)?.onStart(props),
+    onUpdate: (props: SuggestionProps<MentionRow>) => services.get(documentPath)?.onUpdate(props),
+    onKeyDown: (props: SuggestionKeyDownProps) =>
+      services.get(documentPath)?.onKeyDown(props) ?? false,
+    onExit: () => services.get(documentPath)?.onExit(),
+  });
 }
