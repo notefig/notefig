@@ -66,6 +66,7 @@ import {
   mentionPopupHasResults,
 } from "./composer/mention-bridge";
 import { insertMentionRow, type MentionRow } from "./composer/mention-rows";
+import { suggestionCaretRepaint } from "./composer/caret-repaint";
 import { dispatchComposerKey } from "./composer/key-bridge";
 import { PROMPT_MENTION_NAME } from "./composer/mention-node";
 import { readDraftNode } from "./composer/draft-text";
@@ -634,6 +635,9 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
             : null;
         },
       }),
+      // WebKit leaves the caret stale inside the "@" mention's highlight
+      // (this and the page links' share the class).
+      suggestionCaretRepaint(),
       // The "@" mention (files, and directives like `@model:`), scoped to
       // drafts. Registered here rather than
       // as a standalone extension so the scoping travels with the widget

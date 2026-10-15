@@ -12,6 +12,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { usePromptWidgetHost } from "../host-context";
 import type { PromptWidgetHost } from "../host";
 import { promptMentionNode } from "./mention-node";
+import { SuggestionCaretRepaint } from "./caret-repaint";
 import {
   DRAFT_TEXT_SERIALIZERS,
   draftToDoc,
@@ -91,6 +92,7 @@ function promptExtensions(
     // showOnlyWhenEditable: false — the chat composer disables the editor
     // during session load, and the loading placeholder is the only signal.
     Placeholder.configure({ placeholder, showOnlyWhenEditable: false }),
+    SuggestionCaretRepaint,
     promptMentionNode({
       char: "@",
       items: ({ query }: { query: string }) =>
