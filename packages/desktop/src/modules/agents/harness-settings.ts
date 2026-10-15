@@ -18,6 +18,7 @@ import {
   type HarnessOverride,
   type ProbedHarness,
 } from "@notefig/shared/agent";
+import type { HarnessCatalog } from "./harness-catalog";
 
 /**
  * What this machine records about one harness. A built-in has a row once
@@ -35,6 +36,8 @@ export interface HarnessRow {
   custom?: CustomHarnessEntry;
   /** What the last install check found. */
   install?: HarnessDiscoveryResult;
+  /** What it offers — settings, commands — as last reported. */
+  catalog?: HarnessCatalog;
   /** When the row was first written; custom entries list in this order. */
   createdAt: number;
 }

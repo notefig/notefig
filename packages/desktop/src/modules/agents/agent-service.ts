@@ -1103,6 +1103,7 @@ export class AgentTask {
     this.deps.hooks.emit("agent:catalog", {
       taskId: this.taskId,
       harnessId: this.harness.id,
+      harness: this.harness,
       workspacePath: this.workspacePath,
       ...offer,
     });

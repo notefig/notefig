@@ -35,6 +35,7 @@ import {
   type HarnessRow,
   type HarnessSettingsRow,
 } from "@/modules/agents/harness-settings";
+import type { HarnessCatalog } from "@/modules/agents/harness-catalog";
 import { useCore } from "@notefig/core/react";
 
 export type {
@@ -397,4 +398,25 @@ export function useHarnessLabels(): (harnessId: string) => string {
     () => (harnessId: string) => harnessLabel(rows, harnessId),
     [rows],
   );
+}
+
+/** What a harness offers, live, from its row: its settings (the model
+ *  among them) and its commands. Null halves are not known yet. */
+export function useHarnessCatalog(
+  harnessId: string,
+): Pick<HarnessCatalog, "configOptions" | "commands"> & { loading: boolean } {
+  const { harnesses } = useCore();
+  const { data, isLoading } = useLiveQuery(
+    (q) =>
+      q
+        .from({ harness: harnesses.collection })
+        .where(({ harness }) => eq(harness.id, harnessId)),
+    [harnesses, harnessId],
+  );
+  const catalog = data?.[0]?.catalog;
+  return {
+    configOptions: catalog?.configOptions ?? null,
+    commands: catalog?.commands ?? null,
+    loading: isLoading,
+  };
 }
