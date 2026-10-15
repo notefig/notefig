@@ -185,12 +185,12 @@ describe("AgentTask vertical slice", () => {
   it("records unknown session updates as a catch-all entry (D4)", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
-    const commands = {
-      sessionUpdate: "available_commands_update",
-      availableCommands: [],
+    const info = {
+      sessionUpdate: "session_info_update",
+      title: "Greeting",
     };
     agent.onPrompt = async (_params, a) => {
-      a.update("sess_test", commands);
+      a.update("sess_test", info);
       return { stopReason: "end_turn" };
     };
 
@@ -202,8 +202,8 @@ describe("AgentTask vertical slice", () => {
       (e) => e.type === "unknown",
     );
     expect(unknownEntries).toHaveLength(1);
-    expect(unknownEntries[0].text).toBe("available_commands_update");
-    expect(unknownEntries[0].raw).toEqual(commands);
+    expect(unknownEntries[0].text).toBe("session_info_update");
+    expect(unknownEntries[0].raw).toEqual(info);
   });
 
   it("coalesces token-streamed thought chunks into one entry per contiguous run", async () => {
@@ -2124,13 +2124,61 @@ describe("session config options (MET-81)", () => {
       return { stopReason: "end_turn" };
     };
     await runPrompt(task, "go");
-    expect(entriesFor(task.taskId).map((e) => e.type)).toEqual([
-      "user",
-      "unknown",
-    ]);
+    expect(entriesFor(task.taskId).map((e) => e.type)).toEqual(["user"]);
     expect(
       store.tasks.get(task.taskId)?.configOptions?.[0].currentValue,
     ).toBe("plan");
+    expect(store.tasks.get(task.taskId)?.commands).toEqual([]);
+  });
+
+  it("keeps the commands sent right after session/new, before any turn, and announces them", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    const commands = [
+      { name: "review", description: "Review the diff", input: null },
+      { name: "create-ticket", description: "File a ticket" },
+    ];
+    agent.commandsAfterNewSession = commands;
+    const announced: unknown[] = [];
+    hooks.on("agent:catalog", (detail) => {
+      announced.push(detail);
+    });
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    await task.start(() => client);
+
+    await vi.waitFor(() =>
+      expect(store.tasks.get(task.taskId)?.commands).toEqual(commands),
+    );
+    expect(entriesFor(task.taskId)).toEqual([]);
+    expect(announced).toContainEqual({
+      taskId: task.taskId,
+      harnessId: harness.id,
+      workspacePath: "/ws",
+      commands,
+    });
+  });
+
+  it("announces the session's options whenever they change", async () => {
+    const announced: { configOptions?: { currentValue: unknown }[] }[] = [];
+    hooks.on("agent:catalog", (detail) => {
+      announced.push(detail);
+    });
+    const { task, agent } = await startWithModes();
+    agent.update("sess_cfg", {
+      sessionUpdate: "current_mode_update",
+      currentModeId: "plan",
+    });
+
+    await vi.waitFor(() =>
+      expect(
+        announced.map((detail) => detail.configOptions?.[0].currentValue),
+      ).toEqual(["default", "plan"]),
+    );
+    expect(announced[0]).toMatchObject({
+      taskId: task.taskId,
+      harnessId: harness.id,
+      workspacePath: "/ws",
+    });
   });
 
   it("setConfigOption switches over the wire and the row follows; a refusal fails as a value", async () => {

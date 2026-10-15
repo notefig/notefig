@@ -41,6 +41,7 @@ export type {
   WriteTextFileResponse,
   CancelNotification,
   AuthMethod,
+  AvailableCommand,
   Stream,
   McpServer,
   SessionConfigOption,

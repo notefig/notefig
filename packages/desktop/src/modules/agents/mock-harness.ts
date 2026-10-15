@@ -100,6 +100,9 @@ export class FakeAgent {
   newSessionResult: Json = { sessionId: "sess_test" };
   /** Captured `session/new` params (mcpServers pass-through assertions). */
   newSessionParams: Json | null = null;
+  /** Sent as an `available_commands_update` right after `session/new`
+   *  answers, before any turn — as Claude does. Null sends nothing. */
+  commandsAfterNewSession: Json[] | null = null;
   /** Scripted `session/new`: defaults to returning {@link newSessionResult};
    *  throwing rejects the call, and a never-resolving promise hangs it (for
    *  startup-timeout tests). */
@@ -214,6 +217,19 @@ export class FakeAgent {
     }
   }
 
+  private async newSession(id: number, params: Json): Promise<void> {
+    this.newSessionParams = params;
+    let session: Json = null;
+    await this.answer(id, -32603, async () => (session = await this.onNewSession(params, this)));
+    // Only for a session that was opened, under the id it was given.
+    if (this.commandsAfterNewSession && session) {
+      this.update(session.sessionId as string, {
+        sessionUpdate: "available_commands_update",
+        availableCommands: this.commandsAfterNewSession,
+      });
+    }
+  }
+
   private async handle(msg: Json): Promise<void> {
     // A response to one of our client-directed requests (no method field).
     if (msg.method === undefined && msg.id !== undefined) {
@@ -231,8 +247,7 @@ export class FakeAgent {
         this.initializeParams = params;
         return this.respond(id, this.initializeResult);
       case "session/new":
-        this.newSessionParams = params;
-        return this.answer(id, -32603, () => this.onNewSession(params, this));
+        return this.newSession(id, params);
       case "session/load":
         this.loadSessionParams = params;
         return this.answer(id, -32603, () => this.onLoadSession(params, this));
