@@ -11,6 +11,7 @@ import { createCore, type AnyModule, type Core } from "@notefig/core";
 import { QueryClient } from "@tanstack/react-query";
 import { platformAdapter } from "@/adapters";
 import { agentStoreModule } from "@/modules/agents/agent-collections";
+import { agentDirectivesModule } from "@/modules/agents/agent-directives";
 import { harnessProbeModule } from "@/modules/agents/harness-probe";
 import { mockAgentModule } from "@/modules/agents/mock-harness";
 import { promptRoundObserverModule } from "@/modules/agents/round-observer";
@@ -69,6 +70,8 @@ export function runtimeModules(): AnyModule[] {
     gitWorkerModule,
     historyModule,
     agentStoreModule,
+    // `@model:` and `@skill:` in the composers (`core.directives`).
+    agentDirectivesModule,
     promptRoundObserverModule,
     mockAgentModule,
     workspaceAgentsModule,

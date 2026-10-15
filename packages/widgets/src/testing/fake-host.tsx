@@ -61,6 +61,8 @@ export function fakePromptWidgetHost(
 
     isWorkspaceFile: vi.fn(() => false),
     searchWorkspaceFiles: vi.fn(() => []),
+    searchDirectives: vi.fn(() => []),
+    isDirective: vi.fn(() => false),
     // Posix slicing is enough for tests; the real host owns the platform's
     // path flavor.
     toRelativePath: vi.fn((root: string, absolute: string) =>
@@ -83,6 +85,9 @@ export function fakePromptWidgetHost(
         <div data-testid="permission-card">{taskId}</div>
       ),
       AuthCard: ({ task }) => <div data-testid="auth-card">{task.taskId}</div>,
+      DirectiveIcon: ({ namespace, className }) => (
+        <span data-testid={`directive-icon-${namespace}`} className={className} />
+      ),
       FileIcon: ({ className }) => (
         <span data-testid="file-icon" className={className} />
       ),

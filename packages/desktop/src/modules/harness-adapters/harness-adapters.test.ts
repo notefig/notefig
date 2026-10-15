@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILT_IN_HARNESSES,
+  type ContentBlock,
   type HarnessDefinition,
 } from "@notefig/shared/agent";
 import type {
@@ -10,7 +11,7 @@ import type {
 } from "./adapter";
 import { testHarnesses } from "@/testing/test-harnesses";
 import { createHarnessAdapters, harnessLogo } from "./harness-adapters";
-import { needsSignIn } from "./adapter";
+import { needsSignIn, placeCommands } from "./adapter";
 
 const adapters = () =>
   createHarnessAdapters({ harnesses: testHarnesses() });
@@ -397,5 +398,45 @@ describe("catalog discovery", () => {
       mcpRegistration: "session-new",
     };
     expect(adapterFor(custom).discoverCatalog).toBeUndefined();
+  });
+});
+
+describe("placeCommands", () => {
+  const blocks = (): ContentBlock[] => [
+    { type: "text", text: "> quote\n\nfix it" },
+    { type: "resource_link", uri: "file:///ws/notes.md", name: "notes.md" },
+  ];
+  const claude = BUILT_IN_HARNESSES.find((harness) => harness.id === "claude-code")!;
+  const opencode = BUILT_IN_HARNESSES.find((harness) => harness.id === "opencode")!;
+  const { adapterFor } = createHarnessAdapters({ harnesses: { configured: () => [] } });
+
+  it("leaves a prompt with no command as it was", () => {
+    expect(placeCommands(adapterFor(claude), blocks())).toEqual(blocks());
+  });
+
+  it("puts Claude's command in a block of its own, last", () => {
+    expect(placeCommands(adapterFor(claude), blocks(), [{ name: "review" }])).toEqual([
+      ...blocks(),
+      { type: "text", text: "/review" },
+    ]);
+  });
+
+  it("starts the first text block with it elsewhere", () => {
+    expect(placeCommands(adapterFor(opencode), blocks(), [{ name: "review" }])[0]).toEqual({
+      type: "text",
+      text: "/review > quote\n\nfix it",
+    });
+  });
+
+  it("asks for any further command in words", () => {
+    const placed = placeCommands(adapterFor(claude), blocks(), [
+      { name: "review" },
+      { name: "deploy" },
+    ]);
+    expect(placed[0]).toEqual({
+      type: "text",
+      text: "> quote\n\nfix it\n\nAlso use the `deploy` skill.",
+    });
+    expect(placed[placed.length - 1]).toEqual({ type: "text", text: "/review" });
   });
 });

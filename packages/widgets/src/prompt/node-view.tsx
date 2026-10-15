@@ -54,13 +54,19 @@ import {
 } from "./doc-helpers";
 import type { PromptReference } from "./doc-helpers";
 import { PromptBlob } from "./ui/prompt-blob";
-import { adoptPersistedPromptBinding, bindPromptBlobDocument } from "./store";
+import {
+  adoptPersistedPromptBinding,
+  bindPromptBlobDocument,
+  getPromptBlob,
+} from "./store";
 import { promptChangeTrackingPlugin } from "./change-tracking";
 import { promptChangeGutterPlugin } from "./change-gutter";
 import {
   getMentionService,
   mentionPopupHasResults,
 } from "./composer/mention-bridge";
+import { insertMentionRow, type MentionRow } from "./composer/mention-rows";
+import { suggestionCaretRepaint } from "./composer/caret-repaint";
 import { dispatchComposerKey } from "./composer/key-bridge";
 import { PROMPT_MENTION_NAME } from "./composer/mention-node";
 import { readDraftNode } from "./composer/draft-text";
@@ -629,11 +635,15 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
             : null;
         },
       }),
-      // The "@" file mention, scoped to drafts. Registered here rather than
+      // WebKit leaves the caret stale inside the "@" mention's highlight
+      // (this and the page links' share the class).
+      suggestionCaretRepaint(),
+      // The "@" mention (files, and directives like `@model:`), scoped to
+      // drafts. Registered here rather than
       // as a standalone extension so the scoping travels with the widget
       // that owns it: `allow` is the whole of it — outside a draft the
       // trigger never starts, so "@" stays ordinary prose everywhere else.
-      Suggestion({
+      Suggestion<MentionRow, MentionRow>({
         editor: this.editor,
         char: "@",
         allow: ({ state, range }) =>
@@ -642,24 +652,19 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
               selection: { $from: state.doc.resolve(range.from) },
             }),
           ),
-        items: ({ query }) =>
-          getMentionService(options.filePath)?.search(query) ?? [],
+        // Directives offer what the caret's widget's own session does.
+        items: ({ query, editor }) => {
+          const draft = selectionDraft(editor.state);
+          const taskId = draft ? getPromptBlob(draft.blobId).boundTaskId : null;
+          return getMentionService(options.filePath)?.search(query, { taskId }) ?? [];
+        },
         // Pinned directly under the "@" (the anchor is the suggestion
         // decoration, whose left edge is the trigger char). Fixed strategy
         // sidesteps offset-parent math inside the dock/editor stack.
         placement: "bottom-start",
         offset: { mainAxis: 2, crossAxis: 0 },
         floatingUi: { strategy: "fixed" },
-        command: ({ editor, range, props }) => {
-          editor
-            .chain()
-            .focus()
-            .insertContentAt(range, [
-              { type: "mention", attrs: props },
-              { type: "text", text: " " },
-            ])
-            .run();
-        },
+        command: ({ editor, range, props }) => insertMentionRow(editor, range, props),
         render: () => ({
           onStart: (props) =>
             getMentionService(options.filePath)?.onStart(props),

@@ -15,8 +15,10 @@
 import {
   MCP_SERVER_NAME,
   type AvailableCommand,
+  type ContentBlock,
   type Cost,
   type McpServer,
+  type PromptCommand,
   type PromptResponse,
   type SessionConfigSelect,
   type SessionNotification,
@@ -216,6 +218,43 @@ export interface HarnessAdapter {
   /** Find what it offers before any session the user starts, for the
    *  harness catalog. None (a custom harness): only its sessions tell. */
   discoverCatalog?(io: CatalogProbeIo): Promise<HarnessCatalog | null>;
+  /** Put a command's `/name` where this harness runs it from. None: at the
+   *  start of the prompt's first text block, where most harnesses look. */
+  placeCommand?(blocks: ContentBlock[], name: string): ContentBlock[];
+}
+
+/**
+ * A prompt's blocks with its commands placed (`@skill:` directives). The
+ * first runs as the harness's own command, where its adapter puts it; any
+ * further one can't, so the prompt asks for it in words instead.
+ */
+export function placeCommands(
+  adapter: Pick<HarnessAdapter, "placeCommand">,
+  blocks: ContentBlock[],
+  commands: PromptCommand[] = [],
+): ContentBlock[] {
+  const [first, ...rest] = commands;
+  if (!first) return blocks;
+  const asked = rest.length
+    ? withFirstText(blocks, (text) =>
+        `${text}\n\n${rest.map(({ name }) => `Also use the \`${name}\` skill.`).join(" ")}`,
+      )
+    : blocks;
+  return adapter.placeCommand
+    ? adapter.placeCommand(asked, first.name)
+    : withFirstText(asked, (text) => `/${first.name} ${text}`);
+}
+
+/** The blocks with the first text block's text rewritten. */
+function withFirstText(
+  blocks: ContentBlock[],
+  rewrite: (text: string) => string,
+): ContentBlock[] {
+  const index = blocks.findIndex((block) => block.type === "text");
+  if (index === -1) return [{ type: "text", text: rewrite("").trim() }, ...blocks];
+  return blocks.map((block, at) =>
+    at === index && block.type === "text" ? { ...block, text: rewrite(block.text) } : block,
+  );
 }
 
 /** For a harness whose throwaway session leaves nothing behind: open one

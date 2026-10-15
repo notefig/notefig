@@ -2205,6 +2205,141 @@ describe("session config options (MET-81)", () => {
   });
 });
 
+describe("a prompt's directives", () => {
+  it("switches its settings before its turn, skips one not offered, and places its commands", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.newSessionResult = {
+      sessionId: "sess_dir",
+      models: {
+        currentModelId: "opus",
+        availableModels: [
+          { modelId: "opus", name: "Opus" },
+          { modelId: "sonnet", name: "Sonnet" },
+        ],
+      },
+    };
+    const order: string[] = [];
+    const setModel = agent.onSetModel;
+    agent.onSetModel = async (params, a) => {
+      order.push(`model ${params.modelId}`);
+      return setModel(params, a);
+    };
+    let blocks: unknown;
+    agent.onPrompt = async (params) => {
+      order.push("prompt");
+      blocks = params.prompt;
+      return { stopReason: "end_turn" };
+    };
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    await task.start(() => client);
+
+    const { completed } = task.prompt("fix it", {
+      config: [
+        { category: "model", value: "nope" },
+        { category: "model", value: "sonnet" },
+      ],
+      commands: [{ name: "review" }],
+    });
+    await completed;
+
+    expect(order).toEqual(["model sonnet", "prompt"]);
+    expect(
+      store.tasks.get(task.taskId)?.configOptions?.[0].currentValue,
+    ).toBe("sonnet");
+    // Claude runs a command from the last block only.
+    expect(blocks).toEqual([
+      { type: "text", text: "fix it" },
+      { type: "text", text: "/review" },
+    ]);
+  });
+});
+
+describe("a prompt's directives, stopped", () => {
+  it("never sends a prompt whose turn was stopped while its model switched", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.newSessionResult = {
+      sessionId: "sess_stop",
+      models: {
+        currentModelId: "opus",
+        availableModels: [
+          { modelId: "opus", name: "Opus" },
+          { modelId: "sonnet", name: "Sonnet" },
+        ],
+      },
+    };
+    let release!: () => void;
+    const switching = new Promise<void>((resolve) => (release = resolve));
+    const setModel = agent.onSetModel;
+    let switchStarted = false;
+    agent.onSetModel = async (params, a) => {
+      switchStarted = true;
+      await switching;
+      return setModel(params, a);
+    };
+    let prompted = false;
+    agent.onPrompt = async () => {
+      prompted = true;
+      return { stopReason: "end_turn" };
+    };
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    await task.start(() => client);
+
+    const { completed } = task.prompt("fix it", {
+      config: [{ category: "model", value: "sonnet" }],
+    });
+    await vi.waitFor(() => expect(switchStarted).toBe(true));
+    await task.cancel();
+    release();
+
+    expect((await completed).status).toBe("cancelled");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(prompted).toBe(false);
+  });
+});
+
+describe("a prompt's directives, the harness gone", () => {
+  it("fails only the turn whose model was switching when the harness exited", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.newSessionResult = {
+      sessionId: "sess_gone",
+      models: {
+        currentModelId: "opus",
+        availableModels: [
+          { modelId: "opus", name: "Opus" },
+          { modelId: "sonnet", name: "Sonnet" },
+        ],
+      },
+    };
+    let switchStarted = false;
+    agent.onSetModel = () => {
+      switchStarted = true;
+      return new Promise(() => {});
+    };
+    let prompted = false;
+    agent.onPrompt = async () => {
+      prompted = true;
+      return { stopReason: "end_turn" };
+    };
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    await task.start(() => client);
+
+    task.prompt("first", { config: [{ category: "model", value: "sonnet" }] });
+    task.prompt("second");
+    await vi.waitFor(() => expect(switchStarted).toBe(true));
+    await client.close();
+
+    await vi.waitFor(() =>
+      expect(turnFor(task.taskId).map((turn) => turn.status)).toEqual(["error", "queued"]),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(turnFor(task.taskId).map((turn) => turn.status)).toEqual(["error", "queued"]);
+    expect(prompted).toBe(false);
+  });
+});
+
 describe("usage (token & cost)", () => {
   const usageUpdate = (used: number, cost?: number) => ({
     sessionUpdate: "usage_update",

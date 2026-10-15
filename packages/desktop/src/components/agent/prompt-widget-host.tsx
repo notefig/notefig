@@ -23,7 +23,8 @@ import type {
   SessionOption,
 } from "@notefig/widgets";
 import { extractMentionPaths } from "@notefig/widgets";
-import type { PromptContextPart } from "@notefig/shared/agent";
+import type { PromptContextPart, PromptExtras } from "@notefig/shared/agent";
+import type { DirectiveContext } from "@/modules/directives";
 import { AGENT_KV_NAMESPACE, trustKey } from "@/modules/agents/agents";
 import { describeTaskMeta, useAgentTaskList } from "@/modules/agents/react";
 import type { WorkspaceFiles } from "@/modules/files";
@@ -34,6 +35,7 @@ import {
 } from "@/hooks/use-harness-selection";
 import { canOpenFile } from "@/modules/editors";
 import { FileTypeIcon } from "@/components/editor/file-type-icon";
+import { DirectiveIcon } from "./directive-icon";
 import { HarnessLogo } from "./harness-logo";
 import { Markdown } from "@/components/ui/markdown";
 import { useCore } from "@notefig/core/react";
@@ -101,6 +103,43 @@ export function mentionContextParts(
     ),
     name: token,
   }));
+}
+
+/**
+ * Where a directive is picked or sent: the prompt's session — the one
+ * named, else the workspace's shared one — and its harness, else the one a
+ * new session would use.
+ */
+export function directiveContext(
+  core: Core,
+  workspacePath: string,
+  taskId: string | null,
+  defaultHarnessId: string,
+): DirectiveContext {
+  const session = taskId ?? core.sharedSessions.peek(workspacePath);
+  const harnessId =
+    (session && core.agentStore.tasks.get(session)?.harnessId) || defaultHarnessId;
+  return { workspacePath, taskId: session, harnessId };
+}
+
+/**
+ * A finished prompt as it is sent: its directives taken out of the text
+ * and turned into what it is sent with (`core.directives`), and the files it
+ * mentions as context parts.
+ */
+export function promptToSend(
+  core: Core,
+  ctx: DirectiveContext,
+  text: string,
+): { text: string; extras: PromptExtras } {
+  const resolved = core.directives.resolve(text, ctx);
+  return {
+    text: resolved.text,
+    extras: {
+      ...resolved.extras,
+      contextParts: mentionContextParts(openFilesOf(core, ctx.workspacePath), resolved.text),
+    },
+  };
 }
 
 /**
@@ -194,6 +233,7 @@ const slots: PromptWidgetHost["slots"] = {
   PermissionCard: ({ taskId }) => <PermissionCard taskId={taskId} bare />,
   AuthCard: ({ task }) => <AuthCard task={task} bare />,
   FileIcon: FileTypeIcon,
+  DirectiveIcon,
   HarnessLogo,
 };
 
@@ -255,7 +295,7 @@ function useHarnessList() {
 export function usePromptWidgetHost(): PromptWidgetHost {
   // Stable for the life of the app, so the memo below may close over it.
   const core = useCore();
-  const { tabs, agents, agentStore, sharedSessions } = core;
+  const { tabs, agents, agentStore, sharedSessions, directives } = core;
   const { defaultHarness, setDefaultHarness } = useDefaultHarness();
 
   const latest = useRef({ defaultHarness, setDefaultHarness, tabs });
@@ -277,13 +317,14 @@ export function usePromptWidgetHost(): PromptWidgetHost {
       isTaskReachable: (taskId) => agents.task(taskId).isReachable(),
 
       dispatchPrompt: ({ taskId, text, workspacePath: path, target }) => {
+        const sent = promptToSend(
+          core,
+          directiveContext(core, path, taskId, latest.current.defaultHarness.id),
+          text,
+        );
         const { turnId } = agents
           .task(taskId)
-          .promptFromWidget(
-            text,
-            { ...target, workspacePath: path },
-            mentionContextParts(openFilesOf(core, path), text),
-          );
+          .promptFromWidget(sent.text, { ...target, workspacePath: path }, sent.extras);
         return { turnId };
       },
       cancelTask: (taskId) => void agents.task(taskId).cancel(),
@@ -309,6 +350,18 @@ export function usePromptWidgetHost(): PromptWidgetHost {
         return files ? searchWorkspaceFiles(files, query, limit) : [];
       },
       toRelativePath: relativeTreePath,
+
+      searchDirectives: ({ workspacePath: path, taskId, query, limit }) =>
+        directives.search(
+          query,
+          directiveContext(core, path, taskId, latest.current.defaultHarness.id),
+          limit,
+        ),
+      isDirective: ({ workspacePath: path, taskId, token }) =>
+        directives.isDirective(
+          token,
+          directiveContext(core, path, taskId, latest.current.defaultHarness.id),
+        ),
 
       openFile: (path) =>
         void latest.current.tabs.open(path, { intent: "new-tab" }),

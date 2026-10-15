@@ -77,6 +77,19 @@ export interface MentionCandidate {
   path: string;
 }
 
+/**
+ * A row of the "@" menu that isn't a file: a directive namespace to type
+ * into (`value: null`, picking it leaves `@<namespace>:` to keep typing), or
+ * one of its values (`@model:opus`). Which namespaces exist, and what they
+ * offer, is the app's.
+ */
+export interface DirectiveOption {
+  namespace: string;
+  value: string | null;
+  label: string;
+  description?: string;
+}
+
 export interface PromptWidgetHost {
   // ── the agent session this widget prompts ────────────────────────────
   /**
@@ -104,7 +117,8 @@ export interface PromptWidgetHost {
   // ── sending and stopping ─────────────────────────────────────────────
   /**
    * Send a prompt from this widget. The host resolves the text's "@" mentions
-   * into context parts itself — the widget hands over the finished string.
+   * itself — files into context parts, directives into what the prompt is
+   * sent with — so the widget hands over the finished string.
    * Infallible by contract: it returns the id of the turn to watch.
    */
   dispatchPrompt(args: {
@@ -165,6 +179,18 @@ export interface PromptWidgetHost {
     absolutePath: string,
   ): string | undefined;
 
+  // ── directives, for "@<namespace>:<value>" ──────────────────────────
+  /** The menu's directive rows for what follows an "@". `taskId` is the
+   *  session the prompt would go to, when the composer knows it. */
+  searchDirectives(args: {
+    workspacePath: string;
+    taskId: string | null;
+    query: string;
+    limit: number;
+  }): DirectiveOption[];
+  /** Does `<namespace>:<value>` name a directive now (so it is a chip)? */
+  isDirective(args: { workspacePath: string; taskId: string | null; token: string }): boolean;
+
   // ── app chrome ───────────────────────────────────────────────────────
   openFile(path: string): void;
   openAgentTab(taskId: string): void;
@@ -184,6 +210,8 @@ export interface PromptWidgetHost {
     PermissionCard: ComponentType<{ taskId: string }>;
     AuthCard: ComponentType<{ task: AgentTaskRow }>;
     FileIcon: ComponentType<{ path: string; className?: string }>;
+    /** A directive namespace's mark, sized and placed like `FileIcon`. */
+    DirectiveIcon: ComponentType<{ namespace: string; className?: string }>;
     HarnessLogo: ComponentType<{ harnessId: string; className?: string }>;
   };
 }

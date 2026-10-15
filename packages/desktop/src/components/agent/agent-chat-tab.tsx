@@ -48,7 +48,7 @@ import {
 } from "@/modules/agents/react";
 import { PromptEditor, type PromptEditorHandle } from "@notefig/widgets";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
-import { mentionContextParts } from "./prompt-widget-host";
+import { promptToSend } from "./prompt-widget-host";
 import { PermissionCard } from "./permission-card";
 import { AuthCard } from "./auth-card";
 import { HarnessLogo } from "@/components/agent/harness-logo";
@@ -223,7 +223,8 @@ function ComposerOverlay({
   composerRef: RefObject<PromptEditorHandle>;
 }) {
   const { t } = useTranslation();
-  const { agents } = useCore();
+  const core = useCore();
+  const { agents } = core;
   // Focus goes through the arbiter, exactly like a document editor's mount
   // intent (use-editor-focus-lifecycle): the controller resolves it into
   // the composer's own focus call, and an ambient intent stands down for a
@@ -250,13 +251,15 @@ function ComposerOverlay({
     [taskId],
   );
 
-  const files = useWorkspaceModule(taskRow.workspacePath, "files");
   const sendPrompt = useCallback(() => {
     const text = draft.trim();
     if (!text) return;
-    agents.task(taskId).prompt(text, {
-      contextParts: mentionContextParts(files, text),
-    });
+    const sent = promptToSend(
+      core,
+      { workspacePath: taskRow.workspacePath, taskId, harnessId: taskRow.harnessId },
+      text,
+    );
+    agents.task(taskId).prompt(sent.text, sent.extras);
     setLastSentPrompt(taskId, text);
     setDraftState("");
     clearComposerDraft(taskId);
@@ -264,7 +267,7 @@ function ComposerOverlay({
     // reader had scrolled up into history; this also re-enters follow mode
     // for the streamed reply.
     transcriptScrollRef.current.scrollToEnd();
-  }, [agents, draft, taskId, files, transcriptScrollRef]);
+  }, [core, agents, draft, taskId, taskRow.workspacePath, taskRow.harnessId, transcriptScrollRef]);
 
   const stopTask = useCallback(() => {
     void agents.task(taskId).cancel();
@@ -1326,6 +1329,7 @@ export function PromptBox({
       <PromptEditor
         ref={composerRef}
         workspacePath={workspacePath}
+        taskId={taskId}
         value={value}
         onChange={onChange}
         disabled={disabled}

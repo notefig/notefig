@@ -29,6 +29,7 @@ export {
   usePromptWidgetHost,
 } from "./prompt/host-context";
 export type {
+  DirectiveOption,
   MentionCandidate,
   PromptRound,
   PromptWidgetHost,
@@ -72,7 +73,8 @@ export {
   PromptEditor,
   type PromptEditorHandle,
 } from "./prompt/composer/prompt-editor";
-export { extractMentionPaths } from "./prompt/composer/draft-text";
+export { extractMentionPaths, segmentMentions } from "./prompt/composer/draft-text";
+export type { MentionRow } from "./prompt/composer/mention-rows";
 export { CopyTextButton } from "./prompt/ui/copy-text-button";
 
 /** The document's mention popup: mounted beside the editor, like the link

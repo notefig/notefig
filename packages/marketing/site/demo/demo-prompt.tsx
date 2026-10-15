@@ -446,6 +446,7 @@ function PromptFace({
           read: () => state.draft,
           write: noop,
           holdsCaret: () => false,
+          focus: noop,
         }}
         draftSlot={<DraftText text={state.draft} />}
         reference={referenceFor(reference)}
@@ -483,9 +484,12 @@ function referenceFor(text: string | undefined) {
 function MentionPopup({ query }: { query: string }) {
   const items = DEMO_FILES.filter((file) => file.includes(query)).map(
     (relativePath) => ({
-      relativePath,
-      title: relativePath.split("/").pop() ?? relativePath,
-      path: `${DEMO_ROOT}/${relativePath}`,
+      kind: "file" as const,
+      file: {
+        relativePath,
+        title: relativePath.split("/").pop() ?? relativePath,
+        path: `${DEMO_ROOT}/${relativePath}`,
+      },
     }),
   );
   if (items.length === 0) return null;

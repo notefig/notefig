@@ -182,8 +182,10 @@ function useDraftIO(editor: Editor, blobId: string, workspacePath: string) {
     const write = (text: string) => {
       const found = range();
       if (!found) return;
+      const taskId = getPromptBlob(blobId).boundTaskId;
       const isPath = (token: string) =>
-        host.isWorkspaceFile(workspacePath, token);
+        host.isWorkspaceFile(workspacePath, token) ||
+        host.isDirective({ workspacePath, taskId, token });
       const tr = editor.state.tr.replaceWith(
         found.from,
         found.to,

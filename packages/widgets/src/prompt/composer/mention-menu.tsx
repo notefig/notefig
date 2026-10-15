@@ -21,19 +21,17 @@ import { cn } from "@notefig/ui/utils";
 import { usePromptWidgetHost } from "../host-context";
 import type { MentionCandidate } from "../host";
 import { registerMentionService } from "./mention-bridge";
-
-/** How many rows the file search returns for a query. */
-export const SUGGESTION_LIMIT = 8;
+import { mentionRowKey, searchMentionRows, type MentionRow } from "./mention-rows";
 
 export interface SuggestionPopupState {
   container: HTMLElement;
-  items: MentionCandidate[];
-  command: (attrs: { id: string; label: string }) => void;
+  items: MentionRow[];
+  command: (row: MentionRow) => void;
 }
 
 export type SuggestionRenderer = () => {
-  onStart: (props: SuggestionProps<MentionCandidate>) => void;
-  onUpdate: (props: SuggestionProps<MentionCandidate>) => void;
+  onStart: (props: SuggestionProps<MentionRow>) => void;
+  onUpdate: (props: SuggestionProps<MentionRow>) => void;
   onKeyDown: (props: SuggestionKeyDownProps) => boolean;
   onExit: () => void;
 };
@@ -64,19 +62,90 @@ function summarizeDirPrefix(item: MentionCandidate): string | null {
   return `${dirs[0]}/…/${dirs[dirs.length - 1]}/`;
 }
 
+/** A row's one-line label: its muted context (a file's directory, a
+ *  directive's namespace), its name kept whole, and a directive's
+ *  description trailing. */
+function rowParts(item: MentionRow): { context: string | null; name: string; detail?: string } {
+  if (item.kind === "file") {
+    return { context: summarizeDirPrefix(item.file), name: item.file.title };
+  }
+  const { namespace, value, label, description } = item.directive;
+  // A namespace reads as itself: "model:".
+  if (value === null) return { context: null, name: label };
+  return { context: `${namespace}: `, name: label, detail: description };
+}
+
+/** Icon and label, laid out alike for files and directives. */
+function MentionRowLabel({ item }: { item: MentionRow }) {
+  const { FileIcon, DirectiveIcon } = usePromptWidgetHost().slots;
+  const { context, name, detail } = rowParts(item);
+  const iconClass = "h-3.5 w-3.5 shrink-0 text-muted-foreground";
+  return (
+    <>
+      {item.kind === "file" ? (
+        <FileIcon path={item.file.path} className={iconClass} />
+      ) : (
+        <DirectiveIcon namespace={item.directive.namespace} className={iconClass} />
+      )}
+      {/* One combined label. A file keeps its name whole and its directory
+          truncates first; a directive keeps its namespace whole — it says
+          what the row is — and its name truncates. */}
+      <span className="flex min-w-0 items-baseline" dir="ltr">
+        {context && (
+          <span
+            className={cn(
+              "whitespace-pre text-muted-foreground",
+              item.kind === "file" ? "min-w-0 truncate" : "shrink-0",
+            )}
+          >
+            {context}
+          </span>
+        )}
+        <span className={item.kind === "file" ? "shrink-0" : "min-w-0 truncate"}>{name}</span>
+        {detail && (
+          // Gives way long before the name does.
+          <span className="ms-1.5 min-w-0 shrink-[100] truncate text-muted-foreground">
+            {detail}
+          </span>
+        )}
+      </span>
+    </>
+  );
+}
+
+/** Where the pointer was at the page's last mousemove. A document listener
+ *  in the bubble phase hears each move after React's handlers have, so a
+ *  row compares a move with where the pointer was before it — anywhere on
+ *  the page, so the first move onto a fresh menu counts too. */
+let lastPointer: { x: number; y: number } | null = null;
+let trackingPointer = false;
+
+function trackPointer() {
+  if (trackingPointer) return;
+  trackingPointer = true;
+  document.addEventListener("mousemove", (event) => {
+    lastPointer = { x: event.clientX, y: event.clientY };
+  });
+}
+
+/** Whether this mousemove moved the pointer, rather than repeating where it
+ *  already was (or where it rests before it has ever moved). */
+function pointerMoved(event: { clientX: number; clientY: number }): boolean {
+  return !!lastPointer && (lastPointer.x !== event.clientX || lastPointer.y !== event.clientY);
+}
+
 export function SuggestionList({
   items,
   selectedIndex,
   onPick,
   onHover,
 }: {
-  items: MentionCandidate[];
+  items: MentionRow[];
   selectedIndex: number;
   onPick: (index: number) => void;
   onHover: (index: number) => void;
 }) {
   const { t } = useTranslation();
-  const { FileIcon } = usePromptWidgetHost().slots;
   return (
     <div
       role="listbox"
@@ -85,7 +154,7 @@ export function SuggestionList({
     >
       {items.map((item, index) => (
         <button
-          key={item.path}
+          key={mentionRowKey(item)}
           type="button"
           role="option"
           aria-selected={index === selectedIndex}
@@ -94,27 +163,45 @@ export function SuggestionList({
             event.preventDefault();
             onPick(index);
           }}
-          onMouseEnter={() => onHover(index)}
+          // The pointer's own movement only. The browser follows a layout
+          // change under a still pointer with a synthetic mousemove at the
+          // same spot — taking it as a choice moved the selection to the
+          // pointer's row a beat after each keystroke.
+          onMouseMove={(event) => {
+            if (pointerMoved(event)) onHover(index);
+          }}
           className={cn(
             "flex cursor-pointer items-center gap-1 rounded-sm px-1.5 py-0.5 text-start text-xs",
             index === selectedIndex && "bg-accent text-accent-foreground",
           )}
         >
-          <FileIcon
-            path={item.path}
-            className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-          />
-          {/* One combined label: the name stays whole, the dir summary
-              truncates first. */}
-          <span className="flex min-w-0 items-baseline" dir="ltr">
-            <span className="min-w-0 truncate text-muted-foreground">
-              {summarizeDirPrefix(item)}
-            </span>
-            <span className="shrink-0">{item.title}</span>
-          </span>
+          <MentionRowLabel item={item} />
         </button>
       ))}
     </div>
+  );
+}
+
+/** The open popup's list, portalled into the container the suggestion
+ *  plugin mounted; nothing while it has no rows. */
+export function SuggestionPortal({
+  popup,
+  selectedIndex,
+  pick,
+  choose,
+}: Pick<
+  ReturnType<typeof useMentionSuggestion>,
+  "popup" | "selectedIndex" | "pick" | "choose"
+>) {
+  if (!popup || popup.items.length === 0) return null;
+  return createPortal(
+    <SuggestionList
+      items={popup.items}
+      selectedIndex={selectedIndex}
+      onPick={(index) => pick(popup, index)}
+      onHover={(index) => choose(popup, index)}
+    />,
+    popup.container,
   );
 }
 
@@ -129,26 +216,46 @@ export function useMentionSuggestion() {
   const selectedIndexRef = useRef(selectedIndex);
   selectedIndexRef.current = selectedIndex;
   const unmountPopup = useRef<(() => void) | null>(null);
+  // From the composer's mount, not the menu's: a menu's first rows must
+  // already know where the pointer was before it opened.
+  useEffect(trackPointer, []);
+  /** The row the user moved to (arrows, pointer), by key. It stays
+   *  selected while typing narrows the list and still holds it; until then
+   *  the selection is the top row, the best match. */
+  const chosenKey = useRef<string | null>(null);
+
+  const choose = useCallback((state: SuggestionPopupState, index: number) => {
+    const item = state.items[index];
+    if (!item) return;
+    chosenKey.current = mentionRowKey(item);
+    setSelectedIndex(index);
+  }, []);
 
   const applySuggestion = useCallback(
-    (props: SuggestionProps<MentionCandidate>) => {
+    (props: SuggestionProps<MentionRow>) => {
+      // The plugin announces each query twice: once while its rows load
+      // (no items), then with them. The rows on screen stay until the new
+      // ones arrive — emptying them in between tears the list down and back
+      // up on every keystroke, resets the selection, and hands the keys to
+      // the editor for that moment.
+      if (props.loading) {
+        setPopup((previous) => previous && { ...previous, command: props.command });
+        return;
+      }
       setPopup((previous) => {
         if (!previous) return previous;
-        return {
-          ...previous,
-          items: props.items,
-          command: (attrs) => props.command(attrs as never),
-        };
+        return { ...previous, items: props.items, command: props.command };
       });
-      setSelectedIndex(0);
+      const kept = props.items.findIndex((item) => mentionRowKey(item) === chosenKey.current);
+      if (kept === -1) chosenKey.current = null;
+      setSelectedIndex(Math.max(kept, 0));
     },
     [],
   );
 
   const pick = useCallback((state: SuggestionPopupState, index: number) => {
     const item = state.items[index];
-    if (!item) return;
-    state.command({ id: item.relativePath, label: item.title });
+    if (item) state.command(item);
   }, []);
 
   const suggestionKeyDown = useCallback(
@@ -160,13 +267,12 @@ export function useMentionSuggestion() {
       if (action === "pick") pick(state, selectedIndexRef.current);
       else {
         const step = action === "next" ? 1 : -1;
-        setSelectedIndex(
-          (index) => (index + step + state.items.length) % state.items.length,
-        );
+        const count = state.items.length;
+        choose(state, (selectedIndexRef.current + step + count) % count);
       }
       return true;
     },
-    [pick],
+    [pick, choose],
   );
 
   const renderer = useCallback<SuggestionRenderer>(
@@ -175,11 +281,8 @@ export function useMentionSuggestion() {
         const container = document.createElement("div");
         container.className = "z-50";
         unmountPopup.current = props.mount?.(container) ?? null;
-        setPopup({
-          container,
-          items: props.items,
-          command: (attrs) => props.command(attrs as never),
-        });
+        setPopup({ container, items: props.items, command: props.command });
+        chosenKey.current = null;
         setSelectedIndex(0);
       },
       onUpdate: applySuggestion,
@@ -193,17 +296,8 @@ export function useMentionSuggestion() {
     [applySuggestion, suggestionKeyDown],
   );
 
-  return { popup, popupRef, selectedIndex, setSelectedIndex, pick, renderer };
+  return { popup, popupRef, selectedIndex, choose, pick, renderer };
 }
-
-/**
- * Prop → editor synchronization. useEditor can hand out an instance that
- * has since been destroyed (the dock unmounts tabs, and StrictMode
- * double-mounts): Editor.destroy() nulls commandManager while the
- * `commands` getter has no guard, so every imperative entry point checks
- * isDestroyed first (crash report 2026-08-21, focus on a stale chat-tab
- * handle) — re-checked inside each effect too, since a StrictMode cleanup
- * can destroy the instance between render and effect.
 
 /**
  * The popup for a document's prompt drafts. Mounted beside the editor (like
@@ -219,8 +313,7 @@ export function PromptMentionMenu({
   workspacePath: string;
 }) {
   const host = usePromptWidgetHost();
-  const { popup, popupRef, selectedIndex, setSelectedIndex, pick, renderer } =
-    useMentionSuggestion();
+  const { popupRef, renderer, ...portal } = useMentionSuggestion();
 
   // One renderer instance for the plugin to drive, registered for as long as
   // this document's editor is on screen.
@@ -232,8 +325,11 @@ export function PromptMentionMenu({
     if (!live) return;
     return registerMentionService(documentPath, {
       hasResults: () => (popupRef.current?.items.length ?? 0) > 0,
-      search: (query) =>
-        host.searchWorkspaceFiles(workspacePath, query, SUGGESTION_LIMIT),
+      // A draft's widget may be bound to its own session (the plugin says
+      // which); an unbound one offers what the workspace's session, or a
+      // new one, would.
+      search: (query, { directives, taskId = null } = {}) =>
+        searchMentionRows(host, { workspacePath, taskId, query, directives }),
       onStart: live.onStart,
       onUpdate: live.onUpdate,
       onKeyDown: live.onKeyDown,
@@ -241,14 +337,5 @@ export function PromptMentionMenu({
     });
   }, [documentPath, workspacePath, host, popupRef]);
 
-  if (!popup || popup.items.length === 0) return null;
-  return createPortal(
-    <SuggestionList
-      items={popup.items}
-      selectedIndex={selectedIndex}
-      onPick={(index) => pick(popup, index)}
-      onHover={setSelectedIndex}
-    />,
-    popup.container,
-  );
+  return <SuggestionPortal {...portal} />;
 }
