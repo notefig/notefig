@@ -65,6 +65,7 @@ export function isDirectiveToken(token: string): boolean {
 /** The source and value `<namespace>:<value>` names, if one offers it now. */
 export function findDirective(sources: DirectiveSource[], token: string) {
   const colon = token.indexOf(":");
+  if (colon <= 0) return null;
   const source = sources.find(({ name }) => name === token.slice(0, colon));
   const value = token.slice(colon + 1);
   return source?.candidates().some((candidate) => candidate.value === value)

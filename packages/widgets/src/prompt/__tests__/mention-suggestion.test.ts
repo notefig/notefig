@@ -61,6 +61,10 @@ describe("searching directives", () => {
     expect(findDirective(sources, "model:nope")).toBeNull();
     expect(findDirective(sources, "effort:high")).toBeNull();
     expect(findDirective(sources, "notes.md")).toBeNull();
+    // No colon is no directive, even where dropping a letter names one.
+    const skills = [{ name: "skill", candidates: () => [{ value: "skills", label: "skills" }] }];
+    expect(findDirective(skills, "skills")).toBeNull();
+    expect(findDirective(skills, "skill:skills")?.value).toBe("skills");
   });
 });
 
