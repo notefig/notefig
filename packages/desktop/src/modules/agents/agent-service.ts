@@ -44,6 +44,7 @@ import {
   type HarnessInvokeContext,
   type HarnessSpawnPrep,
   type UsageUpdate,
+  type WithMeta,
 } from "@/modules/harness-adapters";
 import { MarkdownJoiner } from "@/lib/markdown-joiner-transform";
 import { PermissionBroker } from "./permission-broker";
@@ -388,6 +389,9 @@ export class AgentTask {
    * stuck at pending/in_progress.
    */
   private readonly toolEventIds = new Map<string, string>();
+  /** The calls whose harness named their tool (`toolNameOf`): the name
+   *  stands, whatever prose title a later update brings. */
+  private readonly namedToolCalls = new Set<string>();
   /**
    * FIFO prompt queue. Prompts arriving while a turn runs stack in send
    * order and run one per turn — nothing is displaced or dropped. Queued
@@ -720,6 +724,7 @@ export class AgentTask {
     // The replay re-establishes tool-call coalescing from scratch — a stale
     // mapping would land a replayed toolCallId on a row the commit deletes.
     this.toolEventIds.clear();
+    this.namedToolCalls.clear();
     this.currentTurn = {
       turnId,
       joiner: new MarkdownJoiner(),
@@ -1525,7 +1530,7 @@ export class AgentTask {
         draft.toolCall = {
           ...previous,
           ...update,
-          title: toolCallTitle(this.adapter, update) ?? previous?.title,
+          title: this.toolCallTitle(update, previous?.title),
           locations:
             update.locations ??
             deriveToolLocations(update.rawInput, this.workspacePath) ??
@@ -1548,7 +1553,7 @@ export class AgentTask {
     if (toolCallId) this.toolEventIds.set(toolCallId, id);
     const toolCall: ToolCallUpdate = {
       ...update,
-      title: toolCallTitle(this.adapter, update),
+      title: this.toolCallTitle(update),
       locations:
         update.locations ??
         deriveToolLocations(update.rawInput, this.workspacePath),
@@ -1563,6 +1568,23 @@ export class AgentTask {
       toolCall,
     });
     this.announceToolCall(turnId, toolCall);
+  }
+
+  /**
+   * A call's title after `update`. One its harness has named keeps that
+   * name: Devin retitles a call in prose once it has run ("Called
+   * widget_respond from notefig"), naming the tool on its first update only.
+   */
+  private toolCallTitle(
+    update: WithMeta & { toolCallId: string; title?: string | null },
+    previous?: string | null,
+  ): string | undefined {
+    if (this.adapter.toolNameOf?.(update)) {
+      this.namedToolCalls.add(update.toolCallId);
+    } else if (previous && this.namedToolCalls.has(update.toolCallId)) {
+      return previous;
+    }
+    return toolCallTitle(this.adapter, update) ?? previous ?? undefined;
   }
 
   /**
