@@ -54,6 +54,14 @@ export function devinAgentOf(update: WithMeta): string | null {
   return typeof context?.parentAgentId === "string" ? context.parentAgentId : null;
 }
 
+/** The tool a Devin call names: its title is prose ("Calling
+ *  widget_respond from notefig"), the tool rides in `_meta`
+ *  (`mcp__notefig__widget_respond`); null when it isn't tagged. */
+export function devinToolNameOf(update: WithMeta): string | null {
+  const name = update._meta?.["cognition.ai/toolName"];
+  return typeof name === "string" ? name : null;
+}
+
 /** Money where ACP's `cost` is sent, else Devin's running credit total. */
 function devinCostTotal(update: UsageUpdate): Cost | null {
   const money = acpCostTotal(update);
@@ -199,6 +207,7 @@ export const devinAdapter: HarnessAdapter = {
   reporting: NO_REPORTING,
   // Unrecorded which prefix it mints; strip either.
   toolNamePrefixes: KNOWN_TOOL_PREFIXES,
+  toolNameOf: devinToolNameOf,
   clientMeta: DEVIN_CLIENT_META,
   usage: devinUsage,
   // A subagent's chunks and usage arrive in the parent session, tagged.
