@@ -6,9 +6,6 @@ import {
 } from "@notefig/shared/intake";
 import { defineWorkflow, defuseMentions, quoteUserText } from "../workflow";
 
-/** The label Linear syncs to GitHub that `agent-build.yml` starts on. */
-export const AGENT_BUILD_LABEL = "agent:build";
-
 const TITLE_PREFIX: Record<FeedbackKind, string> = {
   bug: "Bug report",
   idea: "Idea",
@@ -45,12 +42,14 @@ export const feedbackWorkflow = defineWorkflow<FeedbackSubmission>({
   limits: {
     submissionsPerDay: 50,
     perSubmitterPerDay: 5,
+    duplicatesPerDay: 100,
     blockAfterDeclines: 3,
-    agentRunsPerDay: 5,
+    acceptedBuildsPerDay: 20,
   },
   linear: {
     sourceLabel: "Feedback",
-    onAccept: { agentLabels: [AGENT_BUILD_LABEL], project: "GA roadmap" },
+    onAccept: { build: true, project: "GA roadmap" },
+    reportTitle: "Debug report",
   },
   fingerprint: ({ message }) => message.toLowerCase().replace(/\s+/g, " ").trim(),
   submitter: ({ installId }) => installId,
@@ -66,4 +65,5 @@ export const feedbackWorkflow = defineWorkflow<FeedbackSubmission>({
     labels: KIND_LABELS[payload.kind],
   }),
   duplicateComment: (payload) => `Reported again from the app (${source(payload)}).`,
+  report: ({ debugReport }) => debugReport,
 });

@@ -351,6 +351,11 @@ i18n
             invalid: "Write at least {{min}} characters.",
             failed:
               "Couldn't send your feedback. Check your connection and try again.",
+            includeDebug: "Include debug report",
+            debugHint:
+              "The debug panel's report, with your workspace path and open file names. It isn't posted with your message: only the Notefig team can read it, and it's deleted after 30 days.",
+            showDebug: "Show what's sent",
+            hideDebug: "Hide",
           },
 
           // Hotkeys Settings

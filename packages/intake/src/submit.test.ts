@@ -27,6 +27,7 @@ function setup(options: { failCreate?: boolean } = {}) {
     store: () => store,
     salt: "salt",
     newId: () => `sub_${++next}`,
+    reportUrl: (workflowId, reportId) => `https://intake.test/v1/reports/${workflowId}/${reportId}`,
     warn: () => {},
   };
   const send = (body: unknown) => handleSubmission(deps, feedbackWorkflow, body, "ip:1.2.3.4");
@@ -58,9 +59,31 @@ describe("handleSubmission (feedback)", () => {
     expect(calls.map((call) => call.op)).toEqual(["create", "comment"]);
   });
 
-  it("rejects an invalid submission without touching Linear", async () => {
+  it("keeps the debug report out of the issue and links it privately", async () => {
     const { send, calls } = setup();
-    const result = await send(feedback({ message: "short" }));
+    await send(feedback({ debugReport: "=== Notefig Debug Report ===\nbasePath: /Users/someone/notes" }));
+    expect(calls.map((call) => call.op)).toEqual(["create", "attach"]);
+    const [create, attach] = calls;
+    if (create.op !== "create" || attach.op !== "attach") throw new Error("unexpected calls");
+    expect(create.input.description).not.toContain("/Users/someone");
+    expect(attach.issueId).toBe("issue-1");
+    expect(attach.link.title).toBe("Debug report");
+    expect(attach.link.url).toMatch(/^https:\/\/intake\.test\/v1\/reports\/feedback\/\d{8}-/);
+  });
+
+  it("attaches a duplicate's debug report to the existing issue", async () => {
+    const { send, calls } = setup();
+    await send(feedback());
+    await send(feedback({ installId: INSTALL_B, debugReport: "another install's report" }));
+    expect(calls.map((call) => call.op)).toEqual(["create", "comment", "attach"]);
+  });
+
+  it.each([
+    ["a message that's too short", { message: "short" }],
+    ["a version that isn't one", { app: { version: "1.0.0 @everyone", platform: "macos" } }],
+  ])("rejects %s without touching Linear", async (_, overrides) => {
+    const { send, calls } = setup();
+    const result = await send(feedback(overrides));
     expect(result.status).toBe(400);
     expect(calls).toEqual([]);
   });

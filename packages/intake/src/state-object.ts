@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   createWorkflowStore,
+  REPORT_RETENTION_DAYS,
   type AdmitInput,
   type Resolution,
   type WorkflowStore,
@@ -12,7 +13,7 @@ const KEEP_COUNTERS_DAYS = 7;
 /**
  * Holds one workflow's state; the Worker addresses it by workflow id
  * (`idFromName(workflow.id)`). Calls run one at a time, which keeps the
- * store's counters exact. A daily alarm drops old day counters.
+ * store's counters exact. A daily alarm drops old day counters and reports.
  */
 export class WorkflowState extends DurableObject<unknown> implements WorkflowStore {
   #store: WorkflowStore;
@@ -43,16 +44,27 @@ export class WorkflowState extends DurableObject<unknown> implements WorkflowSto
     return this.#store.resolve(issueId, resolution);
   }
 
-  reserveAgentRun(perDay: number) {
-    return this.#store.reserveAgentRun(perDay);
+  saveReport(submissionId: string, text: string) {
+    return this.#store.saveReport(submissionId, text);
   }
 
-  prune(keepDays: number) {
-    return this.#store.prune(keepDays);
+  report(reportId: string) {
+    return this.#store.report(reportId);
+  }
+
+  reserveBuild(issueId: string, perDay: number) {
+    return this.#store.reserveBuild(issueId, perDay);
+  }
+
+  prune(keep: { counterDays: number; reportDays: number }) {
+    return this.#store.prune(keep);
   }
 
   async alarm() {
-    await this.#store.prune(KEEP_COUNTERS_DAYS);
+    await this.#store.prune({
+      counterDays: KEEP_COUNTERS_DAYS,
+      reportDays: REPORT_RETENTION_DAYS,
+    });
     await this.ctx.storage.setAlarm(Date.now() + PRUNE_EVERY_MS);
   }
 }

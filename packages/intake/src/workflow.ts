@@ -20,10 +20,16 @@ export interface WorkflowLimits {
   submissionsPerDay: number;
   /** Submissions per submitter per UTC day, duplicates included. */
   perSubmitterPerDay: number;
+  /** Reports of an existing issue per UTC day (each comments on it). */
+  duplicatesPerDay: number;
   /** Declined issues after which a submitter's submissions are dropped. */
   blockAfterDeclines: number;
-  /** Accepted issues per UTC day that get the agent label. */
-  agentRunsPerDay: number;
+  /**
+   * Accepted issues per UTC day that start an agent build, so accepting a
+   * batch can't queue more builds than meant. Builds you start yourself
+   * (adding `agent:build`) aren't counted.
+   */
+  acceptedBuildsPerDay: number;
 }
 
 export interface WorkflowLinear {
@@ -31,10 +37,12 @@ export interface WorkflowLinear {
   sourceLabel: string;
   /** What accepting the issue out of Triage does. */
   onAccept: {
-    /** Labels that start the agent build once the issue syncs to GitHub. */
-    agentLabels: string[];
+    /** Adds `agent:build` and starts a build (builds.ts). */
+    build: boolean;
     project?: string;
   };
+  /** The title of the link to a submission's private report. */
+  reportTitle?: string;
 }
 
 export type ParseResult =
@@ -49,6 +57,11 @@ export interface ParsedSubmission {
   issue(submissionId: string): IssueDraft;
   /** The comment left on the existing issue when someone reports it again. */
   duplicateComment: string;
+  /**
+   * Text kept out of the issue (it would sync to public GitHub): stored by
+   * the service and linked from the issue behind Cloudflare Access.
+   */
+  report?: string;
 }
 
 export interface IssueDraft {
@@ -64,6 +77,7 @@ interface WorkflowSpec<T> extends Omit<Workflow, "parse"> {
   submitter(payload: T): string | undefined;
   issue(payload: T, submissionId: string): IssueDraft;
   duplicateComment(payload: T): string;
+  report?(payload: T): string | undefined;
 }
 
 /** Types a workflow against its schema, then erases the payload type. */
@@ -88,6 +102,7 @@ export function defineWorkflow<T>(spec: WorkflowSpec<T>): Workflow {
             return { ...draft, labels: [spec.linear.sourceLabel, ...draft.labels] };
           },
           duplicateComment: spec.duplicateComment(payload),
+          report: spec.report?.(payload),
         },
       };
     },

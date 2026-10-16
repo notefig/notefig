@@ -34,6 +34,12 @@ export interface CreatedIssue {
   identifier: string;
 }
 
+export interface IssueDetails extends CreatedIssue {
+  title: string;
+  description: string;
+  stateType: StateType;
+}
+
 export interface LinearClient {
   context(): Promise<LinearContext>;
   createIssue(input: {
@@ -45,6 +51,9 @@ export interface LinearClient {
   }): Promise<CreatedIssue>;
   updateIssue(id: string, input: { addedLabelIds?: string[]; projectId?: string }): Promise<void>;
   comment(issueId: string, body: string): Promise<void>;
+  issue(id: string): Promise<IssueDetails>;
+  /** A link in the issue's sidebar. Attachments stay in Linear. */
+  attach(issueId: string, link: { url: string; title: string; subtitle?: string }): Promise<void>;
 }
 
 export interface LinearClientOptions {
@@ -60,13 +69,32 @@ interface ContextData {
   projects: { nodes: { id: string; name: string }[] };
 }
 
-const CONTEXT_QUERY = `
-  query IntakeContext($teamKey: String!) {
+interface Page<T> {
+  nodes: T[];
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+}
+
+const TEAM_QUERY = `
+  query IntakeTeam($teamKey: String!) {
     teams(filter: { key: { eq: $teamKey } }) {
       nodes { id states { nodes { id type } } }
     }
-    issueLabels(first: 250) { nodes { id name team { id } } }
-    projects(first: 100) { nodes { id name } }
+  }`;
+
+const LABELS_QUERY = `
+  query IntakeLabels($after: String) {
+    issueLabels(first: 250, after: $after) {
+      nodes { id name team { id } }
+      pageInfo { hasNextPage endCursor }
+    }
+  }`;
+
+const PROJECTS_QUERY = `
+  query IntakeProjects($after: String) {
+    projects(first: 250, after: $after) {
+      nodes { id name }
+      pageInfo { hasNextPage endCursor }
+    }
   }`;
 
 function buildContext(teamKey: string, data: ContextData): LinearContext {
@@ -124,6 +152,19 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
     return result.data;
   }
 
+  /** Every node of a paginated connection, following its cursor. */
+  async function allPages<T>(query: string, field: string): Promise<T[]> {
+    const nodes: T[] = [];
+    let after: string | null = null;
+    do {
+      const data: Record<string, Page<T>> = await request(query, { after });
+      const page = data[field];
+      nodes.push(...page.nodes);
+      after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+    } while (after);
+    return nodes;
+  }
+
   async function mutate<T extends { success: boolean }>(
     field: string,
     query: string,
@@ -138,7 +179,12 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
   return {
     async context() {
       if (cached && now() - cached.at < CONTEXT_TTL_MS) return cached.context;
-      const data = await request<ContextData>(CONTEXT_QUERY, { teamKey: options.teamKey });
+      const [{ teams }, labels, projects] = await Promise.all([
+        request<Pick<ContextData, "teams">>(TEAM_QUERY, { teamKey: options.teamKey }),
+        allPages<ContextData["issueLabels"]["nodes"][number]>(LABELS_QUERY, "issueLabels"),
+        allPages<ContextData["projects"]["nodes"][number]>(PROJECTS_QUERY, "projects"),
+      ]);
+      const data: ContextData = { teams, issueLabels: { nodes: labels }, projects: { nodes: projects } };
       cached = { context: buildContext(options.teamKey, data), at: now() };
       return cached.context;
     },
@@ -171,6 +217,29 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
           commentCreate(input: $input) { success }
         }`,
         { input: { issueId, body } },
+      );
+    },
+
+    async issue(id) {
+      const data = await request<{
+        issue: CreatedIssue & { title: string; description: string | null; state: { type: StateType } };
+      }>(
+        `query IntakeIssue($id: String!) {
+          issue(id: $id) { id identifier title description state { type } }
+        }`,
+        { id },
+      );
+      const { state, description, ...issue } = data.issue;
+      return { ...issue, description: description ?? "", stateType: state.type };
+    },
+
+    async attach(issueId, link) {
+      await mutate(
+        "attachmentCreate",
+        `mutation IntakeAttach($input: AttachmentCreateInput!) {
+          attachmentCreate(input: $input) { success }
+        }`,
+        { input: { issueId, ...link } },
       );
     },
   };

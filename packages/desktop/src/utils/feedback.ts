@@ -47,17 +47,18 @@ function resultFor(status: number): FeedbackSendResult {
 
 export async function sendFeedback(
   deps: FeedbackDeps,
-  input: { kind: FeedbackKind; message: string },
+  input: { kind: FeedbackKind; message: string; debugReport?: string },
 ): Promise<FeedbackSendResult> {
   const intakeUrl = deps.intakeUrl ?? INTAKE_URL;
   if (!intakeUrl) return "failed";
-  const submission: FeedbackSubmission = {
-    kind: input.kind,
-    message: input.message.trim(),
-    app: { version: __APP_VERSION__, platform: getDesktopOs() ?? "web" },
-    installId: await installId(deps.kv),
-  };
   try {
+    const submission: FeedbackSubmission = {
+      kind: input.kind,
+      message: input.message.trim(),
+      app: { version: __APP_VERSION__, platform: getDesktopOs() ?? "web" },
+      installId: await installId(deps.kv),
+      ...(input.debugReport && { debugReport: input.debugReport }),
+    };
     const response = await deps.fetch(
       new URL(intakeSubmissionPath(FEEDBACK_WORKFLOW_ID), intakeUrl),
       {

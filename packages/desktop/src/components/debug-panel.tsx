@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useFocusedWorkspace } from "@/modules/workspaces/react";
-import { path as pathutil } from "@/utils/path";
 import { Button } from "@notefig/ui/button";
 import { Input } from "@notefig/ui/input";
 import { ScrollArea } from "@notefig/ui/scroll-area";
@@ -23,21 +21,13 @@ import {
 } from "lucide-react";
 import type { KvApi } from "@/modules/kv";
 import { SETTINGS_NAMESPACE } from "@/hooks/use-app-settings";
-import type { LayoutNode } from "@/components/dockable";
-// Pure zero-dependency leaf — safe for the crash fallback (unlike entity
-// modules, which must never be runtime imports here).
-import {
-  LAYOUT_PARAM,
-  parseLayout,
-  extractTabIds,
-  findLayoutSelectedTab,
-} from "@/utils/layout-codec";
+// Pure leaves and a QueryClient-only hook — safe for the crash fallback
+// (unlike entity modules, which must never be runtime imports here).
+import { formatDebugReport, type ConsoleEntry } from "@/utils/debug-report";
+import { useDebugSnapshot } from "@/hooks/use-debug-snapshot";
 import { isMarkdownInstance } from "@/modules/editors";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLiveQuery } from "@tanstack/react-db";
-// Type-only import — erased at runtime, so the crash panel stays
-// self-sufficient (its only runtime dependency is the QueryClient).
-import type { GitRow } from "@/modules/git";
 import { buildSessionRecording } from "./debug-panel-recording";
 import { useCore } from "@notefig/core/react";
 
@@ -68,13 +58,6 @@ function useQueryCacheTick(): number {
   }, [queryClient]);
 
   return tick;
-}
-
-interface ConsoleEntry {
-  id: number;
-  level: "log" | "info" | "warn" | "error";
-  timestamp: number;
-  message: string;
 }
 
 type ConsoleLevel = ConsoleEntry["level"];
@@ -262,48 +245,14 @@ function DebugPanelContent({
   searchParams: URLSearchParams;
 }) {
   const { editors, agentStore: store, kv } = useCore();
-  // The focused workspace stands in for the old route param: the dock
-  // spans every open workspace, so this is only the sidebar's scope.
-  const workspacePath = useFocusedWorkspace();
-  const basePath = workspacePath ?? undefined;
-
-  const dockableLayout = useMemo(
-    () => parseLayout(searchParams.get(LAYOUT_PARAM)),
-    [searchParams],
-  );
-  const openTabs = useMemo(
-    () => extractTabIds(dockableLayout),
-    [dockableLayout],
-  );
-  const activeTabId = useMemo(
-    () => findLayoutSelectedTab(dockableLayout),
-    [dockableLayout],
-  );
+  const snapshot = useDebugSnapshot(searchParams);
+  const { basePath, dockableLayout, openTabs, activeTabId } = snapshot;
   useQueryCacheTick();
-  const queryClient = useQueryClient();
-  // Key hand-inlined on purpose (self-sufficiency): matches modules/git/git.ts's
-  // gitQueryKey — the git collection stores its GitRow[] in the query cache.
-  // Normalized, because gitQueryKey normalizes; a respelled basePath would
-  // otherwise read an empty cache and the panel would show no git state.
-  const gitStatusQueryKey = basePath
-    ? (["git", pathutil.normalize(basePath)] as const)
-    : null;
-  const latestGitRows = gitStatusQueryKey
-    ? (queryClient.getQueryData<GitRow[]>(gitStatusQueryKey) ?? null)
-    : null;
-  const latestGitRepoRow =
-    latestGitRows?.find(
-      (row): row is GitRow & { kind: "repo" } => row.kind === "repo",
-    ) ?? null;
-  const latestGitStatus = latestGitRows;
-  const latestGitStatusError: { message: string } | null = gitStatusQueryKey
-    ? ((queryClient.getQueryState(gitStatusQueryKey)?.error as Error | null) ??
-      latestGitRepoRow?.statusError ??
-      null)
-    : null;
-  const latestGitStatusUpdatedAt = gitStatusQueryKey
-    ? (queryClient.getQueryState(gitStatusQueryKey)?.dataUpdatedAt ?? 0)
-    : 0;
+  const {
+    rows: latestGitStatus,
+    error: latestGitStatusError,
+    updatedAt: latestGitStatusUpdatedAt,
+  } = snapshot.git;
 
   const [isCapturing, setIsCapturing] = useState(false);
   const { entries: consoleEntries, clear: clearConsole } =
@@ -379,95 +328,18 @@ function DebugPanelContent({
 
   const [copied, setCopied] = useState(false);
 
-  const buildDebugReport = useCallback(() => {
-    const rawUrl = window.location.pathname + window.location.search;
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(rawUrl);
-    } catch {
-      decoded = rawUrl;
-    }
-
-    const lines: string[] = [];
-    lines.push("=== Notefig Debug Report ===");
-    lines.push(`Timestamp: ${new Date().toISOString()}`);
-    lines.push(`User Agent: ${navigator.userAgent}`);
-    lines.push("");
-
-    if (error) {
-      lines.push("── Error ──");
-      lines.push(`Message: ${error.message}`);
-      if (error.stack) {
-        lines.push(`Stack:\n${error.stack}`);
-      }
-      lines.push("");
-    }
-
-    lines.push("── Route State ──");
-    lines.push(`URL (raw): ${rawUrl}`);
-    if (decoded !== rawUrl) {
-      lines.push(`URL (decoded): ${decoded}`);
-    }
-    lines.push(`basePath: ${basePath || "undefined"}`);
-
-    const displayParams = new URLSearchParams(searchParams);
-    displayParams.delete("debug");
-    lines.push(`searchParams: ${displayParams.toString() || "(none)"}`);
-    lines.push("");
-
-    lines.push("── Open Tabs ──");
-    lines.push(`Count: ${openTabs.length}`);
-    lines.push(`Active: ${activeTabId || "null"}`);
-    openTabs.forEach((tab) => {
-      const marker = tab === activeTabId ? " (active)" : "";
-      lines.push(`  - ${tab}${marker}`);
-    });
-    lines.push("");
-
-    if (dockableLayout.length > 0) {
-      lines.push("── Dockable Layout ──");
-      lines.push(JSON.stringify(dockableLayout, null, 2));
-      lines.push("");
-    }
-
-    lines.push("── Git Status Cache ──");
-    lines.push(
-      `updatedAt: ${latestGitStatusUpdatedAt ? new Date(latestGitStatusUpdatedAt).toISOString() : "(none)"}`,
-    );
-    if (latestGitStatusError) {
-      lines.push(`error: ${latestGitStatusError.message}`);
-    }
-    lines.push(JSON.stringify(latestGitStatus, null, 2));
-    lines.push("");
-
-    if (consoleEntries.length > 0) {
-      lines.push(`── Console Output (${consoleEntries.length} entries) ──`);
-      consoleEntries.forEach((entry) => {
-        const time = new Date(entry.timestamp).toLocaleTimeString("en-US", {
-          hour12: false,
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        });
-        lines.push(`[${time}] [${entry.level.toUpperCase()}] ${entry.message}`);
-      });
-      lines.push("");
-    }
-
-    lines.push("=== End Debug Report ===");
-    return lines.join("\n");
-  }, [
-    basePath,
-    searchParams,
-    openTabs,
-    activeTabId,
-    dockableLayout,
-    latestGitStatus,
-    latestGitStatusError,
-    latestGitStatusUpdatedAt,
-    consoleEntries,
-    error,
-  ]);
+  const buildDebugReport = useCallback(
+    () =>
+      formatDebugReport({
+        ...snapshot,
+        rawUrl: window.location.pathname + window.location.search,
+        userAgent: navigator.userAgent,
+        now: new Date(),
+        error,
+        console: consoleEntries,
+      }),
+    [snapshot, consoleEntries, error],
+  );
 
   const copyDebugReport = useCallback(async () => {
     await copyTextWithFallback(buildDebugReport());
@@ -537,11 +409,11 @@ function DebugPanelContent({
     () =>
       [...allTasks]
         .filter(
-          (task) => !workspacePath || task.workspacePath === workspacePath,
+          (task) => !basePath || task.workspacePath === basePath,
         )
         // Newest-first (task ids sort descending by construction).
         .sort((a, b) => (a.taskId < b.taskId ? -1 : 1)),
-    [allTasks, workspacePath],
+    [allTasks, basePath],
   );
 
   const [selectedSessionTaskId, setSelectedSessionTaskId] = useState<

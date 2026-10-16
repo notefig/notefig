@@ -1,6 +1,6 @@
 import { sha256Hex } from "./crypto";
 import type { LinearClient } from "./linear";
-import type { WorkflowStore } from "./store";
+import { REPORT_RETENTION_DAYS, type WorkflowStore } from "./store";
 import type { ParsedSubmission, Workflow } from "./workflow";
 
 export interface HttpResult {
@@ -14,6 +14,8 @@ export interface SubmitDeps {
   /** Secret salt for hashing fingerprints and submitter ids. */
   salt: string;
   newId(): string;
+  /** Where a stored report is read (behind Cloudflare Access). */
+  reportUrl(workflowId: string, reportId: string): string;
   warn(message: string, error: unknown): void;
 }
 
@@ -60,14 +62,43 @@ export async function handleSubmission(
       return ACCEPTED;
     case "duplicate":
       if (admitted.issueId) {
+        const issueId = admitted.issueId;
         await deps.linear
-          .comment(admitted.issueId, submission.duplicateComment)
+          .comment(issueId, submission.duplicateComment)
           .catch((error: unknown) => deps.warn("duplicate comment failed", error));
+        await attachReport(deps, store, workflow, submission, admitted.submissionId, issueId);
       }
       return ACCEPTED;
-    case "create":
-      await openIssue(deps, store, submission, submissionId);
+    case "create": {
+      const issueId = await openIssue(deps, store, submission, submissionId);
+      await attachReport(deps, store, workflow, submission, submissionId, issueId);
       return ACCEPTED;
+    }
+  }
+}
+
+/**
+ * Stores the submission's private report and links it from the issue. The
+ * issue already exists, so a failure here only loses the report.
+ */
+async function attachReport(
+  deps: SubmitDeps,
+  store: WorkflowStore,
+  workflow: Workflow,
+  submission: ParsedSubmission,
+  submissionId: string,
+  issueId: string,
+): Promise<void> {
+  if (!submission.report) return;
+  try {
+    const reportId = await store.saveReport(submissionId, submission.report);
+    await deps.linear.attach(issueId, {
+      url: deps.reportUrl(workflow.id, reportId),
+      title: workflow.linear.reportTitle ?? "Report",
+      subtitle: `Private. Deleted after ${REPORT_RETENTION_DAYS} days, or when the issue is declined.`,
+    });
+  } catch (error) {
+    deps.warn("report attachment failed", error);
   }
 }
 
@@ -76,7 +107,7 @@ async function openIssue(
   store: WorkflowStore,
   submission: ParsedSubmission,
   submissionId: string,
-): Promise<void> {
+): Promise<string> {
   try {
     const context = await deps.linear.context();
     const draft = submission.issue(submissionId);
@@ -88,6 +119,7 @@ async function openIssue(
       labelIds: draft.labels.map((name) => context.labelId(name)),
     });
     await store.linkIssue(submissionId, issue.id);
+    return issue.id;
   } catch (error) {
     // Free the fingerprint so the same report can be retried.
     await store.abandon(submissionId);

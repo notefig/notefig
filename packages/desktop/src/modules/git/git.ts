@@ -91,9 +91,10 @@ const CHECKPOINT_LOG_DEPTH = 25;
 // registered. useGitFetching then reported "not fetching" forever and the
 // checkpoint panel's anti-flicker freeze was silently off.
 //
-// debug-panel.tsx (the crash fallback — deliberately self-sufficient) peeks
-// this key with a hand-inlined ["git", normalized basePath]. If this key
-// shape ever changes, update debug-panel in the same commit.
+// The debug report (hooks/use-debug-snapshot.ts, read by the crash
+// fallback — deliberately self-sufficient) peeks this key with a
+// hand-inlined ["git", normalized basePath]. If this key shape ever
+// changes, update it in the same commit.
 export function gitQueryKey(workspacePath: string) {
   return ["git", pathutil.normalize(workspacePath)] as const;
 }

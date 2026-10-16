@@ -1,5 +1,6 @@
-// The intake Worker (README.md). Secrets — LINEAR_API_KEY,
-// LINEAR_WEBHOOK_SECRET, SUBMITTER_SALT — are set with `wrangler secret put`.
+// The intake Worker (README.md). Runs on the Workers Free plan. Secrets —
+// LINEAR_API_KEY, LINEAR_WEBHOOK_SECRET, SUBMITTER_SALT,
+// GITHUB_APP_PRIVATE_KEY — are set with `wrangler secret put`.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "notefig-intake",
@@ -15,7 +16,12 @@
   "vars": {
     "LINEAR_TEAM_KEY": "MET",
     "LINEAR_APPROVER_IDS": "566cdfe1-fc7f-4489-bc41-99ee9694e025",
-    "ALLOWED_ORIGINS": "tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://notefig.com,https://www.notefig.com,https://app.notefig.com,http://localhost:1420"
+    "ALLOWED_ORIGINS": "tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://notefig.com,https://www.notefig.com,https://app.notefig.com,http://localhost:1420",
+    "GITHUB_REPOSITORY": "notefig/notefig",
+    // Filled in during setup (README.md); until then builds and report links don't work.
+    "GITHUB_APP_ID": "",
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
   },
   // A short burst limit per IP and workflow, ahead of the daily limits each
   // workflow's state object keeps.
@@ -23,7 +29,10 @@
     { "name": "SUBMIT_LIMITER", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } }
   ],
   "durable_objects": {
-    "bindings": [{ "name": "WORKFLOW_STATE", "class_name": "WorkflowState" }]
+    "bindings": [
+      { "name": "WORKFLOW_STATE", "class_name": "WorkflowState" },
+      { "name": "BUILD_QUEUE", "class_name": "BuildQueueObject" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkflowState"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkflowState", "BuildQueueObject"] }]
 }

@@ -7,7 +7,10 @@
  * Keys are built only here, under a version prefix: a later change of
  * record shape moves to `v2:` (migrating or dropping `v1:` keys) instead of
  * reading old records as new ones. Records hold hashes, never the submitted
- * text or the raw install id.
+ * text or the raw install id. The one exception is a private report (the
+ * app's debug report), kept under a key that starts with the day it
+ * arrived, so `prune` finds old ones by key range, and deleted early when
+ * its issue is declined.
  */
 
 /** The slice of DurableObjectStorage the store needs. */
@@ -28,7 +31,17 @@ export interface SubmissionRecord {
   status: SubmissionStatus;
   /** Hashed submitters who reported the same thing (capped). */
   reporters: string[];
+  /** Ids of private reports sent with this submission or its duplicates. */
+  reports?: string[];
+  /** Accepting it took a slot of the day's build cap; a retried Accept reuses it. */
+  buildReserved?: boolean;
   createdAt: number;
+}
+
+export interface StoredReport {
+  submissionId: string;
+  text: string;
+  receivedAt: number;
 }
 
 interface SubmitterRecord {
@@ -45,6 +58,7 @@ export interface AdmitInput {
     submissionsPerDay: number;
     perSubmitterPerDay: number;
     blockAfterDeclines: number;
+    duplicatesPerDay: number;
   };
 }
 
@@ -52,7 +66,7 @@ export type AdmitResult =
   /** Create the Linear issue, then `linkIssue` (or `abandon` on failure). */
   | { kind: "create" }
   /** Already reported by someone else: comment on `issueId` if there is one. */
-  | { kind: "duplicate"; issueId?: string }
+  | { kind: "duplicate"; submissionId: string; issueId?: string }
   /** Over a limit: tell the client to try later. */
   | { kind: "limited" }
   /** Blocked submitter, declined report, or a repeat: accept and do nothing. */
@@ -65,14 +79,23 @@ export interface WorkflowStore {
   linkIssue(submissionId: string, issueId: string): Promise<void>;
   abandon(submissionId: string): Promise<void>;
   resolve(issueId: string, resolution: Resolution): Promise<void>;
-  /** Counts one agent run against today's cap; false when the cap is reached. */
-  reserveAgentRun(perDay: number): Promise<boolean>;
-  /** Deletes day counters older than `keepDays`. */
-  prune(keepDays: number): Promise<void>;
+  /** Keeps a private report for a submission; returns its id. */
+  saveReport(submissionId: string, text: string): Promise<string>;
+  report(reportId: string): Promise<StoredReport | undefined>;
+  /** Counts one build from an accepted issue; false when today's cap is reached. */
+  reserveBuild(issueId: string, perDay: number): Promise<boolean>;
+  /** Deletes day counters and reports older than the given number of days. */
+  prune(keep: { counterDays: number; reportDays: number }): Promise<void>;
 }
 
 const MAX_REPORTERS = 50;
 const DAY_MS = 86_400_000;
+/**
+ * A submission still pending this long was interrupted between admission
+ * and its issue being created (the Worker stopped mid-request). Its
+ * fingerprint is freed so the report can be sent again.
+ */
+const PENDING_TTL_MS = 10 * 60_000;
 
 const key = {
   submission: (id: string) => `v1:submission:${id}`,
@@ -81,10 +104,23 @@ const key = {
   submitter: (hash: string) => `v1:submitter:${hash}`,
   counterPrefix: "v1:count:",
   counter: (day: string, name: string) => `v1:count:${day}:${name}`,
+  reportPrefix: "v1:report:",
+  /** `reportId` starts with the day it arrived (yyyymmdd), so keys sort by age. */
+  report: (reportId: string) => `v1:report:${reportId}`,
 };
 
 function utcDay(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
+}
+
+/** How long a private report is kept. */
+export const REPORT_RETENTION_DAYS = 30;
+
+/** A report id: the day it arrived, then a random part. */
+export const REPORT_ID_PATTERN = /^\d{8}-[0-9a-f-]{36}$/;
+
+function compactDay(ms: number): string {
+  return utcDay(ms).replace(/-/g, "");
 }
 
 export function createWorkflowStore(
@@ -105,17 +141,40 @@ export function createWorkflowStore(
     return (record?.declined ?? 0) >= after;
   }
 
+  /** The submission holding a fingerprint, unless it was interrupted (then freed). */
+  async function liveSubmission(fingerprint: string): Promise<SubmissionRecord | undefined> {
+    const id = await storage.get<string>(key.fingerprint(fingerprint));
+    const record = id ? await storage.get<SubmissionRecord>(key.submission(id)) : undefined;
+    if (record?.status !== "pending" || now() - record.createdAt <= PENDING_TTL_MS) return record;
+    await forget(record);
+    return undefined;
+  }
+
   async function reportAgain(
     existing: SubmissionRecord,
     submitter: string | undefined,
+    perDay: number,
   ): Promise<AdmitResult> {
     if (existing.status === "declined") return { kind: "drop" };
+    // Each duplicate writes to Linear, so they share a daily ceiling too.
+    if ((await bump("duplicates")) > perDay) return { kind: "drop" };
     if (submitter && existing.reporters.includes(submitter)) return { kind: "drop" };
     if (submitter && existing.reporters.length < MAX_REPORTERS) {
       existing.reporters.push(submitter);
       await storage.put(key.submission(existing.id), existing);
     }
-    return { kind: "duplicate", issueId: existing.issueId };
+    return { kind: "duplicate", submissionId: existing.id, issueId: existing.issueId };
+  }
+
+  async function deleteReports(record: SubmissionRecord): Promise<void> {
+    for (const reportId of record.reports ?? []) await storage.delete(key.report(reportId));
+  }
+
+  /** Deletes a submission that never got its issue, freeing its fingerprint. */
+  async function forget(record: SubmissionRecord): Promise<void> {
+    await deleteReports(record);
+    await storage.delete(key.submission(record.id));
+    await storage.delete(key.fingerprint(record.fingerprint));
   }
 
   async function submissionForIssue(issueId: string): Promise<SubmissionRecord | undefined> {
@@ -129,11 +188,8 @@ export function createWorkflowStore(
       if (submitter && (await bump(`submitter:${submitter}`)) > limits.perSubmitterPerDay) {
         return { kind: "limited" };
       }
-      const existingId = await storage.get<string>(key.fingerprint(fingerprint));
-      const existing = existingId
-        ? await storage.get<SubmissionRecord>(key.submission(existingId))
-        : undefined;
-      if (existing) return reportAgain(existing, submitter);
+      const existing = await liveSubmission(fingerprint);
+      if (existing) return reportAgain(existing, submitter, limits.duplicatesPerDay);
       if ((await bump("submissions")) > limits.submissionsPerDay) return { kind: "limited" };
 
       const record: SubmissionRecord = {
@@ -158,33 +214,62 @@ export function createWorkflowStore(
 
     async abandon(submissionId) {
       const record = await storage.get<SubmissionRecord>(key.submission(submissionId));
-      if (!record) return;
-      await storage.delete(key.submission(submissionId));
-      await storage.delete(key.fingerprint(record.fingerprint));
+      if (record) await forget(record);
     },
 
     async resolve(issueId, resolution) {
       const record = await submissionForIssue(issueId);
       if (!record) return;
       const wasDeclined = record.status === "declined";
-      await storage.put(key.submission(record.id), { ...record, status: resolution });
+      if (resolution === "declined") await deleteReports(record);
+      await storage.put(key.submission(record.id), {
+        ...record,
+        status: resolution,
+        reports: resolution === "declined" ? [] : record.reports,
+      });
       if (resolution !== "declined" || wasDeclined || !record.submitter) return;
       const submitterKey = key.submitter(record.submitter);
       const submitter = (await storage.get<SubmitterRecord>(submitterKey)) ?? { declined: 0 };
       await storage.put(submitterKey, { declined: submitter.declined + 1 });
     },
 
-    async reserveAgentRun(perDay) {
-      return (await bump("agent-runs")) <= perDay;
+    async saveReport(submissionId, text) {
+      const reportId = `${compactDay(now())}-${crypto.randomUUID()}`;
+      const report: StoredReport = { submissionId, text, receivedAt: now() };
+      await storage.put(key.report(reportId), report);
+      const record = await storage.get<SubmissionRecord>(key.submission(submissionId));
+      if (record) {
+        const reports = [...(record.reports ?? []), reportId];
+        await storage.put(key.submission(submissionId), { ...record, reports });
+      }
+      return reportId;
     },
 
-    async prune(keepDays) {
-      const oldest = utcDay(now() - keepDays * DAY_MS);
-      const stale = await storage.list<number>({
+    async report(reportId) {
+      if (!REPORT_ID_PATTERN.test(reportId)) return undefined;
+      return storage.get<StoredReport>(key.report(reportId));
+    },
+
+    async reserveBuild(issueId, perDay) {
+      const record = await submissionForIssue(issueId);
+      if (record?.buildReserved) return true;
+      if ((await bump("builds")) > perDay) return false;
+      if (record) await storage.put(key.submission(record.id), { ...record, buildReserved: true });
+      return true;
+    },
+
+    async prune({ counterDays, reportDays }) {
+      const staleCounters = await storage.list<number>({
         prefix: key.counterPrefix,
-        end: key.counter(oldest, ""),
+        end: key.counter(utcDay(now() - counterDays * DAY_MS), ""),
       });
-      for (const counterKey of stale.keys()) await storage.delete(counterKey);
+      for (const counterKey of staleCounters.keys()) await storage.delete(counterKey);
+      // Run daily, so this lists about one day's reports.
+      const staleReports = await storage.list<never>({
+        prefix: key.reportPrefix,
+        end: key.report(compactDay(now() - reportDays * DAY_MS)),
+      });
+      for (const reportKey of staleReports.keys()) await storage.delete(reportKey);
     },
   };
 }

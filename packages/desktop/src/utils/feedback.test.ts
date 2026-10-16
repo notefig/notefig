@@ -23,6 +23,16 @@ describe("sendFeedback", () => {
     expect(body).toMatchObject({ kind: "idea", message: "Let me pin a document to the sidebar" });
   });
 
+  it("sends a debug report only when one is given", async () => {
+    const fetch = respondWith(202);
+    const deps = { fetch, kv: testKv(), intakeUrl: INTAKE };
+    await sendFeedback(deps, { kind: "bug", message: "Without the report attached" });
+    await sendFeedback(deps, { kind: "bug", message: "With the report attached", debugReport: "=== report ===" });
+    const bodies = fetch.mock.calls.map(([, init]) => feedbackSubmissionSchema.parse(JSON.parse(String(init?.body))));
+    expect(bodies[0].debugReport).toBeUndefined();
+    expect(bodies[1].debugReport).toBe("=== report ===");
+  });
+
   it("keeps one install id across submissions", async () => {
     const fetch = respondWith(202);
     const deps = { fetch, kv: testKv(), intakeUrl: INTAKE };
@@ -42,6 +52,15 @@ describe("sendFeedback", () => {
       { kind: "other", message: "Something to tell you about" },
     );
     expect(result).toBe(expected);
+  });
+
+  it("reports a storage error as failed", async () => {
+    const kv = { read: vi.fn(async () => { throw new Error("db closed"); }), write: vi.fn() };
+    const result = await sendFeedback(
+      { fetch: respondWith(202), kv, intakeUrl: INTAKE },
+      { kind: "bug", message: "This will not get through" },
+    );
+    expect(result).toBe("failed");
   });
 
   it("reports a network error as failed", async () => {

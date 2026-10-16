@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { createWorkflowStore, type AdmitInput } from "./store";
 import { memoryStorage } from "./testing";
 
-const limits = { submissionsPerDay: 3, perSubmitterPerDay: 2, blockAfterDeclines: 2 };
+const limits = {
+  submissionsPerDay: 3,
+  perSubmitterPerDay: 2,
+  blockAfterDeclines: 2,
+  duplicatesPerDay: 2,
+};
 
 function setup(start = Date.UTC(2026, 9, 16, 12)) {
   const storage = memoryStorage();
@@ -32,6 +37,7 @@ describe("createWorkflowStore", () => {
     await store.linkIssue("sub_1", "issue_1");
     expect(await store.admit(input({ submissionId: "sub_2", submitter: "bob" }))).toEqual({
       kind: "duplicate",
+      submissionId: "sub_1",
       issueId: "issue_1",
     });
   });
@@ -102,24 +108,87 @@ describe("createWorkflowStore", () => {
     expect(await store.admit(input({ submissionId: "3", fingerprint: "3", limits: { ...limits, perSubmitterPerDay: 5 } }))).toEqual({ kind: "create" });
   });
 
-  it("caps agent runs per day", async () => {
+  it("caps builds from accepted issues per day", async () => {
     const { store, advanceDays } = setup();
-    expect(await store.reserveAgentRun(1)).toBe(true);
-    expect(await store.reserveAgentRun(1)).toBe(false);
+    expect(await store.reserveBuild("issue_a", 1)).toBe(true);
+    expect(await store.reserveBuild("issue_b", 1)).toBe(false);
     advanceDays(1);
-    expect(await store.reserveAgentRun(1)).toBe(true);
+    expect(await store.reserveBuild("issue_b", 1)).toBe(true);
   });
 
-  it("prunes day counters older than the window and keeps records", async () => {
+  it("reuses an issue's build slot when its Accept is delivered again", async () => {
+    const { store } = setup();
+    await store.admit(input());
+    await store.linkIssue("sub_1", "issue_1");
+    expect(await store.reserveBuild("issue_1", 1)).toBe(true);
+    expect(await store.reserveBuild("issue_1", 1)).toBe(true);
+    expect(await store.reserveBuild("issue_other", 1)).toBe(false);
+  });
+
+  it("caps duplicate reports per day across submitters", async () => {
+    const { store } = setup();
+    await store.admit(input());
+    await store.linkIssue("sub_1", "issue_1");
+    for (const name of ["b", "c"]) {
+      expect(await store.admit(input({ submissionId: name, submitter: name }))).toMatchObject({
+        kind: "duplicate",
+      });
+    }
+    expect(await store.admit(input({ submissionId: "d", submitter: "d" }))).toEqual({ kind: "drop" });
+  });
+
+  it("frees the fingerprint of a submission interrupted before its issue was made", async () => {
+    const { store, advanceDays } = setup();
+    await store.admit(input());
+    expect(await store.admit(input({ submissionId: "b", submitter: "bob" }))).toMatchObject({
+      kind: "duplicate",
+    });
+    advanceDays(1 / 24);
+    expect(await store.admit(input({ submissionId: "c", submitter: "carol" }))).toEqual({
+      kind: "create",
+    });
+  });
+
+  it("keeps a report until its issue is declined", async () => {
+    const { store } = setup();
+    await store.admit(input());
+    await store.linkIssue("sub_1", "issue_1");
+    const reportId = await store.saveReport("sub_1", "=== Notefig Debug Report ===");
+    expect(reportId).toMatch(/^20261016-/);
+    expect(await store.report(reportId)).toMatchObject({ text: "=== Notefig Debug Report ===" });
+    await store.resolve("issue_1", "accepted");
+    expect(await store.report(reportId)).toBeDefined();
+    await store.resolve("issue_1", "declined");
+    expect(await store.report(reportId)).toBeUndefined();
+  });
+
+  it("deletes a report when its issue couldn't be created", async () => {
+    const { store } = setup();
+    await store.admit(input());
+    const reportId = await store.saveReport("sub_1", "report");
+    await store.abandon("sub_1");
+    expect(await store.report(reportId)).toBeUndefined();
+  });
+
+  it("reads only well-formed report ids", async () => {
+    const { store } = setup();
+    expect(await store.report("../v1:submission:sub_1")).toBeUndefined();
+  });
+
+  it("prunes day counters and reports older than their windows, and keeps records", async () => {
     const { store, storage, advanceDays } = setup();
     await store.admit(input());
+    const oldReport = await store.saveReport("sub_1", "old");
     advanceDays(10);
-    await store.reserveAgentRun(5);
-    await store.prune(7);
+    await store.reserveBuild("issue_x", 5);
+    const newReport = await store.saveReport("sub_1", "new");
+    await store.prune({ counterDays: 7, reportDays: 5 });
     const keys = storage.keys();
     expect(keys.filter((key) => key.startsWith("v1:count:"))).toEqual([
-      "v1:count:2026-10-26:agent-runs",
+      "v1:count:2026-10-26:builds",
     ]);
+    expect(await store.report(oldReport)).toBeUndefined();
+    expect(await store.report(newReport)).toBeDefined();
     expect(keys).toContain("v1:submission:sub_1");
   });
 });
