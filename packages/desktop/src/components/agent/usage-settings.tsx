@@ -49,9 +49,7 @@ import {
   useWeekdayTokens,
 } from "@/modules/usage/react";
 import type { UsageReporting } from "@/modules/harness-adapters";
-import {
-  useActiveHarnesses,
-} from "@/hooks/use-harness-selection";
+import { useActiveHarnesses } from "@/hooks/use-harness-selection";
 import { useHarnessLabels } from "@/modules/agents/react";
 import { SettingsSectionActions } from "@/components/editor/settings-section";
 import { useClock } from "@/hooks/use-clock";
@@ -874,7 +872,7 @@ function CacheLegend({
             : days[hovered],
         );
         return (
-          <div key={key} className="flex items-center gap-2">
+          <div key={key} className="flex items-center gap-2 pt-1">
             <span
               className="size-2 shrink-0 rounded-full"
               style={{ background: color }}

@@ -191,6 +191,8 @@ ul[data-type="taskList"] > li > div p {
    code viewer's Shiki (`codeHighlight`, @notefig/widgets): each carries the
    light colour, and the dark one as --shiki-dark, shown here under .dark. */
 .ProseMirror pre {
+  /* The language picker (codeLanguagePicker) sits in its corner. */
+  position: relative;
   background-color: hsl(var(--muted));
   color: hsl(var(--foreground));
 }

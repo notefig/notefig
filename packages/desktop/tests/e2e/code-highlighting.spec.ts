@@ -10,6 +10,7 @@ import {
   seedTestFiles,
   waitForFileTree,
   openFileInTree,
+  waitForContentSaved,
 } from "../setup/test-helpers";
 
 test("a code block's tokens are coloured by kind", async ({ page }) => {
@@ -51,4 +52,38 @@ test("a code block's tokens are coloured by kind", async ({ page }) => {
   await page.evaluate(() => document.documentElement.classList.add("dark"));
   await expect(keyword).toHaveCSS("color", "rgb(213, 104, 234)");
   await expect(string).toHaveCSS("color", "rgb(94, 204, 113)");
+});
+
+test("a code block's language is picked from its corner, and saved in its fence", async ({ page }) => {
+  const workspace = "/workspace/code-language";
+  await setupTestDatabase(page, "code-language");
+  await openWorkspace(page, workspace);
+  await seedTestFiles(page, [
+    { path: `${workspace}/code.md`, content: "# Code\n\n```\nconst a = 1;\n```\n", type: "file" },
+  ]);
+  await page.reload();
+  await waitForFileTree(page, "code.md");
+  await openFileInTree(page, "code.md");
+
+  const picker = page.getByRole("button", { name: "Code block language" });
+  await expect(picker).toHaveText("plain text");
+  await expect(page.locator(".ProseMirror pre code span[style]")).toHaveCount(0);
+
+  await picker.click();
+  await page.keyboard.type("types");
+  await page.getByRole("option", { name: "typescript" }).click();
+  await expect(picker).toHaveText("typescript");
+
+  await page.evaluate(() => document.documentElement.classList.remove("dark"));
+  await expect(page.locator(".ProseMirror pre code span", { hasText: /^const$/ })).toHaveCSS(
+    "color",
+    "rgb(166, 49, 190)",
+    { timeout: 15_000 },
+  );
+  await waitForContentSaved(page, `${workspace}/code.md`, "```typescript\nconst a = 1;\n```");
+
+  // Read-only later (a rename does this): the picker doesn't open.
+  await page.evaluate(() => (document.querySelector(".ProseMirror") as any).editor.setEditable(false));
+  await picker.click({ force: true });
+  await expect(page.getByRole("option")).toHaveCount(0);
 });
