@@ -1,0 +1,279 @@
+name: Agent Build
+run-name: Agent build for ${{ inputs.issue }}
+
+# Turns a Linear issue into a pull request for review.
+#
+# Only the intake Worker (packages/intake) starts this, with
+# workflow_dispatch as the GitHub App, after an approver accepted the issue
+# out of Triage or added `agent:build` to it in Linear. Nothing public can
+# trigger it. The Worker runs one build at a time and passes the issue's
+# title and description in; see packages/intake/README.md.
+#
+# Three jobs, so no credential shares a runner with what the agent touched:
+# - `build` runs the agent with only the Claude Code OAuth token, outbound
+#   traffic blocked except the hosts below. Its output is a patch.
+# - `publish` starts from a fresh checkout, applies the patch, refuses any
+#   change under .github/, and pushes and opens the PR as the GitHub App
+#   (no `workflows` permission). Nothing from the agent's checkout runs
+#   there: no install, no hooks, no repository scripts.
+# - `report` tells the Worker how the build ended, authenticated by GitHub's
+#   OIDC token.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: The Worker's id for this build
+        required: true
+      issue:
+        description: Linear issue key, e.g. MET-123
+        required: true
+      title:
+        description: Issue title
+        required: true
+      body:
+        description: Issue description
+        required: false
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: agent-build-${{ inputs.issue }}
+  cancel-in-progress: false
+
+env:
+  ISSUE: ${{ inputs.issue }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: agent
+    permissions:
+      contents: read
+    outputs:
+      branch: ${{ steps.branch.outputs.name }}
+      outcome: ${{ steps.outcome.outputs.outcome }}
+      detail: ${{ steps.outcome.outputs.detail }}
+    steps:
+      - name: Restrict outbound traffic
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: ${{ vars.AGENT_EGRESS_POLICY || 'block' }}
+          allowed-endpoints: >
+            api.anthropic.com:443
+            api.github.com:443
+            github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            registry.npmjs.org:443
+            nodejs.org:443
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Name the branch
+        id: branch
+        run: |
+          branch="agent/$(echo "$ISSUE" | tr '[:upper:]' '[:lower:]')"
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.branch.outputs.exists != 'true'
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        if: steps.branch.outputs.exists != 'true'
+        run: |
+          npm ci
+          npm install --global @anthropic-ai/claude-code@2.1.285
+
+      - name: Write the task
+        if: steps.branch.outputs.exists != 'true'
+        env:
+          TITLE: ${{ inputs.title }}
+          BODY: ${{ inputs.body }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          printf '# %s: %s\n\n%s\n' "$ISSUE" "$TITLE" "$BODY" > "$RUNNER_TEMP/issue.md"
+
+      - name: Implement the issue
+        if: steps.branch.outputs.exists != 'true'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          ISSUE_FILE: ${{ runner.temp }}/issue.md
+          PR_TITLE_FILE: ${{ runner.temp }}/out/pr-title.txt
+          PR_BODY_FILE: ${{ runner.temp }}/out/pr-body.md
+        run: |
+          prompt="$(cat .github/agent/build-prompt.md)
+
+          ISSUE_FILE=$ISSUE_FILE
+          PR_TITLE_FILE=$PR_TITLE_FILE
+          PR_BODY_FILE=$PR_BODY_FILE"
+          claude -p "$prompt" \
+            --add-dir "$RUNNER_TEMP" \
+            --max-turns 80 \
+            --allowedTools "Read" "Edit" "Write" "Glob" "Grep" \
+              "Bash(cd:*)" "Bash(ls:*)" "Bash(git diff:*)" "Bash(git status:*)" \
+              "Bash(npx tsc --noEmit:*)" "Bash(npm run test:*)" "Bash(npx vitest run:*)" \
+            --disallowedTools "WebFetch" "WebSearch"
+
+      - name: Export the change
+        id: result
+        if: steps.branch.outputs.exists != 'true'
+        env:
+          OUT: ${{ runner.temp }}/out
+        run: |
+          git add --all
+          if [ ! -s "$OUT/pr-body.md" ] || head -c 5 "$OUT/pr-body.md" | grep -q '^SKIP:'; then
+            echo "outcome=skipped" >> "$GITHUB_OUTPUT"
+          elif git diff --cached --quiet; then
+            echo "outcome=no-change" >> "$GITHUB_OUTPUT"
+          else
+            git diff --cached --binary > "$OUT/change.patch"
+            echo "outcome=changed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: steps.result.outputs.outcome == 'changed'
+        with:
+          name: agent-change
+          path: ${{ runner.temp }}/out/
+          retention-days: 7
+
+      - name: Sum up the build
+        id: outcome
+        if: always()
+        env:
+          EXISTS: ${{ steps.branch.outputs.exists }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+          RESULT: ${{ steps.result.outputs.outcome }}
+          PR_BODY_FILE: ${{ runner.temp }}/out/pr-body.md
+        run: |
+          detail=""
+          if [ "$EXISTS" = "true" ]; then
+            outcome=skipped
+            detail="The branch $BRANCH already exists, so no new build was started. Delete it to build again."
+          elif [ -n "$RESULT" ]; then
+            outcome="$RESULT"
+            if [ "$RESULT" != "changed" ]; then detail="$(head -c 4000 "$PR_BODY_FILE" 2>/dev/null)"; fi
+          else
+            outcome=failed
+          fi
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+          delimiter="detail_$(openssl rand -hex 8)"
+          { echo "detail<<$delimiter"; echo "$detail"; echo "$delimiter"; } >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: build
+    if: needs.build.outputs.outcome == 'changed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: agent
+    permissions:
+      contents: read
+    outputs:
+      url: ${{ steps.pr.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-change
+          path: ${{ runner.temp }}/change
+
+      - name: Apply the change
+        env:
+          CHANGE: ${{ runner.temp }}/change
+        run: |
+          git apply --index --binary "$CHANGE/change.patch"
+          if git diff --cached --name-only | grep -q '^\.github/'; then
+            echo "::error::The agent changed files under .github/; not opening a PR."
+            exit 1
+          fi
+
+      - name: Mint the GitHub App token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.AGENT_APP_ID }}
+          private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Open the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          BRANCH: ${{ needs.build.outputs.branch }}
+          REVIEWER: ${{ vars.AGENT_REVIEWER || 'parsasi' }}
+          CHANGE: ${{ runner.temp }}/change
+        run: |
+          title="$(head -n 1 "$CHANGE/pr-title.txt" 2>/dev/null)"
+          title="${title:-Agent build for $ISSUE}"
+          git switch --create "$BRANCH"
+          # This checkout ran no install, so no hooks are configured; turn
+          # them off anyway so nothing in the change runs with the token.
+          git -c core.hooksPath=/dev/null \
+            -c user.name="$APP_SLUG[bot]" -c user.email="$APP_SLUG[bot]@users.noreply.github.com" \
+            commit --quiet --no-verify --message "$title" --message "Closes $ISSUE"
+          git -c core.hooksPath=/dev/null push --no-verify \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$BRANCH"
+          # Linear links the PR to the issue by the key in its branch and
+          # body, and closes the issue when it merges.
+          printf '%s\n\nCloses %s\n' "$(cat "$CHANGE/pr-body.md")" "$ISSUE" > "$RUNNER_TEMP/pr.md"
+          url="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+            --title "$title" --body-file "$RUNNER_TEMP/pr.md" --reviewer "$REVIEWER")"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+  report:
+    needs: [build, publish]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+    steps:
+      - name: Tell the intake Worker how the build ended
+        env:
+          INTAKE_URL: ${{ vars.INTAKE_URL }}
+          BUILD_ID: ${{ inputs.build_id }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          BUILD_OUTCOME: ${{ needs.build.outputs.outcome }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          PR_URL: ${{ needs.publish.outputs.url }}
+          DETAIL: ${{ needs.build.outputs.detail }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$PUBLISH_RESULT" = "success" ] && [ -n "$PR_URL" ]; then
+            outcome=opened
+          elif [ "$BUILD_RESULT" = "success" ] && { [ "$BUILD_OUTCOME" = "skipped" ] || [ "$BUILD_OUTCOME" = "no-change" ]; }; then
+            outcome="$BUILD_OUTCOME"
+          else
+            outcome=failed
+          fi
+          token="$(curl --fail --silent --show-error \
+            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$INTAKE_URL" | jq -r .value)"
+          jq --null-input \
+            --arg buildId "$BUILD_ID" --arg outcome "$outcome" --arg runUrl "$RUN_URL" \
+            --arg pullRequestUrl "$PR_URL" --arg detail "$DETAIL" \
+            '{buildId: $buildId, outcome: $outcome, runUrl: $runUrl}
+              + (if $pullRequestUrl != "" then {pullRequestUrl: $pullRequestUrl} else {} end)
+              + (if $detail != "" then {detail: $detail} else {} end)' \
+            | curl --fail --silent --show-error --request POST "$INTAKE_URL/v1/builds/result" \
+                --header "Authorization: Bearer $token" \
+                --header "content-type: application/json" \
+                --data @-

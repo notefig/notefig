@@ -122,6 +122,25 @@ jobs:
       - name: Typecheck and test Core
         run: npm run build -w packages/core && npm run test -w packages/core
 
+  test-intake:
+    name: Test Intake Worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck and test
+        run: npm run build -w packages/intake && npm run test -w packages/intake
+
   test-desktop-e2e:
     name: Test Desktop
     runs-on: ubuntu-latest

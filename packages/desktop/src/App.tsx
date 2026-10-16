@@ -16,6 +16,8 @@ import { useAppSettings } from "@/hooks/use-app-settings";
 import { WorkspaceErrorBoundary } from "@/components/workspace-error-boundary";
 import { EditorHarness } from "@/test-harness/editor-harness";
 import { PairDialog } from "@/components/tunnel/pair-dialog";
+import { FeedbackDialog } from "@/components/feedback-dialog";
+import { feedbackAvailable } from "@/utils/feedback";
 import { useCore } from "@notefig/core/react";
 
 export const App = () => {
@@ -81,6 +83,7 @@ export const App = () => {
       {isWeb() && <MockDirectoryPickerDialog />}
       <TextPromptDialog />
       <PairDialog />
+      {feedbackAvailable() && <FeedbackDialog />}
       <div className="flex-1 min-h-0">
         <Routes>
           {import.meta.env.DEV && (

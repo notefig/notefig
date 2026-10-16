@@ -44,6 +44,11 @@
       "types": "./dist/tunnel/index.d.ts",
       "require": "./dist/tunnel/index.js",
       "default": "./dist/tunnel/index.js"
+    },
+    "./intake": {
+      "types": "./dist/intake/index.d.ts",
+      "require": "./dist/intake/index.js",
+      "default": "./dist/intake/index.js"
     }
   },
   "scripts": {

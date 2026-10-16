@@ -47,7 +47,9 @@
     { "extends": "BaseBrowserAdapter", "members": ["*"] },
     { "implements": "GitStorageHost", "members": ["*"] },
     { "implements": "Client", "members": ["*"] },
-    { "implements": "AgentTransport", "members": ["*"] }
+    { "implements": "AgentTransport", "members": ["*"] },
+    // Cloudflare calls a Durable Object's lifecycle handlers (packages/intake).
+    { "extends": "DurableObject", "members": ["alarm"] }
   ],
   "dynamicallyLoaded": [
     "packages/cli/commands/*.command.ts"

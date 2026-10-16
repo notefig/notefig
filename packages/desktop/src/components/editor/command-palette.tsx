@@ -19,6 +19,7 @@ import {
   Maximize,
   X,
   Home,
+  MessageSquare,
 } from "lucide-react";
 import {
   Command,
@@ -47,6 +48,8 @@ import { useFileSearch, type FileSearchResult } from "@/hooks/use-file-search";
 import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { canOpenFile } from "@/modules/editors";
 import { FileTypeIcon } from "./file-type-icon";
+import { openFeedbackDialog } from "@/hooks/use-feedback-dialog";
+import { feedbackAvailable } from "@/utils/feedback";
 import { useCore } from "@notefig/core/react";
 
 interface CommandPaletteProps {
@@ -76,6 +79,21 @@ interface CommandType {
   icon: ElementType;
   shortcut?: string;
   action?: () => void | Promise<void>;
+}
+
+/** "Send Feedback" only in builds that have an intake service to send to. */
+function helpCommands(): CommandType[] {
+  if (!feedbackAvailable()) return [];
+  return [
+    {
+      id: "send-feedback",
+      labelKey: "sendFeedback",
+      groupKey: "help",
+      keywordKey: "commandKeywords.sendFeedback",
+      icon: MessageSquare,
+      action: openFeedbackDialog,
+    },
+  ];
 }
 
 /**
@@ -339,6 +357,7 @@ export function CommandPalette({
       icon: Moon,
       action: swapTheme,
     },
+    ...helpCommands(),
   ];
 
   const skipFocusRestoreRef = useRef(false);

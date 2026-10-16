@@ -171,6 +171,8 @@ jobs:
         env:
           VITE_POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
           VITE_POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
+          # Intake service origin (packages/intake). Unset = no "Send feedback".
+          VITE_INTAKE_URL: ${{ vars.INTAKE_URL }}
         run: npm run build
 
       - name: Create updater manifest for web
@@ -348,6 +350,8 @@ jobs:
           # Absent secrets = telemetry fully disabled in the built app.
           VITE_POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
           VITE_POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
+          # Intake service origin (packages/intake). Unset = no "Send feedback".
+          VITE_INTAKE_URL: ${{ vars.INTAKE_URL }}
         with:
           projectPath: packages/desktop
           tagName: "desktop-v${{ inputs.version }}"
