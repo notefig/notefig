@@ -1179,8 +1179,8 @@ describe("MCP tool calls (Stage 3.5)", () => {
   });
 
   it("names a Devin call by the tool in its _meta, not its prose title", async () => {
-    // As Devin sends a call to one of our tools (its sessions.db): the
-    // update that completes it carries neither the title nor the name.
+    // As `devin acp` sends a call to one of our tools (recorded
+    // 2026-10-16): named in `_meta` on the first update only.
     const devin = BUILT_IN_HARNESSES.find((h) => h.id === "devin")!;
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
@@ -1196,11 +1196,26 @@ describe("MCP tool calls (Stage 3.5)", () => {
           "cognition.ai/inferenceToolName": "mcp_call_tool",
         },
       });
+      // Once the call has run, Devin retitles it in the past tense,
+      // naming the tool in `_meta` only as the model's own tool.
+      a.update("sess_test", {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call_1",
+        status: "in_progress",
+        _meta: { "cognition.ai/inferenceToolName": "mcp__notefig__widget_respond" },
+      });
+      a.update("sess_test", {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call_1",
+        title: "Called widget_respond from notefig",
+        status: "in_progress",
+        _meta: { "cognition.ai/inferenceToolName": "mcp__notefig__widget_respond" },
+      });
       a.update("sess_test", {
         sessionUpdate: "tool_call_update",
         toolCallId: "call_1",
         status: "completed",
-        _meta: { "cognition.ai/inferenceToolName": "mcp_call_tool" },
+        _meta: { "cognition.ai/inferenceToolName": "mcp__notefig__widget_respond" },
       });
       return { stopReason: "end_turn" };
     };

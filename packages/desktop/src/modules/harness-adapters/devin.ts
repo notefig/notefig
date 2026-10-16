@@ -5,6 +5,7 @@ import {
   type TokenCounts,
 } from "@notefig/shared/agent";
 import {
+  CLAUDE_TOOL_PREFIX,
   KNOWN_TOOL_PREFIXES,
   NO_PREP,
   NO_REPORTING,
@@ -54,12 +55,20 @@ export function devinAgentOf(update: WithMeta): string | null {
   return typeof context?.parentAgentId === "string" ? context.parentAgentId : null;
 }
 
-/** The tool a Devin call names: its title is prose ("Calling
- *  widget_respond from notefig"), the tool rides in `_meta`
- *  (`mcp__notefig__widget_respond`); null when it isn't tagged. */
+/** Devin's `_meta` keys naming a call's tool: the tool itself, then the
+ *  one the model asked for — the only one left on the update that
+ *  retitles a call once it has run ("Called widget_respond from notefig"). */
+const DEVIN_TOOL_NAME_KEYS = ["cognition.ai/toolName", "cognition.ai/inferenceToolName"];
+
+/** The app's tool a Devin call names (`mcp__notefig__widget_respond`): its
+ *  titles are prose ("Calling widget_respond from notefig"). Null for any
+ *  other tool, which keeps its title. */
 export function devinToolNameOf(update: WithMeta): string | null {
-  const name = update._meta?.["cognition.ai/toolName"];
-  return typeof name === "string" ? name : null;
+  for (const key of DEVIN_TOOL_NAME_KEYS) {
+    const name = update._meta?.[key];
+    if (typeof name === "string" && name.startsWith(CLAUDE_TOOL_PREFIX)) return name;
+  }
+  return null;
 }
 
 /** Money where ACP's `cost` is sent, else Devin's running credit total. */
