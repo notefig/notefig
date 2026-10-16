@@ -11,7 +11,7 @@ import type {
 } from "./adapter";
 import { testHarnesses } from "@/testing/test-harnesses";
 import { createHarnessAdapters, harnessLogo } from "./harness-adapters";
-import { needsSignIn, placeCommands } from "./adapter";
+import { needsSignIn, placeCommands, toolCallTitle } from "./adapter";
 
 const adapters = () =>
   createHarnessAdapters({ harnesses: testHarnesses() });
@@ -301,6 +301,24 @@ describe("tool names", () => {
     expect(
       adapterFor({ ...harness("claude-code"), id: "custom:lab" }).toolNamePrefixes,
     ).toEqual(["mcp__notefig__", "notefig_"]);
+  });
+
+  it("reads Devin's tool from its _meta, its own and a custom harness's alike", () => {
+    const call = {
+      title: "Calling widget_respond from notefig",
+      _meta: { "cognition.ai/toolName": "mcp__notefig__widget_respond" },
+    };
+    for (const definition of [harness("devin"), { ...harness("claude-code"), id: "custom:lab" }]) {
+      expect(toolCallTitle(adapterFor(definition), call)).toBe("widget_respond");
+    }
+    // Untagged, the title stands, its prefix stripped.
+    expect(toolCallTitle(adapterFor(harness("devin")), { title: "mcp__notefig__author_blob" })).toBe(
+      "author_blob",
+    );
+    expect(toolCallTitle(adapterFor(harness("claude-code")), call)).toBe(
+      "Calling widget_respond from notefig",
+    );
+    expect(toolCallTitle(adapterFor(harness("devin")), {})).toBeUndefined();
   });
 });
 

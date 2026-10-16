@@ -206,6 +206,10 @@ export interface HarnessAdapter {
    *  (`mcp__notefig__author_blob`), stripped so the transcript and
    *  `findBlobAuthorTask` see the plain tool name. */
   toolNamePrefixes: readonly string[];
+  /** The tool a call names, for a harness whose title is prose instead
+   *  (Devin: "Calling widget_respond from notefig"); null when it doesn't
+   *  say. Its prefixes are stripped like a title's. */
+  toolNameOf?(update: WithMeta): string | null;
   /** Whether a failed prompt's error means it needs a sign-in, for a
    *  harness that says so differently from claude-agent-acp
    *  (`needsSignIn`). */
@@ -268,6 +272,19 @@ export const CLAUDE_TOOL_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
 export const OPENCODE_TOOL_PREFIX = `${MCP_SERVER_NAME}_`;
 /** For a harness whose prefix was never recorded: strip either. */
 export const KNOWN_TOOL_PREFIXES = [CLAUDE_TOOL_PREFIX, OPENCODE_TOOL_PREFIX];
+
+/** The plain name a tool call goes by in the transcript (`widget_respond`):
+ *  the tool its harness names, else its title, either one's MCP prefix
+ *  stripped. Undefined when it has neither, so an update keeps its call's. */
+export function toolCallTitle(
+  adapter: Pick<HarnessAdapter, "toolNamePrefixes" | "toolNameOf">,
+  update: WithMeta & { title?: string | null },
+): string | undefined {
+  const name = adapter.toolNameOf?.(update) || update.title;
+  if (!name) return undefined;
+  const prefix = adapter.toolNamePrefixes.find((p) => name.startsWith(p));
+  return prefix ? name.slice(prefix.length) : name;
+}
 
 /** Whether a failed prompt's error means the harness needs a sign-in: its
  *  own test, else claude-agent-acp's "Authentication required"

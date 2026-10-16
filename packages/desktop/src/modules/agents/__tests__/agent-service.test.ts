@@ -1178,6 +1178,43 @@ describe("MCP tool calls (Stage 3.5)", () => {
     expect(tools[0].toolCall?.locations).toEqual([{ path: "/ws/notes.md" }]);
   });
 
+  it("names a Devin call by the tool in its _meta, not its prose title", async () => {
+    // As Devin sends a call to one of our tools (its sessions.db): the
+    // update that completes it carries neither the title nor the name.
+    const devin = BUILT_IN_HARNESSES.find((h) => h.id === "devin")!;
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async (_p, a) => {
+      a.update("sess_test", {
+        sessionUpdate: "tool_call",
+        toolCallId: "call_1",
+        title: "Calling widget_respond from notefig",
+        rawInput: { kind: "answer", markdown: "hello" },
+        _meta: {
+          "cognition.ai/toolName": "mcp__notefig__widget_respond",
+          "cognition.ai/eventType": "mcp_tool_call",
+          "cognition.ai/inferenceToolName": "mcp_call_tool",
+        },
+      });
+      a.update("sess_test", {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "call_1",
+        status: "completed",
+        _meta: { "cognition.ai/inferenceToolName": "mcp_call_tool" },
+      });
+      return { stopReason: "end_turn" };
+    };
+
+    const task = new TaskManager(deps, "/ws").createTask(devin);
+    await task.start(() => client);
+    await runPrompt(task, "answer in the widget");
+
+    const tools = toolEntries(task.taskId);
+    expect(tools).toHaveLength(1);
+    expect(tools[0].toolCall?.title).toBe("widget_respond");
+    expect(tools[0].toolCall?.status).toBe("completed");
+  });
+
   it("keeps previously-derived locations when a later update carries no rawInput.path", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
@@ -2566,3 +2603,4 @@ describe("usage limits", () => {
     });
   });
 });
+

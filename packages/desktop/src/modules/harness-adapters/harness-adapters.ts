@@ -30,6 +30,7 @@ import {
   DEVIN_CLIENT_META,
   devinAdapter,
   devinAgentOf,
+  devinToolNameOf,
   devinUsageByMeta,
 } from "./devin";
 import { geminiCliAdapter } from "./gemini-cli";
@@ -49,13 +50,14 @@ const BUILT_IN_ADAPTERS = new Map<string, HarnessAdapter>([
  *  nothing it reports (what it has sent is the only evidence) and has no
  *  brand mark. What it sends is read in every known vendor's shape, so a
  *  custom entry running a known adapter (Devin under another id, a fork of
- *  claude-agent-acp) still counts usage, tags subagents and shows limits the
- *  way it does. */
+ *  claude-agent-acp) still counts usage, tags subagents, names its tool
+ *  calls and shows limits the way it does. */
 function customAdapter(registersLike: HarnessAdapter): HarnessAdapter {
   return {
     onInvoke: registersLike.onInvoke,
     reporting: NO_REPORTING,
     toolNamePrefixes: KNOWN_TOOL_PREFIXES,
+    toolNameOf: devinToolNameOf,
     clientMeta: DEVIN_CLIENT_META,
     usage: {
       ...devinUsageByMeta,
