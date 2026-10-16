@@ -86,6 +86,9 @@ function svgEl<K extends keyof SVGElementTagNameMap>(
   return document.createElementNS(SVG_NS, tag);
 }
 
+/** What the user does that cancels a jump's pending reveal. */
+const USER_INPUT = ["pointerdown", "keydown", "wheel"] as const;
+
 /** Runs `done` once `scroller` has stopped moving for a few frames, or
  *  after 3s if it never does (a long smooth scroll takes ~1.5s in
  *  Chromium). Returns the cancel. */
@@ -454,8 +457,18 @@ export class MinimapRailView implements PluginView {
     // sets its selection: in WebKit that cancels a smooth scroll under way,
     // and with the editor focused it jumps to the caret — so before the
     // widget is in view, the jump either stalls or teleports.
-    this.cancelReveal = whenScrollSettles(this.scroller, () =>
-      this.reveal?.(this.view, dot.entry.pos),
-    );
+    // The user acting meanwhile (a click, a key, a wheel) means they went
+    // elsewhere: no reveal then, or it would take their caret and typing.
+    const stop = () => {
+      stopWaiting();
+      for (const type of USER_INPUT) document.removeEventListener(type, stop, true);
+      this.cancelReveal = () => {};
+    };
+    const stopWaiting = whenScrollSettles(this.scroller, () => {
+      stop();
+      this.reveal?.(this.view, dot.entry.pos);
+    });
+    for (const type of USER_INPUT) document.addEventListener(type, stop, true);
+    this.cancelReveal = stop;
   }
 }
