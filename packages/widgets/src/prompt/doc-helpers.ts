@@ -13,6 +13,7 @@ import type { EditorState, Transaction } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { PROMPT_DRAFT_NODE_NAME, PROMPT_NODE_NAME } from "./node";
+import { findScroller } from "../minimap/rail-view";
 
 /**
  * Node types that a document can hold and still count as empty. The widget
@@ -152,10 +153,20 @@ export function focusPromptDraft(view: EditorView, pos: number): boolean {
       ? widget.querySelector("[data-prompt-draft]")
       : null;
   if (!draft || draft.getClientRects().length === 0) return false;
+  // WebKit scrolls to the editor's old caret as the editor takes focus
+  // (ProseMirror writes the new one after): the viewport is put back, now
+  // and on the next frame, when that scroll lands.
+  const scroller = findScroller(view.dom);
+  const top = scroller.scrollTop;
+  const keep = () => {
+    if (scroller.scrollTop !== top) scroller.scrollTop = top;
+  };
   view.dispatch(
     view.state.tr.setSelection(TextSelection.create(view.state.doc, range.to)),
   );
   view.focus();
+  keep();
+  requestAnimationFrame(keep);
   return true;
 }
 

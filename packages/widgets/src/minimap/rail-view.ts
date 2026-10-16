@@ -86,8 +86,25 @@ function svgEl<K extends keyof SVGElementTagNameMap>(
   return document.createElementNS(SVG_NS, tag);
 }
 
+/** Runs `done` once `scroller` has stopped moving for a few frames, or
+ *  after 3s if it never does (a long smooth scroll takes ~1.5s in
+ *  Chromium). Returns the cancel. */
+function whenScrollSettles(scroller: HTMLElement, done: () => void): () => void {
+  const start = performance.now();
+  let last = scroller.scrollTop;
+  let still = 0;
+  let frame = requestAnimationFrame(function check() {
+    const top = scroller.scrollTop;
+    still = top === last ? still + 1 : 0;
+    last = top;
+    if (still >= 3 || performance.now() - start > 3000) done();
+    else frame = requestAnimationFrame(check);
+  });
+  return () => cancelAnimationFrame(frame);
+}
+
 /** The nearest scrollable ancestor — where the sticky host must live. */
-function findScroller(from: HTMLElement): HTMLElement {
+export function findScroller(from: HTMLElement): HTMLElement {
   let el: HTMLElement | null = from.parentElement;
   while (el) {
     const overflowY = getComputedStyle(el).overflowY;
@@ -102,6 +119,9 @@ export class MinimapRailView implements PluginView {
   private readonly sources: Record<string, MinimapSource>;
   private readonly reveal: ((view: EditorView, pos: number) => void) | undefined;
   private readonly stickyHost: HTMLDivElement;
+  private readonly scroller: HTMLElement;
+  /** Stops waiting to reveal the last jump's widget. */
+  private cancelReveal = () => {};
   private readonly nav: HTMLElement;
   private readonly underlay: SVGGElement;
   private readonly goo: SVGGElement;
@@ -184,8 +204,8 @@ export class MinimapRailView implements PluginView {
 
     this.nav.append(svg, this.buttons);
     this.stickyHost.append(this.nav);
-    const scroller = findScroller(view.dom);
-    scroller.insertBefore(this.stickyHost, scroller.firstChild);
+    this.scroller = findScroller(view.dom);
+    this.scroller.insertBefore(this.stickyHost, this.scroller.firstChild);
 
     this.render();
   }
@@ -195,6 +215,7 @@ export class MinimapRailView implements PluginView {
   }
 
   destroy(): void {
+    this.cancelReveal();
     for (const observer of this.observers.values()) observer.destroy();
     this.observers.clear();
     this.stickyHost.remove();
@@ -424,10 +445,17 @@ export class MinimapRailView implements PluginView {
   }
 
   private jumpTo(dot: Dot): void {
+    this.cancelReveal();
     const dom = this.view.nodeDOM(dot.entry.pos);
     if (dom instanceof HTMLElement) {
       dom.scrollIntoView({ block: "center", behavior: "smooth" });
     }
-    this.reveal?.(this.view, dot.entry.pos);
+    // Reveal once the scroll has settled. Revealing focuses the editor and
+    // sets its selection: in WebKit that cancels a smooth scroll under way,
+    // and with the editor focused it jumps to the caret — so before the
+    // widget is in view, the jump either stalls or teleports.
+    this.cancelReveal = whenScrollSettles(this.scroller, () =>
+      this.reveal?.(this.view, dot.entry.pos),
+    );
   }
 }
