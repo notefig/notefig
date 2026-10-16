@@ -320,6 +320,30 @@ describe("tool names", () => {
     );
     expect(toolCallTitle(adapterFor(harness("devin")), {})).toBeUndefined();
   });
+
+  it("keeps Devin's name for the app's tool through its past-tense retitle", () => {
+    const devin = adapterFor(harness("devin"));
+    // Once the call has run, the tool is named only as the one the model asked for.
+    const retitle = {
+      title: "Called widget_respond from notefig",
+      _meta: { "cognition.ai/inferenceToolName": "mcp__notefig__widget_respond" },
+    };
+    expect(toolCallTitle(devin, retitle)).toBe("widget_respond");
+    // A generic inference name (Devin, September) or another server's tool
+    // leaves the title as Devin wrote it.
+    expect(
+      toolCallTitle(devin, {
+        title: "Calling notefig_marker from notefig",
+        _meta: { "cognition.ai/inferenceToolName": "mcp_call_tool" },
+      }),
+    ).toBe("Calling notefig_marker from notefig");
+    expect(
+      toolCallTitle(devin, {
+        title: "Calling create_issue from github",
+        _meta: { "cognition.ai/toolName": "mcp__github__create_issue" },
+      }),
+    ).toBe("Calling create_issue from github");
+  });
 });
 
 describe("sign-in errors", () => {
