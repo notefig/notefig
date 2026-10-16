@@ -135,6 +135,21 @@ test.describe("widget minimap", () => {
     ).toHaveText("from the minimap");
   });
 
+  test("acting before the jump settles keeps the caret out of its composer", async ({ page }) => {
+    await openFileInTree(page, "doc.md");
+    const dots = minimap(page).first().getByRole("button");
+    await expect(dots).toHaveCount(2);
+    await page.getByText("Filler line 2 keeps").click();
+
+    // A key while the smooth scroll is still under way: the user went
+    // elsewhere, so the jump doesn't take their caret when it lands.
+    await dots.last().click();
+    await page.keyboard.press("Shift");
+    await expect(page.locator('[data-blob-id="blob_mapbb"]').first()).toBeInViewport({ timeout: 5000 });
+    await page.waitForTimeout(3500);
+    expect(await caretInDraftOf(page, "blob_mapbb")).toBe(false);
+  });
+
   test("a copied marker's dot focuses that copy, not the first", async ({
     page,
   }) => {
