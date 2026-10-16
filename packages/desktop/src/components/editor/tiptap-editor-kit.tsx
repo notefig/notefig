@@ -10,6 +10,7 @@ import { widgetRendererNodes, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
 // By path, not through the barrel: @pierre/diffs registers custom elements
 // on import, and the barrel also loads in the markdown worker, which has none.
 import { codeHighlight } from "@notefig/widgets/code-highlight";
+import { codeLanguagePicker } from "@notefig/widgets/code-language";
 import {
   createSchemaExtensions,
   MarkdownImageBase,
@@ -43,7 +44,7 @@ export const MarkdownCodeBlock = CodeBlock.extend({
     return ReactNodeViewRenderer(BlobNodeView);
   },
   addProseMirrorPlugins() {
-    return [...(this.parent?.() ?? []), codeHighlight()];
+    return [...(this.parent?.() ?? []), codeHighlight(), codeLanguagePicker()];
   },
 });
 

@@ -245,6 +245,10 @@ i18n
           noResults: "No results found.",
           quickResultsFor: 'Quick results for "{{query}}"',
           mentionFilesLabel: "Reference a file",
+          codeLanguageLabel: "Code block language",
+          codeLanguagePlain: "plain text",
+          codeLanguageFilter: "Filter languages…",
+          codeLanguageNoMatches: "No matches",
 
           // Command Groups
           file: "File",
