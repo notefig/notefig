@@ -18,6 +18,8 @@ interface ImportMetaEnv {
   /** Set to "1" by the agent e2e config: agent transports come from the
    * in-memory mock harness (agent/mock-harness.ts) instead of spawning. */
   readonly VITE_AGENT_MOCK?: string;
+  /** Intake service origin (packages/intake). Absent = no "Send feedback". */
+  readonly VITE_INTAKE_URL?: string;
 }
 
 // File System Access API types

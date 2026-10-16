@@ -1,0 +1,29 @@
+// The intake Worker (README.md). Secrets — LINEAR_API_KEY,
+// LINEAR_WEBHOOK_SECRET, SUBMITTER_SALT — are set with `wrangler secret put`.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "notefig-intake",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "routes": [{ "pattern": "intake.notefig.com", "custom_domain": true }],
+  "workers_dev": false,
+  "observability": { "enabled": true },
+  // Resolve the shared package to its TS source, as the desktop app does.
+  "alias": {
+    "@notefig/shared/intake": "../shared/src/intake/index.ts"
+  },
+  "vars": {
+    "LINEAR_TEAM_KEY": "MET",
+    "LINEAR_APPROVER_IDS": "566cdfe1-fc7f-4489-bc41-99ee9694e025",
+    "ALLOWED_ORIGINS": "tauri://localhost,http://tauri.localhost,https://tauri.localhost,https://notefig.com,https://www.notefig.com,https://app.notefig.com,http://localhost:1420"
+  },
+  // A short burst limit per IP and workflow, ahead of the daily limits each
+  // workflow's state object keeps.
+  "ratelimits": [
+    { "name": "SUBMIT_LIMITER", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "WORKFLOW_STATE", "class_name": "WorkflowState" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WorkflowState"] }]
+}

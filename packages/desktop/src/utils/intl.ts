@@ -333,6 +333,26 @@ i18n
           keyboardShortcuts: "Keyboard Shortcuts",
           toggleTheme: "Toggle Theme",
 
+          // Help Commands
+          sendFeedback: "Send Feedback",
+          feedback: {
+            title: "Send feedback",
+            description:
+              "Your message is posted to Notefig's public issue tracker on GitHub, with the app version and your OS. Please leave out anything private.",
+            kind: "Kind",
+            kinds: { bug: "Bug", idea: "Idea", other: "Other" },
+            message: "Message",
+            messagePlaceholder: "What happened, or what would you like to see?",
+            send: "Send",
+            sending: "Sending…",
+            sent: "Thanks. Your feedback was sent.",
+            limited:
+              "You've sent a lot of feedback today. Please try again tomorrow.",
+            invalid: "Write at least {{min}} characters.",
+            failed:
+              "Couldn't send your feedback. Check your connection and try again.",
+          },
+
           // Hotkeys Settings
           hotkeysDescription:
             "The keyboard shortcuts this version ships with. Customizing them is coming in a future release.",
@@ -388,6 +408,15 @@ i18n
             toggleSidebar: ["sidebar", "panel", "toggle", "files"],
             toggleFullscreen: ["fullscreen", "maximize", "window"],
             openSettings: ["settings", "preferences", "options"],
+            sendFeedback: [
+              "feedback",
+              "bug",
+              "report",
+              "idea",
+              "suggestion",
+              "issue",
+              "help",
+            ],
             toggleTheme: [
               "theme",
               "appearance",

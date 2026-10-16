@@ -1,0 +1,180 @@
+name: Agent Build
+
+# Turns an approved issue into a pull request for review.
+#
+# Issues reach GitHub through Linear's sync; the intake Worker
+# (packages/intake) adds `agent:build` in Linear when an approver accepts
+# app feedback out of Triage, and a manually created Linear issue can carry
+# the label from the start. See packages/intake/README.md.
+#
+# The repo is public, so the job runs only when BOTH hold:
+#   - the issue's author is in AGENT_ISSUE_AUTHORS. Linear posts synced
+#     issues as the GitHub account linked to its Linear creator, so a
+#     stranger's issue never matches;
+#   - the issue carries `agent:build`, which only collaborators and
+#     Linear's sync can add. This keeps the job off your other synced issues.
+#
+# The agent step holds only the Claude Code OAuth token and runs with
+# outbound traffic blocked except the hosts below. It never sees a GitHub
+# token: a later step commits, pushes and opens the PR as the GitHub App,
+# which has no `workflows` permission, so a change to .github/ can't land.
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions: {}
+
+concurrency:
+  group: agent-build-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: >-
+      github.event.issue.state == 'open' &&
+      contains(fromJSON(vars.AGENT_ISSUE_AUTHORS || '["parsasi"]'), github.event.issue.user.login) &&
+      contains(github.event.issue.labels.*.name, 'agent:build') &&
+      (github.event.action == 'opened' || github.event.label.name == 'agent:build')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: agent
+    permissions:
+      contents: read
+      issues: write
+    env:
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      BRANCH: agent/issue-${{ github.event.issue.number }}
+    steps:
+      - name: Restrict outbound traffic
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: ${{ vars.AGENT_EGRESS_POLICY || 'block' }}
+          allowed-endpoints: >
+            api.anthropic.com:443
+            api.github.com:443
+            github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            registry.npmjs.org:443
+            nodejs.org:443
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Skip if this issue already has a branch
+        id: existing
+        run: |
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$BRANCH already exists; not starting another build."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.existing.outputs.exists != 'true'
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install dependencies
+        if: steps.existing.outputs.exists != 'true'
+        run: |
+          npm ci
+          npm install --global @anthropic-ai/claude-code@2.1.285
+
+      - name: Write the task
+        if: steps.existing.outputs.exists != 'true'
+        run: |
+          jq -r '"# " + .issue.title + "\n\n" + (.issue.body // "")' "$GITHUB_EVENT_PATH" \
+            > "$RUNNER_TEMP/issue.md"
+
+      - name: Implement the issue
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          ISSUE_FILE: ${{ runner.temp }}/issue.md
+          PR_TITLE_FILE: ${{ runner.temp }}/pr-title.txt
+          PR_BODY_FILE: ${{ runner.temp }}/pr-body.md
+        run: |
+          prompt="$(cat .github/agent/build-prompt.md)
+
+          ISSUE_FILE=$ISSUE_FILE
+          PR_TITLE_FILE=$PR_TITLE_FILE
+          PR_BODY_FILE=$PR_BODY_FILE"
+          claude -p "$prompt" \
+            --add-dir "$RUNNER_TEMP" \
+            --max-turns 80 \
+            --allowedTools "Read" "Edit" "Write" "Glob" "Grep" \
+              "Bash(cd:*)" "Bash(ls:*)" "Bash(git diff:*)" "Bash(git status:*)" \
+              "Bash(npx tsc --noEmit:*)" "Bash(npm run test:*)" "Bash(npx vitest run:*)" \
+            --disallowedTools "WebFetch" "WebSearch"
+
+      - name: Check the result
+        id: result
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          PR_BODY_FILE: ${{ runner.temp }}/pr-body.md
+        run: |
+          git add --all
+          if [ ! -s "$PR_BODY_FILE" ] || head -c 5 "$PR_BODY_FILE" | grep -q '^SKIP:'; then
+            echo "outcome=skipped" >> "$GITHUB_OUTPUT"
+          elif git diff --cached --quiet; then
+            echo "outcome=no-change" >> "$GITHUB_OUTPUT"
+          elif git diff --cached --name-only | grep -q '^\.github/'; then
+            echo "::error::The agent changed files under .github/; not opening a PR."
+            exit 1
+          else
+            echo "outcome=changed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Explain a skipped build
+        if: steps.result.outputs.outcome == 'skipped' || steps.result.outputs.outcome == 'no-change'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BODY_FILE: ${{ runner.temp }}/pr-body.md
+        run: |
+          {
+            echo "The agent build didn't open a pull request."
+            echo
+            if [ -s "$PR_BODY_FILE" ]; then cat "$PR_BODY_FILE"; else echo "It made no changes."; fi
+          } > "$RUNNER_TEMP/comment.md"
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
+
+      - name: Mint the GitHub App token
+        id: app
+        if: steps.result.outputs.outcome == 'changed'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.AGENT_APP_ID }}
+          private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
+
+      - name: Open the pull request
+        if: steps.result.outputs.outcome == 'changed'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          REVIEWER: ${{ vars.AGENT_REVIEWER || 'parsasi' }}
+          PR_TITLE_FILE: ${{ runner.temp }}/pr-title.txt
+          PR_BODY_FILE: ${{ runner.temp }}/pr-body.md
+        run: |
+          git config user.name "$APP_SLUG[bot]"
+          git config user.email "$APP_SLUG[bot]@users.noreply.github.com"
+          title="$(head -n 1 "$PR_TITLE_FILE" 2>/dev/null)"
+          title="${title:-Agent build for #$ISSUE_NUMBER}"
+          git switch --create "$BRANCH"
+          git commit --quiet --message "$title" --message "Closes #$ISSUE_NUMBER"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$BRANCH"
+          printf '%s\n\nCloses #%s\n' "$(cat "$PR_BODY_FILE")" "$ISSUE_NUMBER" > "$RUNNER_TEMP/pr.md"
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+            --title "$title" --body-file "$RUNNER_TEMP/pr.md" --reviewer "$REVIEWER"
+
+      - name: Report a failed build
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "The agent build failed: $RUN_URL"

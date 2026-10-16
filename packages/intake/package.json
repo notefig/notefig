@@ -1,0 +1,22 @@
+{
+  "name": "@notefig/intake",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@notefig/shared": "*",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260930.1",
+    "typescript": "^5.0.2",
+    "vitest": "^3.2.4",
+    "wrangler": "4.146.0"
+  }
+}
