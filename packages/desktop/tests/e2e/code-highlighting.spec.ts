@@ -81,4 +81,9 @@ test("a code block's language is picked from its corner, and saved in its fence"
     { timeout: 15_000 },
   );
   await waitForContentSaved(page, `${workspace}/code.md`, "```typescript\nconst a = 1;\n```");
+
+  // Read-only later (a rename does this): the picker doesn't open.
+  await page.evaluate(() => (document.querySelector(".ProseMirror") as any).editor.setEditable(false));
+  await picker.click({ force: true });
+  await expect(page.getByRole("option")).toHaveCount(0);
 });

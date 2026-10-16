@@ -39,7 +39,7 @@ function LanguagePicker({
   done,
 }: {
   language: string;
-  disabled: boolean;
+  disabled: () => boolean;
   choose: (language: string) => void;
   done: () => void;
 }) {
@@ -48,11 +48,17 @@ function LanguagePicker({
   const listed = !language || LANGUAGES.includes(language);
   const plain = t("codeLanguagePlain");
   return (
-    <Popover open={open} onOpenChange={setOpen} modal>
+    <Popover
+      open={open}
+      // Editability is read when it matters, not once at mount: a rename
+      // makes the editor read-only while the picker is up.
+      onOpenChange={(next) => setOpen(next && !disabled())}
+      modal
+    >
       <PopoverTrigger asChild>
         <button
           type="button"
-          disabled={disabled}
+          disabled={disabled()}
           aria-label={t("codeLanguageLabel")}
           className="absolute end-1 top-1 flex h-4 items-center rounded px-1 font-sans text-[0.625rem] leading-4 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
@@ -110,8 +116,9 @@ function mount(view: EditorView, getPos: () => number | undefined, language: str
   root.render(
     <LanguagePicker
       language={language}
-      disabled={!view.editable}
+      disabled={() => !view.editable}
       choose={(next) => {
+        if (!view.editable) return;
         // The widget sits just inside the block.
         const at = (getPos() ?? 0) - 1;
         const block = view.state.doc.nodeAt(at);
