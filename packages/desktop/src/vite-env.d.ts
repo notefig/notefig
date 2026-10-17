@@ -12,6 +12,8 @@ interface ImportMetaEnv {
   readonly VITE_POSTHOG_KEY?: string;
   /** PostHog ingestion host. Defaults to https://us.i.posthog.com. */
   readonly VITE_POSTHOG_HOST?: string;
+  /** support.notefig.com. Absent = no "Send Feedback" (dev/forks/demo). */
+  readonly VITE_SUPPORT_URL?: string;
   /** Set to "shim" by the e2e shim config; also makes telemetry inert. */
   readonly VITE_TEST_BACKEND?: string;
   readonly VITE_TEST_BACKEND_PORT?: string;

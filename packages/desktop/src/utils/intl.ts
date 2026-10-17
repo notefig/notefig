@@ -388,6 +388,7 @@ i18n
             toggleSidebar: ["sidebar", "panel", "toggle", "files"],
             toggleFullscreen: ["fullscreen", "maximize", "window"],
             openSettings: ["settings", "preferences", "options"],
+            sendFeedback: ["feedback", "bug", "report", "idea", "help", "support"],
             toggleTheme: [
               "theme",
               "appearance",
@@ -400,6 +401,21 @@ i18n
 
           // Help Commands
           documentation: "Documentation",
+          sendFeedback: "Send Feedback",
+
+          // Feedback dialog
+          feedbackDescription:
+            "Tell us what broke or what you'd like to see. Every message is read by the Notefig team and may be shared publicly, so leave out anything private.",
+          feedbackKind: "Kind of feedback",
+          feedbackKindBug: "Bug",
+          feedbackKindIdea: "Idea",
+          feedbackKindOther: "Other",
+          feedbackMessage: "Message",
+          feedbackPlaceholder: "What happened, or what would help?",
+          feedbackSending: "Sending...",
+          feedbackSent: "Thanks! Your feedback reached the Notefig team.",
+          feedbackFailed: "Couldn't send your feedback. Check your connection and try again.",
+          feedbackRateLimited: "Too many messages in a short time. Try again in a minute.",
 
           // Window controls (Windows titlebar)
           minimize: "Minimize",

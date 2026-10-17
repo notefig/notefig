@@ -91,6 +91,33 @@ jobs:
       - name: Run git package tests
         run: npm run test -w packages/git
 
+  test-support-worker:
+    name: Test Support Worker
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers/support
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: workers/support/package-lock.json
+
+      # Not a workspace: installs only the Worker's own dev dependencies.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
   test-desktop-unit:
     name: Test Desktop (Unit)
     runs-on: ubuntu-latest

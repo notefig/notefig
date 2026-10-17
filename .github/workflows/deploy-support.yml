@@ -1,0 +1,45 @@
+name: Deploy Support Worker
+
+# support.notefig.com (workers/support). Deploys on every push to main that
+# changes the Worker; CI's "Test Support Worker" job has already run on it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "workers/support/**"
+      - ".github/workflows/deploy-support.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-support
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check the one-time setup is done
+        working-directory: workers/support
+        run: |
+          if grep -n "REPLACE_" wrangler.toml; then
+            echo "::error::wrangler.toml still has placeholder ids; see workers/support/README.md"
+            exit 1
+          fi
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.151.1"
+          workingDirectory: workers/support
+          command: deploy
+          secrets: |
+            LINEAR_API_KEY
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_SUPPORT_API_KEY }}
