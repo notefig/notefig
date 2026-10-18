@@ -25,7 +25,7 @@ export const FEEDBACK_HOTKEY = "Mod+Shift+M";
 /** What the Worker accepts. */
 const MAX_MESSAGE = 5000;
 /** The dialog's controls, a step smaller than the default button. */
-const COMPACT_BUTTON = "h-8 px-3 text-xs";
+const COMPACT_BUTTON = "h-7 px-2.5 text-xs";
 
 type Status = "idle" | "sending" | FeedbackResult;
 
@@ -87,8 +87,8 @@ function FeedbackDialogShell() {
         </DialogHeader>
         {status === "sent" ? (
           <div className="space-y-3">
-            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
-              <Check className="h-4 w-4 shrink-0 text-success" />
+            <div className="flex items-center gap-2 rounded-md bg-muted/40 px-3 py-1.5 text-xs">
+              <Check className="h-3.5 w-3.5 shrink-0 text-success" />
               {t("feedbackSent")}
             </div>
             <div className="flex justify-end">
@@ -166,7 +166,7 @@ function FeedbackForm({
         onChange={onMessageChange}
       />
       {error && (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="text-[11px] leading-snug text-destructive">
           {error}
         </p>
       )}

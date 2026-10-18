@@ -55,7 +55,7 @@ export function FeedbackMessageEditor({
       editor={editor}
       // The surface of a document's pane in the dock, so it reads as the
       // editor it is.
-      className="feedback-editor max-h-[24rem] overflow-y-auto rounded-lg border border-border bg-card texture-surface p-4 focus-within:border-muted-foreground/40"
+      className="feedback-editor max-h-[24rem] overflow-y-auto rounded-lg bg-card texture-surface p-4"
     />
   );
 }
