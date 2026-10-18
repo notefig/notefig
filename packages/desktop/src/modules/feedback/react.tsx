@@ -52,6 +52,9 @@ function FeedbackDialogShell() {
   const [message, setMessage] = useState("");
   const [includeDebug, setIncludeDebug] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
+  // The editor reads the draft once, when it mounts; a new key after each
+  // send remounts it empty if the dialog was reopened while sending.
+  const [draftKey, setDraftKey] = useState(0);
 
   const setOpen = (next: boolean) => {
     if (next) feedback.open();
@@ -67,6 +70,7 @@ function FeedbackDialogShell() {
     const result = await feedback.send({ message, debugReport });
     if (result === "sent") {
       setMessage("");
+      setDraftKey((key) => key + 1);
       setStatus("idle");
       toast.success(t("feedbackSent"), { id: toastId });
     } else {
@@ -87,6 +91,7 @@ function FeedbackDialogShell() {
           <DialogTitle className="text-base">{t("sendFeedback")}</DialogTitle>
         </DialogHeader>
         <FeedbackForm
+          key={draftKey}
           message={message}
           onMessageChange={setMessage}
           includeDebug={includeDebug}

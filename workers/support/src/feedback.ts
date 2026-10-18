@@ -103,13 +103,15 @@ function privateNote(feedback: Feedback): string | null {
 
 /**
  * A markdown line as a title: no heading, quote, list or task marker in
- * front, no emphasis or code marks inside. A line that was only markup
- * falls back to "Feedback".
+ * front, a link as its text, no emphasis or code marks. Underscores inside
+ * a word (snake_case) stay. A line that was only markup falls back to
+ * "Feedback".
  */
 function plainText(line: string): string {
   const text = line
     .replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+(\[[ xX]\]\s+)?|\d+[.)]\s+)/, "")
-    .replace(/\*\*|__|~~|`/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*~`]+|(?<!\w)_+|_+(?!\w)/g, "")
     .trim();
   return text || "Feedback";
 }

@@ -185,4 +185,18 @@ describe("FeedbackDialog", () => {
       "under 5,000",
     );
   });
+
+  it("empties an editor reopened during a send once the send succeeds", async () => {
+    let finish: (response: Response) => void = () => {};
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => (finish = resolve)));
+    act(() => core.feedback.open());
+    type("Sent while reopened");
+    await submit();
+    expect(core.feedback.isOpen()).toBe(false);
+
+    act(() => core.feedback.open());
+    expect(messageEditor()!.textContent).toBe("Sent while reopened");
+    await act(async () => finish(new Response(null, { status: 202 })));
+    expect(messageEditor()!.textContent).toBe("");
+  });
 });

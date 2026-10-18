@@ -150,3 +150,9 @@ test("titles a message whose first line is only markup as Feedback", async () =>
   await submitFeedback({ ...validFeedback, message: "#  \nbody" }, deps);
   assert.equal(issues[0].title, "Feedback");
 });
+
+test("titles with plain text: link text, no emphasis, snake_case kept", async () => {
+  const { deps, issues } = setup();
+  await submitFeedback({ ...validFeedback, message: "*Crash* on [save](https://example.com) in _my_file_ ~~now~~" }, deps);
+  assert.equal(issues[0].title, "Crash on save in my_file now");
+});
