@@ -19,9 +19,13 @@ import { useCore } from "@notefig/core/react";
 import { useDebugSnapshot } from "@/hooks/use-debug-snapshot";
 import { formatDebugReport } from "@/utils/debug-report";
 import type { FeedbackResult } from "./feedback";
+import { FeedbackMessageEditor } from "./message-editor";
 
 export const FEEDBACK_HOTKEY = "Mod+Shift+M";
+/** What the Worker accepts. */
 const MAX_MESSAGE = 5000;
+/** The dialog's controls, a step smaller than the default button. */
+const COMPACT_BUTTON = "h-8 px-3 text-xs";
 
 type Status = "idle" | "sending" | FeedbackResult;
 
@@ -74,10 +78,12 @@ function FeedbackDialogShell() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="sm:max-w-[28rem]">
-        <DialogHeader>
-          <DialogTitle>{t("sendFeedback")}</DialogTitle>
-          <DialogDescription>{t("feedbackDescription")}</DialogDescription>
+      <DialogContent className="gap-3 p-5 sm:max-w-[36rem]">
+        <DialogHeader className="space-y-1">
+          <DialogTitle className="text-base">{t("sendFeedback")}</DialogTitle>
+          <DialogDescription className="text-xs">
+            {t("feedbackDescription")}
+          </DialogDescription>
         </DialogHeader>
         {status === "sent" ? (
           <div className="space-y-3">
@@ -86,7 +92,13 @@ function FeedbackDialogShell() {
               {t("feedbackSent")}
             </div>
             <div className="flex justify-end">
-              <Button onClick={() => setOpen(false)}>{t("close")}</Button>
+              <Button
+                size="sm"
+                className={COMPACT_BUTTON}
+                onClick={() => setOpen(false)}
+              >
+                {t("close")}
+              </Button>
             </div>
           </div>
         ) : (
@@ -129,8 +141,10 @@ function FeedbackForm({
   const { t } = useTranslation();
   const snapshot = useDebugSnapshot();
   const sending = status === "sending";
-  const error =
-    status === "failed"
+  const tooLong = message.length > MAX_MESSAGE;
+  const error = tooLong
+    ? t("feedbackTooLong")
+    : status === "failed"
       ? t("feedbackFailed")
       : status === "rate-limited"
         ? t("feedbackRateLimited")
@@ -144,44 +158,51 @@ function FeedbackForm({
         onSend(includeDebug ? formatDebugReport(snapshot) : undefined);
       }}
     >
-      <textarea
-        autoFocus
-        rows={6}
-        maxLength={MAX_MESSAGE}
-        value={message}
-        readOnly={sending}
+      <FeedbackMessageEditor
+        initialMarkdown={message}
         placeholder={t("feedbackPlaceholder")}
-        aria-label={t("feedbackMessage")}
-        onChange={(event) => onMessageChange(event.target.value)}
-        className="w-full resize-none rounded-md border border-border bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
+        label={t("feedbackMessage")}
+        readOnly={sending}
+        onChange={onMessageChange}
       />
-      <label className="flex cursor-pointer items-start gap-3">
-        <Checkbox
-          className="mt-0.5"
-          checked={includeDebug}
-          onCheckedChange={(checked) => onIncludeDebugChange(checked === true)}
-        />
-        <span className="min-w-0">
-          <span className="block text-sm font-medium">
-            {t("feedbackIncludeDebug")}
-          </span>
-          <span className="block text-xs text-muted-foreground">
-            {t("feedbackIncludeDebugDesc")}
-          </span>
-        </span>
-      </label>
       {error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="text-xs text-destructive">
           {error}
         </p>
       )}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" onClick={onCancel}>
-          {t("cancel")}
-        </Button>
-        <Button type="submit" disabled={sending || !message.trim()}>
-          {t(sending ? "feedbackSending" : "send")}
-        </Button>
+      <div className="flex items-center justify-between gap-3">
+        <label className="flex min-w-0 cursor-pointer items-center gap-2">
+          <Checkbox
+            className="h-3.5 w-3.5"
+            checked={includeDebug}
+            onCheckedChange={(checked) => onIncludeDebugChange(checked === true)}
+          />
+          <span className="min-w-0 text-xs">
+            {t("feedbackIncludeDebug")}
+            <span className="block text-muted-foreground">
+              {t("feedbackIncludeDebugDesc")}
+            </span>
+          </span>
+        </label>
+        <div className="flex shrink-0 gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className={COMPACT_BUTTON}
+            onClick={onCancel}
+          >
+            {t("cancel")}
+          </Button>
+          <Button
+            type="submit"
+            size="sm"
+            className={COMPACT_BUTTON}
+            disabled={sending || tooLong || !message.trim()}
+          >
+            {t(sending ? "feedbackSending" : "send")}
+          </Button>
+        </div>
       </div>
     </form>
   );

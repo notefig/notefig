@@ -406,19 +406,18 @@ i18n
 
           // Feedback dialog
           feedbackDescription:
-            "Tell us what broke or what you'd like to see. Messages may be shared publicly, so leave out anything private.",
+            "Markdown works. Messages may be shared publicly.",
           feedbackMessage: "Message",
           feedbackIncludeDebug: "Include debug info",
-          feedbackIncludeDebugDesc:
-            "Attaches the debug panel's report: your workspace path, open file names and git status.",
+          feedbackIncludeDebugDesc: "Workspace path, open files, git status",
           feedbackSettingTitle: "Feedback",
-          feedbackSettingDesc:
-            "Report a bug or suggest an idea to the Notefig team.",
-          feedbackPlaceholder: "What happened, or what would help?",
+          feedbackSettingDesc: "Report a bug or suggest an idea.",
+          feedbackPlaceholder: "What broke, or what would help?",
           feedbackSending: "Sending...",
-          feedbackSent: "Thanks! Your feedback reached the Notefig team.",
-          feedbackFailed: "Couldn't send your feedback. Check your connection and try again.",
-          feedbackRateLimited: "You can send one message a minute. Try again shortly.",
+          feedbackSent: "Sent. Thank you!",
+          feedbackFailed: "Couldn't send. Try again.",
+          feedbackRateLimited: "One message a minute. Try again shortly.",
+          feedbackTooLong: "Keep it under 5,000 characters.",
 
           // Window controls (Windows titlebar)
           minimize: "Minimize",

@@ -58,8 +58,13 @@ afterEach(() => {
   container.remove();
 });
 
-const textarea = () =>
-  document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message']");
+import type { Editor } from "@tiptap/core";
+
+/** The message editor's element; Tiptap hangs the editor off it. */
+const messageEditor = () =>
+  document.querySelector<HTMLElement & { editor: Editor }>(
+    "[aria-label='Message']",
+  );
 const button = (label: string) =>
   [...document.querySelectorAll("button")].find(
     (candidate) => candidate.textContent === label,
@@ -67,15 +72,10 @@ const button = (label: string) =>
 const sentBody = (call = 0) =>
   JSON.parse(String(fetchMock.mock.calls[call][1].body));
 
-function type(text: string) {
-  const field = textarea()!;
-  const setValue = Object.getOwnPropertyDescriptor(
-    HTMLTextAreaElement.prototype,
-    "value",
-  )!.set!;
+/** Writes markdown into the message, as typing or pasting it would. */
+function type(markdown: string) {
   act(() => {
-    setValue.call(field, text);
-    field.dispatchEvent(new Event("input", { bubbles: true }));
+    messageEditor()!.editor.commands.setContent(markdown, { emitUpdate: true });
   });
 }
 
@@ -86,17 +86,19 @@ async function submit() {
 }
 
 describe("FeedbackDialog", () => {
-  it("opens through core.feedback and sends just the message by default", async () => {
-    expect(textarea()).toBeNull();
+  it("opens through core.feedback and sends the message as markdown", async () => {
+    expect(messageEditor()).toBeNull();
     act(() => core.feedback.open());
     expect(button("Send")!.disabled).toBe(true);
 
-    type("The sidebar flickers");
+    type("The sidebar **flickers**\n\n- on rename");
     await submit();
 
-    expect(sentBody()).toMatchObject({ message: "The sidebar flickers" });
+    expect(sentBody()).toMatchObject({
+      message: "The sidebar **flickers**\n\n- on rename",
+    });
     expect(sentBody()).not.toHaveProperty("debugReport");
-    expect(document.body.textContent).toContain("Your feedback reached");
+    expect(document.body.textContent).toContain("Sent. Thank you!");
   });
 
   it("attaches the debug report when the box is ticked", async () => {
@@ -137,14 +139,14 @@ describe("FeedbackDialog", () => {
     act(() => button("Close")!.click());
 
     act(() => core.feedback.open());
-    expect(textarea()!.value).toBe("");
+    expect(messageEditor()!.textContent).toBe("");
 
     type("Second message");
     await submit();
     // Closed from outside the dialog, as the hotkey does.
     act(() => core.feedback.close());
     act(() => core.feedback.open());
-    expect(textarea()!.value).toBe("");
+    expect(messageEditor()!.textContent).toBe("");
   });
 
   it("keeps the draft when the send fails, so it can be retried", async () => {
@@ -156,11 +158,11 @@ describe("FeedbackDialog", () => {
     expect(document.querySelector("[role='alert']")?.textContent).toContain(
       "Couldn't send",
     );
-    expect(textarea()!.value).toBe("Crashes on save");
+    expect(messageEditor()!.textContent).toBe("Crashes on save");
 
     await submit();
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(document.body.textContent).toContain("Your feedback reached");
+    expect(document.body.textContent).toContain("Sent. Thank you!");
   });
 
   it("says so when the sender is rate-limited", async () => {
@@ -169,7 +171,16 @@ describe("FeedbackDialog", () => {
     type("Hello");
     await submit();
     expect(document.querySelector("[role='alert']")?.textContent).toContain(
-      "one message a minute",
+      "One message a minute",
+    );
+  });
+
+  it("won't send a message longer than the Worker takes", () => {
+    act(() => core.feedback.open());
+    type("x".repeat(5001));
+    expect(button("Send")!.disabled).toBe(true);
+    expect(document.querySelector("[role='alert']")?.textContent).toContain(
+      "under 5,000",
     );
   });
 });

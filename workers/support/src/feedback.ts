@@ -3,8 +3,9 @@ import type { CreateIssue } from "./linear.ts";
 
 /**
  * `POST /v1/feedback`: the app's feedback dialog. A valid report becomes
- * an issue in MET's Triage, in the roadmap project, labelled Feedback,
- * with the app's debug report attached when the user chose to send it.
+ * an issue in MET's Triage, in the roadmap project, labelled Feedback.
+ * The message is markdown and is filed as written; the app's debug
+ * report follows when the user chose to send it.
  */
 
 export interface FeedbackConfig {
@@ -59,13 +60,9 @@ function parseFeedback(value: unknown): Feedback | null {
 }
 
 function issueFor(feedback: Feedback, config: FeedbackConfig) {
-  const firstLine = defuse(feedback.message.split("\n")[0].trim());
+  const firstLine = defuse(plainText(feedback.message.split("\n")[0]));
   const title =
     firstLine.length > TITLE_LENGTH ? `${firstLine.slice(0, TITLE_LENGTH - 1)}…` : firstLine;
-  const quoted = defuse(feedback.message)
-    .split("\n")
-    .map((line) => `> ${line}`)
-    .join("\n");
   return {
     teamId: config.teamId,
     stateId: config.triageStateId,
@@ -73,7 +70,7 @@ function issueFor(feedback: Feedback, config: FeedbackConfig) {
     labelIds: [config.feedbackLabelId],
     title,
     description: [
-      quoted,
+      defuse(feedback.message),
       "",
       "---",
       `**Version:** ${feedback.version} · **OS:** ${feedback.os}`,
@@ -82,6 +79,19 @@ function issueFor(feedback: Feedback, config: FeedbackConfig) {
       ...(feedback.debugReport ? ["", "### Debug report", "", fenced(feedback.debugReport)] : []),
     ].join("\n"),
   };
+}
+
+/**
+ * A markdown line as a title: no heading, quote, list or task marker in
+ * front, no emphasis or code marks inside. A line that was only markup
+ * falls back to "Feedback".
+ */
+function plainText(line: string): string {
+  const text = line
+    .replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+(\[[ xX]\]\s+)?|\d+[.)]\s+)/, "")
+    .replace(/\*\*|__|~~|`/g, "")
+    .trim();
+  return text || "Feedback";
 }
 
 /**

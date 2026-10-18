@@ -34,7 +34,7 @@ test("files feedback in Triage, in the roadmap project, labelled Feedback", asyn
       description: undefined,
     },
   );
-  assert.match(issues[0].description, /^> The sidebar flickers/);
+  assert.match(issues[0].description, /^The sidebar flickers when I rename a file\n\n---\n/);
   assert.match(issues[0].description, /\*\*Version:\*\* 0\.0\.146 · \*\*OS:\*\* macos/);
 });
 
@@ -85,7 +85,7 @@ test("defuses mentions and shortens long titles", async () => {
   assert.ok(issue.title.endsWith("…"));
   assert.ok(!/@\w/.test(issue.title));
   assert.ok(!/@\w/.test(issue.description));
-  assert.match(issue.description, /> second line @​team/);
+  assert.match(issue.description, /\nsecond line @\u200Bteam/);
 });
 
 test("attaches the debug report in a code block it can't close early", async () => {
@@ -101,4 +101,18 @@ test("leaves the debug section out when no report is sent", async () => {
   const { deps, issues } = setup();
   await submitFeedback(validFeedback, deps);
   assert.ok(!issues[0].description.includes("Debug report"));
+});
+
+test("files the message's markdown as written, with a plain-text title", async () => {
+  const { deps, issues } = setup();
+  const message = "## **Crash** on `save`\n\n- step one\n- step two";
+  await submitFeedback({ ...validFeedback, message }, deps);
+  assert.equal(issues[0].title, "Crash on save");
+  assert.ok(issues[0].description.startsWith(`${message}\n\n---\n`));
+});
+
+test("titles a message whose first line is only markup as Feedback", async () => {
+  const { deps, issues } = setup();
+  await submitFeedback({ ...validFeedback, message: "#  \nbody" }, deps);
+  assert.equal(issues[0].title, "Feedback");
 });
