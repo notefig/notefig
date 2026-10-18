@@ -43,7 +43,8 @@ export function FeedbackDialog() {
 
 /**
  * Holds the draft, so it survives a close: a failed or interrupted send
- * can be retried, and it clears once the Worker has it.
+ * can be retried. A sent message stays on screen, read-only, until the
+ * dialog next opens.
  */
 function FeedbackDialogShell() {
   const { t } = useTranslation();
@@ -59,7 +60,10 @@ function FeedbackDialogShell() {
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
-    if (open && status === "sent") setStatus("idle");
+    if (open && status === "sent") {
+      setStatus("idle");
+      setMessage("");
+    }
   }
 
   const setOpen = (next: boolean) => {
@@ -71,9 +75,7 @@ function FeedbackDialogShell() {
 
   const send = async (debugReport: string | undefined) => {
     setStatus("sending");
-    const result = await feedback.send({ message, debugReport });
-    if (result === "sent") setMessage("");
-    setStatus(result);
+    setStatus(await feedback.send({ message, debugReport }));
   };
 
   return (
@@ -85,33 +87,15 @@ function FeedbackDialogShell() {
             {t("feedbackDescription")}
           </DialogDescription>
         </DialogHeader>
-        {status === "sent" ? (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 rounded-md bg-muted/40 px-3 py-1.5 text-xs">
-              <Check className="h-3.5 w-3.5 shrink-0 text-success" />
-              {t("feedbackSent")}
-            </div>
-            <div className="flex justify-end">
-              <Button
-                size="sm"
-                className={COMPACT_BUTTON}
-                onClick={() => setOpen(false)}
-              >
-                {t("close")}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <FeedbackForm
-            message={message}
-            onMessageChange={setMessage}
-            includeDebug={includeDebug}
-            onIncludeDebugChange={setIncludeDebug}
-            status={status}
-            onSend={send}
-            onCancel={() => setOpen(false)}
-          />
-        )}
+        <FeedbackForm
+          message={message}
+          onMessageChange={setMessage}
+          includeDebug={includeDebug}
+          onIncludeDebugChange={setIncludeDebug}
+          status={status}
+          onSend={send}
+          onCancel={() => setOpen(false)}
+        />
       </DialogContent>
     </Dialog>
   );
@@ -141,6 +125,7 @@ function FeedbackForm({
   const { t } = useTranslation();
   const snapshot = useDebugSnapshot();
   const sending = status === "sending";
+  const locked = sending || status === "sent";
   const tooLong = message.length > MAX_MESSAGE;
   const error = tooLong
     ? t("feedbackTooLong")
@@ -162,7 +147,7 @@ function FeedbackForm({
         initialMarkdown={message}
         placeholder={t("feedbackPlaceholder")}
         label={t("feedbackMessage")}
-        readOnly={sending}
+        readOnly={locked}
         onChange={onMessageChange}
       />
       {error && (
@@ -174,6 +159,7 @@ function FeedbackForm({
         <label className="flex min-w-0 cursor-pointer items-center gap-2">
           <Checkbox
             className="h-3.5 w-3.5"
+            disabled={locked}
             checked={includeDebug}
             onCheckedChange={(checked) => onIncludeDebugChange(checked === true)}
           />
@@ -184,26 +170,55 @@ function FeedbackForm({
             </span>
           </span>
         </label>
-        <div className="flex shrink-0 gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className={COMPACT_BUTTON}
-            onClick={onCancel}
-          >
-            {t("cancel")}
-          </Button>
-          <Button
-            type="submit"
-            size="sm"
-            className={COMPACT_BUTTON}
-            disabled={sending || tooLong || !message.trim()}
-          >
-            {t(sending ? "feedbackSending" : "send")}
-          </Button>
-        </div>
+        <FormActions
+          status={status}
+          canSend={!tooLong && message.trim() !== ""}
+          onCancel={onCancel}
+        />
       </div>
     </form>
+  );
+}
+
+/** Cancel and Send, or, once sent, the confirmation in their place. */
+function FormActions({
+  status,
+  canSend,
+  onCancel,
+}: {
+  status: Status;
+  canSend: boolean;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  if (status === "sent") {
+    return (
+      <p className="flex h-7 shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+        <Check className="h-3.5 w-3.5 text-success" />
+        {t("feedbackSent")}
+      </p>
+    );
+  }
+  const sending = status === "sending";
+  return (
+    <div className="flex shrink-0 gap-2">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className={COMPACT_BUTTON}
+        onClick={onCancel}
+      >
+        {t("cancel")}
+      </Button>
+      <Button
+        type="submit"
+        size="sm"
+        className={COMPACT_BUTTON}
+        disabled={sending || !canSend}
+      >
+        {t(sending ? "feedbackSending" : "send")}
+      </Button>
+    </div>
   );
 }

@@ -98,7 +98,11 @@ describe("FeedbackDialog", () => {
       message: "The sidebar **flickers**\n\n- on rename",
     });
     expect(sentBody()).not.toHaveProperty("debugReport");
+    // The message stays, read-only, with the confirmation where Send was.
     expect(document.body.textContent).toContain("Sent. Thank you!");
+    expect(button("Send")).toBeUndefined();
+    expect(messageEditor()!.textContent).toContain("The sidebar flickers");
+    expect(messageEditor()!.getAttribute("contenteditable")).toBe("false");
   });
 
   it("attaches the debug report when the box is ticked", async () => {
@@ -136,7 +140,7 @@ describe("FeedbackDialog", () => {
     act(() => core.feedback.open());
     type("First message");
     await submit();
-    act(() => button("Close")!.click());
+    act(() => core.feedback.close());
 
     act(() => core.feedback.open());
     expect(messageEditor()!.textContent).toBe("");
