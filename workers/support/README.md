@@ -5,8 +5,9 @@ The Cloudflare Worker behind the app's **Send Feedback** dialog. Later routes
 
 `POST /v1/feedback` takes `{ message, version, os, debugReport? }` and files
 it as an issue in MET's Triage, in the **Metrists Roadmap** project,
-labelled `Feedback`. The message is quoted and `@mentions` are broken, so an
-issue synced to GitHub can't ping anyone.
+labelled `Feedback`. The message is markdown, filed as written and titled
+with its first line's plain text; `@mentions` are broken, so an issue synced
+to GitHub can't ping anyone.
 
 MET syncs to the public GitHub repo, and the sync copies the title,
 description and the issue's synced comment thread. So the description holds
