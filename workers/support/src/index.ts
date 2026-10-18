@@ -1,5 +1,5 @@
 import { submitFeedback } from "./feedback.ts";
-import { corsHeaders, json, readJson } from "./http.ts";
+import { corsHeaders, json, readBody } from "./http.ts";
 import { linearClient } from "./linear.ts";
 
 /**
@@ -18,8 +18,8 @@ export interface Env {
   ALLOWED_ORIGINS: string;
 }
 
-// A 50,000-character debug report, worst case in UTF-8, plus the message.
-const MAX_BODY_BYTES = 256 * 1024;
+// Up to three 2 MB screenshots, a 50,000-character debug report, and the message.
+const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 export async function handle(request: Request, env: Env, fetchFn: typeof fetch): Promise<Response> {
   const allowedOrigins = env.ALLOWED_ORIGINS.split(",");
@@ -44,9 +44,9 @@ async function route(request: Request, env: Env, fetchFn: typeof fetch): Promise
       const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
       const { success } = await env.RATE_LIMITER.limit({ key: `feedback:${ip}` });
       if (!success) return json(429, { error: "Too many requests" });
-      const body = await readJson(request, MAX_BODY_BYTES);
-      if ("error" in body) return body.error;
-      return submitFeedback(body.value, {
+      const read = await readBody(request, MAX_BODY_BYTES);
+      if ("error" in read) return read.error;
+      return submitFeedback(read.body, request.headers.get("Content-Type"), {
         ...linearClient(env.LINEAR_API_KEY, fetchFn),
         config: {
           teamId: env.LINEAR_TEAM_ID,

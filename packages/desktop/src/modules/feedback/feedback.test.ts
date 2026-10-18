@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createFeedback } from "@/modules/feedback";
+import { createFeedback, messageLength } from "@/modules/feedback";
 
 const SUPPORT_URL = "https://support.notefig.com";
 
@@ -8,8 +8,30 @@ const respond = (status: number) =>
 
 function sentBody(fetchFn: typeof fetch) {
   const [url, init] = vi.mocked(fetchFn).mock.calls[0];
-  return { url: String(url), init, body: JSON.parse(String(init?.body)) };
+  const form = init?.body as FormData;
+  return {
+    url: String(url),
+    init,
+    form,
+    body: JSON.parse(String(form.get("feedback"))),
+  };
 }
+
+/** Object URLs without a browser: `blob:1`, `blob:2`… */
+function fakeObjectUrls() {
+  let next = 0;
+  const revoked: string[] = [];
+  return {
+    revoked,
+    createObjectURL: () => `blob:${++next}`,
+    revokeObjectURL: (url: string) => void revoked.push(url),
+  };
+}
+
+const png = (label: string) => new Blob([label], { type: "image/png" });
+/** Stands in for the canvas: tags the image so a test can tell it was encoded. */
+const encodeImage = async (image: Blob) =>
+  new Blob(["encoded:", await image.text()], { type: "image/webp" });
 
 describe("createFeedback", () => {
   it("tells subscribers when the dialog opens and closes", () => {
@@ -93,5 +115,88 @@ describe("createFeedback", () => {
       });
       expect(await feedback.send({ message: "x" })).toBe("failed");
     }
+  });
+
+  it("sends the images the message shows as files, and lets them go once sent", async () => {
+    const fetchFn = respond(202);
+    const objectUrls = fakeObjectUrls();
+    const feedback = createFeedback({
+      supportUrl: SUPPORT_URL,
+      fetchFn,
+      encodeImage,
+      objectUrls,
+    });
+    const first = feedback.addImage(png("one"));
+    const second = feedback.addImage(png("two"));
+    feedback.addImage(png("deleted from the message"));
+
+    await feedback.send({
+      message: `Look ![](${first}) and ![a](${second}) and ![](${first})`,
+    });
+
+    const { form, body } = sentBody(fetchFn);
+    expect(body.message).toBe(
+      "Look ![](attachment:img1) and ![a](attachment:img2) and ![](attachment:img1)",
+    );
+    const img1 = form.get("img1") as File;
+    expect(img1.type).toBe("image/webp");
+    expect(await img1.text()).toBe("encoded:one");
+    expect(await (form.get("img2") as File).text()).toBe("encoded:two");
+    expect(form.get("img3")).toBeNull();
+    expect(objectUrls.revoked).toEqual(["blob:1", "blob:2", "blob:3"]);
+  });
+
+  it("keeps a failed send's images for the retry", async () => {
+    const objectUrls = fakeObjectUrls();
+    const feedback = createFeedback({
+      supportUrl: SUPPORT_URL,
+      fetchFn: respond(502),
+      encodeImage,
+      objectUrls,
+    });
+    const url = feedback.addImage(png("one"));
+    expect(await feedback.send({ message: `![](${url})` })).toBe("failed");
+    expect(objectUrls.revoked).toEqual([]);
+  });
+
+  it("sends at most three images, and drops ones it can't find", async () => {
+    const fetchFn = respond(202);
+    const feedback = createFeedback({
+      supportUrl: SUPPORT_URL,
+      fetchFn,
+      encodeImage,
+      objectUrls: fakeObjectUrls(),
+    });
+    const urls = [1, 2, 3, 4].map((n) => feedback.addImage(png(`${n}`)));
+    const images = urls.map((url) => `![](${url})`).join(" ");
+    await feedback.send({ message: `${images} ![](blob:stale)` });
+
+    const { form, body } = sentBody(fetchFn);
+    expect(body.message).toBe(
+      "![](attachment:img1) ![](attachment:img2) ![](attachment:img3)  ",
+    );
+    expect(form.get("img4")).toBeNull();
+  });
+
+  it("sends a pasted data-URL image as a file too", async () => {
+    const fetchFn = respond(202);
+    const feedback = createFeedback({
+      supportUrl: SUPPORT_URL,
+      fetchFn,
+      encodeImage,
+    });
+    await feedback.send({
+      message: `![](data:image/png;base64,${btoa("pixels")})`,
+    });
+    const { form, body } = sentBody(fetchFn);
+    expect(body.message).toBe("![](attachment:img1)");
+    expect(await (form.get("img1") as File).text()).toBe("encoded:pixels");
+  });
+
+  it("counts an image by its placeholder, not its URL", () => {
+    const dataUrl = `data:image/png;base64,${"A".repeat(10_000)}`;
+    expect(messageLength(`Hi ![](${dataUrl})`)).toBe(
+      "Hi ![](attachment:img0)".length,
+    );
   });
 });

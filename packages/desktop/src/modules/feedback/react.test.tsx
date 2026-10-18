@@ -22,9 +22,16 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(async () => {
   fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
+  let objectUrl = 0;
   const feedback = createFeedback({
     supportUrl: "https://support.notefig.com",
     fetchFn: fetchMock as unknown as typeof fetch,
+    // jsdom has no canvas or object URLs.
+    encodeImage: async (image) => image,
+    objectUrls: {
+      createObjectURL: () => `blob:shot-${++objectUrl}`,
+      revokeObjectURL: () => {},
+    },
   });
   core = createTestCore({
     modules: [
@@ -63,6 +70,7 @@ afterEach(() => {
 });
 
 import type { Editor } from "@tiptap/core";
+import { Slice } from "@tiptap/pm/model";
 
 /** The message editor's element; Tiptap hangs the editor off it. */
 const messageEditor = () =>
@@ -73,8 +81,8 @@ const button = (label: string) =>
   [...document.querySelectorAll("button")].find(
     (candidate) => candidate.textContent === label,
   );
-const sentBody = (call = 0) =>
-  JSON.parse(String(fetchMock.mock.calls[call][1].body));
+const sentForm = (call = 0) => fetchMock.mock.calls[call][1].body as FormData;
+const sentBody = (call = 0) => JSON.parse(String(sentForm(call).get("feedback")));
 
 /** Writes markdown into the message, as typing or pasting it would. */
 function type(markdown: string) {
@@ -198,5 +206,25 @@ describe("FeedbackDialog", () => {
     expect(messageEditor()!.textContent).toBe("Sent while reopened");
     await act(async () => finish(new Response(null, { status: 202 })));
     expect(messageEditor()!.textContent).toBe("");
+  });
+
+  it("sends a pasted screenshot with the message", async () => {
+    act(() => core.feedback.open());
+    type("The tree jumps");
+    const { view } = messageEditor()!.editor;
+    const screenshot = new File(["pixels"], "image.png", { type: "image/png" });
+    act(() => {
+      view.someProp("handlePaste", (handle) =>
+        handle(
+          view,
+          { clipboardData: { files: [screenshot] } } as unknown as ClipboardEvent,
+          Slice.empty,
+        ),
+      );
+    });
+    await submit();
+
+    expect(sentBody().message).toContain("![](attachment:img1)");
+    expect(await (sentForm().get("img1") as File).text()).toBe("pixels");
   });
 });

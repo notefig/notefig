@@ -18,6 +18,7 @@ import { useCore } from "@notefig/core/react";
 import { useDebugSnapshot } from "@/hooks/use-debug-snapshot";
 import { formatDebugReport } from "@/utils/debug-report";
 import type { FeedbackResult } from "./feedback";
+import { MAX_IMAGES, messageLength } from "./images";
 import { FeedbackMessageEditor } from "./message-editor";
 
 export const FEEDBACK_HOTKEY = "Mod+Shift+M";
@@ -127,9 +128,10 @@ function FeedbackForm({
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
+  const { feedback } = useCore();
   const snapshot = useDebugSnapshot();
   const sending = status === "sending";
-  const tooLong = message.length > MAX_MESSAGE;
+  const tooLong = messageLength(message) > MAX_MESSAGE;
   const error = tooLong
     ? t("feedbackTooLong")
     : status === "failed"
@@ -152,6 +154,11 @@ function FeedbackForm({
         label={t("feedbackMessage")}
         readOnly={sending}
         onChange={onMessageChange}
+        onImage={feedback.addImage}
+        maxImages={MAX_IMAGES}
+        onTooManyImages={() =>
+          toast.error(t("feedbackTooManyImages", { count: MAX_IMAGES }))
+        }
       />
       {error && (
         <p role="alert" className="text-[11px] leading-snug text-destructive">

@@ -11,15 +11,25 @@ to GitHub can't ping anyone.
 
 MET syncs to the public GitHub repo, and the sync copies the title,
 description and the issue's synced comment thread. So the description holds
-only what the user wrote for the public. When the user ticks "Include debug
-info", the debug panel's report (up to 50,000 characters) goes in a
-top-level comment instead, which starts its own thread; Linear's sync
-doesn't copy comments outside the synced thread, so it stays in Linear.
+only what the user wrote, with each screenshot as a "[Screenshot N]" marker
+and no link. The screenshots and, when the user ticks "Include debug info",
+the debug panel's report (up to 50,000 characters) go in a top-level comment
+instead, which starts its own thread; Linear's sync doesn't copy comments
+outside the synced thread, so they stay in Linear.
+
+Screenshots come as `multipart/form-data`: the same JSON in a `feedback`
+part, and each image as a file part named by its id, which the message
+refers to as `![](attachment:<id>)`. Up to 3 images, each PNG, JPEG or
+WebP (checked by its leading bytes, not just its type) and at most 2 MB.
+Each one the message shows is uploaded to Linear's own file storage with
+`fileUpload`. Multipart keeps the images as bytes: the runtime parses them
+natively, well inside the Free plan's CPU time, where decoding base64 out
+of JSON wouldn't be.
 
 | Guard | How |
 |---|---|
 | 1 request a minute per IP | Workers Rate Limiting binding |
-| Body over 256 KB | 413, read without buffering more |
+| Body over 8 MB | 413, read without buffering more |
 | Calls from anywhere but the app | 403 unless `Origin` is one of `ALLOWED_ORIGINS` |
 
 A Linear failure answers `502`, and the app keeps the draft so the user can
