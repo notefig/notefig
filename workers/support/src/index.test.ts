@@ -46,7 +46,7 @@ test("files posted feedback with Linear, as the API key", async () => {
   });
 });
 
-test("answers the app's preflight, and gives other origins no CORS grant", async () => {
+test("answers the app's preflight", async () => {
   const { env, fetchFn } = setup();
   const preflight = new Request("https://support.notefig.com/v1/feedback", {
     method: "OPTIONS",
@@ -55,9 +55,26 @@ test("answers the app's preflight, and gives other origins no CORS grant", async
   const allowed = await handle(preflight, env, fetchFn);
   assert.equal(allowed.status, 204);
   assert.equal(allowed.headers.get("Access-Control-Allow-Methods"), "POST");
+});
 
-  const elsewhere = await handle(post(JSON.stringify(validFeedback), "https://evil.example"), env, fetchFn);
+test("refuses other origins and origin-less requests without filing anything", async () => {
+  const { env, fetchFn, linearCalls } = setup();
+  // A "simple" text/plain POST: a browser sends it from any page without a preflight.
+  const simplePost = new Request("https://support.notefig.com/v1/feedback", {
+    method: "POST",
+    headers: { "Content-Type": "text/plain", Origin: "https://evil.example" },
+    body: JSON.stringify(validFeedback),
+  });
+  const elsewhere = await handle(simplePost, env, fetchFn);
+  assert.equal(elsewhere.status, 403);
   assert.equal(elsewhere.headers.get("Access-Control-Allow-Origin"), null);
+
+  const noOrigin = new Request("https://support.notefig.com/v1/feedback", {
+    method: "POST",
+    body: JSON.stringify(validFeedback),
+  });
+  assert.equal((await handle(noOrigin, env, fetchFn)).status, 403);
+  assert.equal(linearCalls.length, 0);
 });
 
 test("rate-limited callers get 429 before the body is read", async () => {
@@ -76,7 +93,7 @@ test("refuses bodies over 16 KB and bodies that aren't JSON", async () => {
 test("routes only POST /v1/feedback", async () => {
   const { env, fetchFn } = setup();
   assert.equal((await handle(post("{}", APP_ORIGIN, "/v1/roadmap"), env, fetchFn)).status, 404);
-  const get = new Request("https://support.notefig.com/v1/feedback");
+  const get = new Request("https://support.notefig.com/v1/feedback", { headers: { Origin: APP_ORIGIN } });
   assert.equal((await handle(get, env, fetchFn)).status, 405);
 });
 

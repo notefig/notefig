@@ -18,19 +18,24 @@ export function openFeedbackDialog(): void {
   window.dispatchEvent(new Event(OPEN_FEEDBACK_EVENT));
 }
 
+const SEND_TIMEOUT_MS = 15_000;
+
 /**
  * Posts one piece of feedback to the support Worker, with the app's
- * version and OS. Never throws: a network error is "failed", so the
- * dialog can keep the draft and offer a retry.
+ * version and OS. Never throws: a network error, or no answer within
+ * `timeoutMs`, is "failed", so the dialog can keep the draft and offer a
+ * retry.
  */
 export async function sendFeedback(
   baseUrl: string,
   feedback: { kind: FeedbackKind; message: string },
   fetchFn: typeof fetch = fetch,
+  timeoutMs = SEND_TIMEOUT_MS,
 ): Promise<FeedbackResult> {
   try {
     const response = await fetchFn(new URL("/v1/feedback", baseUrl), {
       method: "POST",
+      signal: AbortSignal.timeout(timeoutMs),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...feedback,

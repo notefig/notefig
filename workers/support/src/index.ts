@@ -24,7 +24,14 @@ export interface Env {
 const MAX_BODY_BYTES = 16 * 1024;
 
 export async function handle(request: Request, env: Env, fetchFn: typeof fetch): Promise<Response> {
-  const cors = corsHeaders(request, env.ALLOWED_ORIGINS.split(","));
+  const allowedOrigins = env.ALLOWED_ORIGINS.split(",");
+  // CORS alone only hides the response: a page elsewhere can still send a
+  // "simple" text/plain POST with no preflight. So anything not from the
+  // app's own origins is refused before it reaches a route.
+  if (!allowedOrigins.includes(request.headers.get("Origin") ?? "")) {
+    return json(403, { error: "Origin not allowed" });
+  }
+  const cors = corsHeaders(request, allowedOrigins);
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   const response = await route(request, env, fetchFn);
   for (const [name, value] of Object.entries(cors)) response.headers.set(name, value);

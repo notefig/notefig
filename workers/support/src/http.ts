@@ -39,8 +39,7 @@ export async function readJson(
 
 /**
  * CORS headers for a request from one of `allowedOrigins` (the app's
- * webviews and the web app). Any other origin gets none, so a browser
- * page elsewhere can't post on a visitor's behalf.
+ * webviews and the web app). Any other origin gets none.
  */
 export function corsHeaders(
   request: Request,

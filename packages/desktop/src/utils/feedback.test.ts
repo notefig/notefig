@@ -44,4 +44,23 @@ describe("sendFeedback", () => {
       ),
     ).toBe("failed");
   });
+
+  it("gives up on a server that never answers", async () => {
+    const hanging = vi.fn(
+      (_url: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(init.signal?.reason),
+          );
+        }),
+    ) as unknown as typeof fetch;
+    expect(
+      await sendFeedback(
+        "https://support.notefig.com",
+        { kind: "bug", message: "x" },
+        hanging,
+        10,
+      ),
+    ).toBe("failed");
+  });
 });

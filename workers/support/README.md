@@ -14,7 +14,7 @@ broken, so an issue synced to GitHub can't ping anyone.
 | Body over 16 KB | 413, read without buffering more |
 | 50 new issues a day | a KV counter that expires after 2 days |
 | Same text within 7 days | a KV key on the message's hash, so no issue is filed |
-| Calls from other websites | CORS is granted only to the app's origins |
+| Calls from anywhere but the app | 403 unless `Origin` is one of `ALLOWED_ORIGINS` |
 
 A repeat or a submission past the cap still gets `202`, so the sender can't
 tell it was filtered. A Linear failure answers `502`, and the app keeps the

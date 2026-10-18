@@ -1,7 +1,7 @@
 name: Deploy Support Worker
 
 # support.notefig.com (workers/support). Deploys on every push to main that
-# changes the Worker; CI's "Test Support Worker" job has already run on it.
+# changes the Worker, after its typecheck and tests pass in this same job.
 
 on:
   push:
@@ -30,6 +30,20 @@ jobs:
             echo "::error::wrangler.toml still has placeholder ids; see workers/support/README.md"
             exit 1
           fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: workers/support/package-lock.json
+
+      - name: Typecheck and test
+        working-directory: workers/support
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
 
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
