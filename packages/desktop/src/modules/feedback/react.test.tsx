@@ -19,12 +19,21 @@ let container: HTMLDivElement;
 let root: Root;
 let core: Core;
 let fetchMock: ReturnType<typeof vi.fn>;
+let revoked: string[];
 
 beforeEach(async () => {
   fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
+  let objectUrl = 0;
+  revoked = [];
   const feedback = createFeedback({
     supportUrl: "https://support.notefig.com",
     fetchFn: fetchMock as unknown as typeof fetch,
+    // jsdom has no canvas or object URLs.
+    encodeImage: async (image) => image,
+    objectUrls: {
+      createObjectURL: () => `blob:shot-${++objectUrl}`,
+      revokeObjectURL: (url: string) => void revoked.push(url),
+    },
   });
   core = createTestCore({
     modules: [
@@ -63,6 +72,7 @@ afterEach(() => {
 });
 
 import type { Editor } from "@tiptap/core";
+import { Slice } from "@tiptap/pm/model";
 
 /** The message editor's element; Tiptap hangs the editor off it. */
 const messageEditor = () =>
@@ -73,8 +83,22 @@ const button = (label: string) =>
   [...document.querySelectorAll("button")].find(
     (candidate) => candidate.textContent === label,
   );
-const sentBody = (call = 0) =>
-  JSON.parse(String(fetchMock.mock.calls[call][1].body));
+const sentForm = (call = 0) => fetchMock.mock.calls[call][1].body as FormData;
+const sentBody = (call = 0) => JSON.parse(String(sentForm(call).get("feedback")));
+
+/** Pastes an image file into the message, through the editor's own handler. */
+function paste(file: File) {
+  const { view } = messageEditor()!.editor;
+  act(() => {
+    view.someProp("handlePaste", (handle) =>
+      handle(
+        view,
+        { clipboardData: { files: [file] } } as unknown as ClipboardEvent,
+        Slice.empty,
+      ),
+    );
+  });
+}
 
 /** Writes markdown into the message, as typing or pasting it would. */
 function type(markdown: string) {
@@ -198,5 +222,27 @@ describe("FeedbackDialog", () => {
     expect(messageEditor()!.textContent).toBe("Sent while reopened");
     await act(async () => finish(new Response(null, { status: 202 })));
     expect(messageEditor()!.textContent).toBe("");
+  });
+
+  it("sends a pasted screenshot with the message", async () => {
+    act(() => core.feedback.open());
+    type("The tree jumps");
+    paste(new File(["pixels"], "image.png", { type: "image/png" }));
+    await submit();
+
+    expect(sentBody().message).toContain("![](attachment:img1)");
+    expect(await (sentForm().get("img1") as File).text()).toBe("pixels");
+  });
+
+  it("lets go of a deleted screenshot on close, and keeps one the draft still shows", () => {
+    act(() => core.feedback.open());
+    paste(new File(["deleted"], "a.png", { type: "image/png" }));
+    // Deleting the image: the draft no longer shows it.
+    type("Just text");
+    paste(new File(["kept"], "b.png", { type: "image/png" }));
+    expect(revoked).toEqual([]);
+
+    act(() => core.feedback.close());
+    expect(revoked).toEqual(["blob:shot-1"]);
   });
 });

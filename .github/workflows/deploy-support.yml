@@ -45,6 +45,9 @@ jobs:
           npm run typecheck
           npm test
 
+      # The action installs wrangler into workers/support beside what `npm
+      # ci` put there, so @cloudflare/workers-types must stay within this
+      # wrangler version's peer range; bump them together.
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:

@@ -412,12 +412,13 @@ i18n
           feedbackSettingTitle: "Feedback",
           feedbackSettingDesc: "Report a bug or suggest an idea.",
           feedbackPlaceholder:
-            "What broke, or what would help? Markdown works, and your text may be shared publicly.",
+            "What broke, or what would help? Markdown and pasted screenshots work. Your text may be shared publicly; screenshots stay private.",
           feedbackSending: "Sending feedback…",
           feedbackSent: "Feedback sent. Thank you!",
           feedbackFailed: "Couldn't send. Try again.",
           feedbackRateLimited: "One message a minute. Try again shortly.",
           feedbackTooLong: "Keep it under 5,000 characters.",
+          feedbackTooManyImages: "Up to {{count}} images per message.",
 
           // Window controls (Windows titlebar)
           minimize: "Minimize",

@@ -8,15 +8,14 @@ export function json(status: number, body: unknown): Response {
 }
 
 /**
- * The request's JSON body, read without buffering more than `maxBytes`:
- * a missing or lying Content-Length can't make the Worker hold a large
- * body. Gives back the error response when the body is too large or isn't
- * JSON.
+ * The request's body, read without buffering more than `maxBytes`: a
+ * missing or lying Content-Length can't make the Worker hold a large body.
+ * Gives back the error response when it's too large.
  */
-export async function readJson(
+export async function readBody(
   request: Request,
   maxBytes: number,
-): Promise<{ value: unknown } | { error: Response }> {
+): Promise<{ body: Blob } | { error: Response }> {
   const chunks: Uint8Array[] = [];
   let size = 0;
   const reader = request.body?.getReader();
@@ -30,11 +29,7 @@ export async function readJson(
     }
     chunks.push(value);
   }
-  try {
-    return { value: JSON.parse(await new Blob(chunks).text()) };
-  } catch {
-    return { error: json(400, { error: "Body is not JSON" }) };
-  }
+  return { body: new Blob(chunks) };
 }
 
 /**

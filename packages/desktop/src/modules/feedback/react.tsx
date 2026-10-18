@@ -2,7 +2,7 @@
  * The feedback dialog, mounted once in App, and its hotkey. Opened from
  * the command palette, Settings, or Mod+Shift+M anywhere in the app.
  */
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { toast } from "sonner";
@@ -18,6 +18,7 @@ import { useCore } from "@notefig/core/react";
 import { useDebugSnapshot } from "@/hooks/use-debug-snapshot";
 import { formatDebugReport } from "@/utils/debug-report";
 import type { FeedbackResult } from "./feedback";
+import { MAX_IMAGES, messageLength } from "./images";
 import { FeedbackMessageEditor } from "./message-editor";
 
 export const FEEDBACK_HOTKEY = "Mod+Shift+M";
@@ -55,6 +56,12 @@ function FeedbackDialogShell() {
   // The editor reads the draft once, when it mounts; a new key after each
   // send remounts it empty if the dialog was reopened while sending.
   const [draftKey, setDraftKey] = useState(0);
+
+  // A closed dialog's editor, and with it its undo history, is gone, so
+  // the images its draft no longer shows can go too.
+  useEffect(() => {
+    if (!open) feedback.releaseImages(message);
+  }, [feedback, open, message]);
 
   const setOpen = (next: boolean) => {
     if (next) feedback.open();
@@ -127,9 +134,10 @@ function FeedbackForm({
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
+  const { feedback } = useCore();
   const snapshot = useDebugSnapshot();
   const sending = status === "sending";
-  const tooLong = message.length > MAX_MESSAGE;
+  const tooLong = messageLength(message) > MAX_MESSAGE;
   const error = tooLong
     ? t("feedbackTooLong")
     : status === "failed"
@@ -152,6 +160,11 @@ function FeedbackForm({
         label={t("feedbackMessage")}
         readOnly={sending}
         onChange={onMessageChange}
+        onImage={feedback.addImage}
+        maxImages={MAX_IMAGES}
+        onTooManyImages={() =>
+          toast.error(t("feedbackTooManyImages", { count: MAX_IMAGES }))
+        }
       />
       {error && (
         <p role="alert" className="text-[11px] leading-snug text-destructive">

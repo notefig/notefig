@@ -86,9 +86,9 @@ test("rate-limited callers get 429 before the body is read", async () => {
   assert.equal(linearCalls.length, 0);
 });
 
-test("refuses bodies over 256 KB and bodies that aren't JSON", async () => {
+test("refuses bodies over 8 MB and bodies that aren't JSON", async () => {
   const { env, fetchFn } = setup();
-  assert.equal((await handle(post("x".repeat(256 * 1024 + 1)), env, fetchFn)).status, 413);
+  assert.equal((await handle(post("x".repeat(8 * 1024 * 1024 + 1)), env, fetchFn)).status, 413);
   assert.equal((await handle(post("{not json"), env, fetchFn)).status, 400);
 });
 
@@ -123,4 +123,61 @@ test("puts the debug report in a comment on the new issue, not its description",
   assert.match(comment.query, /commentCreate/);
   assert.equal(comment.variables.input.issueId, "issue-1");
   assert.match(comment.variables.input.body, /=== Notefig Debug Report ===/);
+});
+
+test("uploads a screenshot to Linear, files the issue, and links it in a private comment", async () => {
+  const { env } = setup();
+  const calls: { url: string; method?: string; headers?: Headers; body?: unknown }[] = [];
+  const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    calls.push({ url, method: init?.method, headers: new Headers(init?.headers), body: init?.body });
+    if (url === "https://upload.example/put") return new Response(null, { status: 200 });
+    const { query } = JSON.parse(String(init?.body));
+    if (query.includes("fileUpload")) {
+      return Response.json({
+        data: {
+          fileUpload: {
+            success: true,
+            uploadFile: {
+              uploadUrl: "https://upload.example/put",
+              assetUrl: "https://uploads.linear.app/asset.png",
+              headers: [{ key: "x-goog-meta-owner", value: "notefig" }],
+            },
+          },
+        },
+      });
+    }
+    if (query.includes("commentCreate")) {
+      return Response.json({ data: { commentCreate: { success: true } } });
+    }
+    return Response.json({ data: { issueCreate: { success: true, issue: { id: "issue-1" } } } });
+  }) as typeof fetch;
+
+  const form = new FormData();
+  form.append("feedback", JSON.stringify({ ...validFeedback, message: "Look\n\n![](attachment:img1)" }));
+  form.append("img1", new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: "image/png" }), "img1");
+  const request = new Request("https://support.notefig.com/v1/feedback", {
+    method: "POST",
+    headers: { Origin: APP_ORIGIN },
+    body: form,
+  });
+
+  const response = await handle(request, env, fetchFn);
+  assert.equal(response.status, 202);
+  assert.deepEqual(calls.map((call) => call.url), [
+    "https://api.linear.app/graphql",
+    "https://upload.example/put",
+    "https://api.linear.app/graphql",
+    "https://api.linear.app/graphql",
+  ]);
+  const put = calls[1];
+  assert.equal(put.method, "PUT");
+  assert.equal(put.headers?.get("Content-Type"), "image/png");
+  assert.equal(put.headers?.get("x-goog-meta-owner"), "notefig");
+  const issue = JSON.parse(String(calls[2].body)).variables.input;
+  assert.match(issue.description, /^Look\n\n\*\[Screenshot 1\]\*\n/);
+  assert.ok(!issue.description.includes("uploads.linear.app"));
+  const comment = JSON.parse(String(calls[3].body)).variables.input;
+  assert.equal(comment.issueId, "issue-1");
+  assert.match(comment.body, /!\[Screenshot 1\]\(https:\/\/uploads\.linear\.app\/asset\.png\)/);
 });
