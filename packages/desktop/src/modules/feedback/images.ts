@@ -35,13 +35,20 @@ export function messageLength(markdown: string): number {
 
 // Fenced code blocks (``` or ~~~, closed by the same fence) and inline
 // code: what they hold is text, never an image.
-const CODE = /(^|\n)(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\2[`~]*(?=\n|$)|(`+)[^`][\s\S]*?\3/g;
+const CODE =
+  /(?:^|\n)(?<fence>`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\k<fence>[`~]*(?=\n|$)|(?<ticks>`+)[^`][\s\S]*?\k<ticks>/;
+
+// Images and code in one pass, whichever starts first: an image's title may
+// hold backticks that aren't code, and code may hold image syntax that isn't
+// an image.
+const IMAGE_OR_CODE = new RegExp(`(?<image>${IMAGE.source})|${CODE.source}`, "g");
 
 /** `markdown` with `edit` applied to everything outside its code. */
 function outsideCode(markdown: string, edit: (text: string) => string): string {
   let result = "";
   let last = 0;
-  for (const match of markdown.matchAll(CODE)) {
+  for (const match of markdown.matchAll(IMAGE_OR_CODE)) {
+    if (match.groups?.image !== undefined) continue;
     result += edit(markdown.slice(last, match.index)) + match[0];
     last = match.index + match[0].length;
   }

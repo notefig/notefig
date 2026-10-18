@@ -270,4 +270,19 @@ describe("createFeedback", () => {
     expect(body.message).toBe(message.replace(url, "attachment:img1"));
     expect(form.get("img2")).toBeNull();
   });
+
+  it("attaches an image whose title holds backticks", async () => {
+    const fetchFn = respond(202);
+    const feedback = createFeedback({
+      supportUrl: SUPPORT_URL,
+      fetchFn,
+      encodeImage,
+      objectUrls: fakeObjectUrls(),
+    });
+    const url = feedback.addImage(png("one"));
+    await feedback.send({ message: `See ![](${url} "a \`label\`") then \`code\`` });
+    const { form, body } = sentBody(fetchFn);
+    expect(body.message).toBe("See ![](attachment:img1) then `code`");
+    expect(await (form.get("img1") as File).text()).toBe("encoded:one");
+  });
 });
