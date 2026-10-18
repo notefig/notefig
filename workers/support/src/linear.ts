@@ -1,4 +1,4 @@
-/** The Linear calls the support Worker makes: upload a file, create an issue, comment on it. */
+/** The Linear calls the support Worker makes: upload a file, create an issue, comment on it, read its comments. */
 
 export interface IssueInput {
   teamId: string;
@@ -19,6 +19,14 @@ export type CreateIssue = (input: IssueInput) => Promise<string>;
  */
 export type CreateComment = (issueId: string, body: string) => Promise<void>;
 
+export interface IssueComment {
+  author: string;
+  body: string;
+}
+
+/** The issue's comments, oldest first: the private one holds the debug report and screenshots. */
+export type IssueComments = (issueId: string) => Promise<IssueComment[]>;
+
 export interface FileInput {
   bytes: Uint8Array;
   type: string;
@@ -34,6 +42,10 @@ const ISSUE_CREATE = `mutation IssueCreate($input: IssueCreateInput!) {
 
 const COMMENT_CREATE = `mutation CommentCreate($input: CommentCreateInput!) {
   commentCreate(input: $input) { success }
+}`;
+
+const ISSUE_COMMENTS = `query IssueComments($id: String!) {
+  issue(id: $id) { comments(first: 50, orderBy: createdAt) { nodes { body createdAt user { name } } } }
 }`;
 
 const FILE_UPLOAD = `mutation FileUpload($contentType: String!, $filename: String!, $size: Int!) {
@@ -58,7 +70,12 @@ interface UploadFileResult {
 export function linearClient(
   apiKey: string,
   fetchFn: typeof fetch,
-): { createIssue: CreateIssue; createComment: CreateComment; uploadFile: UploadFile } {
+): {
+  createIssue: CreateIssue;
+  createComment: CreateComment;
+  uploadFile: UploadFile;
+  issueComments: IssueComments;
+} {
   async function query<T>(name: string, query: string, variables: object): Promise<T> {
     const response = await fetchFn("https://api.linear.app/graphql", {
       method: "POST",
@@ -92,6 +109,18 @@ export function linearClient(
         { input: { issueId, body } },
       );
       if (!data.commentCreate?.success) throw new Error("Linear commentCreate did not succeed");
+    },
+
+    async issueComments(issueId) {
+      type Node = { body: string; createdAt: string; user: { name: string } | null };
+      const data = await query<{ issue?: { comments: { nodes: Node[] } } }>(
+        "issueComments",
+        ISSUE_COMMENTS,
+        { id: issueId },
+      );
+      return (data.issue?.comments.nodes ?? [])
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+        .map((node) => ({ author: node.user?.name ?? "Linear", body: node.body }));
     },
 
     // Linear hands out a signed upload URL; the file goes there directly.

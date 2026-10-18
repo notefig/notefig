@@ -40,8 +40,8 @@ async function sign(body: string, secret = SECRET): Promise<string> {
   return Array.from(new Uint8Array(mac), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function setup(fireStatus = 200) {
-  const fires: { url: string; headers: Headers; body: { text: string } }[] = [];
+function setup(sessionFails = false) {
+  const sessions: Parameters<AgentTriggerDeps["createSession"]>[0][] = [];
   const comments: { issueId: string; body: string }[] = [];
   const deps: AgentTriggerDeps = {
     config: {
@@ -49,19 +49,26 @@ function setup(fireStatus = 200) {
       agentUserId: AGENT,
       approverIds: [APPROVER],
       triageStateId: "triage",
-      routineFireUrl: "https://api.anthropic.com/v1/claude_code/routines/trig_1/fire",
-      routineToken: "routine-token",
+      agentId: "agent_1",
+      environmentId: "env_1",
+      vaultId: "vlt_1",
+      repositoryUrl: "https://github.com/notefig/notefig",
+      githubToken: "github-token",
+      budgetCents: 2000,
     },
-    fetchFn: (async (input: RequestInfo | URL, init?: RequestInit) => {
-      fires.push({ url: String(input), headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
-      return fireStatus === 200
-        ? Response.json({ claude_code_session_id: "s1", claude_code_session_url: "https://claude.ai/code/s1" })
-        : new Response("down", { status: fireStatus });
-    }) as typeof fetch,
+    createSession: async (params) => {
+      if (sessionFails) throw new Error("Managed Agents down");
+      sessions.push(params);
+      return { id: "sesn_1" };
+    },
+    issueComments: async () => [
+      { author: "Notefig Support", body: "### Debug report\n\n```text\n=== Notefig Debug Report ===\n```" },
+      { author: "Parsa", body: "Looks like the tree re-renders." },
+    ],
     createComment: async (issueId, body) => void comments.push({ issueId, body }),
     now: () => NOW,
   };
-  return { deps, fires, comments };
+  return { deps, sessions, comments };
 }
 
 async function deliver(event: unknown, deps: AgentTriggerDeps, signature?: string | null) {
@@ -79,45 +86,53 @@ async function quietly<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-test("starts the routine when an approver assigns an accepted issue to the agent", async () => {
-  const { deps, fires, comments } = setup();
+test("starts a session when an approver assigns an accepted issue to the agent", async () => {
+  const { deps, sessions, comments } = setup();
   const response = await deliver(issueEvent(), deps);
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { outcome: "started" });
+  assert.deepEqual(await response.json(), { outcome: "started", sessionId: "sesn_1" });
 
-  assert.equal(fires.length, 1);
-  const [fire] = fires;
-  assert.equal(fire.url, "https://api.anthropic.com/v1/claude_code/routines/trig_1/fire");
-  assert.equal(fire.headers.get("Authorization"), "Bearer routine-token");
-  assert.equal(fire.headers.get("anthropic-beta"), "experimental-cc-routine-2026-04-01");
-  assert.equal(fire.headers.get("anthropic-version"), "2023-06-01");
-  assert.equal(
-    fire.body.text,
-    [
-      "Linear issue MET-42 (id issue-uuid)",
-      "Title: Sidebar flickers on rename",
-      "URL: https://linear.app/notefig/issue/MET-42",
-      "",
-      "Description:",
-      "The tree jumps when I rename a file.",
-    ].join("\n"),
-  );
+  assert.equal(sessions.length, 1);
+  const { initial_events, ...session } = sessions[0];
+  assert.deepEqual(session, {
+    agent: "agent_1",
+    environment_id: "env_1",
+    vault_ids: ["vlt_1"],
+    title: "MET-42: Sidebar flickers on rename",
+    metadata: { linear_issue: "MET-42" },
+    resources: [
+      {
+        type: "github_repository",
+        url: "https://github.com/notefig/notefig",
+        authorization_token: "github-token",
+        checkout: { type: "branch", name: "main" },
+      },
+    ],
+    budget: { type: "limit", max_list_cost: { amount: "2000", currency: "USD" } },
+  });
+  // The kickoff carries the issue and every comment, the private one too.
+  const kickoff = (initial_events?.[0] as { content: { text: string }[] }).content[0].text;
+  assert.match(kickoff, /^Implement Linear issue MET-42: Sidebar flickers on rename\nURL: https:\/\/linear\.app\/notefig\/issue\/MET-42\n/);
+  assert.match(kickoff, /## Description\n\nThe tree jumps when I rename a file\./);
+  assert.match(kickoff, /### Notefig Support\n\n### Debug report[\s\S]*=== Notefig Debug Report ===/);
+  assert.match(kickoff, /### Parsa\n\nLooks like the tree re-renders\./);
+
   assert.deepEqual(comments, [
     {
       issueId: "issue-uuid",
-      body: "Agent started: https://claude.ai/code/s1 It will link its pull request here.",
+      body: 'Agent started: https://platform.claude.com/workspaces/default/sessions/sesn_1. Its pull request will say "Closes MET-42", which links it here.',
     },
   ]);
 });
 
 test("starts it for an issue created already assigned to the agent", async () => {
-  const { deps, fires } = setup();
+  const { deps, sessions } = setup();
   await deliver(issueEvent({ action: "create", updatedFrom: undefined }), deps);
-  assert.equal(fires.length, 1);
+  assert.equal(sessions.length, 1);
 });
 
 test("ignores events that don't hand an accepted issue to the agent", async () => {
-  const { deps, fires } = setup();
+  const { deps, sessions } = setup();
   const ignored = [
     issueEvent({ actor: { id: "someone-else" } }),
     issueEvent({}, { assigneeId: "another-user" }),
@@ -130,22 +145,22 @@ test("ignores events that don't hand an accepted issue to the agent", async () =
     const response = await deliver(event, deps);
     assert.deepEqual(await response.json(), { outcome: "ignored" }, JSON.stringify(event));
   }
-  assert.equal(fires.length, 0);
+  assert.equal(sessions.length, 0);
 });
 
 test("refuses unsigned, wrongly signed and stale deliveries", async () => {
-  const { deps, fires } = setup();
+  const { deps, sessions } = setup();
   const event = issueEvent();
   assert.equal((await deliver(event, deps, null)).status, 401);
   assert.equal((await deliver(event, deps, "zz")).status, 401);
   const body = JSON.stringify(event);
   assert.equal((await handleLinearWebhook(body, await sign(body, "other-secret"), deps)).status, 401);
   assert.equal((await deliver(issueEvent({ webhookTimestamp: NOW - 61_000 }), deps)).status, 401);
-  assert.equal(fires.length, 0);
+  assert.equal(sessions.length, 0);
 });
 
-test("answers 502 when the routine won't start, so Linear retries", async () => {
-  const { deps, comments } = setup(500);
+test("answers 502 when the session won't start, so Linear retries", async () => {
+  const { deps, comments } = setup(true);
   const response = await quietly(() => deliver(issueEvent(), deps));
   assert.equal(response.status, 502);
   assert.equal(comments.length, 0);
@@ -157,5 +172,5 @@ test("still reports started when only the comment fails", async () => {
     throw new Error("comment refused");
   };
   const response = await quietly(() => deliver(issueEvent(), deps));
-  assert.deepEqual(await response.json(), { outcome: "started" });
+  assert.deepEqual(await response.json(), { outcome: "started", sessionId: "sesn_1" });
 });

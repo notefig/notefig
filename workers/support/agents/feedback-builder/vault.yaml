@@ -1,0 +1,5 @@
+# Holds the GitHub MCP credential the agent opens pull requests with. The
+# credential itself is added once by hand (see workers/support/README.md);
+# ant apply manages only this container.
+type: vault
+display_name: Notefig feedback builder

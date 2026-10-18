@@ -1,12 +1,15 @@
+import type Anthropic from "@anthropic-ai/sdk";
 import { json } from "./http.ts";
-import type { CreateComment } from "./linear.ts";
+import type { CreateComment, IssueComments } from "./linear.ts";
 
 /**
  * `POST /v1/linear`: Linear's webhook. When an approver assigns an accepted
- * issue (out of Triage) to the agent account, this fires a Claude Code
- * routine to implement it, then leaves a comment on the issue linking the
- * run. The routine's own prompt says what to do with the issue; what's sent
- * here is only the issue, which the routine treats as untrusted data.
+ * issue (out of Triage) to the agent account, this starts a Claude Managed
+ * Agents session to implement it, then comments on the issue with a link
+ * to the session. The agent's rules live in its definition
+ * (`agents/feedback-builder/agent.md`); the kickoff carries the issue and
+ * its comments, the private debug report included, which stay inside the
+ * session. The agent's PR says "Closes <identifier>", so Linear links it.
  *
  * Server to server, so there's no Origin to check: Linear's HMAC signature
  * over the raw body is the guard, with its timestamp bounding replays.
@@ -17,13 +20,24 @@ export interface AgentTriggerConfig {
   agentUserId: string;
   approverIds: readonly string[];
   triageStateId: string;
-  routineFireUrl: string;
-  routineToken: string;
+  /** The Managed Agents agent and environment, from `ant apply`. */
+  agentId: string;
+  environmentId: string;
+  /** Holds the GitHub MCP credential the agent opens its PR with. */
+  vaultId: string;
+  repositoryUrl: string;
+  /** Clones and pushes through Anthropic's git proxy; never enters the sandbox. */
+  githubToken: string;
+  /** The session's hard spend cap, in US cents. */
+  budgetCents: number;
 }
+
+type SessionParams = Parameters<Anthropic["beta"]["sessions"]["create"]>[0];
 
 export interface AgentTriggerDeps {
   config: AgentTriggerConfig;
-  fetchFn: typeof fetch;
+  createSession: (params: SessionParams) => Promise<{ id: string }>;
+  issueComments: IssueComments;
   createComment: CreateComment;
   now: () => number;
 }
@@ -66,22 +80,22 @@ export async function handleLinearWebhook(
   }
   if (!asksForAgent(event, deps.config)) return json(200, { outcome: "ignored" });
 
-  let run: { claude_code_session_url?: string };
+  let sessionId: string;
   try {
-    run = await fireRoutine(event, deps);
+    sessionId = (await startSession(event, deps)).id;
   } catch (error) {
-    // Linear retries a failed delivery, which retries the fire.
-    console.error("agent trigger: routine not fired", error);
+    // Linear retries a failed delivery, which retries the start.
+    console.error("agent trigger: session not started", error);
     return json(502, { error: "Could not start the agent" });
   }
   // The agent is running either way; a missing comment only costs the link.
   await deps
     .createComment(
       event.data.id,
-      `Agent started${run.claude_code_session_url ? `: ${run.claude_code_session_url}` : "."} It will link its pull request here.`,
+      `Agent started: https://platform.claude.com/workspaces/default/sessions/${sessionId}. Its pull request will say "Closes ${event.data.identifier}", which links it here.`,
     )
     .catch((error: unknown) => console.error("agent trigger: comment not added", error));
-  return json(200, { outcome: "started" });
+  return json(200, { outcome: "started", sessionId });
 }
 
 /**
@@ -102,31 +116,42 @@ function asksForAgent(event: IssueEvent, config: AgentTriggerConfig): boolean {
   );
 }
 
-async function fireRoutine(
-  event: IssueEvent,
-  { config, fetchFn }: AgentTriggerDeps,
-): Promise<{ claude_code_session_url?: string }> {
+async function startSession(event: IssueEvent, deps: AgentTriggerDeps): Promise<{ id: string }> {
+  const { config } = deps;
   const { id, identifier, title, url, description } = event.data;
-  const text = [
-    `Linear issue ${identifier} (id ${id})`,
-    `Title: ${title}`,
+  const comments = await deps.issueComments(id);
+  const kickoff = [
+    `Implement Linear issue ${identifier}: ${title}`,
     `URL: ${url}`,
     "",
-    "Description:",
+    "## Description",
+    "",
     description?.trim() || "(none)",
+    "",
+    "## Comments",
+    "",
+    ...(comments.length === 0
+      ? ["(none)"]
+      : comments.map(({ author, body }) => `### ${author}\n\n${body.trim()}\n`)),
   ].join("\n");
-  const response = await fetchFn(config.routineFireUrl, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.routineToken}`,
-      "anthropic-beta": "experimental-cc-routine-2026-04-01",
-      "anthropic-version": "2023-06-01",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ text }),
+
+  return deps.createSession({
+    agent: config.agentId,
+    environment_id: config.environmentId,
+    vault_ids: [config.vaultId],
+    title: `${identifier}: ${title}`.slice(0, 200),
+    metadata: { linear_issue: identifier },
+    resources: [
+      {
+        type: "github_repository",
+        url: config.repositoryUrl,
+        authorization_token: config.githubToken,
+        checkout: { type: "branch", name: "main" },
+      },
+    ],
+    budget: { type: "limit", max_list_cost: { amount: String(config.budgetCents), currency: "USD" } },
+    initial_events: [{ type: "user.message", content: [{ type: "text", text: kickoff }] }],
   });
-  if (!response.ok) throw new Error(`routine fire failed (${response.status}): ${await response.text()}`);
-  return (await response.json().catch(() => ({}))) as { claude_code_session_url?: string };
 }
 
 /** Linear's `Linear-Signature`: the hex HMAC-SHA256 of the raw body. */

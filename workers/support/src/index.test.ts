@@ -17,6 +17,8 @@ function setup({ limited = false } = {}) {
     ALLOWED_ORIGINS: `${APP_ORIGIN},https://app.notefig.com`,
     AGENT_USER_ID: "agent-user",
     APPROVER_IDS: "approver-user",
+    AGENT_REPOSITORY_URL: "https://github.com/notefig/notefig",
+    AGENT_BUDGET_CENTS: "2000",
   };
   const fetchFn = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body));
@@ -194,8 +196,11 @@ test("Linear's webhook skips the origin check, and waits for its secrets", async
   const configured: Env = {
     ...env,
     LINEAR_WEBHOOK_SECRET: "secret",
-    CLAUDE_ROUTINE_FIRE_URL: "https://api.anthropic.com/v1/claude_code/routines/trig_1/fire",
-    CLAUDE_ROUTINE_TOKEN: "token",
+    ANTHROPIC_API_KEY: "sk-ant-test",
+    MANAGED_AGENT_ID: "agent_1",
+    MANAGED_ENVIRONMENT_ID: "env_1",
+    AGENT_VAULT_ID: "vlt_1",
+    AGENT_GITHUB_TOKEN: "github-token",
   };
   // Configured, an unsigned delivery is refused by the signature check.
   assert.equal((await handle(delivery(), configured, fetchFn)).status, 401);
