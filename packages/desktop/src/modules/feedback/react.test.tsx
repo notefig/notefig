@@ -130,12 +130,19 @@ describe("FeedbackDialog", () => {
     expect(core.feedback.isOpen()).toBe(false);
   });
 
-  it("starts a fresh form when reopened after a send", async () => {
+  it("starts a fresh form when reopened after a send, however it closed", async () => {
     act(() => core.feedback.open());
     type("First message");
     await submit();
     act(() => button("Close")!.click());
 
+    act(() => core.feedback.open());
+    expect(textarea()!.value).toBe("");
+
+    type("Second message");
+    await submit();
+    // Closed from outside the dialog, as the hotkey does.
+    act(() => core.feedback.close());
     act(() => core.feedback.open());
     expect(textarea()!.value).toBe("");
   });

@@ -49,17 +49,21 @@ function FeedbackDialogShell() {
   const [includeDebug, setIncludeDebug] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
 
-  useHotkey(FEEDBACK_HOTKEY, () => {
-    if (feedback.isOpen()) feedback.close();
-    else feedback.open();
-  });
+  // Reopening after a send starts a fresh form, whichever way it opened
+  // (the hotkey, the palette, Settings): adjusted during render, on the
+  // open it follows.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open && status === "sent") setStatus("idle");
+  }
 
   const setOpen = (next: boolean) => {
     if (next) feedback.open();
     else feedback.close();
-    // Reopening after a send starts a fresh form.
-    if (status === "sent") setStatus("idle");
   };
+
+  useHotkey(FEEDBACK_HOTKEY, () => setOpen(!feedback.isOpen()));
 
   const send = async (debugReport: string | undefined) => {
     setStatus("sending");
