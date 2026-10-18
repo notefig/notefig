@@ -405,15 +405,14 @@ i18n
           sendFeedback: "Send Feedback",
 
           // Feedback dialog
-          feedbackDescription:
-            "Markdown works. Messages may be shared publicly.",
           feedbackMessage: "Message",
           feedbackIncludeDebug: "Include debug info",
           feedbackIncludeDebugDesc:
             "Attaches your workspace path, open file names and git status, kept private to the Notefig team",
           feedbackSettingTitle: "Feedback",
           feedbackSettingDesc: "Report a bug or suggest an idea.",
-          feedbackPlaceholder: "What broke, or what would help?",
+          feedbackPlaceholder:
+            "What broke, or what would help? Markdown works, and your text may be shared publicly.",
           feedbackSending: "Sending feedback…",
           feedbackSent: "Feedback sent. Thank you!",
           feedbackFailed: "Couldn't send. Try again.",

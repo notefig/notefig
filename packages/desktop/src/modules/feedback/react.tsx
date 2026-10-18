@@ -9,7 +9,6 @@ import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@notefig/ui/dialog";
@@ -79,12 +78,13 @@ function FeedbackDialogShell() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="gap-3 p-5 sm:max-w-[36rem]">
-        <DialogHeader className="space-y-1">
+      {/* No description: the editor's placeholder says what to write. */}
+      <DialogContent
+        className="gap-3 p-5 sm:max-w-[36rem]"
+        aria-describedby={undefined}
+      >
+        <DialogHeader>
           <DialogTitle className="text-base">{t("sendFeedback")}</DialogTitle>
-          <DialogDescription className="text-xs">
-            {t("feedbackDescription")}
-          </DialogDescription>
         </DialogHeader>
         <FeedbackForm
           message={message}

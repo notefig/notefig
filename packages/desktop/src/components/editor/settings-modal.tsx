@@ -271,7 +271,6 @@ function GeneralSettings({
   return (
     <div className="space-y-2">
       <UpdateSection />
-      <FeedbackSettingRow />
 
       <SettingRow title={t("language")} description={t("languageDesc")}>
         <Select
@@ -318,6 +317,7 @@ function GeneralSettings({
       <div className="pt-4">
         <h2 className="text-lg font-semibold mb-1">{t("advanced")}</h2>
         <DebugModeToggle />
+        <FeedbackSettingRow />
       </div>
     </div>
   );
