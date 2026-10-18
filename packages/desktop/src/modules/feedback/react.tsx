@@ -5,7 +5,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { useHotkey } from "@tanstack/react-hotkeys";
-import { Check } from "lucide-react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -27,7 +27,7 @@ const MAX_MESSAGE = 5000;
 /** The dialog's controls, a step smaller than the default button. */
 const COMPACT_BUTTON = "h-7 px-2.5 text-xs";
 
-type Status = "idle" | "sending" | FeedbackResult;
+type Status = "idle" | "sending" | Exclude<FeedbackResult, "sent">;
 
 /** Whether the feedback dialog is open, live. */
 export function useFeedbackOpen(): boolean {
@@ -42,9 +42,9 @@ export function FeedbackDialog() {
 }
 
 /**
- * Holds the draft, so it survives a close: a failed or interrupted send
- * can be retried. A sent message stays on screen, read-only, until the
- * dialog next opens.
+ * Holds the draft, so it survives a close. Sending closes the dialog and
+ * reports in a snackbar; a send that fails reopens the dialog on the
+ * draft, with the error, for a retry.
  */
 function FeedbackDialogShell() {
   const { t } = useTranslation();
@@ -53,18 +53,6 @@ function FeedbackDialogShell() {
   const [message, setMessage] = useState("");
   const [includeDebug, setIncludeDebug] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
-
-  // Reopening after a send starts a fresh form, whichever way it opened
-  // (the hotkey, the palette, Settings): adjusted during render, on the
-  // open it follows.
-  const [wasOpen, setWasOpen] = useState(open);
-  if (open !== wasOpen) {
-    setWasOpen(open);
-    if (open && status === "sent") {
-      setStatus("idle");
-      setMessage("");
-    }
-  }
 
   const setOpen = (next: boolean) => {
     if (next) feedback.open();
@@ -75,7 +63,18 @@ function FeedbackDialogShell() {
 
   const send = async (debugReport: string | undefined) => {
     setStatus("sending");
-    setStatus(await feedback.send({ message, debugReport }));
+    feedback.close();
+    const toastId = toast.loading(t("feedbackSending"));
+    const result = await feedback.send({ message, debugReport });
+    if (result === "sent") {
+      setMessage("");
+      setStatus("idle");
+      toast.success(t("feedbackSent"), { id: toastId });
+    } else {
+      toast.dismiss(toastId);
+      setStatus(result);
+      feedback.open();
+    }
   };
 
   return (
@@ -125,7 +124,6 @@ function FeedbackForm({
   const { t } = useTranslation();
   const snapshot = useDebugSnapshot();
   const sending = status === "sending";
-  const locked = sending || status === "sent";
   const tooLong = message.length > MAX_MESSAGE;
   const error = tooLong
     ? t("feedbackTooLong")
@@ -147,7 +145,7 @@ function FeedbackForm({
         initialMarkdown={message}
         placeholder={t("feedbackPlaceholder")}
         label={t("feedbackMessage")}
-        readOnly={locked}
+        readOnly={sending}
         onChange={onMessageChange}
       />
       {error && (
@@ -156,19 +154,17 @@ function FeedbackForm({
         </p>
       )}
       <div className="flex items-center justify-between gap-3">
-        <label className="flex min-w-0 cursor-pointer items-center gap-2">
+        <label
+          className="flex min-w-0 cursor-pointer items-center gap-2 text-xs"
+          title={t("feedbackIncludeDebugDesc")}
+        >
           <Checkbox
             className="h-3.5 w-3.5"
-            disabled={locked}
+            disabled={sending}
             checked={includeDebug}
             onCheckedChange={(checked) => onIncludeDebugChange(checked === true)}
           />
-          <span className="min-w-0 text-xs">
-            {t("feedbackIncludeDebug")}
-            <span className="block text-muted-foreground">
-              {t("feedbackIncludeDebugDesc")}
-            </span>
-          </span>
+          {t("feedbackIncludeDebug")}
         </label>
         <FormActions
           status={status}
@@ -180,7 +176,6 @@ function FeedbackForm({
   );
 }
 
-/** Cancel and Send, or, once sent, the confirmation in their place. */
 function FormActions({
   status,
   canSend,
@@ -191,14 +186,6 @@ function FormActions({
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
-  if (status === "sent") {
-    return (
-      <p className="flex h-7 shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-        <Check className="h-3.5 w-3.5 text-success" />
-        {t("feedbackSent")}
-      </p>
-    );
-  }
   const sending = status === "sending";
   return (
     <div className="flex shrink-0 gap-2">

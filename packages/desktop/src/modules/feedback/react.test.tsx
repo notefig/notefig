@@ -3,6 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "sonner";
 import { defineModule, type Core } from "@notefig/core";
 import { CoreProvider } from "@notefig/core/react";
 import { createTestCore } from "@/testing/test-core";
@@ -45,7 +46,10 @@ beforeEach(async () => {
           { client: new QueryClient() },
           createElement(CoreProvider, {
             core,
-            children: createElement(FeedbackDialog),
+            children: [
+              createElement(FeedbackDialog, { key: "dialog" }),
+              createElement(Toaster, { key: "toaster" }),
+            ],
           }),
         ),
       ),
@@ -86,7 +90,7 @@ async function submit() {
 }
 
 describe("FeedbackDialog", () => {
-  it("opens through core.feedback and sends the message as markdown", async () => {
+  it("sends the message as markdown, closes, and says so in a snackbar", async () => {
     expect(messageEditor()).toBeNull();
     act(() => core.feedback.open());
     expect(button("Send")!.disabled).toBe(true);
@@ -98,11 +102,11 @@ describe("FeedbackDialog", () => {
       message: "The sidebar **flickers**\n\n- on rename",
     });
     expect(sentBody()).not.toHaveProperty("debugReport");
-    // The message stays, read-only, with the confirmation where Send was.
-    expect(document.body.textContent).toContain("Sent. Thank you!");
-    expect(button("Send")).toBeUndefined();
-    expect(messageEditor()!.textContent).toContain("The sidebar flickers");
-    expect(messageEditor()!.getAttribute("contenteditable")).toBe("false");
+    expect(core.feedback.isOpen()).toBe(false);
+    // Sonner renders its toasts a tick later.
+    await act(() => vi.waitFor(() =>
+      expect(document.body.textContent).toContain("Feedback sent. Thank you!"),
+    ));
   });
 
   it("attaches the debug report when the box is ticked", async () => {
@@ -136,29 +140,22 @@ describe("FeedbackDialog", () => {
     expect(core.feedback.isOpen()).toBe(false);
   });
 
-  it("starts a fresh form when reopened after a send, however it closed", async () => {
+  it("starts a fresh form after a send", async () => {
     act(() => core.feedback.open());
     type("First message");
     await submit();
-    act(() => core.feedback.close());
 
-    act(() => core.feedback.open());
-    expect(messageEditor()!.textContent).toBe("");
-
-    type("Second message");
-    await submit();
-    // Closed from outside the dialog, as the hotkey does.
-    act(() => core.feedback.close());
     act(() => core.feedback.open());
     expect(messageEditor()!.textContent).toBe("");
   });
 
-  it("keeps the draft when the send fails, so it can be retried", async () => {
+  it("reopens on the draft with the error when the send fails, for a retry", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 502 }));
     act(() => core.feedback.open());
     type("Crashes on save");
     await submit();
 
+    expect(core.feedback.isOpen()).toBe(true);
     expect(document.querySelector("[role='alert']")?.textContent).toContain(
       "Couldn't send",
     );
@@ -166,7 +163,7 @@ describe("FeedbackDialog", () => {
 
     await submit();
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(document.body.textContent).toContain("Sent. Thank you!");
+    expect(core.feedback.isOpen()).toBe(false);
   });
 
   it("says so when the sender is rate-limited", async () => {
@@ -174,6 +171,7 @@ describe("FeedbackDialog", () => {
     act(() => core.feedback.open());
     type("Hello");
     await submit();
+    expect(core.feedback.isOpen()).toBe(true);
     expect(document.querySelector("[role='alert']")?.textContent).toContain(
       "One message a minute",
     );
