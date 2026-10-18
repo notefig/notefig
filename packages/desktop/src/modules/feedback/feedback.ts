@@ -32,6 +32,12 @@ export interface FeedbackApi {
    */
   addImage(image: Blob): string;
   /**
+   * Lets go of the draft's images that `draft` no longer shows. Call it
+   * once the editor is gone: until then its undo history can bring a
+   * deleted image back.
+   */
+  releaseImages(draft: string): void;
+  /**
    * Posts the message with the app's version and OS, and the images it
    * shows. Never throws: a network error, an image that won't encode, or
    * no answer within the timeout is "failed", so the dialog can keep the
@@ -80,6 +86,13 @@ export function createFeedback({
       const url = objectUrls.createObjectURL(image);
       draftImages.set(url, image);
       return url;
+    },
+    releaseImages(draft) {
+      for (const url of [...draftImages.keys()]) {
+        if (draft.includes(url)) continue;
+        objectUrls.revokeObjectURL(url);
+        draftImages.delete(url);
+      }
     },
     async send({ message, debugReport }) {
       if (supportUrl === undefined) return "failed";

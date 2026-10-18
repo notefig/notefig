@@ -2,7 +2,7 @@
  * The feedback dialog, mounted once in App, and its hotkey. Opened from
  * the command palette, Settings, or Mod+Shift+M anywhere in the app.
  */
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { toast } from "sonner";
@@ -56,6 +56,12 @@ function FeedbackDialogShell() {
   // The editor reads the draft once, when it mounts; a new key after each
   // send remounts it empty if the dialog was reopened while sending.
   const [draftKey, setDraftKey] = useState(0);
+
+  // A closed dialog's editor, and with it its undo history, is gone, so
+  // the images its draft no longer shows can go too.
+  useEffect(() => {
+    if (!open) feedback.releaseImages(message);
+  }, [feedback, open, message]);
 
   const setOpen = (next: boolean) => {
     if (next) feedback.open();

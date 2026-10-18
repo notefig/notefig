@@ -199,4 +199,46 @@ describe("createFeedback", () => {
       "Hi ![](attachment:img0)".length,
     );
   });
+
+  it("finds an image written with a title", async () => {
+    const fetchFn = respond(202);
+    const feedback = createFeedback({
+      supportUrl: SUPPORT_URL,
+      fetchFn,
+      encodeImage,
+      objectUrls: fakeObjectUrls(),
+    });
+    const url = feedback.addImage(png("one"));
+    const dataUrl = `data:image/png;base64,${btoa("pixels")}`;
+    const message = `![a](${url} "Screenshot") and ![](${dataUrl} "Pasted")`;
+    expect(messageLength(message)).toBe(
+      "![a](attachment:img0) and ![](attachment:img0)".length,
+    );
+
+    await feedback.send({ message });
+    const { form, body } = sentBody(fetchFn);
+    expect(body.message).toBe("![a](attachment:img1) and ![](attachment:img2)");
+    expect(await (form.get("img2") as File).text()).toBe("encoded:pixels");
+  });
+
+  it("lets go of the images a draft no longer shows", async () => {
+    const fetchFn = respond(202);
+    const objectUrls = fakeObjectUrls();
+    const feedback = createFeedback({
+      supportUrl: SUPPORT_URL,
+      fetchFn,
+      encodeImage,
+      objectUrls,
+    });
+    const kept = feedback.addImage(png("kept"));
+    feedback.addImage(png("deleted"));
+
+    feedback.releaseImages(`Look ![](${kept})`);
+    expect(objectUrls.revoked).toEqual(["blob:2"]);
+
+    await feedback.send({ message: `Look ![](${kept})` });
+    expect(await (sentBody(fetchFn).form.get("img1") as File).text()).toBe(
+      "encoded:kept",
+    );
+  });
 });

@@ -264,6 +264,6 @@ test("answers 502, filing nothing, when a screenshot won't upload", async () => 
 
 test("titles with plain text: link text, no emphasis, snake_case kept", async () => {
   const { deps, issues } = setup();
-  await submitFeedback({ ...validFeedback, message: "*Crash* on [save](https://example.com) in _my_file_ ~~now~~" }, deps);
+  await submit({ ...validFeedback, message: "*Crash* on [save](https://example.com) in _my_file_ ~~now~~" }, deps);
   assert.equal(issues[0].title, "Crash on save in my_file now");
 });

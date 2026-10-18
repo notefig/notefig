@@ -20,7 +20,8 @@ export interface Attachment {
 /** Turns a pasted image into what's sent: smaller, and compressed. */
 export type EncodeImage = (image: Blob) => Promise<Blob>;
 
-const IMAGE = /!\[([^\]]*)\]\((blob:[^)\s]+|data:image\/[a-z+]+;base64,[^)\s]+)\)/g;
+// An image as the editor writes it, with its optional title: ![alt](src "title").
+const IMAGE = /!\[([^\]]*)\]\((blob:[^)\s]+|data:image\/[a-z+]+;base64,[^)\s]+)(?:\s+"[^"]*")?\)/g;
 
 /**
  * The message's length as the Worker counts it: an image by the
