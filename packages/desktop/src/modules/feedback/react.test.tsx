@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { FeedbackDialog } from "@/components/feedback-dialog";
-import { openFeedbackDialog } from "@/utils/feedback";
+import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { defineModule, type Core } from "@notefig/core";
+import { CoreProvider } from "@notefig/core/react";
+import { createTestCore } from "@/testing/test-core";
+import { workspacesModule } from "@/modules/workspaces";
+import { createFeedback } from "@/modules/feedback";
+import { FeedbackDialog } from "@/modules/feedback/react";
 // Initializes the shared i18n instance so t() resolves the English strings.
 import "@/utils/intl";
 
@@ -10,19 +16,39 @@ import "@/utils/intl";
 
 let container: HTMLDivElement;
 let root: Root;
+let core: Core;
 let fetchMock: ReturnType<typeof vi.fn>;
 
-beforeEach(() => {
+beforeEach(async () => {
   fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
-  vi.stubGlobal("fetch", fetchMock);
+  const feedback = createFeedback({
+    supportUrl: "https://support.notefig.com",
+    fetchFn: fetchMock as unknown as typeof fetch,
+  });
+  core = createTestCore({
+    modules: [
+      workspacesModule,
+      defineModule({ name: "feedback", register: () => feedback }),
+    ],
+  });
+  await core.boot();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() =>
     root.render(
-      createElement(FeedbackDialog, {
-        supportUrl: "https://support.notefig.com",
-      }),
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient() },
+          createElement(CoreProvider, {
+            core,
+            children: createElement(FeedbackDialog),
+          }),
+        ),
+      ),
     ),
   );
 });
@@ -30,7 +56,6 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
-  vi.unstubAllGlobals();
 });
 
 const textarea = () =>
@@ -39,6 +64,8 @@ const button = (label: string) =>
   [...document.querySelectorAll("button")].find(
     (candidate) => candidate.textContent === label,
   );
+const sentBody = (call = 0) =>
+  JSON.parse(String(fetchMock.mock.calls[call][1].body));
 
 function type(text: string) {
   const field = textarea()!;
@@ -59,33 +86,63 @@ async function submit() {
 }
 
 describe("FeedbackDialog", () => {
-  it("opens from the command palette's event and sends the message", async () => {
+  it("opens through core.feedback and sends just the message by default", async () => {
     expect(textarea()).toBeNull();
-    act(() => openFeedbackDialog());
+    act(() => core.feedback.open());
     expect(button("Send")!.disabled).toBe(true);
 
     type("The sidebar flickers");
     await submit();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body));
-    expect(body).toMatchObject({ kind: "bug", message: "The sidebar flickers" });
+    expect(sentBody()).toMatchObject({ message: "The sidebar flickers" });
+    expect(sentBody()).not.toHaveProperty("debugReport");
     expect(document.body.textContent).toContain("Your feedback reached");
   });
 
+  it("attaches the debug report when the box is ticked", async () => {
+    act(() => core.feedback.open());
+    type("Crashes on save");
+    act(() => {
+      document.querySelector<HTMLButtonElement>("[role='checkbox']")!.click();
+    });
+    await submit();
+
+    expect(sentBody().debugReport).toMatch(/^=== Notefig Debug Report ===/);
+  });
+
+  it("opens and closes with Mod+Shift+M", () => {
+    const press = () =>
+      act(() => {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "M",
+            code: "KeyM",
+            // jsdom isn't a Mac, so "Mod" is Control here.
+            ctrlKey: true,
+            shiftKey: true,
+            bubbles: true,
+          }),
+        );
+      });
+    press();
+    expect(core.feedback.isOpen()).toBe(true);
+    press();
+    expect(core.feedback.isOpen()).toBe(false);
+  });
+
   it("starts a fresh form when reopened after a send", async () => {
-    act(() => openFeedbackDialog());
+    act(() => core.feedback.open());
     type("First message");
     await submit();
     act(() => button("Close")!.click());
 
-    act(() => openFeedbackDialog());
+    act(() => core.feedback.open());
     expect(textarea()!.value).toBe("");
   });
 
   it("keeps the draft when the send fails, so it can be retried", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 502 }));
-    act(() => openFeedbackDialog());
+    act(() => core.feedback.open());
     type("Crashes on save");
     await submit();
 
@@ -101,11 +158,11 @@ describe("FeedbackDialog", () => {
 
   it("says so when the sender is rate-limited", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 429 }));
-    act(() => openFeedbackDialog());
+    act(() => core.feedback.open());
     type("Hello");
     await submit();
     expect(document.querySelector("[role='alert']")?.textContent).toContain(
-      "Too many messages",
+      "one message a minute",
     );
   });
 });

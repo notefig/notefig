@@ -8,13 +8,11 @@ routes = [{ pattern = "support.notefig.com", custom_domain = true }]
 [vars]
 ALLOWED_ORIGINS = "tauri://localhost,http://tauri.localhost,https://app.notefig.com"
 # Linear: the MET team, its Triage status, the Metrists Roadmap project, and
-# the Feedback / Bug / Idea labels. Ids, not names, so no lookups at runtime.
+# the Feedback label. Ids, not names, so no lookups at runtime.
 LINEAR_TEAM_ID = "c784a3cb-95a0-44ab-95b2-83943473a8b6"
 LINEAR_TRIAGE_STATE_ID = "8a00261b-f046-41f4-bf68-b793a66424ef"
 LINEAR_PROJECT_ID = "1acafc86-55ee-4d81-a54e-7e3d46aa9f8a"
 LINEAR_FEEDBACK_LABEL_ID = "bfabbb0a-e788-4584-848f-551a7b29f9e0"
-LINEAR_BUG_LABEL_ID = "1cc3a070-eaa4-499d-8f5b-1ca294a262fb"
-LINEAR_IDEA_LABEL_ID = "2c96c064-d12a-412d-b261-aa013b6c9071"
 
 # 1 request a minute per IP, per route (the key is "<route>:<ip>").
 [[ratelimits]]

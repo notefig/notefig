@@ -14,13 +14,12 @@ export interface Env {
   LINEAR_TRIAGE_STATE_ID: string;
   LINEAR_PROJECT_ID: string;
   LINEAR_FEEDBACK_LABEL_ID: string;
-  LINEAR_BUG_LABEL_ID: string;
-  LINEAR_IDEA_LABEL_ID: string;
   /** Comma-separated origins allowed to call from a browser. */
   ALLOWED_ORIGINS: string;
 }
 
-const MAX_BODY_BYTES = 16 * 1024;
+// A 50,000-character debug report, worst case in UTF-8, plus the message.
+const MAX_BODY_BYTES = 256 * 1024;
 
 export async function handle(request: Request, env: Env, fetchFn: typeof fetch): Promise<Response> {
   const allowedOrigins = env.ALLOWED_ORIGINS.split(",");
@@ -53,11 +52,7 @@ async function route(request: Request, env: Env, fetchFn: typeof fetch): Promise
           teamId: env.LINEAR_TEAM_ID,
           triageStateId: env.LINEAR_TRIAGE_STATE_ID,
           projectId: env.LINEAR_PROJECT_ID,
-          labels: {
-            feedback: env.LINEAR_FEEDBACK_LABEL_ID,
-            bug: env.LINEAR_BUG_LABEL_ID,
-            idea: env.LINEAR_IDEA_LABEL_ID,
-          },
+          feedbackLabelId: env.LINEAR_FEEDBACK_LABEL_ID,
         },
       });
     }

@@ -347,6 +347,7 @@ i18n
             openSettings: "Open settings",
             toggleSidebar: "Toggle sidebar",
             sessionsSidebar: "Open agent sessions",
+            sendFeedback: "Send feedback",
             closeTab: "Close tab",
             nextTab: "Next tab",
             prevTab: "Previous tab",
@@ -405,17 +406,19 @@ i18n
 
           // Feedback dialog
           feedbackDescription:
-            "Tell us what broke or what you'd like to see. Every message is read by the Notefig team and may be shared publicly, so leave out anything private.",
-          feedbackKind: "Kind of feedback",
-          feedbackKindBug: "Bug",
-          feedbackKindIdea: "Idea",
-          feedbackKindOther: "Other",
+            "Tell us what broke or what you'd like to see. Messages may be shared publicly, so leave out anything private.",
           feedbackMessage: "Message",
+          feedbackIncludeDebug: "Include debug info",
+          feedbackIncludeDebugDesc:
+            "Attaches the debug panel's report: your workspace path, open file names and git status.",
+          feedbackSettingTitle: "Feedback",
+          feedbackSettingDesc:
+            "Report a bug or suggest an idea to the Notefig team.",
           feedbackPlaceholder: "What happened, or what would help?",
           feedbackSending: "Sending...",
           feedbackSent: "Thanks! Your feedback reached the Notefig team.",
           feedbackFailed: "Couldn't send your feedback. Check your connection and try again.",
-          feedbackRateLimited: "Too many messages in a short time. Try again in a minute.",
+          feedbackRateLimited: "You can send one message a minute. Try again shortly.",
 
           // Window controls (Windows titlebar)
           minimize: "Minimize",

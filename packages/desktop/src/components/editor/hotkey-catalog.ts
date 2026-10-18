@@ -64,6 +64,13 @@ export const HOTKEY_CATALOG: HotkeyEntry[] = [
     labelKey: "sessionsSidebar",
     group: "general",
   },
+  // src/modules/feedback/react.tsx
+  {
+    id: "sendFeedback",
+    binding: "Mod+Shift+M",
+    labelKey: "sendFeedback",
+    group: "general",
+  },
 
   // src/hooks/use-dockable-tabs.ts
   { id: "closeTab", binding: "Mod+W", labelKey: "closeTab", group: "tabs" },

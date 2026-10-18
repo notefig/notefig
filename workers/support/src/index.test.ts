@@ -14,8 +14,6 @@ function setup({ limited = false } = {}) {
     LINEAR_TRIAGE_STATE_ID: "triage",
     LINEAR_PROJECT_ID: "roadmap",
     LINEAR_FEEDBACK_LABEL_ID: "feedback",
-    LINEAR_BUG_LABEL_ID: "bug",
-    LINEAR_IDEA_LABEL_ID: "idea",
     ALLOWED_ORIGINS: `${APP_ORIGIN},https://app.notefig.com`,
   };
   const fetchFn = (async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -83,9 +81,9 @@ test("rate-limited callers get 429 before the body is read", async () => {
   assert.equal(linearCalls.length, 0);
 });
 
-test("refuses bodies over 16 KB and bodies that aren't JSON", async () => {
+test("refuses bodies over 256 KB and bodies that aren't JSON", async () => {
   const { env, fetchFn } = setup();
-  assert.equal((await handle(post("x".repeat(16 * 1024 + 1)), env, fetchFn)).status, 413);
+  assert.equal((await handle(post("x".repeat(256 * 1024 + 1)), env, fetchFn)).status, 413);
   assert.equal((await handle(post("{not json"), env, fetchFn)).status, 400);
 });
 

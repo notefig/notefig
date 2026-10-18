@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
-import type { Core } from "@notefig/core";
+import { defineModule, type Core } from "@notefig/core";
 import { CoreProvider } from "@notefig/core/react";
 import { CommandPalette } from "../command-palette";
 import { ThemeProvider } from "../../theme-provider";
@@ -10,6 +10,7 @@ import { createTestCore } from "@/testing/test-core";
 import { filesModuleOf, testWorkspaceFiles } from "@/testing/test-files";
 import type { WorkspaceFiles } from "@/modules/files";
 import { kvModule } from "@/modules/kv";
+import { createFeedback, type FeedbackApi } from "@/modules/feedback";
 
 // Real TanStack DB collections over a listing handed to them — file
 // results come from the actual metadata collection through useFileSearch.
@@ -24,6 +25,7 @@ const WS = "/ws-palette";
 
 let files: WorkspaceFiles;
 let testCore: Core;
+let feedback: FeedbackApi;
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -97,7 +99,14 @@ beforeEach(async () => {
   files = testWorkspaceFiles(WS, adapter);
   // The settings the palette reads persist through the kv store over the
   // test core's platform db.
-  testCore = createTestCore({ modules: [kvModule, filesModuleOf([files])] });
+  feedback = createFeedback({ supportUrl: "https://support.notefig.com" });
+  testCore = createTestCore({
+    modules: [
+      kvModule,
+      filesModuleOf([files]),
+      defineModule({ name: "feedback", register: () => feedback }),
+    ],
+  });
   await testCore.workspace(WS).open();
   await files.collections.metadata.preload();
 });
@@ -164,5 +173,20 @@ describe("CommandPalette file search", () => {
     const fileIndex = labels.findIndex((l) => l.includes("theme.md"));
     expect(commandIndex).toBeGreaterThanOrEqual(0);
     expect(fileIndex).toBeGreaterThan(commandIndex);
+  });
+});
+
+describe("CommandPalette help commands", () => {
+  it("opens the feedback dialog from Send Feedback", async () => {
+    renderPalette();
+    await act(async () => {});
+    await typeQuery("feedback");
+    const item = [...document.querySelectorAll("[cmdk-item]")].find((el) =>
+      (el.textContent ?? "").includes("Send Feedback"),
+    ) as HTMLElement;
+    await act(async () => {
+      item.click();
+    });
+    expect(feedback.isOpen()).toBe(true);
   });
 });

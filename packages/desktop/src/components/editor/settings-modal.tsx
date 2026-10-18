@@ -271,6 +271,7 @@ function GeneralSettings({
   return (
     <div className="space-y-2">
       <UpdateSection />
+      <FeedbackSettingRow />
 
       <SettingRow title={t("language")} description={t("languageDesc")}>
         <Select
@@ -408,6 +409,33 @@ function UpdateSection() {
         </span>
       </label>
     </div>
+  );
+}
+
+/** Opens the feedback dialog in place of Settings. */
+function FeedbackSettingRow() {
+  const { t } = useTranslation();
+  const { feedback } = useCore();
+  const { setValue: setSectionParam } = useSearchParamValue("settings", {
+    replace: true,
+  });
+  if (!feedback.available) return null;
+  return (
+    <SettingRow
+      title={t("feedbackSettingTitle")}
+      description={t("feedbackSettingDesc")}
+    >
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => {
+          setSectionParam(null);
+          feedback.open();
+        }}
+      >
+        {t("sendFeedback")}
+      </Button>
+    </SettingRow>
   );
 }
 

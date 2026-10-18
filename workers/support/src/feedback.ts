@@ -3,15 +3,15 @@ import type { CreateIssue } from "./linear.ts";
 
 /**
  * `POST /v1/feedback`: the app's feedback dialog. A valid report becomes
- * an issue in MET's Triage, in the roadmap project, labelled Feedback
- * (plus Bug or Idea).
+ * an issue in MET's Triage, in the roadmap project, labelled Feedback,
+ * with the app's debug report attached when the user chose to send it.
  */
 
 export interface FeedbackConfig {
   teamId: string;
   triageStateId: string;
   projectId: string;
-  labels: { feedback: string; bug: string; idea: string };
+  feedbackLabelId: string;
 }
 
 export interface FeedbackDeps {
@@ -19,17 +19,17 @@ export interface FeedbackDeps {
   config: FeedbackConfig;
 }
 
-const KINDS = ["bug", "idea", "other"] as const;
 const OSES = ["macos", "windows", "linux", "web"] as const;
 const SEMVER = /^\d{1,4}\.\d{1,4}\.\d{1,6}(-[0-9A-Za-z.-]{1,20})?$/;
 const MAX_MESSAGE = 5000;
+const MAX_DEBUG_REPORT = 50_000;
 const TITLE_LENGTH = 80;
 
 interface Feedback {
-  kind: (typeof KINDS)[number];
   message: string;
   version: string;
   os: (typeof OSES)[number];
+  debugReport?: string;
 }
 
 export async function submitFeedback(body: unknown, deps: FeedbackDeps): Promise<Response> {
@@ -46,19 +46,19 @@ export async function submitFeedback(body: unknown, deps: FeedbackDeps): Promise
 
 function parseFeedback(value: unknown): Feedback | null {
   if (typeof value !== "object" || value === null) return null;
-  const { kind, message, version, os } = value as Record<string, unknown>;
-  if (!KINDS.includes(kind as Feedback["kind"])) return null;
+  const { message, version, os, debugReport } = value as Record<string, unknown>;
   if (!OSES.includes(os as Feedback["os"])) return null;
   if (typeof version !== "string" || !SEMVER.test(version)) return null;
   if (typeof message !== "string") return null;
   const trimmed = message.trim();
   if (!trimmed || trimmed.length > MAX_MESSAGE) return null;
-  return { kind, os, version, message: trimmed } as Feedback;
+  if (debugReport !== undefined) {
+    if (typeof debugReport !== "string" || debugReport.length > MAX_DEBUG_REPORT) return null;
+  }
+  return { os, version, message: trimmed, debugReport } as Feedback;
 }
 
 function issueFor(feedback: Feedback, config: FeedbackConfig) {
-  const { labels } = config;
-  const kindLabel = { bug: [labels.bug], idea: [labels.idea], other: [] }[feedback.kind];
   const firstLine = defuse(feedback.message.split("\n")[0].trim());
   const title =
     firstLine.length > TITLE_LENGTH ? `${firstLine.slice(0, TITLE_LENGTH - 1)}…` : firstLine;
@@ -70,15 +70,16 @@ function issueFor(feedback: Feedback, config: FeedbackConfig) {
     teamId: config.teamId,
     stateId: config.triageStateId,
     projectId: config.projectId,
-    labelIds: [labels.feedback, ...kindLabel],
+    labelIds: [config.feedbackLabelId],
     title,
     description: [
       quoted,
       "",
       "---",
-      `**Kind:** ${feedback.kind} · **Version:** ${feedback.version} · **OS:** ${feedback.os}`,
+      `**Version:** ${feedback.version} · **OS:** ${feedback.os}`,
       "",
       "_Sent from the app's feedback dialog._",
+      ...(feedback.debugReport ? ["", "### Debug report", "", fenced(feedback.debugReport)] : []),
     ].join("\n"),
   };
 }
@@ -89,4 +90,15 @@ function issueFor(feedback: Feedback, config: FeedbackConfig) {
  */
 function defuse(text: string): string {
   return text.replace(/@(?=\w)/g, "@​");
+}
+
+/**
+ * The report in a code block whose fence is longer than any run of
+ * backticks inside it, so the report can't close the block early. Inside
+ * the block, `@name` and markdown stay inert.
+ */
+function fenced(text: string): string {
+  const longestRun = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(Math.max(3, longestRun + 1));
+  return `${fence}text\n${text}\n${fence}`;
 }

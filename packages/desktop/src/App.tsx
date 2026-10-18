@@ -9,8 +9,7 @@ import {
 import { Workspace } from "@/components/workspace";
 import { MockDirectoryPickerDialog } from "@/components/mock-directory-picker-dialog";
 import { TextPromptDialog } from "@/components/text-prompt-dialog";
-import { FeedbackDialog } from "@/components/feedback-dialog";
-import { supportUrl } from "@/utils/feedback";
+import { FeedbackDialog } from "@/modules/feedback/react";
 import { useEffect, useState } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { isWeb } from "@/utils/platform";
@@ -82,7 +81,7 @@ export const App = () => {
     <div className="flex h-screen flex-col text-foreground overflow-clip">
       {isWeb() && <MockDirectoryPickerDialog />}
       <TextPromptDialog />
-      {supportUrl && <FeedbackDialog supportUrl={supportUrl} />}
+      <FeedbackDialog />
       <PairDialog />
       <div className="flex-1 min-h-0">
         <Routes>

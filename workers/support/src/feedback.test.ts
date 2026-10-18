@@ -12,13 +12,13 @@ function setup(createIssue?: FeedbackDeps["createIssue"]) {
       teamId: "team",
       triageStateId: "triage",
       projectId: "roadmap",
-      labels: { feedback: "feedback", bug: "bug", idea: "idea" },
+      feedbackLabelId: "feedback",
     },
   };
   return { deps, issues };
 }
 
-test("files feedback in Triage, in the roadmap project, with its kind's label", async () => {
+test("files feedback in Triage, in the roadmap project, labelled Feedback", async () => {
   const { deps, issues } = setup();
   const response = await submitFeedback(validFeedback, deps);
   assert.equal(response.status, 202);
@@ -29,7 +29,7 @@ test("files feedback in Triage, in the roadmap project, with its kind's label", 
       teamId: "team",
       stateId: "triage",
       projectId: "roadmap",
-      labelIds: ["feedback", "bug"],
+      labelIds: ["feedback"],
       title: "The sidebar flickers when I rename a file",
       description: undefined,
     },
@@ -38,19 +38,13 @@ test("files feedback in Triage, in the roadmap project, with its kind's label", 
   assert.match(issues[0].description, /\*\*Version:\*\* 0\.0\.146 · \*\*OS:\*\* macos/);
 });
 
-test("labels ideas as Idea and other feedback with Feedback alone", async () => {
-  const { deps, issues } = setup();
-  await submitFeedback({ ...validFeedback, kind: "idea", message: "An idea" }, deps);
-  await submitFeedback({ ...validFeedback, kind: "other", message: "Something else" }, deps);
-  assert.deepEqual(issues.map((issue) => issue.labelIds), [["feedback", "idea"], ["feedback"]]);
-});
-
 test("rejects malformed feedback without filing it", async () => {
   const { deps, issues } = setup();
   const invalid = [
     null,
     "text",
-    { ...validFeedback, kind: "rant" },
+    { ...validFeedback, debugReport: 42 },
+    { ...validFeedback, debugReport: "x".repeat(50_001) },
     { ...validFeedback, os: "beos" },
     { ...validFeedback, version: "1.2" },
     { ...validFeedback, version: "@everyone" },
@@ -92,4 +86,19 @@ test("defuses mentions and shortens long titles", async () => {
   assert.ok(!/@\w/.test(issue.title));
   assert.ok(!/@\w/.test(issue.description));
   assert.match(issue.description, /> second line @​team/);
+});
+
+test("attaches the debug report in a code block it can't close early", async () => {
+  const { deps, issues } = setup();
+  const debugReport = "=== Notefig Debug Report ===\n```\n@team ````\n=== End Debug Report ===";
+  await submitFeedback({ ...validFeedback, debugReport }, deps);
+  const { description } = issues[0];
+  assert.match(description, /### Debug report\n\n`````text\n=== Notefig Debug Report ===/);
+  assert.ok(description.endsWith("=== End Debug Report ===\n`````"));
+});
+
+test("leaves the debug section out when no report is sent", async () => {
+  const { deps, issues } = setup();
+  await submitFeedback(validFeedback, deps);
+  assert.ok(!issues[0].description.includes("Debug report"));
 });

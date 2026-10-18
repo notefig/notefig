@@ -3,15 +3,17 @@
 The Cloudflare Worker behind the app's **Send Feedback** dialog. Later routes
 (roadmap, and others like it) sit next to feedback as `/v1/<name>`.
 
-`POST /v1/feedback` takes `{ kind, message, version, os }` and files it as an
-issue in MET's Triage, in the **Metrists Roadmap** project, labelled
-`Feedback` plus `Bug` or `Idea`. The message is quoted and `@mentions` are
-broken, so an issue synced to GitHub can't ping anyone.
+`POST /v1/feedback` takes `{ message, version, os, debugReport? }` and files
+it as an issue in MET's Triage, in the **Metrists Roadmap** project,
+labelled `Feedback`. The message is quoted and `@mentions` are broken, so an
+issue synced to GitHub can't ping anyone. When the user ticks "Include debug
+info", the debug panel's report (up to 50,000 characters) follows in a code
+block.
 
 | Guard | How |
 |---|---|
 | 1 request a minute per IP | Workers Rate Limiting binding |
-| Body over 16 KB | 413, read without buffering more |
+| Body over 256 KB | 413, read without buffering more |
 | Calls from anywhere but the app | 403 unless `Origin` is one of `ALLOWED_ORIGINS` |
 
 A Linear failure answers `502`, and the app keeps the draft so the user can

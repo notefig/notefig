@@ -49,7 +49,8 @@ import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { canOpenFile } from "@/modules/editors";
 import { FileTypeIcon } from "./file-type-icon";
 import { useCore } from "@notefig/core/react";
-import { openFeedbackDialog, supportUrl } from "@/utils/feedback";
+import type { FeedbackApi } from "@/modules/feedback";
+import { FEEDBACK_HOTKEY } from "@/modules/feedback/react";
 
 interface CommandPaletteProps {
   open: boolean;
@@ -81,18 +82,20 @@ interface CommandType {
 }
 
 /** "Send Feedback", in builds that ship with a support URL. */
-const helpCommands: CommandType[] = supportUrl
-  ? [
-      {
-        id: "send-feedback",
-        labelKey: "sendFeedback",
-        groupKey: "help",
-        keywordKey: "commandKeywords.sendFeedback",
-        icon: MessageSquare,
-        action: openFeedbackDialog,
-      },
-    ]
-  : [];
+function helpCommands(feedback: FeedbackApi): CommandType[] {
+  if (!feedback.available) return [];
+  return [
+    {
+      id: "send-feedback",
+      labelKey: "sendFeedback",
+      groupKey: "help",
+      keywordKey: "commandKeywords.sendFeedback",
+      icon: MessageSquare,
+      shortcut: formatForDisplay(FEEDBACK_HOTKEY),
+      action: feedback.open,
+    },
+  ];
+}
 
 /**
  * The palette's Linear-style "quick results" tail: fuzzy file matches from
@@ -355,7 +358,7 @@ export function CommandPalette({
       icon: Moon,
       action: swapTheme,
     },
-    ...helpCommands,
+    ...helpCommands(core.feedback),
   ];
 
   const skipFocusRestoreRef = useRef(false);
