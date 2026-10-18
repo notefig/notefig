@@ -28,8 +28,24 @@ const IMAGE = /!\[([^\]]*)\]\((blob:[^)\s]+|data:image\/[a-z+]+;base64,[^)\s]+)(
  * placeholder it's sent as, not by the bytes a data URL would carry.
  */
 export function messageLength(markdown: string): number {
-  return markdown.replace(IMAGE, (_, alt: string) => `![${alt}](attachment:img0)`)
-    .length;
+  return outsideCode(markdown, (text) =>
+    text.replace(IMAGE, (_, alt: string) => `![${alt}](attachment:img0)`),
+  ).length;
+}
+
+// Fenced code blocks (``` or ~~~, closed by the same fence) and inline
+// code: what they hold is text, never an image.
+const CODE = /(^|\n)(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\2[`~]*(?=\n|$)|(`+)[^`][\s\S]*?\3/g;
+
+/** `markdown` with `edit` applied to everything outside its code. */
+function outsideCode(markdown: string, edit: (text: string) => string): string {
+  let result = "";
+  let last = 0;
+  for (const match of markdown.matchAll(CODE)) {
+    result += edit(markdown.slice(last, match.index)) + match[0];
+    last = match.index + match[0].length;
+  }
+  return result + edit(markdown.slice(last));
 }
 
 /**
@@ -43,12 +59,15 @@ export async function collectImages(
   encode: EncodeImage,
 ): Promise<{ message: string; attachments: Attachment[] }> {
   const ids = new Map<string, string>();
-  for (const [, , src] of message.matchAll(IMAGE)) {
-    const known = draftImages.has(src) || src.startsWith("data:");
-    if (known && !ids.has(src) && ids.size < MAX_IMAGES) {
-      ids.set(src, `img${ids.size + 1}`);
+  outsideCode(message, (text) => {
+    for (const [, , src] of text.matchAll(IMAGE)) {
+      const known = draftImages.has(src) || src.startsWith("data:");
+      if (known && !ids.has(src) && ids.size < MAX_IMAGES) {
+        ids.set(src, `img${ids.size + 1}`);
+      }
     }
-  }
+    return text;
+  });
   const attachments = await Promise.all(
     [...ids].map(async ([src, id]) => {
       const image = draftImages.get(src) ?? dataUrlToBlob(src);
@@ -56,17 +75,21 @@ export async function collectImages(
     }),
   );
   return {
-    message: message.replace(IMAGE, (_, alt: string, src: string) => {
-      const id = ids.get(src);
-      return id ? `![${alt}](attachment:${id})` : "";
-    }),
+    message: outsideCode(message, (text) =>
+      text.replace(IMAGE, (_, alt: string, src: string) => {
+        const id = ids.get(src);
+        return id ? `![${alt}](attachment:${id})` : "";
+      }),
+    ),
     attachments,
   };
 }
 
 /**
  * The browser's encoder: scaled to fit `MAX_EDGE`, as WebP, or as JPEG
- * where the webview can't write WebP (WebKit hands back PNG instead).
+ * where the webview can't write WebP (WebKit hands back PNG instead). JPEG
+ * has no transparency, so the image goes onto white first; otherwise its
+ * transparent parts (a window screenshot's shadow) would turn black.
  */
 export async function encodeForUpload(image: Blob): Promise<Blob> {
   const bitmap = await createImageBitmap(image);
@@ -74,10 +97,17 @@ export async function encodeForUpload(image: Blob): Promise<Blob> {
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const context = canvas.getContext("2d");
+  context?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
   const webp = await canvasBlob(canvas, "image/webp");
-  return webp.type === "image/webp" ? webp : canvasBlob(canvas, "image/jpeg");
+  if (webp.type === "image/webp") return webp;
+  if (context) {
+    context.globalCompositeOperation = "destination-over";
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  return canvasBlob(canvas, "image/jpeg");
 }
 
 function canvasBlob(canvas: HTMLCanvasElement, type: string): Promise<Blob> {

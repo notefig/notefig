@@ -241,4 +241,33 @@ describe("createFeedback", () => {
       "encoded:kept",
     );
   });
+
+  it("leaves image syntax inside code alone", async () => {
+    const fetchFn = respond(202);
+    const feedback = createFeedback({
+      supportUrl: SUPPORT_URL,
+      fetchFn,
+      encodeImage,
+      objectUrls: fakeObjectUrls(),
+    });
+    const url = feedback.addImage(png("one"));
+    const dataUrl = `data:image/png;base64,${"A".repeat(8)}`;
+    const message = [
+      `![](${url})`,
+      "",
+      "```md",
+      "![](blob:example) and ![](" + dataUrl + ")",
+      "```",
+      "",
+      "Inline `![](blob:inline)` too.",
+    ].join("\n");
+
+    expect(messageLength(message)).toBe(
+      message.length - url.length + "attachment:img0".length,
+    );
+    await feedback.send({ message });
+    const { form, body } = sentBody(fetchFn);
+    expect(body.message).toBe(message.replace(url, "attachment:img1"));
+    expect(form.get("img2")).toBeNull();
+  });
 });
