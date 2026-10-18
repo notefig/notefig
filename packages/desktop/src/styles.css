@@ -457,9 +457,10 @@
   }
 
   /* Tiptap Placeholder renders via CSS only — nothing app-wide draws
-     data-placeholder, so the chat tab's standalone composer (MET-80) opts
-     in here. */
-  .prompt-editor .ProseMirror p.is-editor-empty:first-child::before {
+     data-placeholder, so the chat tab's standalone composer (MET-80) and
+     the feedback dialog's message opt in here. */
+  .prompt-editor .ProseMirror p.is-editor-empty:first-child::before,
+  .feedback-editor .ProseMirror p.is-editor-empty:first-child::before {
     content: attr(data-placeholder);
     color: hsl(var(--muted-foreground));
     float: left;

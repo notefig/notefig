@@ -33,6 +33,7 @@ import { scratchpadLandingModule } from "@/modules/scratchpads";
 import { scratchpadsModule } from "@/modules/scratchpads";
 import { seenModule } from "@/modules/seen";
 import { usageModule } from "@/modules/usage";
+import { feedbackModule } from "@/modules/feedback";
 import { turnWritesModule } from "@/modules/turn-writes";
 import {
   restoreWorkspacesModule,
@@ -79,6 +80,8 @@ export function runtimeModules(): AnyModule[] {
     usageModule,
     treeExpansionModule,
     lastToolModule,
+    // "Send Feedback": `available` only in builds given a support URL.
+    feedbackModule,
   ];
 }
 

@@ -317,6 +317,7 @@ function GeneralSettings({
       <div className="pt-4">
         <h2 className="text-lg font-semibold mb-1">{t("advanced")}</h2>
         <DebugModeToggle />
+        <FeedbackSettingRow />
       </div>
     </div>
   );
@@ -408,6 +409,33 @@ function UpdateSection() {
         </span>
       </label>
     </div>
+  );
+}
+
+/** Opens the feedback dialog in place of Settings. */
+function FeedbackSettingRow() {
+  const { t } = useTranslation();
+  const { feedback } = useCore();
+  const { setValue: setSectionParam } = useSearchParamValue("settings", {
+    replace: true,
+  });
+  if (!feedback.available) return null;
+  return (
+    <SettingRow
+      title={t("feedbackSettingTitle")}
+      description={t("feedbackSettingDesc")}
+    >
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => {
+          setSectionParam(null);
+          feedback.open();
+        }}
+      >
+        {t("sendFeedback")}
+      </Button>
+    </SettingRow>
   );
 }
 

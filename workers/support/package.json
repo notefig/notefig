@@ -1,0 +1,17 @@
+{
+  "name": "notefig-support-worker",
+  "private": true,
+  "description": "support.notefig.com, the Worker behind the app's feedback dialog. Not an npm workspace: installed on its own so wrangler stays out of the root lockfile.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test --experimental-strip-types --no-warnings=ExperimentalWarning 'src/**/*.test.ts'",
+    "typecheck": "tsc --noEmit",
+    "dev": "npx wrangler@4.151.1 dev",
+    "deploy": "npx wrangler@4.151.1 deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260930.1",
+    "@types/node": "22.19.1",
+    "typescript": "5.9.3"
+  }
+}

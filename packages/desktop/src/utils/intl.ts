@@ -347,6 +347,7 @@ i18n
             openSettings: "Open settings",
             toggleSidebar: "Toggle sidebar",
             sessionsSidebar: "Open agent sessions",
+            sendFeedback: "Send feedback",
             closeTab: "Close tab",
             nextTab: "Next tab",
             prevTab: "Previous tab",
@@ -388,6 +389,7 @@ i18n
             toggleSidebar: ["sidebar", "panel", "toggle", "files"],
             toggleFullscreen: ["fullscreen", "maximize", "window"],
             openSettings: ["settings", "preferences", "options"],
+            sendFeedback: ["feedback", "bug", "report", "idea", "help", "support"],
             toggleTheme: [
               "theme",
               "appearance",
@@ -400,6 +402,22 @@ i18n
 
           // Help Commands
           documentation: "Documentation",
+          sendFeedback: "Send Feedback",
+
+          // Feedback dialog
+          feedbackMessage: "Message",
+          feedbackIncludeDebug: "Include debug info",
+          feedbackIncludeDebugDesc:
+            "Attaches your workspace path, open file names and git status, kept private to the Notefig team",
+          feedbackSettingTitle: "Feedback",
+          feedbackSettingDesc: "Report a bug or suggest an idea.",
+          feedbackPlaceholder:
+            "What broke, or what would help? Markdown works, and your text may be shared publicly.",
+          feedbackSending: "Sending feedback…",
+          feedbackSent: "Feedback sent. Thank you!",
+          feedbackFailed: "Couldn't send. Try again.",
+          feedbackRateLimited: "One message a minute. Try again shortly.",
+          feedbackTooLong: "Keep it under 5,000 characters.",
 
           // Window controls (Windows titlebar)
           minimize: "Minimize",

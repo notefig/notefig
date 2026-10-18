@@ -17,7 +17,11 @@
     // sidecars/bundle.mjs. Fallow has no notion of a non-workspace package
     // and would report their one import as unlisted. bundle.mjs itself
     // (root level) stays analysed.
-    "sidecars/*/**"
+    "sidecars/*/**",
+    // workers/<name>/ are Cloudflare Workers, not npm workspaces: each is
+    // installed and tested on its own so wrangler stays out of the root
+    // lockfile, and deploys from its own workflow.
+    "workers/*/**"
   ],
   "ignoreDependencies": [
     "@tanstack/query-core",
