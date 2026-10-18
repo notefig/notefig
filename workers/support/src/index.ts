@@ -1,10 +1,12 @@
+import { handleLinearWebhook } from "./agent-trigger.ts";
 import { submitFeedback } from "./feedback.ts";
 import { corsHeaders, json, readBody } from "./http.ts";
 import { linearClient } from "./linear.ts";
 
 /**
  * support.notefig.com: the endpoints the app talks to for feedback and,
- * later, the roadmap. Each route is `/v1/<name>`, handled by its own file.
+ * later, the roadmap, plus Linear's webhook that hands accepted issues to
+ * the agent. Each route is `/v1/<name>`, handled by its own file.
  */
 
 export interface Env {
@@ -16,12 +18,26 @@ export interface Env {
   LINEAR_FEEDBACK_LABEL_ID: string;
   /** Comma-separated origins allowed to call from a browser. */
   ALLOWED_ORIGINS: string;
+  /** The Linear user the agent works as, and who may assign it work. */
+  AGENT_USER_ID: string;
+  /** Comma-separated Linear user ids. */
+  APPROVER_IDS: string;
+  // Secrets set once with `wrangler secret put`; the agent route answers
+  // 503 until they are.
+  LINEAR_WEBHOOK_SECRET?: string;
+  CLAUDE_ROUTINE_FIRE_URL?: string;
+  CLAUDE_ROUTINE_TOKEN?: string;
 }
 
 // Up to three 2 MB screenshots, a 50,000-character debug report, and the message.
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
+// Linear's webhook body: an issue event, never large.
+const MAX_WEBHOOK_BYTES = 256 * 1024;
+
 export async function handle(request: Request, env: Env, fetchFn: typeof fetch): Promise<Response> {
+  // Server to server: no Origin, guarded by Linear's signature instead.
+  if (new URL(request.url).pathname === "/v1/linear") return linearWebhook(request, env, fetchFn);
   const allowedOrigins = env.ALLOWED_ORIGINS.split(",");
   // CORS alone only hides the response: a page elsewhere can still send a
   // "simple" text/plain POST with no preflight. So anything not from the
@@ -59,6 +75,29 @@ async function route(request: Request, env: Env, fetchFn: typeof fetch): Promise
     default:
       return json(404, { error: "Not found" });
   }
+}
+
+async function linearWebhook(request: Request, env: Env, fetchFn: typeof fetch): Promise<Response> {
+  if (request.method !== "POST") return json(405, { error: "Use POST" });
+  const { LINEAR_WEBHOOK_SECRET, CLAUDE_ROUTINE_FIRE_URL, CLAUDE_ROUTINE_TOKEN } = env;
+  if (!LINEAR_WEBHOOK_SECRET || !CLAUDE_ROUTINE_FIRE_URL || !CLAUDE_ROUTINE_TOKEN) {
+    return json(503, { error: "Agent trigger not configured" });
+  }
+  const read = await readBody(request, MAX_WEBHOOK_BYTES);
+  if ("error" in read) return read.error;
+  return handleLinearWebhook(await read.body.text(), request.headers.get("Linear-Signature"), {
+    config: {
+      webhookSecret: LINEAR_WEBHOOK_SECRET,
+      agentUserId: env.AGENT_USER_ID,
+      approverIds: env.APPROVER_IDS.split(","),
+      triageStateId: env.LINEAR_TRIAGE_STATE_ID,
+      routineFireUrl: CLAUDE_ROUTINE_FIRE_URL,
+      routineToken: CLAUDE_ROUTINE_TOKEN,
+    },
+    fetchFn,
+    createComment: linearClient(env.LINEAR_API_KEY, fetchFn).createComment,
+    now: Date.now,
+  });
 }
 
 export default {
