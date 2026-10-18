@@ -4,10 +4,21 @@ import { submitFeedback, type FeedbackDeps } from "./feedback.ts";
 import type { IssueInput } from "./linear.ts";
 import { validFeedback } from "./testing.ts";
 
-function setup(createIssue?: FeedbackDeps["createIssue"]) {
+function setup(
+  createIssue?: FeedbackDeps["createIssue"],
+  createComment?: FeedbackDeps["createComment"],
+) {
   const issues: IssueInput[] = [];
+  const comments: { issueId: string; body: string }[] = [];
   const deps: FeedbackDeps = {
-    createIssue: createIssue ?? (async (input) => void issues.push(input)),
+    createIssue:
+      createIssue ??
+      (async (input) => {
+        issues.push(input);
+        return `issue-${issues.length}`;
+      }),
+    createComment:
+      createComment ?? (async (issueId, body) => void comments.push({ issueId, body })),
     config: {
       teamId: "team",
       triageStateId: "triage",
@@ -15,7 +26,7 @@ function setup(createIssue?: FeedbackDeps["createIssue"]) {
       feedbackLabelId: "feedback",
     },
   };
-  return { deps, issues };
+  return { deps, issues, comments };
 }
 
 test("files feedback in Triage, in the roadmap project, labelled Feedback", async () => {
@@ -63,6 +74,7 @@ test("answers 502 when Linear fails, and files the same text on retry", async ()
   const { deps } = setup(async (input) => {
     if (fail) throw new Error("Linear down");
     issues.push(input);
+    return "issue";
   });
   const quiet = console.error;
   console.error = () => {};
@@ -88,19 +100,41 @@ test("defuses mentions and shortens long titles", async () => {
   assert.match(issue.description, /\nsecond line @\u200Bteam/);
 });
 
-test("attaches the debug report in a code block it can't close early", async () => {
-  const { deps, issues } = setup();
+test("keeps the debug report out of the synced description, in a private comment", async () => {
+  const { deps, issues, comments } = setup();
   const debugReport = "=== Notefig Debug Report ===\n```\n@team ````\n=== End Debug Report ===";
   await submitFeedback({ ...validFeedback, debugReport }, deps);
+
   const { description } = issues[0];
-  assert.match(description, /### Debug report\n\n`````text\n=== Notefig Debug Report ===/);
-  assert.ok(description.endsWith("=== End Debug Report ===\n`````"));
+  assert.ok(!description.includes("Notefig Debug Report"));
+  assert.ok(description.endsWith("_The debug report is in a private comment in Linear._"));
+  assert.equal(comments.length, 1);
+  const [{ issueId, body }] = comments;
+  assert.equal(issueId, "issue-1");
+  // In a code block it can't close early.
+  assert.match(body, /### Debug report\n\n`````text\n=== Notefig Debug Report ===/);
+  assert.ok(body.endsWith("=== End Debug Report ===\n`````"));
 });
 
-test("leaves the debug section out when no report is sent", async () => {
-  const { deps, issues } = setup();
+test("adds no comment when there's nothing private", async () => {
+  const { deps, issues, comments } = setup();
   await submitFeedback(validFeedback, deps);
   assert.ok(!issues[0].description.includes("Debug report"));
+  assert.equal(comments.length, 0);
+});
+
+test("answers 502 when the private comment can't be added", async () => {
+  const { deps } = setup(undefined, async () => {
+    throw new Error("comment refused");
+  });
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const response = await submitFeedback({ ...validFeedback, debugReport: "report" }, deps);
+    assert.equal(response.status, 502);
+  } finally {
+    console.error = quiet;
+  }
 });
 
 test("files the message's markdown as written, with a plain-text title", async () => {

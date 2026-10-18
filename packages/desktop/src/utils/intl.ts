@@ -410,7 +410,7 @@ i18n
           feedbackMessage: "Message",
           feedbackIncludeDebug: "Include debug info",
           feedbackIncludeDebugDesc:
-            "Attaches your workspace path, open file names and git status",
+            "Attaches your workspace path, open file names and git status, kept private to the Notefig team",
           feedbackSettingTitle: "Feedback",
           feedbackSettingDesc: "Report a bug or suggest an idea.",
           feedbackPlaceholder: "What broke, or what would help?",

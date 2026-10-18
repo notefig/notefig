@@ -6,9 +6,14 @@ The Cloudflare Worker behind the app's **Send Feedback** dialog. Later routes
 `POST /v1/feedback` takes `{ message, version, os, debugReport? }` and files
 it as an issue in MET's Triage, in the **Metrists Roadmap** project,
 labelled `Feedback`. The message is quoted and `@mentions` are broken, so an
-issue synced to GitHub can't ping anyone. When the user ticks "Include debug
-info", the debug panel's report (up to 50,000 characters) follows in a code
-block.
+issue synced to GitHub can't ping anyone.
+
+MET syncs to the public GitHub repo, and the sync copies the title,
+description and the issue's synced comment thread. So the description holds
+only what the user wrote for the public. When the user ticks "Include debug
+info", the debug panel's report (up to 50,000 characters) goes in a
+top-level comment instead, which starts its own thread; Linear's sync
+doesn't copy comments outside the synced thread, so it stays in Linear.
 
 | Guard | How |
 |---|---|

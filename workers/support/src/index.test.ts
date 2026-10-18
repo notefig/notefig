@@ -17,8 +17,13 @@ function setup({ limited = false } = {}) {
     ALLOWED_ORIGINS: `${APP_ORIGIN},https://app.notefig.com`,
   };
   const fetchFn = (async (_input: RequestInfo | URL, init?: RequestInit) => {
-    linearCalls.push({ headers: init?.headers, body: JSON.parse(String(init?.body)) });
-    return Response.json({ data: { issueCreate: { success: true } } });
+    const body = JSON.parse(String(init?.body));
+    linearCalls.push({ headers: init?.headers, body });
+    return Response.json(
+      body.query.includes("commentCreate")
+        ? { data: { commentCreate: { success: true } } }
+        : { data: { issueCreate: { success: true, issue: { id: "issue-1" } } } },
+    );
   }) as typeof fetch;
   return { env, fetchFn, linearCalls };
 }
@@ -105,4 +110,17 @@ test("answers 502 when Linear rejects the issue", async () => {
   } finally {
     console.error = quiet;
   }
+});
+
+test("puts the debug report in a comment on the new issue, not its description", async () => {
+  const { env, fetchFn, linearCalls } = setup();
+  const body = JSON.stringify({ ...validFeedback, debugReport: "=== Notefig Debug Report ===" });
+  assert.equal((await handle(post(body), env, fetchFn)).status, 202);
+  assert.equal(linearCalls.length, 2);
+  const [issue, comment] = linearCalls.map((call) => call.body as { query: string; variables: { input: Record<string, string> } });
+  assert.match(issue.query, /issueCreate/);
+  assert.ok(!issue.variables.input.description.includes("Notefig Debug Report"));
+  assert.match(comment.query, /commentCreate/);
+  assert.equal(comment.variables.input.issueId, "issue-1");
+  assert.match(comment.variables.input.body, /=== Notefig Debug Report ===/);
 });

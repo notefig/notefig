@@ -1,11 +1,14 @@
 import { json } from "./http.ts";
-import type { CreateIssue } from "./linear.ts";
+import type { CreateComment, CreateIssue } from "./linear.ts";
 
 /**
  * `POST /v1/feedback`: the app's feedback dialog. A valid report becomes
  * an issue in MET's Triage, in the roadmap project, labelled Feedback.
- * The message is markdown and is filed as written; the app's debug
- * report follows when the user chose to send it.
+ * The message is markdown and is filed as written.
+ *
+ * The description syncs to the public GitHub repo, so it carries only the
+ * message. The debug report goes in a top-level comment, which Linear's
+ * GitHub sync doesn't copy (only the issue's synced thread does).
  */
 
 export interface FeedbackConfig {
@@ -17,6 +20,7 @@ export interface FeedbackConfig {
 
 export interface FeedbackDeps {
   createIssue: CreateIssue;
+  createComment: CreateComment;
   config: FeedbackConfig;
 }
 
@@ -37,7 +41,11 @@ export async function submitFeedback(body: unknown, deps: FeedbackDeps): Promise
   const feedback = parseFeedback(body);
   if (!feedback) return json(400, { error: "Invalid feedback" });
   try {
-    await deps.createIssue(issueFor(feedback, deps.config));
+    const issueId = await deps.createIssue(issueFor(feedback, deps.config));
+    const note = privateNote(feedback);
+    // Failing here leaves an issue without its report; the 502 asks for a
+    // retry, and a duplicate in Triage beats a report lost without a word.
+    if (note) await deps.createComment(issueId, note);
   } catch (error) {
     console.error("feedback: issue not created", error);
     return json(502, { error: "Could not file feedback" });
@@ -76,9 +84,21 @@ function issueFor(feedback: Feedback, config: FeedbackConfig) {
       `**Version:** ${feedback.version} · **OS:** ${feedback.os}`,
       "",
       "_Sent from the app's feedback dialog._",
-      ...(feedback.debugReport ? ["", "### Debug report", "", fenced(feedback.debugReport)] : []),
+      ...(feedback.debugReport ? ["", "_The debug report is in a private comment in Linear._"] : []),
     ].join("\n"),
   };
+}
+
+/** What stays in Linear: the debug report, or nothing. */
+function privateNote(feedback: Feedback): string | null {
+  if (!feedback.debugReport) return null;
+  return [
+    "_Private: comments outside the synced thread stay out of GitHub._",
+    "",
+    "### Debug report",
+    "",
+    fenced(feedback.debugReport),
+  ].join("\n");
 }
 
 /**

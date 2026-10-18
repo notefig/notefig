@@ -47,7 +47,7 @@ async function route(request: Request, env: Env, fetchFn: typeof fetch): Promise
       const body = await readJson(request, MAX_BODY_BYTES);
       if ("error" in body) return body.error;
       return submitFeedback(body.value, {
-        createIssue: linearClient(env.LINEAR_API_KEY, fetchFn),
+        ...linearClient(env.LINEAR_API_KEY, fetchFn),
         config: {
           teamId: env.LINEAR_TEAM_ID,
           triageStateId: env.LINEAR_TRIAGE_STATE_ID,
