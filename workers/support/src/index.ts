@@ -8,7 +8,6 @@ import { linearClient } from "./linear.ts";
  */
 
 export interface Env {
-  SUPPORT_KV: KVNamespace;
   RATE_LIMITER: RateLimit;
   LINEAR_API_KEY: string;
   LINEAR_TEAM_ID: string;
@@ -49,7 +48,6 @@ async function route(request: Request, env: Env, fetchFn: typeof fetch): Promise
       const body = await readJson(request, MAX_BODY_BYTES);
       if ("error" in body) return body.error;
       return submitFeedback(body.value, {
-        kv: env.SUPPORT_KV,
         createIssue: linearClient(env.LINEAR_API_KEY, fetchFn),
         config: {
           teamId: env.LINEAR_TEAM_ID,
@@ -61,7 +59,6 @@ async function route(request: Request, env: Env, fetchFn: typeof fetch): Promise
             idea: env.LINEAR_IDEA_LABEL_ID,
           },
         },
-        now: Date.now,
       });
     }
     default:

@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { handle, type Env } from "./index.ts";
-import { fakeKv, validFeedback } from "./testing.ts";
+import { validFeedback } from "./testing.ts";
 
 const APP_ORIGIN = "tauri://localhost";
 
 function setup({ limited = false } = {}) {
   const linearCalls: { headers: HeadersInit | undefined; body: unknown }[] = [];
   const env: Env = {
-    SUPPORT_KV: fakeKv(),
     RATE_LIMITER: { limit: async () => ({ success: !limited }) },
     LINEAR_API_KEY: "lin_api_test",
     LINEAR_TEAM_ID: "team",

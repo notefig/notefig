@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DAILY_ISSUE_CAP, submitFeedback, type FeedbackDeps } from "./feedback.ts";
+import { submitFeedback, type FeedbackDeps } from "./feedback.ts";
 import type { IssueInput } from "./linear.ts";
-import { fakeKv, validFeedback } from "./testing.ts";
+import { validFeedback } from "./testing.ts";
 
 function setup(createIssue?: FeedbackDeps["createIssue"]) {
   const issues: IssueInput[] = [];
-  const kv = fakeKv();
   const deps: FeedbackDeps = {
-    kv,
     createIssue: createIssue ?? (async (input) => void issues.push(input)),
     config: {
       teamId: "team",
@@ -16,9 +14,8 @@ function setup(createIssue?: FeedbackDeps["createIssue"]) {
       projectId: "roadmap",
       labels: { feedback: "feedback", bug: "bug", idea: "idea" },
     },
-    now: () => Date.parse("2026-10-16T12:00:00Z"),
   };
-  return { deps, issues, kv };
+  return { deps, issues };
 }
 
 test("files feedback in Triage, in the roadmap project, with its kind's label", async () => {
@@ -66,32 +63,7 @@ test("rejects malformed feedback without filing it", async () => {
   assert.equal(issues.length, 0);
 });
 
-test("files the same text once, ignoring case and spacing, for a week", async () => {
-  const { deps, issues, kv } = setup();
-  await submitFeedback(validFeedback, deps);
-  const repeat = { ...validFeedback, message: "  the SIDEBAR flickers\nwhen I rename a file " };
-  assert.equal((await submitFeedback(repeat, deps)).status, 202);
-  assert.equal(issues.length, 1);
-  const [duplicateKey] = [...kv.values.keys()].filter((key) => key.startsWith("feedback:dup:"));
-  assert.equal(kv.ttls.get(duplicateKey), 7 * 24 * 60 * 60);
-});
-
-test("stops filing at the daily cap but still answers 202", async () => {
-  const { deps, issues, kv } = setup();
-  kv.values.set("feedback:day:2026-10-16", String(DAILY_ISSUE_CAP));
-  assert.equal((await submitFeedback(validFeedback, deps)).status, 202);
-  assert.equal(issues.length, 0);
-});
-
-test("counts each filed issue against the day, expiring the counter", async () => {
-  const { deps, kv } = setup();
-  await submitFeedback(validFeedback, deps);
-  await submitFeedback({ ...validFeedback, message: "Another one" }, deps);
-  assert.equal(kv.values.get("feedback:day:2026-10-16"), "2");
-  assert.equal(kv.ttls.get("feedback:day:2026-10-16"), 2 * 24 * 60 * 60);
-});
-
-test("answers 502 when Linear fails, and lets the same text through on retry", async () => {
+test("answers 502 when Linear fails, and files the same text on retry", async () => {
   let fail = true;
   const issues: IssueInput[] = [];
   const { deps } = setup(async (input) => {

@@ -10,15 +10,12 @@ broken, so an issue synced to GitHub can't ping anyone.
 
 | Guard | How |
 |---|---|
-| 5 requests a minute per IP | Workers Rate Limiting binding |
+| 1 request a minute per IP | Workers Rate Limiting binding |
 | Body over 16 KB | 413, read without buffering more |
-| 50 new issues a day | a KV counter that expires after 2 days |
-| Same text within 7 days | a KV key on the message's hash, so no issue is filed |
 | Calls from anywhere but the app | 403 unless `Origin` is one of `ALLOWED_ORIGINS` |
 
-A repeat or a submission past the cap still gets `202`, so the sender can't
-tell it was filtered. A Linear failure answers `502`, and the app keeps the
-draft so the user can retry.
+A Linear failure answers `502`, and the app keeps the draft so the user can
+retry.
 
 The Worker isn't an npm workspace. It has its own lockfile so wrangler stays
 out of the root one, and its tests run on Node's built-in runner.
@@ -40,11 +37,8 @@ npm run typecheck
      because issues are created as whoever owns the key. Save the key as the
      GitHub secret `LINEAR_SUPPORT_API_KEY`.
 2. **Cloudflare**
-   - Create the KV namespace with
-     `npx wrangler@4.151.1 kv namespace create SUPPORT_KV`, then put its id
-     in `wrangler.toml`.
    - The deploy uses the existing `CLOUDFLARE_API_TOKEN`. It needs
-     *Workers Scripts: Edit*, *Workers KV Storage: Edit*, and, on the
+     *Workers Scripts: Edit* and, on the
      notefig.com zone, *Workers Routes: Edit* and *DNS: Edit*, so the
      `support.notefig.com` custom domain can be created.
    - Optional: add a WAF rule on `support.notefig.com` that blocks anything
