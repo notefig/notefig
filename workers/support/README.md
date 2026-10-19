@@ -1,6 +1,10 @@
 # support.notefig.com
 
-The Cloudflare Worker behind the app's **Send Feedback** dialog. Later routes
+The Cloudflare Worker behind the app's **Send Feedback** dialog.
+
+**Requirements:** Node 22 (matching `.nvmrc`).
+
+Later routes
 (roadmap, and others like it) sit next to feedback as `/v1/<name>`.
 
 `POST /v1/feedback` takes `{ message, version, os, debugReport? }` and files
