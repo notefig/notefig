@@ -1,8 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createModels } from "@earendil-works/pi-ai/models";
+import { createModels, type Models } from "@earendil-works/pi-ai/models";
 import { cloudflareAIGatewayProvider } from "@earendil-works/pi-ai/providers/cloudflare-ai-gateway";
-import { type Conversation, createRegistry, defineExtension, Harness, section } from "@earendil-works/pi-durable";
+import { type Conversation, createRegistry, defineExtension, Harness, hook, section, ToolTask } from "@earendil-works/pi-durable";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { type Config, type Env, readConfig } from "./config.ts";
@@ -36,16 +37,16 @@ interface Stored {
 
 export class IssueAgent extends DurableObject<Env> {
 	readonly #config: Config;
-	readonly #linear: LinearAgentClient;
-	readonly #github: GitHubClient;
+	#linear: LinearAgentClient | undefined;
+	#github: GitHubClient | undefined;
 	#harness!: Harness;
 	#workspace: Promise<ContainerEnv> | undefined;
+	/** Why the workspace last failed to start, for the coding tools' error. */
+	#workspaceError: string | undefined;
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
 		this.#config = readConfig(env);
-		this.#linear = linearAgentClient({ clientId: env.LINEAR_CLIENT_ID, clientSecret: env.LINEAR_CLIENT_SECRET });
-		this.#github = gitHubClient({ appId: env.GH_APP_ID, privateKey: env.GH_APP_PRIVATE_KEY }, this.#config.repo);
 		void ctx.blockConcurrencyWhile(async () => {
 			// A fallback before anything can throw: an object whose open or recovery fails is started again.
 			const fallback = Date.now() + HEARTBEAT_MS;
@@ -54,9 +55,21 @@ export class IssueAgent extends DurableObject<Env> {
 			this.#harness = await Harness.open(
 				await openDurableObjectSqliteStorage(ctx.storage, { prefix: "pi_" }),
 				{
-					models: this.#models(),
+					models: this.models(),
 					registry: this.#registry(),
-					env: () => this.#environment(),
+					// Pi 1.3 frees idle conversations and documents on timers, which would keep the object awake (and
+					// billed) and stop it from being evicted. Freeing them at once costs a reload on the next use.
+					settings: { contextRetentionMs: 0, documentRetentionMs: 0 },
+					// A workspace that won't start fails only the tools that need it; the others (asking the maintainer,
+					// the pull request) still run, and coding tools get the reason in their error.
+					env: () => this.workspace().then((workspace) => {
+						this.#workspaceError = undefined;
+						return workspace;
+					}, (error: unknown) => {
+						this.#workspaceError = error instanceof Error ? error.message : String(error);
+						console.error("workspace unavailable", error);
+						return undefined;
+					}),
 				},
 				context,
 			);
@@ -70,7 +83,7 @@ export class IssueAgent extends DurableObject<Env> {
 		this.#put("session", input.sessionId);
 		// Linear marks a session unresponsive without an activity within 10 seconds.
 		await this.#post({ type: "thought", body: "Reading the issue." });
-		const issue = await this.#linear.issue(input.issueId);
+		const issue = await this.linear().issue(input.issueId);
 		if (issue.stateType === "triage") {
 			return this.#post({ type: "response", body: "This issue is still in Triage. Accept it first, then delegate it again." });
 		}
@@ -96,7 +109,7 @@ export class IssueAgent extends DurableObject<Env> {
 	}
 
 	async ciFailed(input: { runId: number; name: string; url: string; requestId: string }): Promise<void> {
-		const jobs = await this.#github.failedJobs(input.runId);
+		const jobs = await this.github().failedJobs(input.runId);
 		const lines = jobs.map((job) => `- ${job.name}${job.steps.length ? `: ${job.steps.join(", ")}` : ""} (${job.url})`);
 		const text = `CI failed on your branch: ${input.name} (${input.url}).\n${lines.join("\n")}\nReproduce it locally, fix it and push again.`;
 		await this.#submit(text, input.requestId, "steer");
@@ -145,7 +158,22 @@ export class IssueAgent extends DurableObject<Env> {
 		else await this.ctx.storage.deleteAlarm();
 	}
 
-	#models() {
+	// The outside world, one method each, so tests can stand in for it (`test/issue-agent.ts`).
+
+	/** Linear, as the agent's own app. */
+	protected linear(): LinearAgentClient {
+		this.#linear ??= linearAgentClient({ clientId: this.env.LINEAR_CLIENT_ID, clientSecret: this.env.LINEAR_CLIENT_SECRET });
+		return this.#linear;
+	}
+
+	/** GitHub, as the agent's GitHub App. */
+	protected github(): GitHubClient {
+		this.#github ??= gitHubClient({ appId: this.env.GH_APP_ID, privateKey: this.env.GH_APP_PRIVATE_KEY }, this.#config.repo);
+		return this.#github;
+	}
+
+	/** The models, through AI Gateway. */
+	protected models(): Models {
 		const values: Record<string, string> = {
 			CLOUDFLARE_API_KEY: this.env.AI_GATEWAY_TOKEN,
 			CLOUDFLARE_ACCOUNT_ID: this.env.CLOUDFLARE_ACCOUNT_ID,
@@ -168,12 +196,28 @@ export class IssueAgent extends DurableObject<Env> {
 					issue.labels.some((label) => label.toLowerCase() === this.#config.testLabel?.toLowerCase()),
 				permitPush: (permitted) => this.#interceptGit(permitted),
 				upsertPullRequest: async (input) => {
-					const pr = await this.#github.upsertPullRequest(input);
+					const pr = await this.github().upsertPullRequest(input);
 					const session = this.#get("session");
-					if (session) await this.#linear.addLink(session, `Pull request #${pr.number}`, pr.url).catch(() => {});
+					if (session) await this.linear().addLink(session, `Pull request #${pr.number}`, pr.url).catch(() => {});
 					return pr;
 				},
 				ask: (question) => this.#post({ type: "elicitation", body: question }),
+			}),
+		);
+		registry.install(
+			defineExtension({
+				name: "notefig.workspace",
+				hooks: [
+					hook(ToolTask, {
+						// Pi's coding tools say only that there is no environment; say why the container didn't start.
+						afterTool: (_call, result) => {
+							const reason = this.#workspaceError;
+							const text = result.output?.map((part) => ("text" in part ? part.text : "")).join("") ?? "";
+							if (!result.isError || !reason || !text.includes("No execution environment")) return undefined;
+							return { ...result, output: [{ type: "text", text: `The workspace couldn't start: ${reason}` }] };
+						},
+					}),
+				],
 			}),
 		);
 		registry.install(reporting((activity) => this.#post(activity)));
@@ -197,11 +241,11 @@ export class IssueAgent extends DurableObject<Env> {
 
 	async #post(activity: Activity): Promise<void> {
 		const session = this.#get("session");
-		if (session) await this.#linear.activity(session, activity);
+		if (session) await this.linear().activity(session, activity);
 	}
 
-	/** The container with the repository on the issue's branch, started and cloned on first use. */
-	#environment(): Promise<ContainerEnv> {
+	/** Where tools run: the container with the repository on the issue's branch, started and cloned on first use. */
+	protected workspace(): Promise<ExecutionEnv> {
 		const container = this.ctx.container;
 		if (!container) return Promise.reject(new Error("This Durable Object has no container"));
 		if (!this.#workspace || !container.running) {
