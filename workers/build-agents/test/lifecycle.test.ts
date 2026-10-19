@@ -90,6 +90,10 @@ describe("an issue's agent", () => {
 		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.modelCalls())).toBe(2);
 		// The new session's request reached the model.
 		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.lastPrompt())).toContain("please also handle folders");
+		// Linear retrying the first session's delivery changes nothing: no new run, and the newer prompt stays.
+		await runInDurableObject(stub, (agent: TestIssueAgent) => agent.start({ issueId: ISSUE.id, sessionId: "session-1", prompt: "old" }));
+		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.storedPrompt())).toContain("please also handle folders");
+		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.modelCalls())).toBe(2);
 	});
 
 	it("submits messages a restart left in the start-up queue when it comes back", async () => {

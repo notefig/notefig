@@ -32,6 +32,8 @@ const CONTAINER_IDLE_MS = 10 * 60_000;
 
 interface Stored {
 	session?: string;
+	/** Every Linear session this agent has taken, so a retried delivery of an older one is ignored. */
+	sessions?: string[];
 	/** The container's state after the last push, and the image it was taken on. */
 	snapshot?: { id: string; image: string };
 	issue?: IssueDetails;
@@ -109,7 +111,11 @@ export class IssueAgent extends DurableObject<Env> {
 
 	/** Delegated in Linear: check the issue, then start working on it. */
 	async start(input: { issueId: string; sessionId: string; prompt: string }): Promise<void> {
-		// Already accepted (delegated again, or a redelivery): carry on in the newest session.
+		// A session already taken (Linear retrying an older delivery) changes nothing: not the session, not the prompt.
+		const sessions = this.#get("sessions") ?? [];
+		if (sessions.includes(input.sessionId)) return;
+		this.#put("sessions", [...sessions, input.sessionId]);
+		// Already accepted (delegated again): carry on in the new session.
 		if (this.#get("issue")) {
 			this.#put("session", input.sessionId);
 			// The new session's context (the comment that mentioned the agent, say) replaces the old one in the issue
@@ -176,6 +182,7 @@ export class IssueAgent extends DurableObject<Env> {
 		await this.#post({ type, body }).catch((error: unknown) => console.error("linear: refusal not posted", error));
 		this.ctx.storage.kv.delete("pending");
 		this.ctx.storage.kv.delete("session");
+		this.ctx.storage.kv.delete("sessions");
 	}
 
 	/**

@@ -72,6 +72,10 @@ export class TestIssueAgent extends IssueAgent {
 		return this.ctx.storage.kv.get<string[]>("test:moves") ?? [];
 	}
 
+	storedPrompt(): string {
+		return this.ctx.storage.kv.get<string>("prompt") ?? "";
+	}
+
 	lastPrompt(): string {
 		return this.ctx.storage.kv.get<string>("test:last-prompt") ?? "";
 	}
