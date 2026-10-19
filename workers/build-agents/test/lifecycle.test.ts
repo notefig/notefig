@@ -130,8 +130,12 @@ describe("an issue's agent", () => {
 			expect(await env.BRANCHES.get(ISSUE.branchName)).toBeNull();
 			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).toEqual([]);
 			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.alarmAt())).toBeNull();
-			// A late review or CI failure finds nothing to work on.
+			// A late review, CI failure or Linear message finds nothing to work on.
 			await runInDurableObject(stub, (agent: TestIssueAgent) => agent.feedback({ text: "One more thing", requestId: "github:review:9" }));
+			await runInDurableObject(stub, (agent: TestIssueAgent) =>
+				agent.ciFailed({ branch: ISSUE.branchName, sha: "abc1234", runId: 1, name: "CI", url: "u", requestId: "github:run:1:1" }),
+			);
+			await runInDurableObject(stub, (agent: TestIssueAgent) => agent.steer({ sessionId: "session-1", text: "Keep going", requestId: "linear:late" }));
 			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).toEqual([]);
 		}
 	});

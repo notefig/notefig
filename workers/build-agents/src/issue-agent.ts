@@ -131,6 +131,7 @@ export class IssueAgent extends DurableObject<Env> {
 
 	/** A maintainer's message in the Linear session: joins the running work at the next tool round. */
 	async steer(input: { sessionId: string; text: string; requestId: string }): Promise<void> {
+		if (!this.#get("issue")) return;
 		this.#put("session", input.sessionId);
 		await this.#submit(input.text, input.requestId, "steer");
 	}
@@ -210,6 +211,9 @@ export class IssueAgent extends DurableObject<Env> {
 	}
 
 	async #submit(content: string, requestId: string, whenBusy: "steer" | "followUp"): Promise<void> {
+		// Checked here, at the moment of admitting, as well as on the way in: an event already waiting on the network
+		// (a CI failure fetching its logs) when the agent ended must not start it again. Only a delegation stores an issue.
+		if (!this.#get("issue")) return;
 		// Armed before admitting work: an object that dies after the commit is still woken.
 		await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);
 		const root = await this.#root();
