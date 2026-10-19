@@ -30,8 +30,11 @@ jobs:
       VERSION: ${{ inputs.version }}
       TAG: build-agents-v${{ inputs.version }}
     steps:
+      # Full history: the release notes list the commits since the previous build-agents tag.
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Validate version format
         run: |
@@ -118,7 +121,8 @@ jobs:
           git push --no-verify origin "$TAG"
           PREVIOUS=$(git tag -l 'build-agents-v*' --sort=-v:refname | grep -vx "$TAG" | head -1)
           RANGE=${PREVIOUS:+$PREVIOUS..}$TAG
-          gh release create "$TAG" --title "Build agents v$VERSION" \
+          # --latest=false: "latest" stays the desktop release, whose latest.json installed apps check for updates.
+          gh release create "$TAG" --title "Build agents v$VERSION" --latest=false \
             --notes "Deployed to agents.notefig.com.
 
           **Changes:**
