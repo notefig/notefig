@@ -23,6 +23,7 @@ Not an npm workspace: installed, tested and deployed on its own, like `workers/s
 [Operating it](#operating-it) ·
 [Costs](#costs) ·
 [Troubleshooting](#troubleshooting) ·
+[Last end-to-end run](#last-end-to-end-run-2026-10-19-local) ·
 [Cutover from the routine](#cutover-from-the-routine) ·
 [Files](#files)
 
@@ -83,7 +84,9 @@ the object's state, and never sees a token.
    `src/container-env.ts`) and three of its own (`src/tools.ts`):
    - `push`: reads every outgoing commit's message, author and own patch (`git log --patch --cc origin/main..HEAD`,
      which includes merge commits), refuses if any quotes the private note, then opens the gateway's push permit,
-     runs `git push`, closes the permit, and snapshots the container;
+     runs `git push --no-verify`, closes the permit, and snapshots the container. `--no-verify` skips only the
+     repository's pre-push hook, which runs the whole desktop e2e suite in a browser: CI runs it on the pull request,
+     and its failures come back to the agent. The commit hook (Fallow) still runs in the container;
    - `open_pull_request`: the title type from the issue's label (`TYPE_LABELS`), the body with `## Release notes`
      and `Closes MET-n`, a draft while the issue has the test label; the PR link is added to the Linear session;
    - `ask_maintainer`: posts a Linear elicitation and ends the run until someone answers.
@@ -95,8 +98,12 @@ the object's state, and never sees a token.
    - a message in the Linear session (`prompted`) joins the running work at the next tool round, or starts the next
      run, with request id `linear:<activity id>`;
    - the session's **stop** button (`prompted` with the `stop` signal) aborts the run and destroys the container;
-   - a review or review comment on the PR, from a repo collaborator or a `TRUSTED_REVIEWERS` login, steers it;
-   - a failed workflow run on the branch arrives with the failed jobs and steps, and the agent fixes and pushes again;
+   - a review or review comment on the PR, from someone who can push to the repository or a `TRUSTED_REVIEWERS`
+     login, steers it. GitHub's `author_association` settles most cases; it reports a private org membership as
+     CONTRIBUTOR, so anyone else is checked with the permission endpoint (write, maintain or admin);
+   - a failed workflow run on the branch arrives with the commit it ran on, a hint to pull first (others may have
+     pushed), and the end of each failed job's log, fetched by the object: the container can't reach CI. Each run
+     attempt is its own message, so a re-run's failure isn't taken for a repeat;
    - the PR merging or closing aborts any work, destroys the container, removes the branch mapping, and posts a
      final response.
 
@@ -112,7 +119,7 @@ The agent reads text strangers write (feedback, public PR comments), so every ca
 | Risk | What stops it |
 |---|---|
 | Forged webhooks | HMAC signatures (Linear, GitHub), Linear's timestamp within 60 s |
-| A stranger starts or steers an agent | Only approvers' delegations and messages (by email); GitHub feedback only from collaborators or listed bots, only on this repo's branches |
+| A stranger starts or steers an agent | Only approvers' delegations and messages (by email); GitHub feedback only from people who can push to the repo or listed bots, only on this repo's branches |
 | The agent reads or leaks a token | The container holds none. The GitHub token is added by `GitGateway` on the way out; Linear and model calls are made by the Durable Object |
 | The agent pushes somewhere else | `GitGateway` parses the push's ref updates and allows only `refs/heads/<issue branch>`, no deletion, only while the `push` tool holds the permit. GitHub's ruleset on `main` blocks the app too |
 | The agent reaches other hosts | The container starts with internet off; only intercepted hosts resolve |
@@ -202,7 +209,8 @@ Also used by the workflow: the repo secret `CLOUDFLARE_ACCOUNT_ID` and the envir
     `read,write,app:assignable,app:mentionable`). Installed agents take no seat.
 - **Team MET**, with the labels `agent-test`, `Bug`, `Feature`, `Improvement`. The app can't create labels in this
   workspace (label management is admin-only), so bootstrap lists missing ones to create by hand.
-- **Approvers:** members whose email is in `BUILD_AGENTS_APPROVERS`.
+- **Approvers:** members whose **Linear account email** is in `BUILD_AGENTS_APPROVERS` (currently `mail@parsa.pro`;
+  check it with Linear's API or Settings → Account, it may differ from your GitHub or Cloudflare email).
 - The support Worker's private note is the top-level comment starting
   `_Private: comments outside the synced thread stay out of GitHub._` (`PRIVATE_NOTE_MARKER` in `src/linear.ts`).
 
@@ -356,6 +364,47 @@ Everything below happened while building this.
 | `ask_maintainer` failed when the container couldn't start | Pi builds the environment before every tool | The workspace is optional; coding tools fail with the reason, others run |
 | First Worker test timed out in CI | Loading the bundle (Pi included) takes seconds on a cold runner | `testTimeout: 30_000` |
 | Hard to find which Cloudflare token CI uses | The repo's token is account-owned, listed under Manage Account → Account API Tokens | Build agents have their own token on their environment |
+| Every delegation ignored as "not started by an approver" | `APPROVER_EMAILS` had a different email than the Linear account | Use the Linear account's email |
+| Reviews from maintainers never reached the agent | The collaborators API answers apps 404, and `author_association` shows a private org membership as CONTRIBUTOR | Check the permission endpoint instead (fixed) |
+| `push` failed after minutes | The pre-push hook ran the desktop e2e suite in the container; it's slow (and under emulation, flaky) | The tool pushes with `--no-verify`; CI runs e2e (fixed) |
+| The agent tried `git push --no-verify` from bash, then looked for tokens | The prompt didn't rule it out | The gateway refused (no permit) and there are no tokens; the prompt now forbids both (fixed) |
+| The agent couldn't reproduce a CI failure | Someone else's commit on its branch; it couldn't read the CI log | The failure message has the commit, a pull hint and the log tail (fixed) |
+| A re-run's failure was ignored | Same run id, deduplicated | Request ids include the run attempt (fixed) |
+| A running agent kept old instructions after a change | A conversation stores its instructions at creation | Re-applied on every open when they differ (fixed) |
+| The branch is `notefigbuildagent-met-…`, not `parsa-met-…` | Linear's `branchName` is personalised to whoever asks; the agent asks as itself | Expected; Linear links the PR by `met-<n>` |
+| Issues stay Todo while their draft PRs are open | Linear's GitHub automation doesn't move issues on draft PRs by default | Configure MET's GitHub workflow automation, or go live (PRs stop being drafts) |
+| Linear deliveries never reach a local run | The Linear app's webhook points at agents.notefig.com | Point it at the tunnel, or play Linear's part: create a session with `agentSessionCreateOnIssue` and post signed `AgentSessionEvent`s (see "Last end-to-end run") |
+
+## Last end-to-end run (2026-10-19, local)
+
+Locally (`wrangler dev` with the real container, a cloudflared tunnel), against the real Linear workspace, GitHub
+repo, CI, AI Gateway and Kimi K2.7 Code. The Linear app's webhook still pointed at agents.notefig.com, so its
+deliveries were played by a script: a **real** agent session from `agentSessionCreateOnIssue` with the app's token,
+and `AgentSessionEvent` webhooks signed with the real secret. Everything after the webhook was real. The GitHub App's
+webhook was pointed at the tunnel through `PATCH /app/hook/config`, so GitHub's deliveries were real.
+
+| # | Scenario | Result |
+|---|---|---|
+| 1 | Feedback through support.notefig.com → Triage issue (MET-237) with the private note, created by Notefig Support | ✓ |
+| 2 | Delegated while in Triage | ✓ refused on the session |
+| 3 | Accepted, no `agent-test` label | ✓ refused |
+| 4 | Delegated by a non-approver | ✓ ignored |
+| 5 | Real run: thought in seconds, container started, `npm ci` through the registry gateway, edit, Fallow commit hook, push, draft PR #441 `improve: …` with release notes and `Closes MET-237`, response on the session | ✓ after the push fixes above |
+| 6 | Steering mid-run (the issue's file wasn't on `main`; told it where to write instead) | ✓ picked up at the next tool round |
+| 7 | bash `git push` and `git push --no-verify` | ✓ refused by the gateway ("Push with the push tool") |
+| 8 | Restart mid-run (`wrangler dev` reloaded several times) | ✓ resumed from the checkpoint |
+| 9 | Review from a maintainer on the PR (GitHub's real webhook, then a redelivery) | ✓ after the review-trust fix: edited, pushed, reported |
+| 10 | Someone else pushes a breaking commit; CI fails | ✓ after the CI-message fix: pulled, found the commit, fixed it, CI green |
+| 11 | Stop button mid-run | ✓ aborted, response posted, container destroyed |
+| 12 | Team-written issue needing a decision (MET-238) | ✓ asked with `ask_maintainer`, waited, answer resumed it, PR #443 `feat: …` |
+| 13 | Worker killed mid-turn and started fresh (workspace lost, nothing pushed yet) | ✓ resumed on the heartbeat, noticed the edit was gone, redid it |
+| 14 | PR closed | ✓ final response, container destroyed |
+| 15 | Privacy | ✓ nothing from the debug report in either PR, its commits or descriptions |
+
+Not exercised live: Linear's own webhook delivery and its UI (stop button, replies); a review from someone without push
+access (no such account; covered by unit tests); asking the agent to leak private data or push to `main` on purpose
+(the session's safety check declined to send those instructions; both guards are unit-tested, and the agent's own
+bash pushes were refused live). The model's edits were correct but not always tidy (MET-238's split a sentence).
 
 ## Cutover from the routine
 

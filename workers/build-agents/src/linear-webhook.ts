@@ -52,6 +52,8 @@ export async function readLinearWebhook(
 	const session = event.agentSession;
 	const issueId = session.issue?.id ?? session.issueId;
 	if (!issueId) return { ok: true, command: undefined, reason: "session has no issue" };
+	// Without its session the agent would work without being able to say anything.
+	if (!session.id) return { ok: false, status: 400, error: "Agent session has no id" };
 	const approved = (email: string | undefined) => email !== undefined && config.approverEmails.includes(email.toLowerCase());
 
 	if (event.action === "created") {

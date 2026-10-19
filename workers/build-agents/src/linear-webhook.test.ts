@@ -50,6 +50,13 @@ describe("readLinearWebhook", () => {
 		});
 	});
 
+	it("refuses a session without an id", async () => {
+		expect(await read(event({ agentSession: { id: "", issue: { id: "i" }, creator: { email: "approver@example.com" } } }))).toMatchObject({
+			ok: false,
+			status: 400,
+		});
+	});
+
 	it("refuses unsigned, wrongly signed and stale deliveries", async () => {
 		expect(await read(event(), null)).toMatchObject({ ok: false, status: 401 });
 		expect(await read(event(), "zz")).toMatchObject({ ok: false, status: 401 });
