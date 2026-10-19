@@ -35,6 +35,8 @@ export interface AgentTriggerConfig {
   githubToken: string;
   /** The session's hard spend cap, in US cents. */
   budgetCents: number;
+  /** The Anthropic workspace the agent lives in, for the Console link. */
+  workspaceId: string;
 }
 
 type Sessions = Anthropic["beta"]["sessions"];
@@ -180,7 +182,7 @@ async function start(issue: IssueData, deps: AgentTriggerDeps): Promise<Response
   await comment(
     deps,
     issue.id,
-    `${STARTED}https://platform.claude.com/workspaces/default/sessions/${sessionId}. Its pull request will say "Closes ${issue.identifier}", which links it here. Your comments and edits on this issue go to it.`,
+    `${STARTED}https://platform.claude.com/workspaces/${deps.config.workspaceId}/sessions/${sessionId}. Its pull request will say "Closes ${issue.identifier}", which links it here. Your comments and edits on this issue go to it.`,
   );
   return json(200, { outcome: "started", sessionId });
 }

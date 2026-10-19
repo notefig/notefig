@@ -118,16 +118,20 @@ assigning the agent again starts a new run.
 
 ### Setup
 
-1. **The agent, environment and vault.** With the
+1. **A workspace.** In the Claude Console, create a workspace for the
+   agent (for example "Notefig agents"), so its runs have their own API key,
+   spend limit and usage. Optionally set a monthly limit there: it caps all
+   runs together, on top of each session's budget.
+2. **The agent, environment and vault.** With the
    [`ant` CLI](https://github.com/anthropics/anthropic-cli)
-   (`brew install anthropics/tap/ant`, then `ant auth login`), from
-   `workers/support`:
+   (`brew install anthropics/tap/ant`, then `ant auth login`, choosing that
+   workspace), from `workers/support`:
    ```bash
    ant apply --dry-run agents/feedback-builder   # review the plan
    ant apply agents/feedback-builder             # create; writes claude-lock.json (commit it)
    ```
    To change the agent later, edit `agent.md` and run `ant apply` again.
-2. **GitHub tokens.** Create two fine-grained tokens for `notefig/notefig`:
+3. **GitHub tokens.** Create two fine-grained tokens for `notefig/notefig`:
    - one for the repository (Contents: read and write), used for clone and
      push;
    - one for the GitHub MCP server (Pull requests: read and write).
@@ -142,15 +146,15 @@ assigning the agent again starts a new run.
    ```
    Protect `main` (require pull requests) so the agent's push can only go
    to its own branch.
-3. **Linear webhook.** Settings → API → Webhooks: URL
+4. **Linear webhook.** Settings → API → Webhooks: URL
    `https://support.notefig.com/v1/linear`, team MET, resources **Issues**
    and **Comments**. Copy the signing secret.
    The Worker's own Linear key (`LINEAR_API_KEY`, from the
    `LINEAR_SUPPORT_API_KEY` GitHub secret) should belong to Notefig Support,
    not an approver. Its issues and comments then come from the support
    account.
-4. **Worker secrets**, once. Deploys keep them. The ids come from
-   `claude-lock.json`:
+5. **Worker secrets**, once. Deploys keep them. The ids come from
+   `claude-lock.json`, and the API key from the same workspace:
    ```bash
    npx wrangler@4.151.1 secret put LINEAR_WEBHOOK_SECRET
    npx wrangler@4.151.1 secret put ANTHROPIC_API_KEY
@@ -158,6 +162,7 @@ assigning the agent again starts a new run.
    npx wrangler@4.151.1 secret put MANAGED_ENVIRONMENT_ID  # environment.yaml's id
    npx wrangler@4.151.1 secret put AGENT_VAULT_ID          # vault.yaml's id
    npx wrangler@4.151.1 secret put AGENT_GITHUB_TOKEN      # the repository token
+   npx wrangler@4.151.1 secret put AGENT_WORKSPACE_ID      # wrkspc_…, for the session link
    ```
 
 ## Local development

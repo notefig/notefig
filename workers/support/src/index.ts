@@ -36,6 +36,8 @@ export interface Env {
   MANAGED_ENVIRONMENT_ID?: string;
   AGENT_VAULT_ID?: string;
   AGENT_GITHUB_TOKEN?: string;
+  /** The agent's Anthropic workspace (`wrkspc_…`), for the session link; "default" when unset. */
+  AGENT_WORKSPACE_ID?: string;
 }
 
 // Up to three 2 MB screenshots, a 50,000-character debug report, and the message.
@@ -107,6 +109,7 @@ async function linearWebhook(request: Request, env: Env, fetchFn: typeof fetch):
       repositoryUrl: env.AGENT_REPOSITORY_URL,
       githubToken: secrets.AGENT_GITHUB_TOKEN,
       budgetCents: Number(env.AGENT_BUDGET_CENTS),
+      workspaceId: env.AGENT_WORKSPACE_ID || "default",
     },
     createSession: (params) => anthropic.beta.sessions.create(params),
     sendMessage: (sessionId, content) =>

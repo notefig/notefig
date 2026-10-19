@@ -88,6 +88,7 @@ function setup({ sessionFails = false, sendFails = false } = {}) {
       repositoryUrl: "https://github.com/notefig/notefig",
       githubToken: "github-token",
       budgetCents: 2000,
+      workspaceId: "wrkspc_1",
     },
     createSession: async (params) => {
       if (sessionFails) throw new Error("Managed Agents down");
@@ -168,7 +169,7 @@ test("starts a session when an approver assigns an accepted issue to the agent",
 
   assert.equal(kv.values.get("issue:issue-uuid"), "sesn_1");
   assert.equal(comments.length, 1);
-  assert.match(comments[0].body, /^Agent started: https:\/\/platform\.claude\.com\/workspaces\/default\/sessions\/sesn_1\. /);
+  assert.match(comments[0].body, /^Agent started: https:\/\/platform\.claude\.com\/workspaces\/wrkspc_1\/sessions\/sesn_1\. /);
 });
 
 test("starts one session per Linear delivery, however often it's retried", async () => {
