@@ -126,10 +126,10 @@ The agent reads text strangers write (feedback, public PR comments), so every ca
 | Forged webhooks | HMAC signatures (Linear, GitHub), Linear's timestamp within 60 s |
 | A stranger starts or steers an agent | Only approvers' delegations and messages (by email); GitHub feedback only from people who can push to the repo or listed bots, only on this repo's branches |
 | The agent reads or leaks a token | The container holds none. The GitHub token is added by `GitGateway` on the way out; Linear and model calls are made by the Durable Object |
-| The agent pushes somewhere else | `GitGateway` parses the push's ref updates and allows only `refs/heads/<issue branch>`, no deletion, only while the `push` tool holds the permit. GitHub's ruleset on `main` blocks the app too |
+| The agent pushes somewhere else | `GitGateway` parses the push's ref updates and allows only `refs/heads/<issue branch>`, no deletion, only while the `push` tool holds the permit. This is the guard: the `main` ruleset only stops force pushes and deletion (see below) |
 | The agent reaches other hosts | The container starts with internet off; only intercepted hosts resolve |
 | Private feedback reaches GitHub | The debug report and screenshots stay in Linear's top-level private comment; `push` and `open_pull_request` refuse anything that quotes its URLs, paths or file names, in any commit of the push |
-| A merged change was never reviewed | The agent opens pull requests; a human merges. The ruleset requires PRs and checks on `main` |
+| A merged change was never reviewed | The agent opens pull requests and can't push to `main`; a human merges |
 | Someone uses the AI Gateway | Authentication is on: calls without `AI_GATEWAY_TOKEN` get 401 |
 | A runaway agent's cost | One container per issue, stopped after 10 idle minutes; the gateway logs every model call; stop from Linear at any time |
 
@@ -198,12 +198,14 @@ Also used by the workflow: the repo secret `CLOUDFLARE_ACCOUNT_ID` and the envir
   - installed on **notefig/notefig only**;
   - its bot user `notefig-build-agent[bot]` (id 344640214) is the commit author.
 - **Environment `build-agents`:** the secrets above and the variable `BUILD_AGENTS_APPROVERS`.
-- **Ruleset on `main`** (from `npm run bootstrap -- --github`, named "Protect main"): pull requests required (0
-  approvals), the CI checks required (Test CLI, Test Git Package, Test Desktop (Unit), Test Desktop (Tauri) per OS,
-  Test Build Agents), no force pushes or deletion. **Bypass: repository admins, and GitHub Actions** (integration
-  15368), because the CLI and desktop release workflows push their version bumps straight to `main`. The agent's app
-  is a separate integration and can't bypass it. Run this part only after the stack with "Test Build Agents" is
-  merged; until then the older "Push to Master" ruleset stays in evaluate mode and enforces nothing.
+- **Ruleset on `main`** (from `npm run bootstrap -- --github`, named "Protect main"): no force pushes, no deletion;
+  repository admins bypass. That's all a ruleset can enforce here: the CLI and desktop release workflows push their
+  version bumps straight to `main` with the Actions token, and a repository ruleset can't name GitHub Actions as a
+  bypass actor (GitHub answers 422, "must be part of the ruleset source or owner organization"), so requiring pull
+  requests or checks would block every release. A bump is a fast-forward, so these two rules leave it alone. What
+  keeps the agent off `main` is `GitGateway`. To also require PRs, move the release workflows' bump pushes to a
+  dedicated GitHub App (its integration *can* bypass) and add that app to the ruleset. The older "Push to Master"
+  ruleset is in evaluate mode and enforces nothing; it can be deleted.
 
 ### Linear
 - **App "Notefig Build Agent"** (Settings → API → Applications):
@@ -260,7 +262,7 @@ a gateway provider key. Do it from `workers/build-agents`, on a machine with `gh
    - Linear: checks the team and approvers, creates the labels (or lists them to create by hand), prints the install
      link. Open it once as an admin.
    - Gateway: creates `notefig-build-agents` with authentication on, or turns authentication on.
-   - `--github` (repo admin, after the "Test Build Agents" check exists on `main`): the ruleset.
+   - `--github` (repo admin): the "Protect main" ruleset (no force pushes or deletion).
 6. **Model:** for Workers AI nothing more. For Claude, add the provider key in the gateway and set `MODEL_ID`.
 7. **Release:** run "Release Build Agents" (below).
 
@@ -389,6 +391,7 @@ Everything below happened while building this.
 | Durable Object never evicted in tests | Pi 1.3's memory-retention timers kept the object awake (and billed) | `contextRetentionMs: 0`, `documentRetentionMs: 0` |
 | `ask_maintainer` failed when the container couldn't start | Pi builds the environment before every tool | The workspace is optional; coding tools fail with the reason, others run |
 | First Worker test timed out in CI | Loading the bundle (Pi included) takes seconds on a cold runner | `testTimeout: 30_000` |
+| `bootstrap --github`: 422 "Actor GitHub Actions integration must be part of the ruleset source or owner organization" | A repository ruleset can't exempt the built-in Actions integration | The ruleset only blocks force pushes and deletion, which releases never do (fixed); see "Accounts and their settings" |
 | Hard to find which Cloudflare token CI uses | The repo's token is account-owned, listed under Manage Account → Account API Tokens | Build agents have their own token on their environment |
 | Every delegation ignored as "not started by an approver" | `APPROVER_EMAILS` had a different email than the Linear account | Use the Linear account's email |
 | Reviews from maintainers never reached the agent | The collaborators API answers apps 404, and `author_association` shows a private org membership as CONTRIBUTOR | Check the permission endpoint instead (fixed) |

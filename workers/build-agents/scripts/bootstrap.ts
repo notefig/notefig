@@ -4,9 +4,9 @@
  *
  *   node --experimental-strip-types scripts/bootstrap.ts [--github] [--linear] [--gateway]   (default: all three)
  *
- * - GitHub (`gh` logged in as a repo admin): `main` requires pull requests and passing checks, can't be force-pushed
- *   or deleted. Repo admins and GitHub Actions (the release workflows' version bumps) bypass that; the agent's app
- *   can push its own branches, never `main`.
+ * - GitHub (`gh` logged in as a repo admin): `main` can't be force-pushed or deleted (repo admins bypass). Requiring
+ *   pull requests or checks would block the release workflows' version-bump pushes, and a repository ruleset can't
+ *   exempt GitHub Actions. The agent is kept off `main` by GitGateway.
  * - Linear (LINEAR_CLIENT_ID, LINEAR_CLIENT_SECRET): the team exists, the test and type labels exist on it, and the
  *   approvers are members. Prints the link that installs the app as a delegatable agent.
  * - AI Gateway (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID): the gateway the agent's model calls go through exists.
@@ -35,16 +35,6 @@ const list = (value: string | undefined) => (value ?? "").split(",").map((item) 
 // ── GitHub ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 const RULESET_NAME = "Protect main";
-/** The checks every pull request to main must pass. Matrix jobs report one check per entry. */
-const REQUIRED_CHECKS = [
-	"Test CLI",
-	"Test Git Package",
-	"Test Desktop (Unit)",
-	"Test Desktop (Tauri) (macos-latest)",
-	"Test Desktop (Tauri) (windows-latest)",
-	"Test Build Agents",
-];
-const GITHUB_ACTIONS_APP = 15368;
 const REPOSITORY_ADMIN_ROLE = 5;
 
 function gh(args: string[], input?: unknown): unknown {
@@ -57,38 +47,17 @@ function gh(args: string[], input?: unknown): unknown {
 
 async function github() {
 	const repo = vars.GITHUB_REPO;
+	// Only what doesn't break the release workflows, which push their version bumps to main with the Actions token: a
+	// repository ruleset can't exempt GitHub Actions, so pull-request and status-check rules would block every release.
+	// A bump is an ordinary fast-forward, so these two rules leave it alone. What keeps the agent off main is GitGateway,
+	// which only lets a push update the issue's own branch.
 	const ruleset = {
 		name: RULESET_NAME,
 		target: "branch",
 		enforcement: "active",
 		conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
-		bypass_actors: [
-			{ actor_id: REPOSITORY_ADMIN_ROLE, actor_type: "RepositoryRole", bypass_mode: "always" },
-			// The release workflows push their version bumps to main with the Actions token.
-			{ actor_id: GITHUB_ACTIONS_APP, actor_type: "Integration", bypass_mode: "always" },
-		],
-		rules: [
-			{ type: "deletion" },
-			{ type: "non_fast_forward" },
-			{
-				type: "pull_request",
-				parameters: {
-					required_approving_review_count: 0,
-					dismiss_stale_reviews_on_push: false,
-					require_code_owner_review: false,
-					require_last_push_approval: false,
-					required_review_thread_resolution: false,
-				},
-			},
-			{
-				type: "required_status_checks",
-				parameters: {
-					strict_required_status_checks_policy: true,
-					do_not_enforce_on_create: true,
-					required_status_checks: REQUIRED_CHECKS.map((context) => ({ context, integration_id: GITHUB_ACTIONS_APP })),
-				},
-			},
-		],
+		bypass_actors: [{ actor_id: REPOSITORY_ADMIN_ROLE, actor_type: "RepositoryRole", bypass_mode: "always" }],
+		rules: [{ type: "deletion" }, { type: "non_fast_forward" }],
 	};
 	// Only this script's own ruleset is created or updated; other rulesets on the repository are left as they are.
 	const existing = (gh([`repos/${repo}/rulesets`]) as { id: number; name: string }[]).find((item) => item.name === RULESET_NAME);
