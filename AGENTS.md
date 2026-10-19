@@ -235,6 +235,7 @@ Tests run automatically on PRs via GitHub Actions. Test files:
 - CLI: `packages/cli/**/*.test.ts` (Jest)
 - Desktop: `packages/desktop/**/*.test.ts` (Vitest)
 - Desktop E2E: `packages/desktop/tests/e2e/` (Playwright)
+- Workers: `workers/*` packages have their own tests (`npm test`); the container conformance suite under `workers/build-agents` needs Docker and is run locally, not in CI.
 
 ### Playwright / Browser Debugging
 
