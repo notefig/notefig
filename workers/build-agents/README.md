@@ -69,6 +69,7 @@ the object's state, and never sees a token.
      Worker's private note with the debug report and screenshots);
    - refuses issues still in Triage, and, while `LINEAR_TEST_LABEL` is set, issues without that label;
    - records the branch → issue mapping in KV (`BRANCHES`), so GitHub events find the agent;
+   - moves the issue to the team's first started state (In Progress) if it's still in Backlog or Todo;
    - arms a heartbeat alarm, then submits "Start working on the issue." to the harness with the request id
      `linear:session:<session id>`, so a retried webhook is admitted once.
 4. **Pi Durable** runs the conversation: the system prompt (`src/prompt.ts`: where issues come from, what's private,
@@ -97,7 +98,8 @@ the object's state, and never sees a token.
 9. **Feedback comes back to the same object:**
    - a message in the Linear session (`prompted`) joins the running work at the next tool round, or starts the next
      run, with request id `linear:<activity id>`;
-   - the session's **stop** button (`prompted` with the `stop` signal) aborts the run and destroys the container;
+   - the session's **stop** button (`prompted` with the `stop` signal), or **unassigning** the agent (an `Issue`
+     update whose previous delegate was the app), aborts the run and destroys the container;
    - a review or review comment on the PR, from someone who can push to the repository or a `TRUSTED_REVIEWERS`
      login, steers it. GitHub's `author_association` settles most cases; it reports a private org membership as
      CONTRIBUTOR, so anyone else is checked with the permission endpoint (write, maintain or admin);
@@ -204,7 +206,8 @@ Also used by the workflow: the repo secret `CLOUDFLARE_ACCOUNT_ID` and the envir
 - **App "Notefig Build Agent"** (Settings → API → Applications):
   - **Client credentials** on (the Worker mints its own app-actor token);
   - callback URL `https://agents.notefig.com/v1/linear/installed` (the Worker answers it with a short page);
-  - webhooks on: `https://agents.notefig.com/v1/linear`, events **Agent session events** and **Permission changes**;
+  - webhooks on: `https://agents.notefig.com/v1/linear`, events **Agent session events**, **Issues** (so unassigning
+    the agent stops it) and **Permission changes**;
   - installed as an agent once by an admin, through the link `bootstrap` prints (`actor=app`, scopes
     `read,write,app:assignable,app:mentionable`). Installed agents take no seat.
 - **Team MET**, with the labels `agent-test`, `Bug`, `Feature`, `Improvement`. The app can't create labels in this
@@ -330,8 +333,8 @@ the old image isn't reused; the next start clones afresh.
 
 - **Logs:** `npx wrangler tail notefig-build-agents`, or Workers → notefig-build-agents → Logs (observability on).
 - **Model calls and spend:** AI → AI Gateway → notefig-build-agents → Logs.
-- **Stop an agent:** the stop button in its Linear session. (Unassigning or removing the delegation doesn't stop a
-  running agent yet; only the stop signal does.)
+- **Stop an agent:** the stop button in its Linear session, or unassign it (remove it as the delegate, or delegate
+  the issue to someone else). Unassigning needs the Linear app's **Issues** webhook events.
 - **Turn it off entirely:** turn off the Linear app's webhook (or empty `BUILD_AGENTS_APPROVERS` and release).
 - **Go live:** empty `LINEAR_TEST_LABEL` in `wrangler.jsonc` and release. PRs stop being drafts.
 - **Switch model:** `MODEL_PROVIDER`/`MODEL_ID` (any entry in pi-ai's catalog for that provider), release.
@@ -372,7 +375,8 @@ Everything below happened while building this.
 | A re-run's failure was ignored | Same run id, deduplicated | Request ids include the run attempt (fixed) |
 | A running agent kept old instructions after a change | A conversation stores its instructions at creation | Re-applied on every open when they differ (fixed) |
 | The branch is `notefigbuildagent-met-…`, not `parsa-met-…` | Linear's `branchName` is personalised to whoever asks; the agent asks as itself | Expected; Linear links the PR by `met-<n>` |
-| Issues stay Todo while their draft PRs are open | Linear's GitHub automation doesn't move issues on draft PRs by default | Configure MET's GitHub workflow automation, or go live (PRs stop being drafts) |
+| Issues stay Todo while their draft PRs are open | Linear's GitHub automation doesn't move issues on draft PRs by default | The agent moves its issue to In Progress itself when it starts (fixed) |
+| Delegating MET-234 got no answer and Linear cancelled the session | The Linear app's webhook points at agents.notefig.com, not deployed yet; with no activity in 10 s, Linear marks the session unresponsive | Expected until the release (or point the webhook at a tunnel) |
 | Linear deliveries never reach a local run | The Linear app's webhook points at agents.notefig.com | Point it at the tunnel, or play Linear's part: create a session with `agentSessionCreateOnIssue` and post signed `AgentSessionEvent`s (see "Last end-to-end run") |
 
 ## Last end-to-end run (2026-10-19, local)
@@ -400,6 +404,9 @@ webhook was pointed at the tunnel through `PATCH /app/hook/config`, so GitHub's 
 | 13 | Worker killed mid-turn and started fresh (workspace lost, nothing pushed yet) | ✓ resumed on the heartbeat, noticed the edit was gone, redid it |
 | 14 | PR closed | ✓ final response, container destroyed |
 | 15 | Privacy | ✓ nothing from the debug report in either PR, its commits or descriptions |
+
+After this run: the agent moves its issue to In Progress itself, and unassigning stops it (unit and lifecycle
+tests; live once the Linear app sends Issues events).
 
 Not exercised live: Linear's own webhook delivery and its UI (stop button, replies); a review from someone without push
 access (no such account; covered by unit tests); asking the agent to leak private data or push to `main` on purpose
