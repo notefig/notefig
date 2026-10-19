@@ -203,7 +203,16 @@ async function gateway() {
 	const id = vars.AI_GATEWAY_ID;
 	const found = await fetch(`${base}/${id}`, { headers });
 	if (found.ok) {
-		console.log(`AI Gateway: ${id} exists.`);
+		// Authenticated, always: with provider keys stored in it, an open gateway is usable by anyone with its URL.
+		const { result } = (await found.json()) as { result: Record<string, unknown> };
+		if (result.authentication !== true) {
+			const kept = ["cache_invalidate_on_update", "cache_ttl", "collect_logs", "rate_limiting_interval", "rate_limiting_limit", "rate_limiting_technique"];
+			const body = Object.fromEntries(kept.filter((key) => result[key] !== undefined && result[key] !== null).map((key) => [key, result[key]]));
+			const updated = await fetch(`${base}/${id}`, { method: "PUT", headers, body: JSON.stringify({ ...body, authentication: true }) });
+			if (!updated.ok) throw new Error(`AI Gateway (${updated.status}): ${await updated.text()}`);
+			console.log(`AI Gateway: turned on authentication for ${id}.`);
+		}
+		console.log(`AI Gateway: ${id} exists and requires its token.`);
 		return;
 	}
 	const created = await fetch(base, {
@@ -211,6 +220,7 @@ async function gateway() {
 		headers,
 		body: JSON.stringify({
 			id,
+			authentication: true,
 			collect_logs: true,
 			cache_invalidate_on_update: false,
 			cache_ttl: 0,
@@ -220,7 +230,7 @@ async function gateway() {
 		}),
 	});
 	if (!created.ok) throw new Error(`AI Gateway (${created.status}): ${await created.text()}`);
-	console.log(`AI Gateway: created ${id}. Add a provider key or turn on unified billing in its dashboard.`);
+	console.log(`AI Gateway: created ${id}, authenticated. In its dashboard, add the model's provider key or turn on unified billing.`);
 }
 
 // ── Run ─────────────────────────────────────────────────────────────────────────────────────────────────────────
