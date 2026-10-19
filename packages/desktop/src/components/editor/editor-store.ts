@@ -56,6 +56,7 @@ import {
   createImageDropHandler,
   createImagePasteHandler,
 } from "./editor-image-paste";
+import { createLinkPasteHandler } from "./editor-link-paste";
 import {
   composeDropHandlers,
   createProtocolDropHandler,
@@ -339,6 +340,11 @@ function createMarkdownInstance(
     widgetMinimapExtension(),
   ];
 
+  const baseDir = getDirectoryPath(filePath);
+  const imageDropHandler = createImageDropHandler(fs, baseDir);
+  const imagePasteHandler = createImagePasteHandler(fs, baseDir);
+  const linkPasteHandler = createLinkPasteHandler();
+
   const editor = new Editor({
     extensions,
     content,
@@ -351,9 +357,10 @@ function createMarkdownInstance(
       // (`<fileDir>/assets/`), matching how image srcs are resolved.
       handleDrop: composeDropHandlers(
         createProtocolDropHandler(),
-        createImageDropHandler(fs, getDirectoryPath(filePath)),
+        imageDropHandler,
       ),
-      handlePaste: createImagePasteHandler(fs, getDirectoryPath(filePath)),
+      handlePaste: (view, event) =>
+        imagePasteHandler(view, event) || linkPasteHandler(view, event),
 
       handleDOMEvents: {
         // Layout re-parenting can silently drop DOM focus to <body> while
