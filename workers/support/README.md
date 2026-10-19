@@ -139,16 +139,18 @@ retries.
   libraries and Playwright's Chromium. Keep the Playwright version equal to
   the one in `package-lock.json`. It's cached when it finishes in about 5
   minutes. `npm ci` isn't here: the prompt runs it, since it's project setup,
-  not machine setup.
+  not machine setup. A failed install fails the setup, so a session without
+  the libraries or Chromium the hooks need is never cached; only the Rust
+  update may be skipped.
   ```bash
   #!/bin/bash
+  set -euo pipefail
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update && apt-get install -y --no-install-recommends \
+  apt-get update
+  apt-get install -y --no-install-recommends \
     libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev \
-    librsvg2-dev build-essential file \
-    || echo "setup: Tauri libraries failed to install"
-  npx -y playwright@1.59.0 install --with-deps chromium \
-    || echo "setup: Playwright Chromium failed to install"
+    librsvg2-dev build-essential file
+  npx -y playwright@1.59.0 install --with-deps chromium
   rustup update stable || echo "setup: rustup update skipped"
   ```
 
