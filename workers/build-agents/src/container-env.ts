@@ -35,11 +35,15 @@ export class ContainerEnv implements ExecutionEnv {
 	/** Open watchers' close functions, so `cleanup()` stops their polling too. */
 	readonly #watchers = new Set<() => void>();
 
-	constructor(container: Container, options: { id: string; cwd: string }) {
+	/** The timeout of a command that sets none, in seconds; unset, a command may run forever. */
+	readonly #defaultTimeout: number | undefined;
+
+	constructor(container: Container, options: { id: string; cwd: string; defaultTimeoutSeconds?: number }) {
 		this.#container = container;
 		this.#files = new Files(container);
 		this.id = options.id;
 		this.cwd = options.cwd;
+		this.#defaultTimeout = options.defaultTimeoutSeconds;
 	}
 
 	async absolutePath(path: string): Promise<Result<string, FileError>> {
@@ -303,13 +307,14 @@ export class ContainerEnv implements ExecutionEnv {
 		const onAbort = () => abort.abort();
 		context.abortSignal?.addEventListener("abort", onAbort, { once: true });
 		let timedOut = false;
+		const timeout = options?.timeout ?? this.#defaultTimeout;
 		const timer =
-			options?.timeout === undefined
+			timeout === undefined
 				? undefined
 				: setTimeout(() => {
 						timedOut = true;
 						abort.abort();
-					}, options.timeout * 1000);
+					}, timeout * 1000);
 		let process: ExecProcess;
 		try {
 			process = await this.#container.exec(argv, {
@@ -347,14 +352,14 @@ export class ContainerEnv implements ExecutionEnv {
 		try {
 			const [exitCode] = await Promise.all([process.exitCode, pump(process.stdout, "stdout"), pump(process.stderr, "stderr")]);
 			if (callbackError !== undefined) return err(new ExecutionError("callback_error", "Output callback failed", toError(callbackError)));
-			if (timedOut) return err(new ExecutionError("timeout", `Timed out after ${options?.timeout} seconds`));
+			if (timedOut) return err(new ExecutionError("timeout", `Timed out after ${timeout} seconds`));
 			if (context.abortSignal?.aborted) return err(new ExecutionError("aborted", "Aborted"));
 			if (missing) {
 				return err(new ExecutionError("spawn_error", `${command[0]} was not found`));
 			}
 			return ok({ exitCode });
 		} catch (error) {
-			if (timedOut) return err(new ExecutionError("timeout", `Timed out after ${options?.timeout} seconds`));
+			if (timedOut) return err(new ExecutionError("timeout", `Timed out after ${timeout} seconds`));
 			if (abort.signal.aborted) return err(new ExecutionError("aborted", "Aborted"));
 			return err(new ExecutionError("unknown", "Command failed", toError(error)));
 		} finally {
