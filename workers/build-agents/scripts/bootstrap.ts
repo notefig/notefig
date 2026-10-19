@@ -126,17 +126,34 @@ async function linear() {
 		return result.data;
 	};
 
-	const { teams } = await query<{ teams: { nodes: { id: string; key: string; labels: { nodes: { name: string }[] } }[] } }>(
-		`query ($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id key labels(first: 250) { nodes { name } } } } }`,
+	// Small queries: Linear refuses ones over its complexity limit, which a team with all its labels exceeds.
+	const { teams } = await query<{ teams: { nodes: { id: string; key: string }[] } }>(
+		`query ($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id key } } }`,
 		{ key: vars.LINEAR_TEAM_KEY },
 	);
 	const team = teams.nodes[0];
 	if (!team) throw new Error(`Linear: no team with key ${vars.LINEAR_TEAM_KEY}, or the app has no access to it`);
 
-	const { issueLabels } = await query<{ issueLabels: { nodes: { name: string }[] } }>(
-		`{ issueLabels(first: 250, filter: { team: { null: true } }) { nodes { name } } }`,
+	// The team's own labels and the workspace's, which every team can use.
+	const labelNames = async (filter: Record<string, unknown>) => {
+		const names: string[] = [];
+		for (let after: string | null = null; ; ) {
+			const { issueLabels } = await query<{
+				issueLabels: { nodes: { name: string }[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
+			}>(
+				`query ($filter: IssueLabelFilter, $after: String) { issueLabels(first: 50, after: $after, filter: $filter) { nodes { name } pageInfo { hasNextPage endCursor } } }`,
+				{ filter, after },
+			);
+			names.push(...issueLabels.nodes.map((label) => label.name));
+			if (!issueLabels.pageInfo.hasNextPage) return names;
+			after = issueLabels.pageInfo.endCursor;
+		}
+	};
+	const known = new Set(
+		[...(await labelNames({ team: { id: { eq: team.id } } })), ...(await labelNames({ team: { null: true } }))].map((name) =>
+			name.toLowerCase(),
+		),
 	);
-	const known = new Set([...team.labels.nodes, ...issueLabels.nodes].map((label) => label.name.toLowerCase()));
 	const wanted = [vars.LINEAR_TEST_LABEL, ...list(vars.TYPE_LABELS).map((pair) => pair.split("=")[0])].filter(Boolean);
 	for (const name of wanted) {
 		if (known.has(name.toLowerCase())) continue;
