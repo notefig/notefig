@@ -1,0 +1,125 @@
+name: Release Build Agents
+
+# Deploys workers/build-agents (agents.notefig.com) by hand, never on push: the agent has write access to the
+# repository, so a new version ships only when someone releases it. Tags the deployed commit build-agents-v{version}.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., 0.1.0)"
+        required: true
+        type: string
+
+concurrency:
+  group: release-build-agents
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Test, bootstrap and deploy
+    runs-on: ubuntu-latest
+    # Secrets come from this environment; see workers/build-agents/README.md, "Setup".
+    environment: build-agents
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: workers/build-agents
+    env:
+      VERSION: ${{ inputs.version }}
+      TAG: build-agents-v${{ inputs.version }}
+    steps:
+      # Full history: the release notes list the commits since the previous build-agents tag.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version format
+        run: |
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: Version must be in semver format (e.g., 0.1.0)"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "Error: $TAG already exists"
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: workers/build-agents/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      # Idempotent: the Linear labels and the AI Gateway match wrangler.jsonc. The GitHub part needs a repo admin,
+      # so it runs from a maintainer's machine instead.
+      - name: Bootstrap Linear and the AI Gateway
+        run: npm run bootstrap -- --linear --gateway
+        env:
+          LINEAR_CLIENT_ID: ${{ secrets.LINEAR_CLIENT_ID }}
+          LINEAR_CLIENT_SECRET: ${{ secrets.LINEAR_CLIENT_SECRET }}
+          APPROVER_EMAILS: ${{ vars.BUILD_AGENTS_APPROVERS }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      # wrangler builds the container image from the Dockerfile (the runner has Docker) and pushes it with the Worker.
+      # Running agents resume after the deploy: their Durable Objects restart and continue from their checkpoints.
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.151.1"
+          workingDirectory: workers/build-agents
+          command: >-
+            deploy
+            --tag ${{ env.TAG }}
+            --message "Release ${{ env.TAG }}"
+            --var "APPROVER_EMAILS:${{ vars.BUILD_AGENTS_APPROVERS }}"
+            --var "CLOUDFLARE_ACCOUNT_ID:${{ secrets.CLOUDFLARE_ACCOUNT_ID }}"
+          secrets: |
+            LINEAR_CLIENT_ID
+            LINEAR_CLIENT_SECRET
+            LINEAR_WEBHOOK_SECRET
+            GH_APP_ID
+            GH_APP_PRIVATE_KEY
+            GH_APP_WEBHOOK_SECRET
+            AI_GATEWAY_TOKEN
+        env:
+          LINEAR_CLIENT_ID: ${{ secrets.LINEAR_CLIENT_ID }}
+          LINEAR_CLIENT_SECRET: ${{ secrets.LINEAR_CLIENT_SECRET }}
+          LINEAR_WEBHOOK_SECRET: ${{ secrets.LINEAR_WEBHOOK_SECRET }}
+          GH_APP_ID: ${{ secrets.GH_APP_ID }}
+          GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          GH_APP_WEBHOOK_SECRET: ${{ secrets.GH_APP_WEBHOOK_SECRET }}
+          AI_GATEWAY_TOKEN: ${{ secrets.AI_GATEWAY_TOKEN }}
+
+      # The tag is the version record, on the exact commit that was deployed. No version-bump commit: pushing one could
+      # be rejected if the branch moved during the run, after the deploy, leaving a release with no record.
+      - name: Tag and release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PREVIOUS=$(git tag -l 'build-agents-v*' --sort=-v:refname | head -1)
+          git tag "$TAG" "$GITHUB_SHA"
+          git push --no-verify origin "$TAG"
+          if [ -n "$PREVIOUS" ]; then RANGE="$PREVIOUS..$GITHUB_SHA"; else RANGE="$GITHUB_SHA"; fi
+          CHANGES=$(git log --format='- %s' "$RANGE" -- . | head -50)
+          # --latest=false: "latest" stays the desktop release, whose latest.json installed apps check for updates.
+          gh release create "$TAG" --title "Build agents v$VERSION" --latest=false --verify-tag \
+            --notes "Deployed to agents.notefig.com from ${GITHUB_SHA::7}.
+
+          **Changes:**
+          ${CHANGES:-- First release}"
