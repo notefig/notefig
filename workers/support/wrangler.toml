@@ -17,6 +17,9 @@ LINEAR_FEEDBACK_LABEL_ID = "bfabbb0a-e788-4584-848f-551a7b29f9e0"
 # (Parsa) starts a Claude Code routine. See README.md, "Agent".
 AGENT_USER_ID = "c62305f9-fdea-4fb1-9ecd-9c2e71069c46"
 APPROVER_IDS = "566cdfe1-fc7f-4489-bc41-99ee9694e025"
+# The routine's API trigger (claude.ai/code/routines). Its token is the
+# secret CLAUDE_ROUTINE_TOKEN; the URL alone can't start a run.
+CLAUDE_ROUTINE_FIRE_URL = "https://api.anthropic.com/v1/claude_code/routines/trig_01Cg57pTGXDUNqpbWugvUr98/fire"
 
 # Which Linear deliveries already fired a routine run (kept a day), so a
 # retried delivery can't fire a second one.

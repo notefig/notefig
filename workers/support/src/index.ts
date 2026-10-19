@@ -24,10 +24,11 @@ export interface Env {
   APPROVER_IDS: string;
   /** Which Linear deliveries already fired a run. */
   AGENT_DELIVERIES: KVNamespace;
+  /** The routine's API trigger. Useless without its token, so not a secret. */
+  CLAUDE_ROUTINE_FIRE_URL: string;
   // Secrets set once with `wrangler secret put`; the agent route answers
   // 503 until they are.
   LINEAR_WEBHOOK_SECRET?: string;
-  CLAUDE_ROUTINE_FIRE_URL?: string;
   CLAUDE_ROUTINE_TOKEN?: string;
 }
 
@@ -81,8 +82,8 @@ async function route(request: Request, env: Env, fetchFn: typeof fetch): Promise
 
 async function linearWebhook(request: Request, env: Env, fetchFn: typeof fetch): Promise<Response> {
   if (request.method !== "POST") return json(405, { error: "Use POST" });
-  const { LINEAR_WEBHOOK_SECRET, CLAUDE_ROUTINE_FIRE_URL, CLAUDE_ROUTINE_TOKEN } = env;
-  if (!LINEAR_WEBHOOK_SECRET || !CLAUDE_ROUTINE_FIRE_URL || !CLAUDE_ROUTINE_TOKEN) {
+  const { LINEAR_WEBHOOK_SECRET, CLAUDE_ROUTINE_TOKEN } = env;
+  if (!LINEAR_WEBHOOK_SECRET || !CLAUDE_ROUTINE_TOKEN) {
     return json(503, { error: "Agent trigger not configured" });
   }
   const read = await readBody(request, MAX_WEBHOOK_BYTES);
@@ -94,7 +95,7 @@ async function linearWebhook(request: Request, env: Env, fetchFn: typeof fetch):
       agentUserId: env.AGENT_USER_ID,
       approverIds: env.APPROVER_IDS.split(","),
       triageStateId: env.LINEAR_TRIAGE_STATE_ID,
-      routineFireUrl: CLAUDE_ROUTINE_FIRE_URL,
+      routineFireUrl: env.CLAUDE_ROUTINE_FIRE_URL,
       routineToken: CLAUDE_ROUTINE_TOKEN,
     },
     fetchFn,
