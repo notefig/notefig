@@ -32,6 +32,8 @@ export class ContainerEnv implements ExecutionEnv {
 	readonly #container: Container;
 	readonly #files: Files;
 	readonly #running = new Set<ExecProcess>();
+	/** Open watchers' close functions, so `cleanup()` stops their polling too. */
+	readonly #watchers = new Set<() => void>();
 
 	constructor(container: Container, options: { id: string; cwd: string }) {
 		this.#container = container;
@@ -238,13 +240,13 @@ export class ContainerEnv implements ExecutionEnv {
 				if (changed.size > 0) onChange({ paths: [...changed].sort() });
 			}
 		};
+		const stop = () => {
+			closed = true;
+			this.#watchers.delete(stop);
+		};
+		this.#watchers.add(stop);
 		void poll();
-		return ok({
-			mode: "polling",
-			close: async () => {
-				closed = true;
-			},
-		});
+		return ok({ mode: "polling", close: async () => stop() });
 	}
 
 	async canonicalPath(path: string, context: Context): Promise<Result<string, FileError>> {
@@ -290,11 +292,13 @@ export class ContainerEnv implements ExecutionEnv {
 
 	async exec(command: string | readonly string[], options: ShellExecOptions | undefined, context: Context): Promise<Result<ShellExecResult, ExecutionError>> {
 		if (typeof command !== "string" && command.length === 0) return err(new ExecutionError("spawn_error", "No program to run"));
-		// An argv command runs through a check for the program, so a missing one is a spawn error, not exit 127.
+		// An argv command runs through a check for the program, so a missing one is a spawn error, not exit 127. The
+		// check says so with a marker on stderr, which no real program prints, rather than an exit status one could use.
 		const argv =
 			typeof command === "string"
 				? ["bash", "-lc", command]
-				: ["sh", "-c", `command -v "$1" >/dev/null 2>&1 || exit ${MISSING_PROGRAM}; exec "$@"`, "sh", ...command];
+				: ["sh", "-c", `command -v "$1" >/dev/null 2>&1 || { echo '${MISSING_PROGRAM}' >&2; exit 127; }; exec "$@"`, "sh", ...command];
+		let missing = false;
 		const abort = new AbortController();
 		const onAbort = () => abort.abort();
 		context.abortSignal?.addEventListener("abort", onAbort, { once: true });
@@ -327,7 +331,11 @@ export class ContainerEnv implements ExecutionEnv {
 			if (!stream) return;
 			const decoder = new TextDecoder();
 			for await (const chunk of stream as ReadableStream<Uint8Array>) {
-				const text = decoder.decode(chunk, { stream: true });
+				let text = decoder.decode(chunk, { stream: true });
+				if (typeof command !== "string" && name === "stderr" && text.includes(MISSING_PROGRAM)) {
+					missing = true;
+					text = text.replace(`${MISSING_PROGRAM}\n`, "").replace(MISSING_PROGRAM, "");
+				}
 				if (!text || !options?.onOutput) continue;
 				try {
 					options.onOutput(text, context, { stream: name });
@@ -341,7 +349,7 @@ export class ContainerEnv implements ExecutionEnv {
 			if (callbackError !== undefined) return err(new ExecutionError("callback_error", "Output callback failed", toError(callbackError)));
 			if (timedOut) return err(new ExecutionError("timeout", `Timed out after ${options?.timeout} seconds`));
 			if (context.abortSignal?.aborted) return err(new ExecutionError("aborted", "Aborted"));
-			if (typeof command !== "string" && exitCode === MISSING_PROGRAM) {
+			if (missing) {
 				return err(new ExecutionError("spawn_error", `${command[0]} was not found`));
 			}
 			return ok({ exitCode });
@@ -357,6 +365,7 @@ export class ContainerEnv implements ExecutionEnv {
 	}
 
 	async cleanup(): Promise<void> {
+		for (const stop of [...this.#watchers]) stop();
 		for (const process of this.#running) process.kill(9);
 		this.#running.clear();
 	}
@@ -401,8 +410,8 @@ export class ContainerEnv implements ExecutionEnv {
 	}
 }
 
-/** The exit status the argv wrapper uses for a program that isn't there. */
-const MISSING_PROGRAM = 211;
+/** What the argv wrapper prints on stderr for a program that isn't there. */
+const MISSING_PROGRAM = "pi-container-env: program not found";
 const WATCH_INTERVAL_MS = 250;
 
 /**

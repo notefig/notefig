@@ -8,7 +8,7 @@ import { signedBy } from "./signature.ts";
  */
 
 export type GitHubEvent =
-	| { kind: "feedback"; branch: string; author: string; trusted: boolean; text: string; requestId: string }
+	| { kind: "feedback"; branch: string; author: string; text: string; requestId: string }
 	| { kind: "ci_failed"; branch: string; sha: string; runId: number; name: string; url: string; requestId: string }
 	| { kind: "closed"; branch: string; merged: boolean };
 
@@ -20,8 +20,8 @@ interface Payload {
 	action?: string;
 	sender?: { login: string; type: string };
 	pull_request?: { head: { ref: string; repo: { full_name: string } | null }; merged?: boolean; html_url: string };
-	review?: { id: number; body: string | null; state: string; user: { login: string }; author_association?: string };
-	comment?: { id: number; body: string; path?: string; line?: number | null; user: { login: string }; author_association?: string };
+	review?: { id: number; body: string | null; state: string; user: { login: string } };
+	comment?: { id: number; body: string; path?: string; line?: number | null; user: { login: string } };
 	workflow_run?: {
 		id: number;
 		name: string;
@@ -66,7 +66,6 @@ function toEvent(eventName: string | null, payload: Payload, repo: string): GitH
 				kind: "feedback",
 				branch,
 				author: review.user.login,
-				trusted: maintains(review.author_association),
 				text: `Review from ${review.user.login} (${state}):\n\n${review.body?.trim() || "(no summary)"}`,
 				requestId: `github:review:${review.id}`,
 			};
@@ -79,7 +78,6 @@ function toEvent(eventName: string | null, payload: Payload, repo: string): GitH
 				kind: "feedback",
 				branch,
 				author: comment.user.login,
-				trusted: maintains(comment.author_association),
 				text: `Review comment from ${comment.user.login}${where}:\n\n${comment.body}`,
 				requestId: `github:review-comment:${comment.id}`,
 			};
@@ -105,12 +103,4 @@ function toEvent(eventName: string | null, payload: Payload, repo: string): GitH
 		default:
 			return undefined;
 	}
-}
-
-/**
- * Whether the payload's `author_association` already says the author has a hand in the repository: its owner, an org
- * member, or a collaborator. A private org membership shows as CONTRIBUTOR, so `false` here means "check", not "no".
- */
-function maintains(association: string | undefined): boolean {
-	return association === "OWNER" || association === "MEMBER" || association === "COLLABORATOR";
 }

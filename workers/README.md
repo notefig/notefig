@@ -73,7 +73,7 @@ part of the Workers.
 
 | Worker | Secrets |
 |---|---|
-| `notefig-support` | `LINEAR_API_KEY` (from CI); `LINEAR_WEBHOOK_SECRET`, `CLAUDE_ROUTINE_TOKEN` (set by hand for the old agent route, removed at cutover) |
+| `notefig-support` | `LINEAR_API_KEY` (from CI); `LINEAR_WEBHOOK_SECRET`, `CLAUDE_ROUTINE_FIRE_URL`, `CLAUDE_ROUTINE_TOKEN` (set by hand for the old agent route; the fire URL becomes a `wrangler.toml` var with #435; all removed at cutover) |
 | `notefig-build-agents` | the seven secrets of the `build-agents` environment above, copied on every release |
 
 ### Cloudflare: API tokens

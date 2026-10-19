@@ -67,8 +67,35 @@ export class ConformanceHarness extends DurableObject {
 			// listFiles is optional in Pi, which walks directories itself without it; ContainerEnv leaves it out.
 			listFiles: false,
 		});
+		// ContainerEnv's own cases, beyond Pi's suite.
+		const ownCases = [
+			{
+				name: "a program exiting 211 keeps its exit status, and a missing one is a spawn error",
+				run: async () => {
+					const env = new ContainerEnv(container, { id: "own-exit", cwd: "/tmp" });
+					const exited = await env.exec(["sh", "-c", "exit 211"], undefined, BACKGROUND_CONTEXT);
+					assertions.ok(exited.ok && exited.value.exitCode === 211, `exit 211 → ${JSON.stringify(exited)}`);
+					const missing = await env.exec(["no-such-program-here"], undefined, BACKGROUND_CONTEXT);
+					assertions.ok(!missing.ok && missing.error.code === "spawn_error", "missing → spawn_error");
+				},
+			},
+			{
+				name: "cleanup stops open watchers' polling",
+				run: async () => {
+					const env = new ContainerEnv(container, { id: "own-watch", cwd: "/tmp" });
+					await env.writeFile("/tmp/own-watch/file", "one", BACKGROUND_CONTEXT);
+					const changes: unknown[] = [];
+					const watcher = await env.watch([{ path: "/tmp/own-watch", recursive: true }], (change) => changes.push(change), BACKGROUND_CONTEXT);
+					assertions.ok(watcher.ok, "watch started");
+					await env.cleanup();
+					await env.writeFile("/tmp/own-watch/file", "two!", BACKGROUND_CONTEXT);
+					await new Promise((resolve) => setTimeout(resolve, 1000));
+					assertions.strictEqual(changes.length, 0);
+				},
+			},
+		];
 		const results = [];
-		for (const testCase of cases) {
+		for (const testCase of [...cases, ...ownCases] as { name: string; timeoutMs?: number; run(): Promise<void> }[]) {
 			if (only && !testCase.name.includes(only)) continue;
 			const started = Date.now();
 			try {

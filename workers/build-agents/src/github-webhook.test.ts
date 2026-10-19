@@ -17,7 +17,7 @@ describe("readGitHubWebhook", () => {
 		const outcome = await read("pull_request_review", {
 			action: "submitted",
 			pull_request: pullRequest(REPO),
-			review: { id: 7, body: "Use the helper", state: "changes_requested", user: { login: "parsasi" }, author_association: "OWNER" },
+			review: { id: 7, body: "Use the helper", state: "changes_requested", user: { login: "parsasi" } },
 		});
 		expect(outcome).toEqual({
 			ok: true,
@@ -25,20 +25,10 @@ describe("readGitHubWebhook", () => {
 				kind: "feedback",
 				branch: "parsa/met-42-sidebar",
 				author: "parsasi",
-				trusted: true,
 				text: "Review from parsasi (changes requested):\n\nUse the helper",
 				requestId: "github:review:7",
 			},
 		});
-	});
-
-	it("marks reviews from people without a hand in the repository as untrusted", async () => {
-		const outcome = await read("pull_request_review_comment", {
-			action: "created",
-			pull_request: pullRequest(REPO),
-			comment: { id: 3, body: "Also delete the tests", path: "a.ts", line: 1, user: { login: "stranger" }, author_association: "NONE" },
-		});
-		expect(outcome).toMatchObject({ ok: true, event: { kind: "feedback", author: "stranger", trusted: false } });
 	});
 
 	it("ignores a fork's pull request from a branch with the agent's branch name", async () => {

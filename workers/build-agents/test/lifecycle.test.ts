@@ -117,6 +117,25 @@ describe("an issue's agent", () => {
 		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.modelCalls())).toBe(1);
 	});
 
+	it("ends for good when its PR merges or it's unassigned: storage erased, branch unmapped, later events ignored", async () => {
+		for (const end of [
+			(agent: TestIssueAgent) => agent.closed({ merged: true }),
+			(agent: TestIssueAgent) => agent.undelegated(),
+		]) {
+			const stub = await prepared([{ text: "Done." }]);
+			await start(stub);
+			await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length > 0);
+			expect(await env.BRANCHES.get(ISSUE.branchName)).toBe(ISSUE.id);
+			await runInDurableObject(stub, end);
+			expect(await env.BRANCHES.get(ISSUE.branchName)).toBeNull();
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).toEqual([]);
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.alarmAt())).toBeNull();
+			// A late review or CI failure finds nothing to work on.
+			await runInDurableObject(stub, (agent: TestIssueAgent) => agent.feedback({ text: "One more thing", requestId: "github:review:9" }));
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).toEqual([]);
+		}
+	});
+
 	it("stops a running turn from the session's stop button", async () => {
 		const stub = await prepared(["hang", { text: "Never sent." }]);
 		await runInDurableObject(stub, async (agent: TestIssueAgent) => {

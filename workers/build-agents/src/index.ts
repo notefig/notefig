@@ -72,7 +72,7 @@ async function runLinear(env: Env, command: AgentCommand): Promise<void> {
 		else {
 			// Unassigned: stop only if the issue was this app's to work on.
 			const app = await linearAgentClient({ clientId: env.LINEAR_CLIENT_ID, clientSecret: env.LINEAR_CLIENT_SECRET }).appUserId();
-			if (command.previousDelegateId === app) await stub.stop();
+			if (command.previousDelegateId === app) await stub.undelegated();
 		}
 	} catch (error) {
 		console.error(`linear ${command.kind} failed`, error);
@@ -98,12 +98,12 @@ async function runGitHub(env: Env, event: GitHubEvent): Promise<void> {
 
 /**
  * A review reaches the agent only from someone who can push to the repository, or a listed bot; the repository is
- * public. GitHub's `author_association` settles most cases without a call, but reports a private org membership as
- * CONTRIBUTOR, so anyone else is checked against their permission.
+ * public. GitHub's `author_association` can't settle it: MEMBER and COLLABORATOR don't mean write access, and a
+ * private org membership shows as CONTRIBUTOR. So every human reviewer is checked against their permission.
  */
-async function trusted(env: Env, event: { author: string; trusted: boolean }): Promise<boolean> {
+async function trusted(env: Env, event: { author: string }): Promise<boolean> {
 	const config = readConfig(env);
-	if (event.trusted || config.trustedReviewers.includes(event.author.toLowerCase())) return true;
+	if (config.trustedReviewers.includes(event.author.toLowerCase())) return true;
 	return gitHubClient({ appId: env.GH_APP_ID, privateKey: env.GH_APP_PRIVATE_KEY }, config.repo).canWrite(event.author);
 }
 

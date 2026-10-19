@@ -54,6 +54,11 @@ export class TestIssueAgent extends IssueAgent {
 		return this.ctx.storage.kv.get<Activity[]>("test:activities") ?? [];
 	}
 
+	/** Everything the object has stored, by key: empty once it has ended. */
+	stored(): string[] {
+		return [...this.ctx.storage.kv.list()].map(([key]) => key);
+	}
+
 	alarmAt(): Promise<number | null> {
 		return this.ctx.storage.getAlarm();
 	}

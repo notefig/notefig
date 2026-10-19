@@ -55,31 +55,40 @@ export class IssueAgent extends DurableObject<Env> {
 			const fallback = Date.now() + HEARTBEAT_MS;
 			const current = await ctx.storage.getAlarm();
 			if (current === null || current > fallback) await ctx.storage.setAlarm(fallback);
-			this.#harness = await Harness.open(
-				await openDurableObjectSqliteStorage(ctx.storage, { prefix: "pi_" }),
-				{
-					models: this.models(),
-					registry: this.#registry(),
-					// Pi 1.3 frees idle conversations and documents on timers, which would keep the object awake (and
-					// billed) and stop it from being evicted. Freeing them at once costs a reload on the next use.
-					settings: { contextRetentionMs: 0, documentRetentionMs: 0 },
-					// A workspace that won't start fails only the tools that need it; the others (asking the maintainer,
-					// the pull request) still run, and coding tools get the reason in their error.
-					env: () => this.workspace().then((workspace) => {
-						this.#workspaceError = undefined;
-						return workspace;
-					}, (error: unknown) => {
-						this.#workspaceError = error instanceof Error ? error.message : String(error);
-						console.error("workspace unavailable", error);
-						return undefined;
-					}),
-				},
-				context,
-			);
+			this.#harness = await this.#open();
 			await this.#current();
 			this.#harness.resume();
 			await this.#heartbeat();
 		});
+	}
+
+	/** The harness on the object's SQLite (tables prefixed `pi_`), with this process's models, registry and workspace. */
+	async #open(): Promise<Harness> {
+		return Harness.open(
+			await openDurableObjectSqliteStorage(this.ctx.storage, { prefix: "pi_" }),
+			{
+				models: this.models(),
+				registry: this.#registry(),
+				// Pi 1.3 frees idle conversations and documents on timers, which would keep the object awake (and
+				// billed) and stop it from being evicted. Freeing them at once costs a reload on the next use.
+				settings: { contextRetentionMs: 0, documentRetentionMs: 0 },
+				// A workspace that won't start fails only the tools that need it; the others (asking the maintainer,
+				// the pull request) still run, and coding tools get the reason in their error.
+				env: () =>
+					this.workspace().then(
+						(workspace) => {
+							this.#workspaceError = undefined;
+							return workspace;
+						},
+						(error: unknown) => {
+							this.#workspaceError = error instanceof Error ? error.message : String(error);
+							console.error("workspace unavailable", error);
+							return undefined;
+						},
+					),
+			},
+			context,
+		);
 	}
 
 	/**
@@ -126,12 +135,14 @@ export class IssueAgent extends DurableObject<Env> {
 		await this.#submit(input.text, input.requestId, "steer");
 	}
 
-	/** Review feedback on the pull request, from someone the webhook trusts. */
+	/** Review feedback on the pull request, from someone the webhook trusts. Ignored once the agent has ended. */
 	async feedback(input: { text: string; requestId: string }): Promise<void> {
+		if (!this.#get("issue")) return;
 		await this.#submit(input.text, input.requestId, "steer");
 	}
 
 	async ciFailed(input: { branch: string; sha: string; runId: number; name: string; url: string; requestId: string }): Promise<void> {
+		if (!this.#get("issue")) return;
 		const jobs = await this.github().failedJobs(input.runId);
 		const sections = jobs.map((job) =>
 			[
@@ -153,7 +164,10 @@ export class IssueAgent extends DurableObject<Env> {
 	}
 
 
-	/** The session's stop button: abort the run and free the container. */
+	/**
+	 * The session's stop button: a pause. The run is aborted and the container destroyed, but the transcript stays, so
+	 * a message picks the work up again. A stopped agent costs only its stored state.
+	 */
 	async stop(): Promise<void> {
 		await (await this.#root()).abort(context);
 		await this.#heartbeat();
@@ -161,14 +175,33 @@ export class IssueAgent extends DurableObject<Env> {
 		await this.#post({ type: "response", body: "Stopped. Send a message to pick it up again." });
 	}
 
+	/** Unassigned in Linear (removed as the delegate, or delegated elsewhere): the agent's work on this issue is over. */
+	async undelegated(): Promise<void> {
+		await this.#end("Unassigned, so I've stopped and cleared my workspace. Delegate the issue again to start over.");
+	}
+
 	/** The pull request merged or closed: nothing more to do on this branch. */
 	async closed(input: { merged: boolean }): Promise<void> {
-		await (await this.#root()).abort(context);
-		await this.#heartbeat();
-		await this.#release();
+		await this.#end(input.merged ? "The pull request was merged." : "The pull request was closed.");
+	}
+
+	/**
+	 * Ends the agent for good, so it costs nothing afterwards: aborts any run, destroys the container, removes the
+	 * branch mapping (so GitHub events no longer reach it), says so on the session, and erases the object's storage
+	 * (transcript, checkpoints, snapshot record, alarm). A new delegation starts afresh.
+	 */
+	async #end(farewell: string): Promise<void> {
 		const issue = this.#get("issue");
+		await (await this.#root()).abort(context);
+		await this.#release();
 		if (issue) await this.env.BRANCHES.delete(issue.branchName);
-		await this.#post({ type: "response", body: input.merged ? "The pull request was merged." : "The pull request was closed." });
+		await this.#post({ type: "response", body: farewell }).catch((error: unknown) => console.error("linear: farewell not posted", error));
+		await this.#harness.close(context);
+		await this.ctx.storage.deleteAlarm();
+		await this.ctx.storage.deleteAll();
+		// A harness on the now empty storage, so this instance is as fresh as a new one; it stores nothing until the
+		// issue is delegated again.
+		this.#harness = await this.#open();
 	}
 
 	override async alarm(): Promise<void> {
@@ -366,7 +399,8 @@ export class IssueAgent extends DurableObject<Env> {
 			const snapshot = await container.snapshotContainer({ name: this.#get("issue")?.identifier });
 			this.#put("snapshot", { id: snapshot.id, image });
 		} catch (error) {
-			// Only a slower restart: the next container clones again.
+			// An older snapshot would restore a checkout without this push; without one, the next start clones the branch.
+			this.ctx.storage.kv.delete("snapshot");
 			console.error("container: snapshot failed", error);
 		}
 	}

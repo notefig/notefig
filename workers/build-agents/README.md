@@ -21,6 +21,7 @@ Not an npm workspace: installed, tested and deployed on its own, like `workers/s
 [Testing](#testing) ·
 [Releasing](#releasing) ·
 [Operating it](#operating-it) ·
+[Lifecycle and cost](#lifecycle-and-cost) ·
 [Costs](#costs) ·
 [Troubleshooting](#troubleshooting) ·
 [Last end-to-end run](#last-end-to-end-run-2026-10-19-local) ·
@@ -98,16 +99,18 @@ the object's state, and never sees a token.
 9. **Feedback comes back to the same object:**
    - a message in the Linear session (`prompted`) joins the running work at the next tool round, or starts the next
      run, with request id `linear:<activity id>`;
-   - the session's **stop** button (`prompted` with the `stop` signal), or **unassigning** the agent (an `Issue`
-     update whose previous delegate was the app), aborts the run and destroys the container;
+   - the session's **stop** button (`prompted` with the `stop` signal) pauses it: the run is aborted and the
+     container destroyed, but the transcript stays, so a message picks it up again;
+   - **unassigning** the agent (an `Issue` update whose previous delegate was the app) ends it: see "Lifecycle and
+     cost";
    - a review or review comment on the PR, from someone who can push to the repository or a `TRUSTED_REVIEWERS`
-     login, steers it. GitHub's `author_association` settles most cases; it reports a private org membership as
-     CONTRIBUTOR, so anyone else is checked with the permission endpoint (write, maintain or admin);
+     bot, steers it. Every human reviewer is checked with the permission endpoint (write, maintain or admin):
+     `author_association` can't tell, since MEMBER and COLLABORATOR don't mean write access and a private org
+     membership shows as CONTRIBUTOR;
    - a failed workflow run on the branch arrives with the commit it ran on, a hint to pull first (others may have
      pushed), and the end of each failed job's log, fetched by the object: the container can't reach CI. Each run
      attempt is its own message, so a re-run's failure isn't taken for a repeat;
-   - the PR merging or closing aborts any work, destroys the container, removes the branch mapping, and posts a
-     final response.
+   - the PR merging or closing ends it the same way.
 
    GitHub events count only for the repository's own branches: a fork's PR from a same-named branch is ignored.
 10. **Between events the object sleeps.** While the harness has live tasks a heartbeat alarm comes back every 60
@@ -310,7 +313,7 @@ Checklist for a run:
 | Command | Where | What |
 |---|---|---|
 | `npm test` | workerd via `@cloudflare/vitest-plugin`, config `test/wrangler.jsonc` (no container) | Units: receive-pack parsing and the branch guard, git output, the privacy deny-list, Linear and GitHub webhook gating (forks included), the app JWT and PKCS#1 wrapping, Worker routing. **Lifecycle:** `test/issue-agent.ts` is the real `IssueAgent` with its four seams (`models`, `linear`, `github`, `workspace`) replaced by a scripted pi-ai faux model and recorders, on Cloudflare's own Durable Object storage, alarms and eviction: answering on the session, refusing Triage and unlabelled issues, finishing a turn an eviction cut off, admitting a retried message once, `ask_maintainer` ending the run, the stop button |
-| `npm run test:container` | `wrangler dev` on `test/container` (a slim image with `sandbox-shim`), port 8799, Docker | Pi's own environment conformance suite (`createEnvConformance`) against `ContainerEnv`: readers, writes, renames, watching (by polling), exec windows, timeouts, aborts, spawn errors, symlinks (24 cases); plus a container snapshot round trip. `listFiles` is optional in Pi and left out |
+| `npm run test:container` | `wrangler dev` on `test/container` (a slim image with `sandbox-shim`), port 8799, Docker | Pi's own environment conformance suite (`createEnvConformance`) against `ContainerEnv`: readers, writes, renames, watching (by polling), exec windows, timeouts, aborts, spawn errors, symlinks (24 cases); `ContainerEnv`'s own cases (a program exiting 211 keeps its status, `cleanup()` stops watchers); and a container snapshot round trip. `listFiles` is optional in Pi and left out |
 | CI "Test Build Agents" | `ci-tests.yml` | `npm ci`, typecheck, `npm test`, on every PR |
 
 ## Releasing
@@ -338,6 +341,26 @@ the old image isn't reused; the next start clones afresh.
 - **Turn it off entirely:** turn off the Linear app's webhook (or empty `BUILD_AGENTS_APPROVERS` and release).
 - **Go live:** empty `LINEAR_TEST_LABEL` in `wrangler.jsonc` and release. PRs stop being drafts.
 - **Switch model:** `MODEL_PROVIDER`/`MODEL_ID` (any entry in pi-ai's catalog for that provider), release.
+
+## Lifecycle and cost
+
+What exists for an issue, and when it goes away:
+
+| Thing | Created | Runs (and bills) | Stopped | Deleted |
+|---|---|---|---|---|
+| **Container** | the run's first tool call | while tools run, and up to 10 idle minutes after (`setInactivityTimeout`) | after 10 idle minutes, on the stop button, on the end | on the stop button and on the end (`container.destroy()`); an idle stop restarts on the next tool call |
+| **Container snapshot** | after every successful push | (stored, not running) | | the record is dropped when a snapshot fails or the agent ends. The container API has no call to delete a snapshot, so the snapshot itself isn't removed by the agent; how long Cloudflare keeps snapshots, and whether they bill, isn't verified yet (check before going live) |
+| **Durable Object** | the first webhook for the issue | only while handling an event or running the harness; it hibernates in between, and an evicted object costs nothing | | its storage (transcript, checkpoints, the issue, the session, the snapshot record) is erased on the end (`deleteAll`), and its alarm cleared |
+| **Heartbeat alarm** | when work is admitted | wakes the object every 60 s while the harness has live tasks | once idle, it clears itself | on the end |
+| **Branch mapping** (`BRANCHES` KV) | when the agent starts | | | on the end, so GitHub events stop reaching it |
+
+**The end** comes when the PR merges or closes, or the agent is unassigned. The agent aborts any run, destroys the
+container, removes the branch mapping, says so on the session, erases its storage and reopens an empty harness; a
+review or CI failure arriving afterwards finds no issue and is ignored. Delegating the issue again starts afresh.
+
+**The stop button is a pause, not the end:** the container goes, the transcript stays (a few KB in SQLite), and a
+message resumes it. An agent that's merely finished a turn keeps its container for 10 minutes, so feedback that comes
+quickly finds its workspace warm, then costs nothing but storage until something happens.
 
 ## Costs
 
