@@ -50,6 +50,31 @@ describe("readLinearWebhook", () => {
 		});
 	});
 
+	it("reports an issue's delegate being removed or changed, and nothing else about issues", async () => {
+		const issue = (data: Record<string, unknown>, updatedFrom: Record<string, unknown>) => ({
+			type: "Issue",
+			action: "update",
+			webhookTimestamp: NOW,
+			data: { id: "issue-1", ...data },
+			updatedFrom,
+		});
+		expect(await read(issue({ delegateId: null }, { delegateId: "app-user" }))).toEqual({
+			ok: true,
+			command: { kind: "undelegated", issueId: "issue-1", previousDelegateId: "app-user" },
+		});
+		expect(await read(issue({ delegateId: "other-agent" }, { delegateId: "app-user" }))).toMatchObject({
+			command: { kind: "undelegated", previousDelegateId: "app-user" },
+		});
+		expect(await read(issue({ delegateId: "app-user" }, { title: "old" }))).toMatchObject({ ok: true, command: undefined });
+	});
+
+	it("refuses a session without an id", async () => {
+		expect(await read(event({ agentSession: { id: "", issue: { id: "i" }, creator: { email: "approver@example.com" } } }))).toMatchObject({
+			ok: false,
+			status: 400,
+		});
+	});
+
 	it("refuses unsigned, wrongly signed and stale deliveries", async () => {
 		expect(await read(event(), null)).toMatchObject({ ok: false, status: 401 });
 		expect(await read(event(), "zz")).toMatchObject({ ok: false, status: 401 });

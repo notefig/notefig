@@ -21,6 +21,20 @@ export interface FailedJob {
 	name: string;
 	steps: string[];
 	url: string;
+	/** The end of the job's log, where the failure is: the agent can't read CI logs itself. */
+	logTail: string;
+}
+
+const LOG_TAIL_LINES = 60;
+
+/** The last lines of a job log, without GitHub's timestamps and colour codes. */
+export function logTail(log: string, lines = LOG_TAIL_LINES): string {
+	return log
+		.split("\n")
+		.map((line) => line.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z ?/, "").replace(/\x1b\[[0-9;]*m/g, ""))
+		.filter((line) => line.trim() && !line.startsWith("##[group]") && !line.startsWith("##[endgroup]"))
+		.slice(-lines)
+		.join("\n");
 }
 
 export interface GitHubClient {
@@ -28,7 +42,8 @@ export interface GitHubClient {
 	token(): Promise<string>;
 	/** Opens the pull request for `branch`, or updates the open one. */
 	upsertPullRequest(input: { branch: string; title: string; body: string; draft: boolean }): Promise<PullRequest>;
-	isCollaborator(login: string): Promise<boolean>;
+	/** Whether `login` can push to the repository (write, maintain or admin): someone whose review the agent follows. */
+	canWrite(login: string): Promise<boolean>;
 	failedJobs(runId: number): Promise<FailedJob[]>;
 }
 
@@ -101,21 +116,36 @@ export function gitHubClient(
 			});
 			return { number: created.body.number, url: created.body.html_url };
 		},
-		async isCollaborator(login) {
-			const { status } = await request(`${repoPath}/collaborators/${encodeURIComponent(login)}`, { bearer: await token() });
-			return status === 204;
+		async canWrite(login) {
+			// The permission endpoint works with an app's metadata access; the plain collaborator check answers 404.
+			const { status, body } = await request<{ permission?: string }>(
+				`${repoPath}/collaborators/${encodeURIComponent(login)}/permission`,
+				{ bearer: await token() },
+			);
+			return status === 200 && ["admin", "maintain", "write"].includes(body?.permission ?? "");
 		},
 		async failedJobs(runId) {
+			const bearer = await token();
 			const { body } = await request<{
-				jobs: { name: string; conclusion: string | null; html_url: string; steps?: { name: string; conclusion: string | null }[] }[];
-			}>(`${repoPath}/actions/runs/${runId}/jobs?filter=latest`, { bearer: await token() });
-			return body.jobs
-				.filter((job) => job.conclusion === "failure")
-				.map((job) => ({
-					name: job.name,
-					url: job.html_url,
-					steps: (job.steps ?? []).filter((step) => step.conclusion === "failure").map((step) => step.name),
-				}));
+				jobs: { id: number; name: string; conclusion: string | null; html_url: string; steps?: { name: string; conclusion: string | null }[] }[];
+			}>(`${repoPath}/actions/runs/${runId}/jobs?filter=latest`, { bearer });
+			const failed = body.jobs.filter((job) => job.conclusion === "failure");
+			return Promise.all(
+				failed.map(async (job) => {
+					// Redirects to a signed log URL; fetch drops the Authorization header on the way.
+					const log = await fetchFn(`${API}${repoPath}/actions/jobs/${job.id}/logs`, {
+						headers: { Authorization: `Bearer ${bearer}`, "User-Agent": "notefig-build-agents" },
+					})
+						.then((response) => (response.ok ? response.text() : ""))
+						.catch(() => "");
+					return {
+						name: job.name,
+						url: job.html_url,
+						steps: (job.steps ?? []).filter((step) => step.conclusion === "failure").map((step) => step.name),
+						logTail: logTail(log),
+					};
+				}),
+			);
 		},
 	};
 }

@@ -1,0 +1,12 @@
+// `npm run test:container`: Pi's environment conformance suite against ContainerEnv, in a real local container.
+{
+	"name": "build-agents-container-test",
+	"main": "./worker.ts",
+	"compatibility_date": "2026-10-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"durable_objects": { "bindings": [{ "name": "HARNESS", "class_name": "ConformanceHarness" }] },
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["ConformanceHarness"] }],
+	"containers": [
+		{ "class_name": "ConformanceHarness", "scheduling_policy": "durable_object", "images": { "harness": { "dockerfile": "./Dockerfile" } } }
+	]
+}

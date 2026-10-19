@@ -1,7 +1,8 @@
-// The Worker as tests run it: wrangler.jsonc without the container and route, with test values for vars and secrets.
+// The Worker as tests run it: wrangler.jsonc without the container and route, with test values for vars and secrets,
+// a scripted model, and `TestIssueAgent` (test/issue-agent.ts) standing in for Linear and GitHub.
 {
 	"name": "notefig-build-agents-test",
-	"main": "../src/index.ts",
+	"main": "./entry.ts",
 	"compatibility_date": "2026-10-01",
 	"compatibility_flags": ["nodejs_compat"],
 	"vars": {
@@ -11,8 +12,8 @@
 		"APPROVER_EMAILS": "approver@example.com",
 		"TRUSTED_REVIEWERS": "greptile-apps[bot]",
 		"TYPE_LABELS": "Bug=fix,Feature=feat,Improvement=improve",
-		"MODEL_PROVIDER": "cloudflare-ai-gateway",
-		"MODEL_ID": "claude-sonnet-5-5",
+		"MODEL_PROVIDER": "faux",
+		"MODEL_ID": "faux-1",
 		"AI_GATEWAY_ID": "test",
 		"CLOUDFLARE_ACCOUNT_ID": "test",
 		"GIT_AUTHOR_NAME": "test[bot]",

@@ -19,6 +19,8 @@ export interface AgentHost {
 	/** Draft pull requests while testing. */
 	draft(issue: IssueDetails): boolean;
 	permitPush(permitted: boolean): Promise<void>;
+	/** After a successful push: a moment worth resuming from. */
+	pushed(): Promise<void>;
 	upsertPullRequest(input: { branch: string; title: string; body: string; draft: boolean }): Promise<PullRequest>;
 	ask(question: string): Promise<void>;
 }
@@ -43,7 +45,7 @@ export function agentTools(host: AgentHost) {
 	const push = defineTool({
 		name: "push",
 		description:
-			"Push the committed work on the issue's branch to GitHub. Checks the commits for private details first. Commit before calling it.",
+			"Push the committed work on the issue's branch to GitHub. The only way to push: it checks the commits for private details, and the desktop e2e suite runs in CI on the pull request instead of before the push. Commit before calling it.",
 		parameters: Type.Object({}),
 		execute: async (_args, api, context) => {
 			const issue = await host.issue();
@@ -55,11 +57,15 @@ export function agentTools(host: AgentHost) {
 			if (found.length > 0) refuseLeaks(found);
 			await host.permitPush(true);
 			try {
-				const pushed = await run(api, `git push --quiet origin HEAD:refs/heads/${issue.branchName}`, context);
+				// --no-verify skips only the repository's pre-push hook, which runs the whole desktop e2e suite in a browser:
+				// minutes of container time per push, and CI runs the same suite on the pull request, whose failures come
+				// back to the agent. The commit hook (Fallow) has already run.
+				const pushed = await run(api, `git push --quiet --no-verify origin HEAD:refs/heads/${issue.branchName}`, context);
 				if (pushed.exitCode !== 0) throw new Error(`git push failed:\n${pushed.output}`);
 			} finally {
 				await host.permitPush(false);
 			}
+			await host.pushed();
 			return { output: text(`Pushed to ${issue.branchName}.`) };
 		},
 	});

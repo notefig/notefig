@@ -4,9 +4,9 @@
  *
  *   node --experimental-strip-types scripts/bootstrap.ts [--github] [--linear] [--gateway]   (default: all three)
  *
- * - GitHub (`gh` logged in as a repo admin): `main` requires pull requests and passing checks, can't be force-pushed
- *   or deleted. Repo admins and GitHub Actions (the release workflows' version bumps) bypass that; the agent's app
- *   can push its own branches, never `main`.
+ * - GitHub (`gh` logged in as a repo admin): `main` can't be force-pushed or deleted (repo admins bypass). Requiring
+ *   pull requests or checks would block the release workflows' version-bump pushes, and a repository ruleset can't
+ *   exempt GitHub Actions. The agent is kept off `main` by GitGateway.
  * - Linear (LINEAR_CLIENT_ID, LINEAR_CLIENT_SECRET): the team exists, the test and type labels exist on it, and the
  *   approvers are members. Prints the link that installs the app as a delegatable agent.
  * - AI Gateway (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID): the gateway the agent's model calls go through exists.
@@ -35,16 +35,6 @@ const list = (value: string | undefined) => (value ?? "").split(",").map((item) 
 // ── GitHub ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 const RULESET_NAME = "Protect main";
-/** The checks every pull request to main must pass. Matrix jobs report one check per entry. */
-const REQUIRED_CHECKS = [
-	"Test CLI",
-	"Test Git Package",
-	"Test Desktop (Unit)",
-	"Test Desktop (Tauri) (macos-latest)",
-	"Test Desktop (Tauri) (windows-latest)",
-	"Test Build Agents",
-];
-const GITHUB_ACTIONS_APP = 15368;
 const REPOSITORY_ADMIN_ROLE = 5;
 
 function gh(args: string[], input?: unknown): unknown {
@@ -57,38 +47,17 @@ function gh(args: string[], input?: unknown): unknown {
 
 async function github() {
 	const repo = vars.GITHUB_REPO;
+	// Only what doesn't break the release workflows, which push their version bumps to main with the Actions token: a
+	// repository ruleset can't exempt GitHub Actions, so pull-request and status-check rules would block every release.
+	// A bump is an ordinary fast-forward, so these two rules leave it alone. What keeps the agent off main is GitGateway,
+	// which only lets a push update the issue's own branch.
 	const ruleset = {
 		name: RULESET_NAME,
 		target: "branch",
 		enforcement: "active",
 		conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
-		bypass_actors: [
-			{ actor_id: REPOSITORY_ADMIN_ROLE, actor_type: "RepositoryRole", bypass_mode: "always" },
-			// The release workflows push their version bumps to main with the Actions token.
-			{ actor_id: GITHUB_ACTIONS_APP, actor_type: "Integration", bypass_mode: "always" },
-		],
-		rules: [
-			{ type: "deletion" },
-			{ type: "non_fast_forward" },
-			{
-				type: "pull_request",
-				parameters: {
-					required_approving_review_count: 0,
-					dismiss_stale_reviews_on_push: false,
-					require_code_owner_review: false,
-					require_last_push_approval: false,
-					required_review_thread_resolution: false,
-				},
-			},
-			{
-				type: "required_status_checks",
-				parameters: {
-					strict_required_status_checks_policy: true,
-					do_not_enforce_on_create: true,
-					required_status_checks: REQUIRED_CHECKS.map((context) => ({ context, integration_id: GITHUB_ACTIONS_APP })),
-				},
-			},
-		],
+		bypass_actors: [{ actor_id: REPOSITORY_ADMIN_ROLE, actor_type: "RepositoryRole", bypass_mode: "always" }],
+		rules: [{ type: "deletion" }, { type: "non_fast_forward" }],
 	};
 	// Only this script's own ruleset is created or updated; other rulesets on the repository are left as they are.
 	const existing = (gh([`repos/${repo}/rulesets`]) as { id: number; name: string }[]).find((item) => item.name === RULESET_NAME);
@@ -126,24 +95,51 @@ async function linear() {
 		return result.data;
 	};
 
-	const { teams } = await query<{ teams: { nodes: { id: string; key: string; labels: { nodes: { name: string }[] } }[] } }>(
-		`query ($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id key labels(first: 250) { nodes { name } } } } }`,
+	// Small queries: Linear refuses ones over its complexity limit, which a team with all its labels exceeds.
+	const { teams } = await query<{ teams: { nodes: { id: string; key: string }[] } }>(
+		`query ($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id key } } }`,
 		{ key: vars.LINEAR_TEAM_KEY },
 	);
 	const team = teams.nodes[0];
 	if (!team) throw new Error(`Linear: no team with key ${vars.LINEAR_TEAM_KEY}, or the app has no access to it`);
 
-	const { issueLabels } = await query<{ issueLabels: { nodes: { name: string }[] } }>(
-		`{ issueLabels(first: 250, filter: { team: { null: true } }) { nodes { name } } }`,
+	// The team's own labels and the workspace's, which every team can use.
+	const labelNames = async (filter: Record<string, unknown>) => {
+		const names: string[] = [];
+		for (let after: string | null = null; ; ) {
+			const { issueLabels } = await query<{
+				issueLabels: { nodes: { name: string }[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
+			}>(
+				`query ($filter: IssueLabelFilter, $after: String) { issueLabels(first: 50, after: $after, filter: $filter) { nodes { name } pageInfo { hasNextPage endCursor } } }`,
+				{ filter, after },
+			);
+			names.push(...issueLabels.nodes.map((label) => label.name));
+			if (!issueLabels.pageInfo.hasNextPage) return names;
+			after = issueLabels.pageInfo.endCursor;
+		}
+	};
+	const known = new Set(
+		[...(await labelNames({ team: { id: { eq: team.id } } })), ...(await labelNames({ team: { null: true } }))].map((name) =>
+			name.toLowerCase(),
+		),
 	);
-	const known = new Set([...team.labels.nodes, ...issueLabels.nodes].map((label) => label.name.toLowerCase()));
 	const wanted = [vars.LINEAR_TEST_LABEL, ...list(vars.TYPE_LABELS).map((pair) => pair.split("=")[0])].filter(Boolean);
+	const missing: string[] = [];
 	for (const name of wanted) {
 		if (known.has(name.toLowerCase())) continue;
-		await query(`mutation ($input: IssueLabelCreateInput!) { issueLabelCreate(input: $input) { success } }`, {
-			input: { name, teamId: team.id },
-		});
-		console.log(`Linear: created the "${name}" label on ${team.key}.`);
+		try {
+			await query(`mutation ($input: IssueLabelCreateInput!) { issueLabelCreate(input: $input) { success } }`, {
+				input: { name, teamId: team.id },
+			});
+			console.log(`Linear: created the "${name}" label on ${team.key}.`);
+		} catch (error) {
+			// Workspaces can keep label management to admins, and the app isn't one.
+			console.warn(`Linear: couldn't create "${name}" (${error instanceof Error ? error.message : error}).`);
+			missing.push(name);
+		}
+	}
+	if (missing.length > 0) {
+		console.warn(`Linear: create these labels on ${team.key} by hand (Team settings → Labels): ${missing.join(", ")}`);
 	}
 
 	const approvers = list(process.env.APPROVER_EMAILS ?? vars.APPROVER_EMAILS);
@@ -176,7 +172,16 @@ async function gateway() {
 	const id = vars.AI_GATEWAY_ID;
 	const found = await fetch(`${base}/${id}`, { headers });
 	if (found.ok) {
-		console.log(`AI Gateway: ${id} exists.`);
+		// Authenticated, always: with provider keys stored in it, an open gateway is usable by anyone with its URL.
+		const { result } = (await found.json()) as { result: Record<string, unknown> };
+		if (result.authentication !== true) {
+			const kept = ["cache_invalidate_on_update", "cache_ttl", "collect_logs", "rate_limiting_interval", "rate_limiting_limit", "rate_limiting_technique"];
+			const body = Object.fromEntries(kept.filter((key) => result[key] !== undefined && result[key] !== null).map((key) => [key, result[key]]));
+			const updated = await fetch(`${base}/${id}`, { method: "PUT", headers, body: JSON.stringify({ ...body, authentication: true }) });
+			if (!updated.ok) throw new Error(`AI Gateway (${updated.status}): ${await updated.text()}`);
+			console.log(`AI Gateway: turned on authentication for ${id}.`);
+		}
+		console.log(`AI Gateway: ${id} exists and requires its token.`);
 		return;
 	}
 	const created = await fetch(base, {
@@ -184,6 +189,7 @@ async function gateway() {
 		headers,
 		body: JSON.stringify({
 			id,
+			authentication: true,
 			collect_logs: true,
 			cache_invalidate_on_update: false,
 			cache_ttl: 0,
@@ -193,7 +199,7 @@ async function gateway() {
 		}),
 	});
 	if (!created.ok) throw new Error(`AI Gateway (${created.status}): ${await created.text()}`);
-	console.log(`AI Gateway: created ${id}. Add a provider key or turn on unified billing in its dashboard.`);
+	console.log(`AI Gateway: created ${id}, authenticated. In its dashboard, add the model's provider key or turn on unified billing.`);
 }
 
 // ── Run ─────────────────────────────────────────────────────────────────────────────────────────────────────────

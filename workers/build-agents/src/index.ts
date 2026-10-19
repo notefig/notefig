@@ -1,6 +1,7 @@
 import { type Env, readConfig } from "./config.ts";
 import { type GitHubEvent, readGitHubWebhook } from "./github-webhook.ts";
 import { gitHubClient } from "./github.ts";
+import { linearAgentClient } from "./linear.ts";
 import { type AgentCommand, readLinearWebhook } from "./linear-webhook.ts";
 
 export { GitGateway, RegistryGateway } from "./gateways.ts";
@@ -9,7 +10,7 @@ export { IssueAgent } from "./issue-agent.ts";
 /**
  * agents.notefig.com. Two webhooks in, each handed to the Durable Object of the issue it's about:
  *
- * - `POST /v1/linear`: Linear's agent session events (delegated, a message, stop).
+ * - `POST /v1/linear`: Linear's agent session events (delegated, a message, stop) and issue updates (unassigned).
  * - `POST /v1/github`: the GitHub App's events on the agent's pull requests and branches.
  *
  * Both answer as soon as the event is verified and handed over; Linear wants an answer within five seconds.
@@ -67,7 +68,12 @@ async function runLinear(env: Env, command: AgentCommand): Promise<void> {
 	try {
 		if (command.kind === "start") await stub.start(command);
 		else if (command.kind === "steer") await stub.steer(command);
-		else await stub.stop();
+		else if (command.kind === "stop") await stub.stop();
+		else {
+			// Unassigned: stop only if the issue was this app's to work on.
+			const app = await linearAgentClient({ clientId: env.LINEAR_CLIENT_ID, clientSecret: env.LINEAR_CLIENT_SECRET }).appUserId();
+			if (command.previousDelegateId === app) await stub.undelegated();
+		}
 	} catch (error) {
 		console.error(`linear ${command.kind} failed`, error);
 	}
@@ -80,18 +86,25 @@ async function runGitHub(env: Env, event: GitHubEvent): Promise<void> {
 	try {
 		if (event.kind === "closed") return await stub.closed(event);
 		if (event.kind === "ci_failed") return await stub.ciFailed(event);
-		if (!(await trusted(env, event.author))) return;
+		if (!(await trusted(env, event))) {
+			console.log(`github: ignored ${event.requestId} from ${event.author}, who can't push to the repository`);
+			return;
+		}
 		await stub.feedback(event);
 	} catch (error) {
 		console.error(`github ${event.kind} failed`, error);
 	}
 }
 
-/** A review reaches the agent only from a collaborator or a listed bot; the repository is public. */
-async function trusted(env: Env, login: string): Promise<boolean> {
+/**
+ * A review reaches the agent only from someone who can push to the repository, or a listed bot; the repository is
+ * public. GitHub's `author_association` can't settle it: MEMBER and COLLABORATOR don't mean write access, and a
+ * private org membership shows as CONTRIBUTOR. So every human reviewer is checked against their permission.
+ */
+async function trusted(env: Env, event: { author: string }): Promise<boolean> {
 	const config = readConfig(env);
-	if (config.trustedReviewers.includes(login.toLowerCase())) return true;
-	return gitHubClient({ appId: env.GH_APP_ID, privateKey: env.GH_APP_PRIVATE_KEY }, config.repo).isCollaborator(login);
+	if (config.trustedReviewers.includes(event.author.toLowerCase())) return true;
+	return gitHubClient({ appId: env.GH_APP_ID, privateKey: env.GH_APP_PRIVATE_KEY }, config.repo).canWrite(event.author);
 }
 
 function json(status: number, body: unknown): Response {

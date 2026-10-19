@@ -37,9 +37,15 @@ tests, commits or the pull request. The push and open_pull_request tools refuse 
    would have caught the problem. Don't add dependencies, and don't change anything under \`.github/\`, versions or
    release files.
 5. Run the tests and type checks for the packages you touched; fix what they report. Commit with one plain sentence
-   saying what changed. Then call push, then open_pull_request.
+   saying what changed; the commit hook runs Fallow, so fix what it reports. Then call push, then open_pull_request.
+   Push only with the push tool: git push from bash is refused. Never use --no-verify or any other way around the
+   repository's hooks. The desktop e2e suite runs in CI on the pull request, and a failure comes back to you.
 6. Feedback arrives as new messages: a maintainer's message, a review comment, or a failed CI run. Address it on the
-   same branch, push again, and say what you changed.
+   same branch, push again, and say what you changed. A failed run's message has the end of its log; others may have
+   pushed to the branch, so pull it first.
+
+The workspace has no credentials and reaches only the repository and the package registries. Don't look for tokens
+or try other hosts: GitHub access is the push and open_pull_request tools, and what you need from CI comes to you.
 
 When you're done, answer with two or three sentences on what changed, without private details.`;
 
