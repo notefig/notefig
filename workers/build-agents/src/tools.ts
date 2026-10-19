@@ -48,7 +48,8 @@ export function agentTools(host: AgentHost) {
 		execute: async (_args, api, context) => {
 			const issue = await host.issue();
 			await run(api, "git fetch --quiet origin main", context);
-			const commits = await run(api, "git log --format=%B%n%an origin/main..HEAD && git diff origin/main...HEAD", context);
+			// Every outgoing commit's message and its own patch: a value removed in a later commit is still in the history.
+			const commits = await run(api, "git log --patch --format=%B%n%an%n%ae origin/main..HEAD", context);
 			const found = leaks(commits.output, privateTokens(issue.privateNote));
 			if (found.length > 0) refuseLeaks(found);
 			await host.permitPush(true);

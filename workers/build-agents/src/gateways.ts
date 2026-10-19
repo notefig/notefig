@@ -38,16 +38,18 @@ export class GitGateway extends WorkerEntrypoint<Env, GitGatewayProps> {
 			return refuse(`Only ${repo.owner}/${repo.name} over git is reachable from here.`);
 		}
 
-		let body: BodyInit | null = request.body;
+		let body: ReadableStream<Uint8Array> | null = request.body;
 		if (advertisesPush || pushes) {
 			if (!this.ctx.props.push) return refuse("Push with the push tool; it checks the commits first.");
-			if (pushes) {
-				const bytes = new Uint8Array(await request.arrayBuffer());
-				const updates = readRefUpdates(bytes.subarray(0, MAX_PUSH_HEADER));
+			if (pushes && request.body) {
+				// Only the ref-update header is buffered; the pack streams on to GitHub behind it.
+				const { header, rest } = await readHeader(request.body);
+				const updates = readRefUpdates(header);
 				if (!updates || !onlyUpdates(updates, this.ctx.props.branch)) {
+					await rest.cancel();
 					return refuse(`Only refs/heads/${this.ctx.props.branch} can be pushed, and not deleted.`);
 				}
-				body = bytes;
+				body = prepend(header, rest);
 			}
 		}
 
@@ -67,6 +69,51 @@ export class RegistryGateway extends WorkerEntrypoint<Env> {
 
 /** Hosts `RegistryGateway` serves. */
 export const REGISTRY_HOSTS = ["registry.npmjs.org", "index.crates.io", "static.crates.io"];
+
+/**
+ * Reads a push body up to the end of its pkt-line header (the flush packet) or `MAX_PUSH_HEADER` bytes, whichever
+ * comes first, and hands back what was read and the reader positioned after it.
+ */
+async function readHeader(stream: ReadableStream<Uint8Array>): Promise<{ header: Uint8Array; rest: ReadableStream<Uint8Array> }> {
+	const reader = stream.getReader();
+	let header = new Uint8Array();
+	while (header.length < MAX_PUSH_HEADER && readRefUpdates(header) === null) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		const joined = new Uint8Array(header.length + value.length);
+		joined.set(header);
+		joined.set(value, header.length);
+		header = joined;
+	}
+	const rest = new ReadableStream<Uint8Array>({
+		async pull(controller) {
+			const { done, value } = await reader.read();
+			if (done) controller.close();
+			else controller.enqueue(value);
+		},
+		cancel: (reason) => reader.cancel(reason),
+	});
+	return { header, rest };
+}
+
+/** `head`, then everything `rest` yields. */
+function prepend(head: Uint8Array, rest: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+	const reader = rest.getReader();
+	let sent = false;
+	return new ReadableStream<Uint8Array>({
+		async pull(controller) {
+			if (!sent) {
+				sent = true;
+				controller.enqueue(head);
+				return;
+			}
+			const { done, value } = await reader.read();
+			if (done) controller.close();
+			else controller.enqueue(value);
+		},
+		cancel: (reason) => reader.cancel(reason),
+	});
+}
 
 function refuse(message: string): Response {
 	// git shows the body of a 403 to the user, here the agent.

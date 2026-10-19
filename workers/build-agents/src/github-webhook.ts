@@ -2,8 +2,9 @@ import { signedBy } from "./signature.ts";
 
 /**
  * The GitHub App's webhook, turned into feedback for the agent whose branch it's about: reviews and comments on its
- * pull request, a failed CI run on its branch, and the pull request closing. Which agent, and whether the author is
- * trusted, is decided by the caller (`index.ts`), which can look up branches and collaborators.
+ * pull request, a failed CI run on its branch, and the pull request closing. Only for branches of this repository: a
+ * fork can open a pull request from a branch with the same name, and its events must not reach the agent. Which agent,
+ * and whether the author is trusted, is decided by the caller (`index.ts`), which can look up branches and collaborators.
  */
 
 export type GitHubEvent =
@@ -18,10 +19,17 @@ export type GitHubOutcome =
 interface Payload {
 	action?: string;
 	sender?: { login: string; type: string };
-	pull_request?: { head: { ref: string }; merged?: boolean; html_url: string };
+	pull_request?: { head: { ref: string; repo: { full_name: string } | null }; merged?: boolean; html_url: string };
 	review?: { id: number; body: string | null; state: string; user: { login: string } };
 	comment?: { id: number; body: string; path?: string; line?: number | null; user: { login: string } };
-	workflow_run?: { id: number; name: string; head_branch: string; conclusion: string | null; html_url: string };
+	workflow_run?: {
+		id: number;
+		name: string;
+		head_branch: string;
+		head_repository: { full_name: string } | null;
+		conclusion: string | null;
+		html_url: string;
+	};
 }
 
 export async function readGitHubWebhook(
@@ -29,6 +37,7 @@ export async function readGitHubWebhook(
 	signature: string | null,
 	eventName: string | null,
 	secret: string,
+	repo: string,
 ): Promise<GitHubOutcome> {
 	if (!(await signedBy(secret, rawBody, signature))) return { ok: false, status: 401, error: "Bad signature" };
 	let payload: Payload;
@@ -39,11 +48,12 @@ export async function readGitHubWebhook(
 	}
 	// The app's own comments and pushes are not feedback.
 	if (payload.sender?.type === "Bot" && payload.sender.login.startsWith("notefig-build-agent")) return { ok: true, event: undefined };
-	return { ok: true, event: toEvent(eventName, payload) };
+	return { ok: true, event: toEvent(eventName, payload, repo.toLowerCase()) };
 }
 
-function toEvent(eventName: string | null, payload: Payload): GitHubEvent | undefined {
-	const branch = payload.pull_request?.head.ref;
+function toEvent(eventName: string | null, payload: Payload, repo: string): GitHubEvent | undefined {
+	const head = payload.pull_request?.head;
+	const branch = head?.repo?.full_name.toLowerCase() === repo ? head.ref : undefined;
 	switch (eventName) {
 		case "pull_request_review": {
 			const review = payload.review;
@@ -73,6 +83,7 @@ function toEvent(eventName: string | null, payload: Payload): GitHubEvent | unde
 		case "workflow_run": {
 			const run = payload.workflow_run;
 			if (payload.action !== "completed" || !run || run.conclusion !== "failure") return undefined;
+			if (run.head_repository?.full_name.toLowerCase() !== repo) return undefined;
 			return {
 				kind: "ci_failed",
 				branch: run.head_branch,

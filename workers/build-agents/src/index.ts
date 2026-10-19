@@ -43,6 +43,7 @@ export default {
 				request.headers.get("X-Hub-Signature-256"),
 				request.headers.get("X-GitHub-Event"),
 				env.GH_APP_WEBHOOK_SECRET,
+				env.GITHUB_REPO,
 			);
 			if (!outcome.ok) return json(outcome.status, { error: outcome.error });
 			if (outcome.event) ctx.waitUntil(runGitHub(env, outcome.event));
