@@ -1,6 +1,5 @@
 {
   "name": "notefig-build-agents",
-  "version": "0.0.0",
   "private": true,
   "description": "agents.notefig.com: one Durable Object per Linear issue runs a Pi Durable agent that works in its own container and opens a pull request. Deliberately not an npm workspace; see README.md.",
   "type": "module",

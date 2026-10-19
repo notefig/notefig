@@ -1,7 +1,7 @@
 name: Release Build Agents
 
 # Deploys workers/build-agents (agents.notefig.com) by hand, never on push: the agent has write access to the
-# repository, so a new version ships only when someone releases it. Tags build-agents-v{version}.
+# repository, so a new version ships only when someone releases it. Tags the deployed commit build-agents-v{version}.
 
 on:
   workflow_dispatch:
@@ -106,24 +106,20 @@ jobs:
           GH_APP_WEBHOOK_SECRET: ${{ secrets.GH_APP_WEBHOOK_SECRET }}
           AI_GATEWAY_TOKEN: ${{ secrets.AI_GATEWAY_TOKEN }}
 
-      - name: Bump version, tag and release
+      # The tag is the version record, on the exact commit that was deployed. No version-bump commit: pushing one could
+      # be rejected if the branch moved during the run, after the deploy, leaving a release with no record.
+      - name: Tag and release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          npm version "$VERSION" --no-git-tag-version
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json
-          git commit -m "build-agents: bump to v$VERSION"
-          # --no-verify: the pre-push hook runs the desktop e2e suite, a local check with no place in a release.
-          git push --no-verify origin "${{ github.ref_name }}"
-          git tag "$TAG"
+          PREVIOUS=$(git tag -l 'build-agents-v*' --sort=-v:refname | head -1)
+          git tag "$TAG" "$GITHUB_SHA"
           git push --no-verify origin "$TAG"
-          PREVIOUS=$(git tag -l 'build-agents-v*' --sort=-v:refname | grep -vx "$TAG" | head -1)
-          RANGE=${PREVIOUS:+$PREVIOUS..}$TAG
+          if [ -n "$PREVIOUS" ]; then RANGE="$PREVIOUS..$GITHUB_SHA"; else RANGE="$GITHUB_SHA"; fi
+          CHANGES=$(git log --format='- %s' "$RANGE" -- . | head -50)
           # --latest=false: "latest" stays the desktop release, whose latest.json installed apps check for updates.
-          gh release create "$TAG" --title "Build agents v$VERSION" --latest=false \
-            --notes "Deployed to agents.notefig.com.
+          gh release create "$TAG" --title "Build agents v$VERSION" --latest=false --verify-tag \
+            --notes "Deployed to agents.notefig.com from ${GITHUB_SHA::7}.
 
           **Changes:**
-          $(git log --format='- %s' "$RANGE" -- . | grep -v 'bump to v' || echo '- First release')"
+          ${CHANGES:-- First release}"
