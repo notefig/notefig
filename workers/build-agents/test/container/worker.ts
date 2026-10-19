@@ -80,6 +80,16 @@ export class ConformanceHarness extends DurableObject {
 				},
 			},
 			{
+				name: "a command without a timeout gets the environment's default",
+				run: async () => {
+					const env = new ContainerEnv(container, { id: "own-timeout", cwd: "/tmp", defaultTimeoutSeconds: 1 });
+					const started = Date.now();
+					const result = await env.exec(["sleep", "30"], undefined, BACKGROUND_CONTEXT);
+					assertions.ok(!result.ok && result.error.code === "timeout", `sleep 30 → ${JSON.stringify(result)}`);
+					assertions.ok(Date.now() - started < 10_000, "ended near the default, not after the command");
+				},
+			},
+			{
 				name: "cleanup stops open watchers' polling",
 				run: async () => {
 					const env = new ContainerEnv(container, { id: "own-watch", cwd: "/tmp" });

@@ -29,6 +29,8 @@ const HEARTBEAT_MS = 60_000;
 const REPO_DIR = "/workspace/repo";
 const CONTAINER_CA = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 const CONTAINER_IDLE_MS = 10 * 60_000;
+/** A command's limit when the model sets none: long enough for `npm ci` or the desktop test suite. */
+const COMMAND_TIMEOUT_SECONDS = 20 * 60;
 
 interface Stored {
 	session?: string;
@@ -241,9 +243,13 @@ export class IssueAgent extends DurableObject<Env> {
 	 * a message picks the work up again. A stopped agent costs only its stored state.
 	 */
 	async stop(): Promise<void> {
+		// The container goes first: that ends any running command at once, so the abort after it doesn't wait on one.
+		// (The Worker keeps this call alive only for a short while after answering Linear.)
+		await this.release();
 		await (await this.#root()).abort(context);
+		// Again: a tool call between the two could have started a new container.
+		await this.release();
 		await this.#heartbeat();
-		await this.#release();
 		await this.#post({ type: "response", body: "Stopped. Send a message to pick it up again." });
 	}
 
@@ -264,8 +270,10 @@ export class IssueAgent extends DurableObject<Env> {
 	 */
 	async #end(farewell: string): Promise<void> {
 		const issue = this.#get("issue");
+		// Container first, as in `stop`: a running command ends with it, so the abort doesn't wait.
+		await this.release();
 		await (await this.#root()).abort(context);
-		await this.#release();
+		await this.release();
 		if (issue) await this.env.BRANCHES.delete(issue.branchName);
 		await this.#post({ type: "response", body: farewell }).catch((error: unknown) => console.error("linear: farewell not posted", error));
 		await this.#harness.close(context);
@@ -418,7 +426,12 @@ export class IssueAgent extends DurableObject<Env> {
 
 	async #prepare(container: Container): Promise<ContainerEnv> {
 		const issue = await this.#issue();
-		const env = new ContainerEnv(container, { id: `container:${this.ctx.id.toString()}`, cwd: "/" });
+		const env = new ContainerEnv(container, {
+			id: `container:${this.ctx.id.toString()}`,
+			cwd: "/",
+			// The model often sets no timeout; a hung test or server would otherwise hold the run (and stop) forever.
+			defaultTimeoutSeconds: COMMAND_TIMEOUT_SECONDS,
+		});
 		if (!container.running) {
 			const image = container.images.workspace ?? Object.values(container.images)[0];
 			if (!image) throw new Error("No container image is configured");
@@ -502,7 +515,8 @@ export class IssueAgent extends DurableObject<Env> {
 		await container.interceptOutboundHttps("github.com", this.ctx.exports.GitGateway({ props: { branch: issue.branchName, push } }));
 	}
 
-	async #release(): Promise<void> {
+	/** Destroys the container, ending any command running in it. A seam, like `workspace`, so tests can stand in. */
+	protected async release(): Promise<void> {
 		this.#workspace = undefined;
 		if (this.ctx.container?.running) await this.ctx.container.destroy();
 	}

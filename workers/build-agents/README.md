@@ -350,7 +350,7 @@ What exists for an issue, and when it goes away:
 
 | Thing | Created | Runs (and bills) | Stopped | Deleted |
 |---|---|---|---|---|
-| **Container** | the run's first tool call | while tools run, and up to 10 idle minutes after (`setInactivityTimeout`) | after 10 idle minutes, on the stop button, on the end | on the stop button and on the end (`container.destroy()`); an idle stop restarts on the next tool call |
+| **Container** | the run's first tool call | while tools run (each command is capped at 20 minutes unless the model sets its own timeout), and up to 10 idle minutes after (`setInactivityTimeout`) | after 10 idle minutes, on the stop button, on the end | on the stop button and on the end (`container.destroy()`); an idle stop restarts on the next tool call |
 | **Container snapshot** | after every successful push | (stored, not running) | | the record is dropped when a snapshot fails or the agent ends. The container API has no call to delete a snapshot, so the snapshot itself isn't removed by the agent; how long Cloudflare keeps snapshots, and whether they bill, isn't verified yet (check before going live) |
 | **Durable Object** | the first webhook for the issue | only while handling an event or running the harness; it hibernates in between, and an evicted object costs nothing | | its storage (transcript, checkpoints, the issue, the session, the snapshot record) is erased on the end (`deleteAll`), and its alarm cleared |
 | **Heartbeat alarm** | when work is admitted | wakes the object every 60 s while the harness has live tasks | once idle, it clears itself | on the end |
@@ -392,6 +392,9 @@ Everything below happened while building this.
 | `ask_maintainer` failed when the container couldn't start | Pi builds the environment before every tool | The workspace is optional; coding tools fail with the reason, others run |
 | First Worker test timed out in CI | Loading the bundle (Pi included) takes seconds on a cold runner | `testTimeout: 30_000` |
 | `bootstrap --github`: 422 "Actor GitHub Actions integration must be part of the ruleset source or owner organization" | A repository ruleset can't exempt the built-in Actions integration | The ruleset only blocks force pushes and deletion, which releases never do (fixed); see "Accounts and their settings" |
+| Pressing stop left the session "stopping" for minutes; the log said `waitUntil() tasks did not complete … cancelled` | `stop()` aborted the run first, and the abort waited on a test command running for over ten minutes, past the Worker's short `waitUntil` window. The object finished stopping on its own once the command ended | Stop destroys the container first, which ends any command at once; commands get a 20-minute default timeout (fixed) |
+| The clone failed in production with "server certificate verification failed. CAfile: none" | The intercept re-signs TLS with the container CA, and `container.start`'s env doesn't reach `exec`'d commands | The CA goes into the system store, git's config and `/etc/profile.d` on every start (fixed) |
+| The agent couldn't read `packages/desktop/AGENTS.md` | That file isn't committed (only the root AGENTS.md is) | Commit it if agents should follow it |
 | Hard to find which Cloudflare token CI uses | The repo's token is account-owned, listed under Manage Account → Account API Tokens | Build agents have their own token on their environment |
 | Every delegation ignored as "not started by an approver" | `APPROVER_EMAILS` had a different email than the Linear account | Use the Linear account's email |
 | Reviews from maintainers never reached the agent | The collaborators API answers apps 404, and `author_association` shows a private org membership as CONTRIBUTOR | Check the permission endpoint instead (fixed) |

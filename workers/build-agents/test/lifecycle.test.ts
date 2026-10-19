@@ -212,6 +212,23 @@ describe("an issue's agent", () => {
 		}
 	});
 
+	it("stops at once while a command is running, by destroying the container before aborting", async () => {
+		for (const finish of [
+			(agent: TestIssueAgent) => agent.stop(),
+			(agent: TestIssueAgent) => agent.undelegated(),
+		]) {
+			const stub = await prepared([{ tool: "bash", args: { command: "npm run test:desktop" } }, { text: "Never sent." }]);
+			await runInDurableObject(stub, (agent: TestIssueAgent) => agent.useHangingWorkspace());
+			await start(stub);
+			await eventually(stub, (agent) => agent.commandStarted(), (started) => started);
+			// With the abort first, this would wait on the command, which only ends when the container goes.
+			const began = Date.now();
+			await runInDurableObject(stub, finish);
+			expect(Date.now() - began).toBeLessThan(5_000);
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.released())).toBe(true);
+		}
+	});
+
 	it("stops a running turn from the session's stop button", async () => {
 		const stub = await prepared(["hang", { text: "Never sent." }]);
 		await runInDurableObject(stub, async (agent: TestIssueAgent) => {

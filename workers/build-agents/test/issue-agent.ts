@@ -1,7 +1,7 @@
 import { createModels, type Models } from "@earendil-works/pi-ai/models";
 import { type FauxResponseStep, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import type { JsonObject } from "@earendil-works/pi-ai";
-import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
+import { type ExecutionEnv, ExecutionError } from "@earendil-works/pi-durable/env";
 import type { Env } from "../src/config.ts";
 import type { GitHubClient } from "../src/github.ts";
 import { IssueAgent } from "../src/issue-agent.ts";
@@ -132,8 +132,45 @@ export class TestIssueAgent extends IssueAgent {
 		return { token: refuse, upsertPullRequest: refuse, canWrite: async () => false, failedJobs: async () => [] };
 	}
 
+	/** Gives the agent a workspace whose commands run until it's released, as a long test run in a container would. */
+	useHangingWorkspace(): void {
+		this.ctx.storage.kv.put("test:workspace", "hanging");
+	}
+
+	/** Whether a command has started in the hanging workspace. */
+	commandStarted(): boolean {
+		return this.ctx.storage.kv.get<boolean>("test:command-started") ?? false;
+	}
+
+	/** Whether the agent released (destroyed) its workspace. Kept outside the object, since ending it erases storage. */
+	async released(): Promise<boolean> {
+		return (await this.env.BRANCHES.get(`test:released:${this.ctx.id.toString()}`)) === "yes";
+	}
+
+	#release = deferred();
+
+	protected override async release(): Promise<void> {
+		await this.env.BRANCHES.put(`test:released:${this.ctx.id.toString()}`, "yes");
+		this.#release.resolve();
+		this.#release = deferred();
+	}
+
 	protected override workspace(): Promise<ExecutionEnv> {
-		return Promise.reject(new Error("No workspace in tests"));
+		if (this.ctx.storage.kv.get("test:workspace") !== "hanging") return Promise.reject(new Error("No workspace in tests"));
+		const kv = this.ctx.storage.kv;
+		const ended = () => this.#release.promise;
+		const env = {
+			id: "hanging",
+			cwd: "/workspace/repo",
+			// A command that runs until the workspace is destroyed, then fails as a killed process does.
+			exec: async () => {
+				kv.put("test:command-started", true);
+				await ended();
+				return { ok: false, error: new ExecutionError("aborted", "Killed: the container was destroyed") };
+			},
+			cleanup: async () => {},
+		};
+		return Promise.resolve(env as unknown as ExecutionEnv);
 	}
 
 	/** The next scripted response. The position is stored before the response is used, so a new instance continues. */
@@ -161,4 +198,10 @@ export class TestIssueAgent extends IssueAgent {
 			return fauxAssistantMessage(step.text);
 		};
 	}
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+	let resolve!: () => void;
+	const promise = new Promise<void>((done) => (resolve = done));
+	return { promise, resolve };
 }
