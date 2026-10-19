@@ -21,7 +21,7 @@
 		"TYPE_LABELS": "Bug=fix,Feature=feat,Improvement=improve",
 		// Any model in pi-ai's catalog for the provider; through AI Gateway, so switching vendors is these two lines.
 		"MODEL_PROVIDER": "cloudflare-ai-gateway",
-		"MODEL_ID": "claude-sonnet-5-5",
+		"MODEL_ID": "workers-ai/@cf/moonshotai/kimi-k2.7-code",
 		"AI_GATEWAY_ID": "notefig-build-agents",
 		// Set at deploy from the CLOUDFLARE_ACCOUNT_ID secret.
 		"CLOUDFLARE_ACCOUNT_ID": "",
