@@ -89,9 +89,27 @@ provider key. Secrets go to the GitHub environment `build-agents`, and the relea
 ```bash
 npm ci
 npm run typecheck
-npm test          # workerd, against test/wrangler.jsonc (no container)
-npm run dev       # needs Docker: builds the image and runs containers locally
+npm test                 # workerd, no container: units, webhooks, and the agent's lifecycle
+npm run test:container   # needs Docker: Pi's environment conformance suite in a real container
+npm run dev              # needs Docker: the whole Worker with containers, locally
 ```
 
-Pi Durable 1.3 has no `onWake` yet, so the object keeps a heartbeat alarm while the harness has live tasks. When Pi
-releases `onWake`, the alarm can follow the harness's own schedule instead.
+- **`npm test`** runs `IssueAgent` itself (as `test/issue-agent.ts`, with a scripted pi-ai model and Linear and
+  GitHub that record what they're sent) on Cloudflare's own Durable Object storage, alarms and eviction: answering
+  on the session, refusing Triage and unlabelled issues, finishing a turn an eviction cut off, admitting a retried
+  message once, ending a run on a question, and stopping.
+- **`npm run test:container`** runs Pi's `createEnvConformance` cases against `ContainerEnv` in a slim container
+  (`test/container`): file and directory readers, writes, renames, watching (by polling), exec with windows,
+  timeouts, aborts and spawn errors, symlinks; and a container snapshot round trip. `listFiles` is optional in Pi
+  and left out, so Pi walks directories itself.
+
+## Containers
+
+Each agent's container starts on its first tool call, with internet off, and stops after 10 idle minutes; the next
+tool call starts it again. After every push the object snapshots it, so a restart resumes with the clone,
+`node_modules` and build caches instead of cloning and installing again. A release changes the image, and then the
+next start is a fresh clone. The container is destroyed when the pull request merges or closes, or on stop.
+
+Pi Durable 1.3 has no `onWake` yet, so the object keeps a heartbeat alarm while the harness has live tasks, and frees
+idle conversations at once (`contextRetentionMs: 0`), since 1.3's retention timers would keep the object awake. When
+Pi releases `onWake`, the alarm can follow the harness's own schedule instead.

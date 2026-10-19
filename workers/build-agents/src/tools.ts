@@ -19,6 +19,8 @@ export interface AgentHost {
 	/** Draft pull requests while testing. */
 	draft(issue: IssueDetails): boolean;
 	permitPush(permitted: boolean): Promise<void>;
+	/** After a successful push: a moment worth resuming from. */
+	pushed(): Promise<void>;
 	upsertPullRequest(input: { branch: string; title: string; body: string; draft: boolean }): Promise<PullRequest>;
 	ask(question: string): Promise<void>;
 }
@@ -60,6 +62,7 @@ export function agentTools(host: AgentHost) {
 			} finally {
 				await host.permitPush(false);
 			}
+			await host.pushed();
 			return { output: text(`Pushed to ${issue.branchName}.`) };
 		},
 	});

@@ -28,9 +28,12 @@ const context = BACKGROUND_CONTEXT;
 const HEARTBEAT_MS = 60_000;
 const REPO_DIR = "/workspace/repo";
 const CONTAINER_CA = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
+const CONTAINER_IDLE_MS = 10 * 60_000;
 
 interface Stored {
 	session?: string;
+	/** The container's state after the last push, and the image it was taken on. */
+	snapshot?: { id: string; image: string };
 	issue?: IssueDetails;
 	prompt?: string;
 }
@@ -195,6 +198,7 @@ export class IssueAgent extends DurableObject<Env> {
 					this.#config.testLabel !== undefined &&
 					issue.labels.some((label) => label.toLowerCase() === this.#config.testLabel?.toLowerCase()),
 				permitPush: (permitted) => this.#interceptGit(permitted),
+				pushed: () => this.#checkpoint(),
 				upsertPullRequest: async (input) => {
 					const pr = await this.github().upsertPullRequest(input);
 					const session = this.#get("session");
@@ -259,22 +263,21 @@ export class IssueAgent extends DurableObject<Env> {
 
 	async #prepare(container: Container): Promise<ContainerEnv> {
 		const issue = await this.#issue();
+		const env = new ContainerEnv(container, { id: `container:${this.ctx.id.toString()}`, cwd: "/" });
 		if (!container.running) {
 			const image = container.images.workspace ?? Object.values(container.images)[0];
 			if (!image) throw new Error("No container image is configured");
-			container.start({
-				image,
-				enableInternet: false,
-				instance: "standard-2",
-				env: { GIT_SSL_CAINFO: CONTAINER_CA, NODE_EXTRA_CA_CERTS: CONTAINER_CA, CARGO_HTTP_CAINFO: CONTAINER_CA },
-			});
+			// The last pushed state, if it was taken on this image; a new release starts from a fresh clone.
+			const snapshot = this.#get("snapshot");
+			const resumed = snapshot?.image === image && (await this.#start(container, env, { containerSnapshot: { id: snapshot.id } }));
+			if (!resumed) {
+				if (snapshot) this.ctx.storage.kv.delete("snapshot");
+				await this.#start(container, env, { image }, true);
+			}
+			// An agent waiting days for a review doesn't keep its container running; the next tool call restarts it.
+			await container.setInactivityTimeout(CONTAINER_IDLE_MS);
 		}
-		await this.#interceptGit(false);
-		const registries = this.ctx.exports.RegistryGateway({});
-		for (const host of REGISTRY_HOSTS) await container.interceptOutboundHttps(host, registries);
 
-		const env = new ContainerEnv(container, { id: `container:${this.ctx.id.toString()}`, cwd: "/" });
-		await ready(env);
 		const exists = await env.exists(`${REPO_DIR}/.git`, context);
 		if (!exists.ok || !exists.value) {
 			const { owner, name } = this.#config.repo;
@@ -293,6 +296,46 @@ export class IssueAgent extends DurableObject<Env> {
 		env.cwd = REPO_DIR;
 		return env;
 	}
+
+	/**
+	 * Starts the container from `source` with internet off and the intercepts in place, and waits until it runs
+	 * commands. A snapshot that won't start is given up on (false); a fresh image that won't start is an error.
+	 */
+	async #start(container: Container, env: ContainerEnv, source: { image: string } | { containerSnapshot: { id: string } }, required = false): Promise<boolean> {
+		try {
+			container.start({
+				...source,
+				enableInternet: false,
+				instance: "standard-2",
+				env: { GIT_SSL_CAINFO: CONTAINER_CA, NODE_EXTRA_CA_CERTS: CONTAINER_CA, CARGO_HTTP_CAINFO: CONTAINER_CA },
+			} as ContainerStartupOptions);
+			await this.#interceptGit(false);
+			const registries = this.ctx.exports.RegistryGateway({});
+			for (const host of REGISTRY_HOSTS) await container.interceptOutboundHttps(host, registries);
+			await ready(env);
+			return true;
+		} catch (error) {
+			if (required) throw error;
+			console.error("container: snapshot did not start, cloning instead", error);
+			if (container.running) await container.destroy();
+			return false;
+		}
+	}
+
+	/** After a push: the container as it is, so a restart resumes with the clone, dependencies and build caches. */
+	async #checkpoint(): Promise<void> {
+		const container = this.ctx.container;
+		const image = container?.images.workspace ?? Object.values(container?.images ?? {})[0];
+		if (!container?.running || !image) return;
+		try {
+			const snapshot = await container.snapshotContainer({ name: this.#get("issue")?.identifier });
+			this.#put("snapshot", { id: snapshot.id, image });
+		} catch (error) {
+			// Only a slower restart: the next container clones again.
+			console.error("container: snapshot failed", error);
+		}
+	}
+
 
 	/** git to `github.com` goes through `GitGateway`, which pushes only to the issue's branch, and only when permitted. */
 	async #interceptGit(push: boolean): Promise<void> {
