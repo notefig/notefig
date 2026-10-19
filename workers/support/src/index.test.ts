@@ -15,6 +15,9 @@ function setup({ limited = false } = {}) {
     LINEAR_PROJECT_ID: "roadmap",
     LINEAR_FEEDBACK_LABEL_ID: "feedback",
     ALLOWED_ORIGINS: `${APP_ORIGIN},https://app.notefig.com`,
+    AGENT_USER_ID: "agent-user",
+    APPROVER_IDS: "approver-user",
+    AGENT_DELIVERIES: { get: async () => null, put: async () => {} } as unknown as KVNamespace,
   };
   const fetchFn = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body));
@@ -180,4 +183,21 @@ test("uploads a screenshot to Linear, files the issue, and links it in a private
   const comment = JSON.parse(String(calls[3].body)).variables.input;
   assert.equal(comment.issueId, "issue-1");
   assert.match(comment.body, /!\[Screenshot 1\]\(https:\/\/uploads\.linear\.app\/asset\.png\)/);
+});
+
+test("Linear's webhook skips the origin check, and waits for its secrets", async () => {
+  const { env, fetchFn } = setup();
+  const delivery = () =>
+    new Request("https://support.notefig.com/v1/linear", { method: "POST", body: "{}" });
+  // No Origin header, yet not refused as a stranger: unconfigured, it says so.
+  assert.equal((await handle(delivery(), env, fetchFn)).status, 503);
+
+  const configured: Env = {
+    ...env,
+    LINEAR_WEBHOOK_SECRET: "secret",
+    CLAUDE_ROUTINE_FIRE_URL: "https://api.anthropic.com/v1/claude_code/routines/trig_1/fire",
+    CLAUDE_ROUTINE_TOKEN: "token",
+  };
+  // Configured, an unsigned delivery is refused by the signature check.
+  assert.equal((await handle(delivery(), configured, fetchFn)).status, 401);
 });
