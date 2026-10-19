@@ -96,6 +96,19 @@ describe("an issue's agent", () => {
 		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.modelCalls())).toBe(2);
 	});
 
+	it("still takes a new session's request when posting to Linear fails, and a retry adds nothing", async () => {
+		const stub = await prepared([{ text: "First pass." }, { text: "Carried on." }]);
+		await start(stub);
+		await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length === 1);
+		// Posting to Linear fails for the first attempt of session-2, then works.
+		await runInDurableObject(stub, async (agent: TestIssueAgent) => {
+			agent.failNextPosts(1);
+			await agent.start({ issueId: ISSUE.id, sessionId: "session-2", prompt: "Also handle folders" });
+		});
+		await runInDurableObject(stub, (agent: TestIssueAgent) => agent.start({ issueId: ISSUE.id, sessionId: "session-2", prompt: "Also handle folders" }));
+		await eventually(stub, (agent) => agent.modelCalls(), (calls) => calls === 2);
+	});
+
 	it("submits messages a restart left in the start-up queue when it comes back", async () => {
 		const stub = await prepared([{ text: "First pass." }, { text: "Used the helper." }]);
 		await start(stub);

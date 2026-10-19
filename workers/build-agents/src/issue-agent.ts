@@ -112,20 +112,22 @@ export class IssueAgent extends DurableObject<Env> {
 	/** Delegated in Linear: check the issue, then start working on it. */
 	async start(input: { issueId: string; sessionId: string; prompt: string }): Promise<void> {
 		// A session already taken (Linear retrying an older delivery) changes nothing: not the session, not the prompt.
-		const sessions = this.#get("sessions") ?? [];
-		if (sessions.includes(input.sessionId)) return;
-		this.#put("sessions", [...sessions, input.sessionId]);
+		// A session counts as taken once its request is admitted, so a start that failed before that can be retried.
+		if ((this.#get("sessions") ?? []).includes(input.sessionId)) return;
 		// Already accepted (delegated again): carry on in the new session.
 		if (this.#get("issue")) {
 			this.#put("session", input.sessionId);
 			// The new session's context (the comment that mentioned the agent, say) replaces the old one in the issue
 			// section, and is the follow-up itself, so a new request isn't answered from old instructions.
 			if (input.prompt.trim()) this.#put("prompt", input.prompt);
-			await this.#post({ type: "thought", body: "Picking this up again." });
+			await this.#post({ type: "thought", body: "Picking this up again." }).catch((error: unknown) => {
+				console.error("linear: thought not posted", error);
+			});
 			const content = input.prompt.trim()
 				? `You've been delegated this issue again, in a new session. Its context, which may hold a new request:\n\n${input.prompt.trim()}\n\nContinue from where you are, following it.`
 				: "Continue working on the issue.";
 			await this.#submit(content, `linear:session:${input.sessionId}`, "followUp");
+			this.#taken(input.sessionId);
 			return;
 		}
 		// Starting: messages arriving before the issue is accepted wait in `pending` (see `steer`).
@@ -156,7 +158,13 @@ export class IssueAgent extends DurableObject<Env> {
 		}
 		await this.env.BRANCHES.put(issue.branchName, issue.id);
 		await this.#submit("Start working on the issue.", `linear:session:${input.sessionId}`, "followUp");
+		this.#taken(input.sessionId);
 		await this.#drainPending();
+	}
+
+	/** Records a session whose request is admitted; a later delivery of it is a retry. */
+	#taken(sessionId: string): void {
+		this.#put("sessions", [...(this.#get("sessions") ?? []), sessionId]);
 	}
 
 	/**

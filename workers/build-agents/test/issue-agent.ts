@@ -72,6 +72,11 @@ export class TestIssueAgent extends IssueAgent {
 		return this.ctx.storage.kv.get<string[]>("test:moves") ?? [];
 	}
 
+	/** The next `count` activity posts fail, as when Linear is briefly down. */
+	failNextPosts(count: number): void {
+		this.ctx.storage.kv.put("test:fail-posts", count);
+	}
+
 	storedPrompt(): string {
 		return this.ctx.storage.kv.get<string>("prompt") ?? "";
 	}
@@ -96,6 +101,11 @@ export class TestIssueAgent extends IssueAgent {
 		const kv = this.ctx.storage.kv;
 		return {
 			activity: async (_session, activity) => {
+				const failures = kv.get<number>("test:fail-posts") ?? 0;
+				if (failures > 0) {
+					kv.put("test:fail-posts", failures - 1);
+					throw new Error("Linear is down");
+				}
 				kv.put("test:activities", [...(kv.get<Activity[]>("test:activities") ?? []), activity]);
 			},
 			addLink: async () => {},
