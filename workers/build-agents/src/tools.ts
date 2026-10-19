@@ -49,7 +49,8 @@ export function agentTools(host: AgentHost) {
 			const issue = await host.issue();
 			await run(api, "git fetch --quiet origin main", context);
 			// Every outgoing commit's message and its own patch: a value removed in a later commit is still in the history.
-			const commits = await run(api, "git log --patch --format=%B%n%an%n%ae origin/main..HEAD", context);
+			// `--cc` includes what a merge commit itself introduces, which plain `--patch` leaves out.
+			const commits = await run(api, "git log --patch --cc --format=%B%n%an%n%ae origin/main..HEAD", context);
 			const found = leaks(commits.output, privateTokens(issue.privateNote));
 			if (found.length > 0) refuseLeaks(found);
 			await host.permitPush(true);
