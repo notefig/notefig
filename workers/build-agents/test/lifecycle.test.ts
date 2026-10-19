@@ -66,6 +66,26 @@ describe("an issue's agent", () => {
 		expect(await runInDurableObject(started, (agent: TestIssueAgent) => agent.moves())).toEqual([]);
 	});
 
+	it("keeps a message that arrives while it's still reading the issue, and acts on it once started", async () => {
+		const stub = await prepared([{ text: "Started." }, { text: "Used the helper." }]);
+		await runInDurableObject(stub, async (agent: TestIssueAgent) => {
+			// Not awaited: the message lands while start() waits on Linear.
+			const starting = agent.start({ issueId: ISSUE.id, sessionId: "session-1", prompt: "" });
+			await agent.steer({ sessionId: "session-1", text: "Use the existing helper", requestId: "linear:early" });
+			await starting;
+		});
+		await eventually(stub, (agent) => agent.modelCalls(), (calls) => calls === 2);
+		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).not.toContain("pending");
+	});
+
+	it("keeps nothing for a delegation it turns down, so later messages for it are dropped", async () => {
+		const stub = await prepared([], { ...ISSUE, stateType: "triage" });
+		await start(stub);
+		await runInDurableObject(stub, (agent: TestIssueAgent) => agent.steer({ sessionId: "session-1", text: "Please", requestId: "linear:x" }));
+		const stored = await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored());
+		expect(stored.filter((key) => !key.startsWith("test:"))).toEqual([]);
+	});
+
 	it("turns down an issue still in Triage, or without the test label", async () => {
 		const triage = await prepared([], { ...ISSUE, stateType: "triage" });
 		await start(triage);

@@ -36,6 +36,8 @@ interface Stored {
 	snapshot?: { id: string; image: string };
 	issue?: IssueDetails;
 	prompt?: string;
+	/** Messages that arrived while the agent was still reading its issue. */
+	pending?: { text: string; requestId: string }[];
 }
 
 export class IssueAgent extends DurableObject<Env> {
@@ -106,16 +108,23 @@ export class IssueAgent extends DurableObject<Env> {
 
 	/** Delegated in Linear: check the issue, then start working on it. */
 	async start(input: { issueId: string; sessionId: string; prompt: string }): Promise<void> {
+		// Starting: messages arriving before the issue is accepted wait in `pending` (see `steer`).
 		this.#put("session", input.sessionId);
-		// Linear marks a session unresponsive without an activity within 10 seconds.
-		await this.#post({ type: "thought", body: "Reading the issue." });
-		const issue = await this.linear().issue(input.issueId);
+		let issue: IssueDetails;
+		try {
+			// Linear marks a session unresponsive without an activity within 10 seconds.
+			await this.#post({ type: "thought", body: "Reading the issue." });
+			issue = await this.linear().issue(input.issueId);
+		} catch (error) {
+			await this.#refuse(`I couldn't read the issue: ${error instanceof Error ? error.message : String(error)}`, "error");
+			throw error;
+		}
 		if (issue.stateType === "triage") {
-			return this.#post({ type: "response", body: "This issue is still in Triage. Accept it first, then delegate it again." });
+			return this.#refuse("This issue is still in Triage. Accept it first, then delegate it again.");
 		}
 		const { testLabel } = this.#config;
 		if (testLabel && !issue.labels.some((label) => label.toLowerCase() === testLabel.toLowerCase())) {
-			return this.#post({ type: "response", body: `While the agent is in testing it only takes issues labelled "${testLabel}".` });
+			return this.#refuse(`While the agent is in testing it only takes issues labelled "${testLabel}".`);
 		}
 		this.#put("issue", issue);
 		this.#put("prompt", input.prompt);
@@ -127,13 +136,31 @@ export class IssueAgent extends DurableObject<Env> {
 		}
 		await this.env.BRANCHES.put(issue.branchName, issue.id);
 		await this.#submit("Start working on the issue.", `linear:session:${input.sessionId}`, "followUp");
+		// Messages that arrived while the issue was being read, in order.
+		const pending = this.#get("pending") ?? [];
+		this.ctx.storage.kv.delete("pending");
+		for (const message of pending) await this.#submit(message.text, message.requestId, "steer");
 	}
 
-	/** A maintainer's message in the Linear session: joins the running work at the next tool round. */
+	/** Turns a delegation down: says why, and keeps nothing, so later messages for it are dropped. */
+	async #refuse(body: string, type: "response" | "error" = "response"): Promise<void> {
+		await this.#post({ type, body }).catch((error: unknown) => console.error("linear: refusal not posted", error));
+		this.ctx.storage.kv.delete("pending");
+		this.ctx.storage.kv.delete("session");
+	}
+
+	/**
+	 * A maintainer's message in the Linear session: joins the running work at the next tool round. While the agent is
+	 * still starting (reading the issue), it waits until the issue is accepted; with no delegation at all (never
+	 * delegated, refused, or ended), it's dropped.
+	 */
 	async steer(input: { sessionId: string; text: string; requestId: string }): Promise<void> {
-		if (!this.#get("issue")) return;
-		this.#put("session", input.sessionId);
-		await this.#submit(input.text, input.requestId, "steer");
+		if (this.#get("issue")) {
+			this.#put("session", input.sessionId);
+			await this.#submit(input.text, input.requestId, "steer");
+		} else if (this.#get("session")) {
+			this.#put("pending", [...(this.#get("pending") ?? []), { text: input.text, requestId: input.requestId }]);
+		}
 	}
 
 	/** Review feedback on the pull request, from someone the webhook trusts. Ignored once the agent has ended. */
