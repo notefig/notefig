@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appJwt, pkcs8 } from "./github.ts";
+import { appJwt, logTail, pkcs8 } from "./github.ts";
 
 function pem(label: string, der: ArrayBuffer): string {
 	const base64 = btoa(String.fromCharCode(...new Uint8Array(der)));
@@ -37,5 +37,19 @@ describe("pkcs8", () => {
 		// The PKCS#1 key is the OCTET STRING at the end of the PKCS#8 structure: strip the 26-byte prefix.
 		const rsa = pem("RSA PRIVATE KEY", der.slice(26).buffer);
 		expect(pkcs8(rsa)).toEqual(der);
+	});
+});
+
+describe("logTail", () => {
+	it("keeps the last lines without timestamps, colours or group markers", () => {
+		const log = [
+			"2026-10-19T07:10:01.1234567Z ##[group]Run npm test",
+			"2026-10-19T07:10:02.1234567Z \x1b[31mnot ok 3 - answers 429 when rate limited\x1b[0m",
+			"2026-10-19T07:10:02.2234567Z   expected: 418",
+			"2026-10-19T07:10:03.1234567Z ##[endgroup]",
+			"2026-10-19T07:10:03.2234567Z ##[error]Process completed with exit code 1.",
+		].join("\n");
+		expect(logTail(log)).toBe("not ok 3 - answers 429 when rate limited\n  expected: 418\n##[error]Process completed with exit code 1.");
+		expect(logTail(log, 1)).toBe("##[error]Process completed with exit code 1.");
 	});
 });

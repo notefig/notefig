@@ -126,24 +126,51 @@ async function linear() {
 		return result.data;
 	};
 
-	const { teams } = await query<{ teams: { nodes: { id: string; key: string; labels: { nodes: { name: string }[] } }[] } }>(
-		`query ($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id key labels(first: 250) { nodes { name } } } } }`,
+	// Small queries: Linear refuses ones over its complexity limit, which a team with all its labels exceeds.
+	const { teams } = await query<{ teams: { nodes: { id: string; key: string }[] } }>(
+		`query ($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id key } } }`,
 		{ key: vars.LINEAR_TEAM_KEY },
 	);
 	const team = teams.nodes[0];
 	if (!team) throw new Error(`Linear: no team with key ${vars.LINEAR_TEAM_KEY}, or the app has no access to it`);
 
-	const { issueLabels } = await query<{ issueLabels: { nodes: { name: string }[] } }>(
-		`{ issueLabels(first: 250, filter: { team: { null: true } }) { nodes { name } } }`,
+	// The team's own labels and the workspace's, which every team can use.
+	const labelNames = async (filter: Record<string, unknown>) => {
+		const names: string[] = [];
+		for (let after: string | null = null; ; ) {
+			const { issueLabels } = await query<{
+				issueLabels: { nodes: { name: string }[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
+			}>(
+				`query ($filter: IssueLabelFilter, $after: String) { issueLabels(first: 50, after: $after, filter: $filter) { nodes { name } pageInfo { hasNextPage endCursor } } }`,
+				{ filter, after },
+			);
+			names.push(...issueLabels.nodes.map((label) => label.name));
+			if (!issueLabels.pageInfo.hasNextPage) return names;
+			after = issueLabels.pageInfo.endCursor;
+		}
+	};
+	const known = new Set(
+		[...(await labelNames({ team: { id: { eq: team.id } } })), ...(await labelNames({ team: { null: true } }))].map((name) =>
+			name.toLowerCase(),
+		),
 	);
-	const known = new Set([...team.labels.nodes, ...issueLabels.nodes].map((label) => label.name.toLowerCase()));
 	const wanted = [vars.LINEAR_TEST_LABEL, ...list(vars.TYPE_LABELS).map((pair) => pair.split("=")[0])].filter(Boolean);
+	const missing: string[] = [];
 	for (const name of wanted) {
 		if (known.has(name.toLowerCase())) continue;
-		await query(`mutation ($input: IssueLabelCreateInput!) { issueLabelCreate(input: $input) { success } }`, {
-			input: { name, teamId: team.id },
-		});
-		console.log(`Linear: created the "${name}" label on ${team.key}.`);
+		try {
+			await query(`mutation ($input: IssueLabelCreateInput!) { issueLabelCreate(input: $input) { success } }`, {
+				input: { name, teamId: team.id },
+			});
+			console.log(`Linear: created the "${name}" label on ${team.key}.`);
+		} catch (error) {
+			// Workspaces can keep label management to admins, and the app isn't one.
+			console.warn(`Linear: couldn't create "${name}" (${error instanceof Error ? error.message : error}).`);
+			missing.push(name);
+		}
+	}
+	if (missing.length > 0) {
+		console.warn(`Linear: create these labels on ${team.key} by hand (Team settings → Labels): ${missing.join(", ")}`);
 	}
 
 	const approvers = list(process.env.APPROVER_EMAILS ?? vars.APPROVER_EMAILS);
@@ -176,7 +203,16 @@ async function gateway() {
 	const id = vars.AI_GATEWAY_ID;
 	const found = await fetch(`${base}/${id}`, { headers });
 	if (found.ok) {
-		console.log(`AI Gateway: ${id} exists.`);
+		// Authenticated, always: with provider keys stored in it, an open gateway is usable by anyone with its URL.
+		const { result } = (await found.json()) as { result: Record<string, unknown> };
+		if (result.authentication !== true) {
+			const kept = ["cache_invalidate_on_update", "cache_ttl", "collect_logs", "rate_limiting_interval", "rate_limiting_limit", "rate_limiting_technique"];
+			const body = Object.fromEntries(kept.filter((key) => result[key] !== undefined && result[key] !== null).map((key) => [key, result[key]]));
+			const updated = await fetch(`${base}/${id}`, { method: "PUT", headers, body: JSON.stringify({ ...body, authentication: true }) });
+			if (!updated.ok) throw new Error(`AI Gateway (${updated.status}): ${await updated.text()}`);
+			console.log(`AI Gateway: turned on authentication for ${id}.`);
+		}
+		console.log(`AI Gateway: ${id} exists and requires its token.`);
 		return;
 	}
 	const created = await fetch(base, {
@@ -184,6 +220,7 @@ async function gateway() {
 		headers,
 		body: JSON.stringify({
 			id,
+			authentication: true,
 			collect_logs: true,
 			cache_invalidate_on_update: false,
 			cache_ttl: 0,
@@ -193,7 +230,7 @@ async function gateway() {
 		}),
 	});
 	if (!created.ok) throw new Error(`AI Gateway (${created.status}): ${await created.text()}`);
-	console.log(`AI Gateway: created ${id}. Add a provider key or turn on unified billing in its dashboard.`);
+	console.log(`AI Gateway: created ${id}, authenticated. In its dashboard, add the model's provider key or turn on unified billing.`);
 }
 
 // ── Run ─────────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -11,6 +11,8 @@ import {
 	type FileInfo,
 	type FileKind,
 	type FileWatcher,
+	type WatchChange,
+	type WatchTarget,
 	LineScanner,
 	ok,
 	type Result,
@@ -30,6 +32,8 @@ export class ContainerEnv implements ExecutionEnv {
 	readonly #container: Container;
 	readonly #files: Files;
 	readonly #running = new Set<ExecProcess>();
+	/** Open watchers' close functions, so `cleanup()` stops their polling too. */
+	readonly #watchers = new Set<() => void>();
 
 	constructor(container: Container, options: { id: string; cwd: string }) {
 		this.#container = container;
@@ -87,30 +91,54 @@ export class ContainerEnv implements ExecutionEnv {
 	async openBinaryReader(path: string, options: { noFollow?: boolean } | undefined, context: Context): Promise<Result<BinaryReader, FileError>> {
 		const info = await this.#stat(path, options?.noFollow === true, context);
 		if (!info.ok) return info;
+		if (info.value.kind === "symlink") return err(new FileError("invalid", "Is a symbolic link", info.value.path));
 		if (info.value.kind === "directory") return err(new FileError("is_directory", "Is a directory", info.value.path));
 		const bytes = await this.readBinaryFile(path, context);
 		if (!bytes.ok) return bytes;
+		// The file as it was opened: later renames or writes don't change what this reader sees.
 		const data = bytes.value;
+		const where = info.value.path;
+		let closed = false;
+		const usable = (context: Context): { ok: false; error: FileError } | undefined => {
+			if (context.abortSignal?.aborted) return { ok: false, error: new FileError("aborted", "Aborted", where) };
+			if (closed) return { ok: false, error: new FileError("invalid", "Reader is closed", where) };
+			return undefined;
+		};
 		return ok({
-			info: async () => ok({ ...info.value, size: data.length }),
-			read: async (offset, length) => ok(data.subarray(offset, offset + length)),
-			scanLines: async ({ startLine, endLine }) => {
+			info: async (context) => usable(context) ?? ok({ ...info.value, size: data.length }),
+			read: async (offset, length, context) => {
+				const refused = usable(context);
+				if (refused) return refused;
+				if (!Number.isInteger(offset) || !Number.isInteger(length) || offset < 0 || length < 0) {
+					return err(new FileError("invalid", "Invalid byte range", where));
+				}
+				return ok(data.slice(offset, offset + length));
+			},
+			scanLines: async ({ startLine, endLine }, context) => {
+				const refused = usable(context);
+				if (refused) return refused;
 				let scanner: LineScanner;
 				try {
 					scanner = new LineScanner(startLine, endLine);
 				} catch {
-					return err(new FileError("invalid", "Invalid line range", info.value.path));
+					return err(new FileError("invalid", "Invalid line range", where));
 				}
 				scanner.push(data);
 				return ok(scanner.finish());
 			},
-			close: async () => {},
+			close: async () => {
+				closed = true;
+			},
 		});
 	}
 
 	async writeFile(path: string, content: string | Uint8Array, context: Context): Promise<Result<void, FileError>> {
 		const absolute = resolve(this.cwd, path);
-		return this.#file(absolute, () => this.#files.writeFile(absolute, content, { signal: context.abortSignal }));
+		const parent = absolute.slice(0, absolute.lastIndexOf("/")) || "/";
+		return this.#file(absolute, async () => {
+			await this.#files.mkdir(parent, { recursive: true, signal: context.abortSignal });
+			await this.#files.writeFile(absolute, content, { signal: context.abortSignal });
+		});
 	}
 
 	async appendFile(path: string, content: string | Uint8Array, context: Context): Promise<Result<void, FileError>> {
@@ -154,20 +182,71 @@ export class ContainerEnv implements ExecutionEnv {
 	}
 
 	async openDirReader(path: string, context: Context): Promise<Result<DirReader, FileError>> {
-		const listing = await this.listDir(path, context);
-		if (!listing.ok) return listing;
-		const remaining = [...listing.value];
+		const absolute = resolve(this.cwd, path);
+		const info = await this.#stat(absolute, false, context);
+		if (!info.ok) return info;
+		if (info.value.kind !== "directory") return err(new FileError("not_directory", "Not a directory", absolute));
+		const names = await this.#file(absolute, () => this.#files.readDirectory(absolute, { signal: context.abortSignal }));
+		if (!names.ok) return names;
+		const remaining = names.value.map((entry) => entry.name);
+		let closed = false;
 		return ok({
-			next: async (maxEntries) => {
-				const entries = remaining.splice(0, Math.max(1, maxEntries));
+			next: async (maxEntries, context) => {
+				if (context.abortSignal?.aborted) return err(new FileError("aborted", "Aborted", absolute));
+				if (closed) return err(new FileError("invalid", "Reader is closed", absolute));
+				if (!Number.isInteger(maxEntries) || maxEntries < 1) return err(new FileError("invalid", "maxEntries must be at least 1", absolute));
+				const entries: FileInfo[] = [];
+				while (entries.length < maxEntries && remaining.length > 0) {
+					const name = remaining.shift() as string;
+					// Stat'ed now, not at open: an entry removed since then is skipped.
+					const entry = await this.#stat(`${absolute}/${name}`, true, context);
+					if (entry.ok) entries.push(entry.value);
+					else if (entry.error.code !== "not_found") return entry;
+				}
 				return ok({ entries, done: remaining.length === 0 });
 			},
-			close: async () => {},
+			close: async () => {
+				closed = true;
+			},
 		});
 	}
 
-	async watch(): Promise<Result<FileWatcher, FileError>> {
-		return err(new FileError("not_supported", "Watching is not supported in the container"));
+	async watch(targets: readonly WatchTarget[], onChange: (change: WatchChange) => void, context: Context): Promise<Result<FileWatcher, FileError>> {
+		const script = targets.map((target) => findCommand({ ...target, path: resolve(this.cwd, target.path) })).join("; ");
+		const snapshot = async (): Promise<Map<string, string> | undefined> => {
+			let output = "";
+			const result = await this.exec(["sh", "-c", script], { onOutput: (text, _context, { stream }) => stream === "stdout" && (output += text) }, context);
+			if (!result.ok) return undefined;
+			const entries = new Map<string, string>();
+			for (const line of output.split("\n")) {
+				const tab = line.indexOf("\t");
+				if (tab > 0) entries.set(line.slice(0, tab), line.slice(tab + 1));
+			}
+			return entries;
+		};
+		let previous = await snapshot();
+		if (!previous) return err(new FileError("unknown", "Could not list the watched paths"));
+		let closed = false;
+		const poll = async () => {
+			while (!closed && !context.abortSignal?.aborted) {
+				await new Promise((resolve) => setTimeout(resolve, WATCH_INTERVAL_MS));
+				if (closed) return;
+				const current = await snapshot();
+				if (!current || closed) continue;
+				const changed = new Set<string>();
+				for (const [path, signature] of current) if (previous?.get(path) !== signature) changed.add(path);
+				for (const path of previous?.keys() ?? []) if (!current.has(path)) changed.add(path);
+				previous = current;
+				if (changed.size > 0) onChange({ paths: [...changed].sort() });
+			}
+		};
+		const stop = () => {
+			closed = true;
+			this.#watchers.delete(stop);
+		};
+		this.#watchers.add(stop);
+		void poll();
+		return ok({ mode: "polling", close: async () => stop() });
 	}
 
 	async canonicalPath(path: string, context: Context): Promise<Result<string, FileError>> {
@@ -212,7 +291,14 @@ export class ContainerEnv implements ExecutionEnv {
 	}
 
 	async exec(command: string | readonly string[], options: ShellExecOptions | undefined, context: Context): Promise<Result<ShellExecResult, ExecutionError>> {
-		const argv = typeof command === "string" ? ["bash", "-lc", command] : [...command];
+		if (typeof command !== "string" && command.length === 0) return err(new ExecutionError("spawn_error", "No program to run"));
+		// An argv command runs through a check for the program, so a missing one is a spawn error, not exit 127. The
+		// check says so with a marker on stderr, which no real program prints, rather than an exit status one could use.
+		const argv =
+			typeof command === "string"
+				? ["bash", "-lc", command]
+				: ["sh", "-c", `command -v "$1" >/dev/null 2>&1 || { echo '${MISSING_PROGRAM}' >&2; exit 127; }; exec "$@"`, "sh", ...command];
+		let missing = false;
 		const abort = new AbortController();
 		const onAbort = () => abort.abort();
 		context.abortSignal?.addEventListener("abort", onAbort, { once: true });
@@ -245,7 +331,11 @@ export class ContainerEnv implements ExecutionEnv {
 			if (!stream) return;
 			const decoder = new TextDecoder();
 			for await (const chunk of stream as ReadableStream<Uint8Array>) {
-				const text = decoder.decode(chunk, { stream: true });
+				let text = decoder.decode(chunk, { stream: true });
+				if (typeof command !== "string" && name === "stderr" && text.includes(MISSING_PROGRAM)) {
+					missing = true;
+					text = text.replace(`${MISSING_PROGRAM}\n`, "").replace(MISSING_PROGRAM, "");
+				}
 				if (!text || !options?.onOutput) continue;
 				try {
 					options.onOutput(text, context, { stream: name });
@@ -259,6 +349,9 @@ export class ContainerEnv implements ExecutionEnv {
 			if (callbackError !== undefined) return err(new ExecutionError("callback_error", "Output callback failed", toError(callbackError)));
 			if (timedOut) return err(new ExecutionError("timeout", `Timed out after ${options?.timeout} seconds`));
 			if (context.abortSignal?.aborted) return err(new ExecutionError("aborted", "Aborted"));
+			if (missing) {
+				return err(new ExecutionError("spawn_error", `${command[0]} was not found`));
+			}
 			return ok({ exitCode });
 		} catch (error) {
 			if (timedOut) return err(new ExecutionError("timeout", `Timed out after ${options?.timeout} seconds`));
@@ -272,6 +365,7 @@ export class ContainerEnv implements ExecutionEnv {
 	}
 
 	async cleanup(): Promise<void> {
+		for (const stop of [...this.#watchers]) stop();
 		for (const process of this.#running) process.kill(9);
 		this.#running.clear();
 	}
@@ -314,6 +408,26 @@ export class ContainerEnv implements ExecutionEnv {
 			return err(toFileError(error, path));
 		}
 	}
+}
+
+/** What the argv wrapper prints on stderr for a program that isn't there. */
+const MISSING_PROGRAM = "pi-container-env: program not found";
+const WATCH_INTERVAL_MS = 250;
+
+/**
+ * A `find` listing of one watch target, one `path<TAB>type size mtime inode` line per entry: the target itself (its
+ * symlink followed), and below it either everything (recursive) or its children, without excluded names.
+ */
+function findCommand(target: WatchTarget): string {
+	const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
+	const prune = [
+		...(target.exclude?.hidden ? ["-name '.*'"] : []),
+		...(target.exclude?.names ?? []).map((name) => `-name ${quote(name)}`),
+	];
+	const depth = target.recursive ? "" : "-maxdepth 1";
+	// Excluded names are pruned below the target, never the target itself.
+	const skip = prune.length > 0 ? `\\( ! -path ${quote(target.path)} \\( ${prune.join(" -o ")} \\) \\) -prune -o` : "";
+	return `find -H ${quote(target.path)} ${depth} ${skip} -printf '%p\\t%y %s %T@ %i\\n' 2>/dev/null`;
 }
 
 const ERRNO: Record<string, FileErrorCode> = {

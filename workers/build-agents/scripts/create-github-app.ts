@@ -9,7 +9,7 @@
  * --webhook-url https://<tunnel>/v1/github`, then set its secrets on a different environment with `--env`.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 
@@ -84,6 +84,19 @@ setSecret("GH_APP_ID", String(app.id));
 setSecret("GH_APP_PRIVATE_KEY", app.pem);
 setSecret("GH_APP_WEBHOOK_SECRET", app.webhook_secret);
 console.log(`Stored GH_APP_ID, GH_APP_PRIVATE_KEY and GH_APP_WEBHOOK_SECRET on the "${environment}" environment.`);
+
+// The same values for `wrangler dev`, in .dev.vars (gitignored), replacing any earlier ones.
+const devVars = `${root}/.dev.vars`;
+const kept = existsSync(devVars)
+	? readFileSync(devVars, "utf8").split("\n").filter((line) => line && !/^GH_APP_(ID|PRIVATE_KEY|WEBHOOK_SECRET)=/.test(line))
+	: [];
+const quoted = (value: string) => JSON.stringify(value);
+writeFileSync(
+	devVars,
+	[...kept, `GH_APP_ID=${app.id}`, `GH_APP_PRIVATE_KEY=${quoted(app.pem)}`, `GH_APP_WEBHOOK_SECRET=${quoted(app.webhook_secret)}`, ""].join("\n"),
+	{ mode: 0o600 },
+);
+console.log("Wrote them to .dev.vars for local runs too (gitignored).");
 
 // Commits by the bot user show the app's avatar; its email needs the bot user's id.
 const bot = (await (await fetch(`https://api.github.com/users/${app.slug}%5Bbot%5D`)).json()) as { id: number };

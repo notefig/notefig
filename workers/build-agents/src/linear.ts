@@ -18,6 +18,8 @@ export interface IssueDetails extends IssueSummary {
 	description: string;
 	teamKey: string;
 	stateType: string;
+	/** The team's first "started" state (In Progress), which the agent moves the issue to when it starts. */
+	startedStateId: string | undefined;
 	/** The top-level comment the support Worker wrote with the debug report and screenshots, kept out of GitHub. */
 	privateNote: string | undefined;
 }
@@ -26,6 +28,10 @@ export interface LinearAgentClient {
 	activity(sessionId: string, activity: Activity, options?: { ephemeral?: boolean }): Promise<void>;
 	addLink(sessionId: string, label: string, url: string): Promise<void>;
 	issue(issueId: string): Promise<IssueDetails>;
+	/** Moves the issue to a state. */
+	moveIssue(issueId: string, stateId: string): Promise<void>;
+	/** The app's own Linear user id: the delegate of every issue handed to it. */
+	appUserId(): Promise<string>;
 }
 
 export interface LinearCredentials {
@@ -37,6 +43,7 @@ export interface LinearCredentials {
 export const PRIVATE_NOTE_MARKER = "_Private: comments outside the synced thread stay out of GitHub._";
 
 let cached: { key: string; token: string } | undefined;
+let cachedViewer: { key: string; id: string } | undefined;
 
 export function linearAgentClient(credentials: LinearCredentials, fetchFn: typeof fetch = fetch): LinearAgentClient {
 	const key = credentials.clientId;
@@ -88,6 +95,18 @@ export function linearAgentClient(credentials: LinearCredentials, fetchFn: typeo
 				{ id: sessionId, input: { addedExternalUrls: [{ label, url }] } },
 			);
 		},
+		async moveIssue(issueId, stateId) {
+			await graphql(`mutation ($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`, {
+				id: issueId,
+				input: { stateId },
+			});
+		},
+		async appUserId() {
+			if (cachedViewer?.key === key) return cachedViewer.id;
+			const { viewer } = await graphql<{ viewer: { id: string } }>(`{ viewer { id } }`, {});
+			cachedViewer = { key, id: viewer.id };
+			return viewer.id;
+		},
 		async issue(issueId) {
 			const { issue } = await graphql<{ issue: RawIssue }>(ISSUE_QUERY, { id: issueId });
 			return toIssueDetails(issue);
@@ -98,7 +117,7 @@ export function linearAgentClient(credentials: LinearCredentials, fetchFn: typeo
 const ISSUE_QUERY = `query ($id: String!) {
 	issue(id: $id) {
 		id identifier title url branchName description
-		team { key }
+		team { key states(filter: { type: { eq: "started" } }) { nodes { id position } } }
 		state { type }
 		labels { nodes { name } }
 		comments(first: 50) { nodes { body parent { id } } }
@@ -112,7 +131,7 @@ interface RawIssue {
 	url: string;
 	branchName: string;
 	description: string | null;
-	team: { key: string };
+	team: { key: string; states: { nodes: { id: string; position: number }[] } };
 	state: { type: string };
 	labels: { nodes: { name: string }[] };
 	comments: { nodes: { body: string; parent: { id: string } | null }[] };
@@ -129,6 +148,7 @@ export function toIssueDetails(issue: RawIssue): IssueDetails {
 		description: issue.description ?? "",
 		teamKey: issue.team.key,
 		stateType: issue.state.type,
+		startedStateId: [...issue.team.states.nodes].sort((a, b) => a.position - b.position)[0]?.id,
 		labels: issue.labels.nodes.map((label) => label.name),
 		privateNote: note?.body,
 	};

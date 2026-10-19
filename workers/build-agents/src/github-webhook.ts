@@ -3,13 +3,13 @@ import { signedBy } from "./signature.ts";
 /**
  * The GitHub App's webhook, turned into feedback for the agent whose branch it's about: reviews and comments on its
  * pull request, a failed CI run on its branch, and the pull request closing. Only for branches of this repository: a
- * fork can open a pull request from a branch with the same name, and its events must not reach the agent. Which agent,
- * and whether the author is trusted, is decided by the caller (`index.ts`), which can look up branches and collaborators.
+ * fork can open a pull request from a branch with the same name, and its events must not reach the agent. Which agent
+ * it is, and whether a listed bot is trusted too, is decided by the caller (`index.ts`).
  */
 
 export type GitHubEvent =
 	| { kind: "feedback"; branch: string; author: string; text: string; requestId: string }
-	| { kind: "ci_failed"; branch: string; runId: number; name: string; url: string; requestId: string }
+	| { kind: "ci_failed"; branch: string; sha: string; runId: number; name: string; url: string; requestId: string }
 	| { kind: "closed"; branch: string; merged: boolean };
 
 export type GitHubOutcome =
@@ -26,6 +26,8 @@ interface Payload {
 		id: number;
 		name: string;
 		head_branch: string;
+		head_sha: string;
+		run_attempt?: number;
 		head_repository: { full_name: string } | null;
 		conclusion: string | null;
 		html_url: string;
@@ -87,10 +89,12 @@ function toEvent(eventName: string | null, payload: Payload, repo: string): GitH
 			return {
 				kind: "ci_failed",
 				branch: run.head_branch,
+				sha: run.head_sha,
 				runId: run.id,
 				name: run.name,
 				url: run.html_url,
-				requestId: `github:run:${run.id}`,
+				// A re-run keeps the run's id: the attempt makes each failure its own message.
+				requestId: `github:run:${run.id}:${run.run_attempt ?? 1}`,
 			};
 		}
 		case "pull_request":
