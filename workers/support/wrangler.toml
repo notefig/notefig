@@ -21,6 +21,12 @@ APPROVER_IDS = "566cdfe1-fc7f-4489-bc41-99ee9694e025"
 AGENT_REPOSITORY_URL = "https://github.com/notefig/notefig"
 AGENT_BUDGET_CENTS = "2000"
 
+# The agent's memory: which Linear delivery started a session (a day), and
+# each issue's session (30 days), so later updates reach the same session.
+[[kv_namespaces]]
+binding = "AGENT_SESSIONS"
+id = "d737c6e09cea4fea9488e9117bc784d6"
+
 # 1 request a minute per IP, per route (the key is "<route>:<ip>").
 [[ratelimits]]
 name = "RATE_LIMITER"

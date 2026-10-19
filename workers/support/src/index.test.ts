@@ -18,6 +18,7 @@ function setup({ limited = false } = {}) {
     AGENT_USER_ID: "agent-user",
     APPROVER_IDS: "approver-user",
     AGENT_REPOSITORY_URL: "https://github.com/notefig/notefig",
+    AGENT_SESSIONS: { get: async () => null, put: async () => {} } as unknown as KVNamespace,
     AGENT_BUDGET_CENTS: "2000",
   };
   const fetchFn = (async (_input: RequestInfo | URL, init?: RequestInit) => {

@@ -24,6 +24,8 @@ export interface Env {
   /** Comma-separated Linear user ids. */
   APPROVER_IDS: string;
   AGENT_REPOSITORY_URL: string;
+  /** Which Linear delivery started a session, and each issue's session. */
+  AGENT_SESSIONS: KVNamespace;
   /** Each session's hard spend cap, in US cents. */
   AGENT_BUDGET_CENTS: string;
   // Set once with `wrangler secret put`; the agent route answers 503 until
@@ -92,7 +94,8 @@ async function linearWebhook(request: Request, env: Env, fetchFn: typeof fetch):
   if ("error" in read) return read.error;
   const linear = linearClient(env.LINEAR_API_KEY, fetchFn);
   const anthropic = new Anthropic({ apiKey: secrets.ANTHROPIC_API_KEY, fetch: fetchFn });
-  return handleLinearWebhook(await read.body.text(), request.headers.get("Linear-Signature"), {
+  const body = await read.body.text();
+  return handleLinearWebhook(body, request.headers.get("Linear-Signature"), request.headers.get("Linear-Delivery"), {
     config: {
       webhookSecret: secrets.LINEAR_WEBHOOK_SECRET,
       agentUserId: env.AGENT_USER_ID,
@@ -106,8 +109,12 @@ async function linearWebhook(request: Request, env: Env, fetchFn: typeof fetch):
       budgetCents: Number(env.AGENT_BUDGET_CENTS),
     },
     createSession: (params) => anthropic.beta.sessions.create(params),
+    sendMessage: (sessionId, content) =>
+      anthropic.beta.sessions.events.send(sessionId, { events: [{ type: "user.message", content }] }),
     issueComments: linear.issueComments,
     createComment: linear.createComment,
+    downloadFile: linear.downloadFile,
+    kv: env.AGENT_SESSIONS,
     now: Date.now,
   });
 }
