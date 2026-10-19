@@ -106,14 +106,15 @@ forbids copying it into commits or the PR.
 | A person chose this | The assignment's actor must be in `APPROVER_IDS`. Feedback filed by anyone else never starts the agent on its own |
 | It was accepted | The issue's state isn't Triage |
 | It can't overspend | The session's `budget`: Anthropic pauses it at the cap |
-| A retry can't start a second run | Each Linear delivery (`Linear-Delivery`) is claimed in KV before a session starts |
+| A retry can't act twice | Each Linear delivery (`Linear-Delivery`) the Worker acts on is claimed in KV first, so a retried one neither starts a second run nor repeats an update |
 | Screenshots come from Linear only | The Worker downloads `uploads.linear.app` files only (at most 5 per message), and its key goes nowhere else |
 
 Neither secret enters the sandbox. The repository token is used by
 Anthropic's git proxy, and the GitHub MCP credential sits in a vault. The
 sandbox reaches package managers and the agent's MCP server only. The
 route answers `503` until every secret below is set. If a session won't
-start, the Worker says so on the issue; assigning the agent again retries.
+start, or an update can't reach it, the Worker says so on the issue:
+assigning the agent again starts a new run.
 
 ### Setup
 

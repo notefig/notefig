@@ -229,7 +229,7 @@ test("forwards an approver's comment, with its screenshots, to the issue's sessi
   const { deps, messages } = setup();
   await deliver(issueEvent(), deps);
 
-  const response = await deliver(commentEvent(`Also check the outline.\n\n![](${SHOT})`), deps);
+  const response = await deliver(commentEvent(`Also check the outline.\n\n![](${SHOT})`), deps, "delivery-2");
   assert.deepEqual(await response.json(), { outcome: "forwarded", sessionId: "sesn_1" });
   assert.equal(messages.length, 1);
   const [{ sessionId, content }] = messages;
@@ -252,7 +252,7 @@ test("forwards an approver's edit to the issue's title or description", async ()
 
 test("doesn't forward anyone else's comments, the Worker's own, or to an issue with no session", async () => {
   const { deps, messages } = setup();
-  const before = await deliver(commentEvent("No session yet"), deps);
+  const before = await deliver(commentEvent("No session yet"), deps, "delivery-0");
   assert.deepEqual(await before.json(), { outcome: "ignored" });
 
   await deliver(issueEvent(), deps);
@@ -261,18 +261,35 @@ test("doesn't forward anyone else's comments, the Worker's own, or to an issue w
     commentEvent("Agent started: https://platform.claude.com/... (posted by the Worker)"),
     commentEvent("The agent couldn't start. Assign it to Notefig Support again to retry."),
   ];
-  for (const event of ignored) {
-    assert.deepEqual(await (await deliver(event, deps)).json(), { outcome: "ignored" }, JSON.stringify(event));
+  for (const [n, event] of ignored.entries()) {
+    const response = await deliver(event, deps, `delivery-c${n}`);
+    assert.deepEqual(await response.json(), { outcome: "ignored" }, JSON.stringify(event));
   }
   assert.equal(messages.length, 0);
 });
 
-test("reports a session that won't take the update, without asking Linear to retry", async () => {
-  const { deps } = setup({ sendFails: true });
+test("tells the approver on the issue when an update can't reach the agent", async () => {
+  const { deps, comments } = setup({ sendFails: true });
   await deliver(issueEvent(), deps);
-  const response = await quietly(() => deliver(commentEvent("One more thing"), deps));
+  const response = await quietly(() => deliver(commentEvent("One more thing"), deps, "delivery-2"));
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { outcome: "not-forwarded" });
+  assert.equal(
+    comments.at(-1)?.body,
+    "Your update didn't reach the agent. Post it again in a new comment, or assign the issue to Notefig Support again to start a new run.",
+  );
+  // That notice is the Worker's own, so it isn't forwarded back.
+  const notice = await deliver(commentEvent(comments.at(-1)?.body ?? ""), deps, "delivery-3");
+  assert.deepEqual(await notice.json(), { outcome: "ignored" });
+});
+
+test("forwards each update once, however often Linear retries it", async () => {
+  const { deps, messages } = setup();
+  await deliver(issueEvent(), deps, "delivery-1");
+  await deliver(commentEvent("Also check the outline."), deps, "delivery-2");
+  const retry = await deliver(commentEvent("Also check the outline."), deps, "delivery-2");
+  assert.deepEqual(await retry.json(), { outcome: "duplicate" });
+  assert.equal(messages.length, 1);
 });
 
 test("attaches only Linear-hosted images, at most five, skipping what isn't an image", async () => {

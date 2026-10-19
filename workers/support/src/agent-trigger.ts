@@ -65,7 +65,8 @@ const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif
 // so its comments are recognized by how they start, never forwarded.
 const STARTED = "Agent started: ";
 const NOT_STARTED = "The agent couldn't start.";
-const WORKER_COMMENTS = [STARTED, NOT_STARTED];
+const NOT_FORWARDED = "Your update didn't reach the agent.";
+const WORKER_COMMENTS = [STARTED, NOT_STARTED, NOT_FORWARDED];
 const LINEAR_UPLOAD_IMAGE = /!\[[^\]]*\]\((https:\/\/uploads\.linear\.app\/[^)\s]+)\)/g;
 
 interface IssueData {
@@ -109,17 +110,29 @@ export async function handleLinearWebhook(
   if (Math.abs(deps.now() - event.webhookTimestamp) > MAX_CLOCK_SKEW_MS) {
     return json(401, { error: "Stale webhook" });
   }
-  if (!deps.config.approverIds.includes(event.actor?.id ?? "")) return json(200, { outcome: "ignored" });
+  const action = actionFor(event, deps);
+  if (!action) return json(200, { outcome: "ignored" });
+  // Each delivery is acted on once: a retry of one that started a session
+  // or reached the agent must not do it again.
+  if (deliveryId) {
+    if (await deps.kv.get(`delivery:${deliveryId}`)) return json(200, { outcome: "duplicate" });
+    await deps.kv.put(`delivery:${deliveryId}`, "1", { expirationTtl: DAY_SECONDS });
+  }
+  return action();
+}
 
-  if (isIssue(event) && assignsAgent(event, deps.config)) return start(event.data, deliveryId, deps);
+/** What an approver's event asks of the agent, if anything. */
+function actionFor(event: LinearEvent, deps: AgentTriggerDeps): (() => Promise<Response>) | null {
+  if (!deps.config.approverIds.includes(event.actor?.id ?? "")) return null;
+  if (isIssue(event) && assignsAgent(event, deps.config)) return () => start(event.data, deps);
   if (isIssue(event) && editsText(event)) {
-    return forward(event.data.id, [issueEditText(event.data)], [event.data.description], deps);
+    return () => forward(event.data.id, issueEditText(event.data), [event.data.description], deps);
   }
   if (isComment(event) && event.action === "create" && !WORKER_COMMENTS.some((p) => event.data.body.startsWith(p))) {
     const author = event.actor?.name ?? "An approver";
-    return forward(event.data.issueId, [`New comment from ${author}:\n\n${event.data.body}`], [event.data.body], deps);
+    return () => forward(event.data.issueId, `New comment from ${author}:\n\n${event.data.body}`, [event.data.body], deps);
   }
-  return json(200, { outcome: "ignored" });
+  return null;
 }
 
 function isIssue(event: LinearEvent): event is LinearEvent & { type: "Issue"; data: IssueData } {
@@ -150,16 +163,11 @@ function issueEditText({ identifier, title, description }: IssueData): string {
 }
 
 /**
- * Starts the session for an assignment. Each Linear delivery is claimed
- * first, so a retried delivery can't start a second paid run. A start that
- * fails says so on the issue instead of leaving Linear to retry: assigning
- * the agent again is a new delivery, and a new try.
+ * Starts the session for an assignment. A start that fails says so on the
+ * issue instead of leaving Linear to retry: assigning the agent again is a
+ * new delivery, and a new try.
  */
-async function start(issue: IssueData, deliveryId: string | null, deps: AgentTriggerDeps): Promise<Response> {
-  if (deliveryId) {
-    if (await deps.kv.get(`delivery:${deliveryId}`)) return json(200, { outcome: "duplicate" });
-    await deps.kv.put(`delivery:${deliveryId}`, "1", { expirationTtl: DAY_SECONDS });
-  }
+async function start(issue: IssueData, deps: AgentTriggerDeps): Promise<Response> {
   let sessionId: string;
   try {
     sessionId = (await deps.createSession(await sessionParams(issue, deps))).id;
@@ -212,20 +220,29 @@ async function sessionParams(issue: IssueData, deps: AgentTriggerDeps): Promise<
   };
 }
 
-/** Sends an approver's update to the issue's session, if it has one. */
+/**
+ * Sends an approver's update to the issue's session, if it has one. If it
+ * can't be delivered (an outage, or a session archived or paused at its
+ * budget), the approver is told on the issue rather than left to assume
+ * the agent has it.
+ */
 async function forward(
   issueId: string,
-  text: string[],
+  text: string,
   markdown: (string | null | undefined)[],
   deps: AgentTriggerDeps,
 ): Promise<Response> {
   const sessionId = await deps.kv.get(`issue:${issueId}`);
   if (!sessionId) return json(200, { outcome: "ignored" });
   try {
-    await deps.sendMessage(sessionId, await withScreenshots(text.join("\n\n"), markdown, deps));
+    await deps.sendMessage(sessionId, await withScreenshots(text, markdown, deps));
   } catch (error) {
-    // A session that was archived, or paused at its budget, takes no messages.
     console.error("agent trigger: update not forwarded", error);
+    await comment(
+      deps,
+      issueId,
+      `${NOT_FORWARDED} Post it again in a new comment, or assign the issue to Notefig Support again to start a new run.`,
+    );
     return json(200, { outcome: "not-forwarded" });
   }
   return json(200, { outcome: "forwarded", sessionId });
