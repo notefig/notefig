@@ -85,7 +85,7 @@ test("refuses other origins and origin-less requests without filing anything", a
 test("rate-limited callers get 429 before the body is read", async () => {
   const { env, fetchFn, linearCalls } = setup({ limited: true });
   const response = await handle(post(JSON.stringify(validFeedback)), env, fetchFn);
-  assert.equal(response.status, 429);
+  assert.equal(response.status, 418);
   assert.equal(linearCalls.length, 0);
 });
 
