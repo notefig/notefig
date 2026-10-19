@@ -78,13 +78,21 @@ Agents session, billed to the Anthropic API account. When an approver
 (`APPROVER_IDS`) assigns an issue that's out of Triage to the agent account
 (`AGENT_USER_ID`, Notefig Support), the Worker:
 
-1. reads the issue's comments from Linear, the private debug report
-   included;
+1. reads every comment on the issue from Linear, the private debug report
+   included, and downloads the screenshots they show;
 2. starts a session of the **feedback builder** (`agents/feedback-builder/`)
-   with `notefig/notefig` attached on `main`, a hard spend cap of
-   `AGENT_BUDGET_CENTS` (default $20), and the issue and its comments as the
-   first message;
-3. comments on the issue with a link to the session in the Claude Console.
+   with `notefig/notefig` attached on `main` and a hard spend cap of
+   `AGENT_BUDGET_CENTS` (default $20). Its first message is the issue, its
+   comments and the screenshots as images;
+3. records the session for the issue in KV (`AGENT_SESSIONS`, 30 days) and
+   comments on the issue with a link to the session in the Claude Console.
+
+After that, the approver's comments on the issue, and edits to its title or
+description, go to the same session as new messages, screenshots included.
+A session that finished goes idle, and the message wakes it to continue on
+its branch and PR. Only approvers' updates are forwarded: comments on the
+public GitHub issue sync into Linear, so anyone else's would be a way to
+instruct the agent. The Worker's own comments are never forwarded.
 
 The agent works in Anthropic's sandbox and follows the rules in its system
 prompt. It pushes an `agent/<issue>` branch and opens a PR through the
@@ -98,12 +106,14 @@ forbids copying it into commits or the PR.
 | A person chose this | The assignment's actor must be in `APPROVER_IDS`. Feedback filed by anyone else never starts the agent on its own |
 | It was accepted | The issue's state isn't Triage |
 | It can't overspend | The session's `budget`: Anthropic pauses it at the cap |
+| A retry can't start a second run | Each Linear delivery (`Linear-Delivery`) is claimed in KV before a session starts |
+| Screenshots come from Linear only | The Worker downloads `uploads.linear.app` files only (at most 5 per message), and its key goes nowhere else |
 
 Neither secret enters the sandbox. The repository token is used by
 Anthropic's git proxy, and the GitHub MCP credential sits in a vault. The
 sandbox reaches package managers and the agent's MCP server only. The
 route answers `503` until every secret below is set. If a session won't
-start it answers `502`, and Linear retries the delivery.
+start, the Worker says so on the issue; assigning the agent again retries.
 
 ### Setup
 
@@ -132,8 +142,12 @@ start it answers `502`, and Linear retries the delivery.
    Protect `main` (require pull requests) so the agent's push can only go
    to its own branch.
 3. **Linear webhook.** Settings → API → Webhooks: URL
-   `https://support.notefig.com/v1/linear`, team MET, resource **Issues**.
-   Copy the signing secret.
+   `https://support.notefig.com/v1/linear`, team MET, resources **Issues**
+   and **Comments**. Copy the signing secret.
+   The Worker's own Linear key (`LINEAR_API_KEY`, from the
+   `LINEAR_SUPPORT_API_KEY` GitHub secret) should belong to Notefig Support,
+   not an approver. Its issues and comments then come from the support
+   account.
 4. **Worker secrets**, once. Deploys keep them. The ids come from
    `claude-lock.json`:
    ```bash
