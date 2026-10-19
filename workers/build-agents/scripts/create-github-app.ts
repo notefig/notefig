@@ -31,6 +31,15 @@ const manifest = JSON.parse(readFileSync(`${root}/github-app.json`, "utf8"));
 if (option("name")) manifest.name = option("name");
 if (option("webhook-url")) manifest.hook_attributes.url = option("webhook-url");
 
+/** Opens `url` in a browser, or says to when there's no opener. */
+function open(url: string) {
+	try {
+		execFileSync(process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open", [url]);
+	} catch {
+		console.log(`Open ${url} in a browser.`);
+	}
+}
+
 const PORT = 53_682;
 manifest.redirect_url = `http://127.0.0.1:${PORT}/callback`;
 const state = crypto.randomUUID();
@@ -56,7 +65,7 @@ const code = await new Promise<string>((resolve, reject) => {
 	server.listen(PORT, "127.0.0.1", () => {
 		const page = `http://127.0.0.1:${PORT}/`;
 		console.log(`Opening ${page} to register "${manifest.name}" on ${org}…`);
-		execFileSync(process.platform === "darwin" ? "open" : "xdg-open", [page]);
+		open(page);
 	});
 });
 
@@ -87,4 +96,4 @@ console.log(`Set the git author in wrangler.jsonc to ${app.slug}[bot]; commit th
 
 const install = `${app.html_url}/installations/new`;
 console.log(`Install the app on ${repo} only: ${install}`);
-execFileSync(process.platform === "darwin" ? "open" : "xdg-open", [install]);
+open(install);

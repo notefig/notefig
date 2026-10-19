@@ -60,7 +60,8 @@ provider key. Secrets go to the GitHub environment `build-agents`, and the relea
    writes the bot's git author into `wrangler.jsonc` (commit it), and opens the page to install the app. Install it on
    this repository only.
 3. **Linear app** (Linear has no API for creating apps). Settings → API → Applications → New:
-   - name **Notefig Build Agent**, any callback URL (it is never used);
+   - name **Notefig Build Agent**, callback URL `https://agents.notefig.com/v1/linear/installed` (the install link
+     bootstrap prints returns there);
    - turn on **Client credentials**;
    - webhooks on, URL `https://agents.notefig.com/v1/linear`, events **Agent session events** and
      **Permission changes**.

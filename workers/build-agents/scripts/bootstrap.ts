@@ -17,12 +17,6 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const vars = readVars();
-const requested = new Set(process.argv.slice(2).map((arg) => arg.replace(/^--/, "")));
-const runs = (part: string) => requested.size === 0 || requested.has(part);
-
-if (runs("github")) await github();
-if (runs("linear")) await linear();
-if (runs("gateway")) await gateway();
 
 /** The `vars` of wrangler.jsonc. Comments are stripped; values have no `//` in them. */
 function readVars(): Record<string, string> {
@@ -96,16 +90,15 @@ async function github() {
 			},
 		],
 	};
-	const existing = (gh([`repos/${repo}/rulesets`]) as { id: number; name: string; target: string }[]).filter(
-		(item) => item.target === "branch",
-	);
-	// Replaces the one ruleset on the default branch, whatever it was called; refuses to guess between several.
-	const current = existing.find((item) => item.name === RULESET_NAME) ?? (existing.length === 1 ? existing[0] : undefined);
-	if (!current && existing.length > 1) throw new Error(`Several branch rulesets on ${repo}; merge them into "${RULESET_NAME}" by hand`);
-	if (current) gh(["-X", "PUT", `repos/${repo}/rulesets/${current.id}`], ruleset);
+	// Only this script's own ruleset is created or updated; other rulesets on the repository are left as they are.
+	const existing = (gh([`repos/${repo}/rulesets`]) as { id: number; name: string }[]).find((item) => item.name === RULESET_NAME);
+	if (existing) gh(["-X", "PUT", `repos/${repo}/rulesets/${existing.id}`], ruleset);
 	else gh(["-X", "POST", `repos/${repo}/rulesets`], ruleset);
 	console.log(`GitHub: "${RULESET_NAME}" is active on ${repo}'s default branch.`);
 }
+
+/** The callback the Linear app registers; the Worker answers it with a page saying the install worked. */
+const LINEAR_CALLBACK = "https://agents.notefig.com/v1/linear/installed";
 
 // ── Linear ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -166,7 +159,7 @@ async function linear() {
 	const install = new URL("https://linear.app/oauth/authorize");
 	install.search = new URLSearchParams({
 		client_id: env("LINEAR_CLIENT_ID"),
-		redirect_uri: "https://agents.notefig.com/v1/linear/installed",
+		redirect_uri: LINEAR_CALLBACK,
 		response_type: "code",
 		scope: "read,write,app:assignable,app:mentionable",
 		actor: "app",
@@ -202,3 +195,13 @@ async function gateway() {
 	if (!created.ok) throw new Error(`AI Gateway (${created.status}): ${await created.text()}`);
 	console.log(`AI Gateway: created ${id}. Add a provider key or turn on unified billing in its dashboard.`);
 }
+
+// ── Run ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Last, so every constant above is initialized before a part uses it.
+
+const requested = new Set(process.argv.slice(2).map((arg) => arg.replace(/^--/, "")));
+const runs = (part: string) => requested.size === 0 || requested.has(part);
+
+if (runs("github")) await github();
+if (runs("linear")) await linear();
+if (runs("gateway")) await gateway();
