@@ -1,6 +1,7 @@
 import { type Env, readConfig } from "./config.ts";
 import { type GitHubEvent, readGitHubWebhook } from "./github-webhook.ts";
 import { gitHubClient } from "./github.ts";
+import { linearAgentClient } from "./linear.ts";
 import { type AgentCommand, readLinearWebhook } from "./linear-webhook.ts";
 
 export { GitGateway, RegistryGateway } from "./gateways.ts";
@@ -9,7 +10,7 @@ export { IssueAgent } from "./issue-agent.ts";
 /**
  * agents.notefig.com. Two webhooks in, each handed to the Durable Object of the issue it's about:
  *
- * - `POST /v1/linear`: Linear's agent session events (delegated, a message, stop).
+ * - `POST /v1/linear`: Linear's agent session events (delegated, a message, stop) and issue updates (unassigned).
  * - `POST /v1/github`: the GitHub App's events on the agent's pull requests and branches.
  *
  * Both answer as soon as the event is verified and handed over; Linear wants an answer within five seconds.
@@ -67,7 +68,12 @@ async function runLinear(env: Env, command: AgentCommand): Promise<void> {
 	try {
 		if (command.kind === "start") await stub.start(command);
 		else if (command.kind === "steer") await stub.steer(command);
-		else await stub.stop();
+		else if (command.kind === "stop") await stub.stop();
+		else {
+			// Unassigned: stop only if the issue was this app's to work on.
+			const app = await linearAgentClient({ clientId: env.LINEAR_CLIENT_ID, clientSecret: env.LINEAR_CLIENT_SECRET }).appUserId();
+			if (command.previousDelegateId === app) await stub.stop();
+		}
 	} catch (error) {
 		console.error(`linear ${command.kind} failed`, error);
 	}

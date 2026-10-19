@@ -110,6 +110,12 @@ export class IssueAgent extends DurableObject<Env> {
 		}
 		this.#put("issue", issue);
 		this.#put("prompt", input.prompt);
+		// The issue shows it's being worked on. Draft PRs don't move it, and an issue already further along stays put.
+		if ((issue.stateType === "backlog" || issue.stateType === "unstarted") && issue.startedStateId) {
+			await this.linear()
+				.moveIssue(issue.id, issue.startedStateId)
+				.catch((error: unknown) => console.error("linear: issue not moved to started", error));
+		}
 		await this.env.BRANCHES.put(issue.branchName, issue.id);
 		await this.#submit("Start working on the issue.", `linear:session:${input.sessionId}`, "followUp");
 	}

@@ -56,6 +56,16 @@ describe("an issue's agent", () => {
 		await idle(stub);
 	});
 
+	it("moves an accepted issue to In Progress when it starts, and leaves one already further along", async () => {
+		const todo = await prepared([{ text: "Done." }], { ...ISSUE, stateType: "unstarted" });
+		await start(todo);
+		expect(await runInDurableObject(todo, (agent: TestIssueAgent) => agent.moves())).toEqual(["issue-1→state-in-progress"]);
+
+		const started = await prepared([{ text: "Done." }]);
+		await start(started);
+		expect(await runInDurableObject(started, (agent: TestIssueAgent) => agent.moves())).toEqual([]);
+	});
+
 	it("turns down an issue still in Triage, or without the test label", async () => {
 		const triage = await prepared([], { ...ISSUE, stateType: "triage" });
 		await start(triage);

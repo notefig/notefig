@@ -28,6 +28,7 @@ export const ISSUE: IssueDetails = {
 	description: "The tree jumps when I rename a file.",
 	teamKey: "MET",
 	stateType: "started",
+	startedStateId: "state-in-progress",
 	privateNote: undefined,
 };
 
@@ -57,6 +58,10 @@ export class TestIssueAgent extends IssueAgent {
 		return this.ctx.storage.getAlarm();
 	}
 
+	moves(): string[] {
+		return this.ctx.storage.kv.get<string[]>("test:moves") ?? [];
+	}
+
 	modelCalls(): number {
 		return this.ctx.storage.kv.get<Script>("test:script")?.next ?? 0;
 	}
@@ -76,6 +81,10 @@ export class TestIssueAgent extends IssueAgent {
 				kv.put("test:activities", [...(kv.get<Activity[]>("test:activities") ?? []), activity]);
 			},
 			addLink: async () => {},
+			moveIssue: async (issueId, stateId) => {
+				kv.put("test:moves", [...(kv.get<string[]>("test:moves") ?? []), `${issueId}→${stateId}`]);
+			},
+			appUserId: async () => "app-user",
 			issue: async () => {
 				const issue = kv.get<IssueDetails>("test:issue");
 				if (!issue) throw new Error("No test issue");
