@@ -72,6 +72,10 @@ export class TestIssueAgent extends IssueAgent {
 		return this.ctx.storage.kv.get<string[]>("test:moves") ?? [];
 	}
 
+	lastPrompt(): string {
+		return this.ctx.storage.kv.get<string>("test:last-prompt") ?? "";
+	}
+
 	modelCalls(): number {
 		return this.ctx.storage.kv.get<Script>("test:script")?.next ?? 0;
 	}
@@ -120,6 +124,10 @@ export class TestIssueAgent extends IssueAgent {
 			const kv = this.ctx.storage.kv;
 			const script = kv.get<Script>("test:script") ?? { steps: [], next: 0 };
 			const step = script.steps[script.next] ?? { text: "unscripted" };
+			// The newest user message the model was sent, for tests that check what reached it.
+			const messages = (_request as { messages?: { role: string; content: unknown }[] }).messages ?? [];
+			const user = [...messages].reverse().find((message) => message.role === "user");
+			if (user) kv.put("test:last-prompt", JSON.stringify(user.content));
 			kv.put("test:script", { ...script, next: script.next + 1 });
 			if (step === "hang") {
 				this.#hung();

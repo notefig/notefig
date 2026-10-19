@@ -112,8 +112,14 @@ export class IssueAgent extends DurableObject<Env> {
 		// Already accepted (delegated again, or a redelivery): carry on in the newest session.
 		if (this.#get("issue")) {
 			this.#put("session", input.sessionId);
+			// The new session's context (the comment that mentioned the agent, say) replaces the old one in the issue
+			// section, and is the follow-up itself, so a new request isn't answered from old instructions.
+			if (input.prompt.trim()) this.#put("prompt", input.prompt);
 			await this.#post({ type: "thought", body: "Picking this up again." });
-			await this.#submit("Continue working on the issue.", `linear:session:${input.sessionId}`, "followUp");
+			const content = input.prompt.trim()
+				? `You've been delegated this issue again, in a new session. Its context, which may hold a new request:\n\n${input.prompt.trim()}\n\nContinue from where you are, following it.`
+				: "Continue working on the issue.";
+			await this.#submit(content, `linear:session:${input.sessionId}`, "followUp");
 			return;
 		}
 		// Starting: messages arriving before the issue is accepted wait in `pending` (see `steer`).

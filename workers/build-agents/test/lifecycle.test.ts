@@ -82,10 +82,14 @@ describe("an issue's agent", () => {
 		const stub = await prepared([{ text: "First pass." }, { text: "Carried on." }]);
 		await start(stub);
 		await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length === 1);
-		await runInDurableObject(stub, (agent: TestIssueAgent) => agent.start({ issueId: ISSUE.id, sessionId: "session-2", prompt: "" }));
+		await runInDurableObject(stub, (agent: TestIssueAgent) =>
+			agent.start({ issueId: ISSUE.id, sessionId: "session-2", prompt: "@agent please also handle folders" }),
+		);
 		const list = await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length === 2);
 		expect(list).toContainEqual({ type: "thought", body: "Picking this up again." });
 		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.modelCalls())).toBe(2);
+		// The new session's request reached the model.
+		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.lastPrompt())).toContain("please also handle folders");
 	});
 
 	it("submits messages a restart left in the start-up queue when it comes back", async () => {
