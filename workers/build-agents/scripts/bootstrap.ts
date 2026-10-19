@@ -155,12 +155,22 @@ async function linear() {
 		),
 	);
 	const wanted = [vars.LINEAR_TEST_LABEL, ...list(vars.TYPE_LABELS).map((pair) => pair.split("=")[0])].filter(Boolean);
+	const missing: string[] = [];
 	for (const name of wanted) {
 		if (known.has(name.toLowerCase())) continue;
-		await query(`mutation ($input: IssueLabelCreateInput!) { issueLabelCreate(input: $input) { success } }`, {
-			input: { name, teamId: team.id },
-		});
-		console.log(`Linear: created the "${name}" label on ${team.key}.`);
+		try {
+			await query(`mutation ($input: IssueLabelCreateInput!) { issueLabelCreate(input: $input) { success } }`, {
+				input: { name, teamId: team.id },
+			});
+			console.log(`Linear: created the "${name}" label on ${team.key}.`);
+		} catch (error) {
+			// Workspaces can keep label management to admins, and the app isn't one.
+			console.warn(`Linear: couldn't create "${name}" (${error instanceof Error ? error.message : error}).`);
+			missing.push(name);
+		}
+	}
+	if (missing.length > 0) {
+		console.warn(`Linear: create these labels on ${team.key} by hand (Team settings → Labels): ${missing.join(", ")}`);
 	}
 
 	const approvers = list(process.env.APPROVER_EMAILS ?? vars.APPROVER_EMAILS);
