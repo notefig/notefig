@@ -54,6 +54,11 @@ export class TestIssueAgent extends IssueAgent {
 		return this.ctx.storage.kv.get<Activity[]>("test:activities") ?? [];
 	}
 
+	/** Leaves messages in the start-up queue, as a restart in the middle of draining it would. */
+	queue(messages: { text: string; requestId: string }[]): void {
+		this.ctx.storage.kv.put("pending", messages);
+	}
+
 	/** Everything the object has stored, by key: empty once it has ended. */
 	stored(): string[] {
 		return [...this.ctx.storage.kv.list()].map(([key]) => key);

@@ -60,6 +60,7 @@ export class IssueAgent extends DurableObject<Env> {
 			this.#harness = await this.#open();
 			await this.#current();
 			this.#harness.resume();
+			await this.#drainPending();
 			await this.#heartbeat();
 		});
 	}
@@ -108,6 +109,13 @@ export class IssueAgent extends DurableObject<Env> {
 
 	/** Delegated in Linear: check the issue, then start working on it. */
 	async start(input: { issueId: string; sessionId: string; prompt: string }): Promise<void> {
+		// Already accepted (delegated again, or a redelivery): carry on in the newest session.
+		if (this.#get("issue")) {
+			this.#put("session", input.sessionId);
+			await this.#post({ type: "thought", body: "Picking this up again." });
+			await this.#submit("Continue working on the issue.", `linear:session:${input.sessionId}`, "followUp");
+			return;
+		}
 		// Starting: messages arriving before the issue is accepted wait in `pending` (see `steer`).
 		this.#put("session", input.sessionId);
 		let issue: IssueDetails;
@@ -136,13 +144,28 @@ export class IssueAgent extends DurableObject<Env> {
 		}
 		await this.env.BRANCHES.put(issue.branchName, issue.id);
 		await this.#submit("Start working on the issue.", `linear:session:${input.sessionId}`, "followUp");
-		// Messages that arrived while the issue was being read, in order.
-		const pending = this.#get("pending") ?? [];
-		this.ctx.storage.kv.delete("pending");
-		for (const message of pending) await this.#submit(message.text, message.requestId, "steer");
+		await this.#drainPending();
 	}
 
-	/** Turns a delegation down: says why, and keeps nothing, so later messages for it are dropped. */
+	/**
+	 * Submits the messages that arrived while the issue was being read, in order, each removed only once it's admitted.
+	 * Also run on every start of the object and alarm, so a restart in between loses none; a message submitted twice is
+	 * admitted once, by its request id.
+	 */
+	async #drainPending(): Promise<void> {
+		if (!this.#get("issue")) return;
+		for (let pending = this.#get("pending") ?? []; pending.length > 0; pending = this.#get("pending") ?? []) {
+			const [message, ...rest] = pending;
+			await this.#submit(message.text, message.requestId, "steer");
+			if (rest.length > 0) this.#put("pending", rest);
+			else this.ctx.storage.kv.delete("pending");
+		}
+	}
+
+	/**
+	 * Turns down a delegation that was never accepted: says why, and keeps nothing, so later messages for it are
+	 * dropped. (An accepted issue never gets here: `start` carries on with it instead.)
+	 */
 	async #refuse(body: string, type: "response" | "error" = "response"): Promise<void> {
 		await this.#post({ type, body }).catch((error: unknown) => console.error("linear: refusal not posted", error));
 		this.ctx.storage.kv.delete("pending");
@@ -234,6 +257,7 @@ export class IssueAgent extends DurableObject<Env> {
 
 	override async alarm(): Promise<void> {
 		this.#harness.resume();
+		await this.#drainPending();
 		await this.#heartbeat();
 	}
 

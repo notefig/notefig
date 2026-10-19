@@ -78,6 +78,27 @@ describe("an issue's agent", () => {
 		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).not.toContain("pending");
 	});
 
+	it("carries on in the new session when an accepted issue is delegated again", async () => {
+		const stub = await prepared([{ text: "First pass." }, { text: "Carried on." }]);
+		await start(stub);
+		await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length === 1);
+		await runInDurableObject(stub, (agent: TestIssueAgent) => agent.start({ issueId: ISSUE.id, sessionId: "session-2", prompt: "" }));
+		const list = await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length === 2);
+		expect(list).toContainEqual({ type: "thought", body: "Picking this up again." });
+		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.modelCalls())).toBe(2);
+	});
+
+	it("submits messages a restart left in the start-up queue when it comes back", async () => {
+		const stub = await prepared([{ text: "First pass." }, { text: "Used the helper." }]);
+		await start(stub);
+		await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length === 1);
+		await runInDurableObject(stub, (agent: TestIssueAgent) => agent.queue([{ text: "Use the helper", requestId: "linear:queued" }]));
+		await evictDurableObject(stub);
+		// The new instance drains the queue as it opens.
+		await eventually(stub, (agent) => agent.modelCalls(), (calls) => calls === 2);
+		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).not.toContain("pending");
+	});
+
 	it("keeps nothing for a delegation it turns down, so later messages for it are dropped", async () => {
 		const stub = await prepared([], { ...ISSUE, stateType: "triage" });
 		await start(stub);
