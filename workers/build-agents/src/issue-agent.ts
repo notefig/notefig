@@ -357,12 +357,23 @@ export class IssueAgent extends DurableObject<Env> {
 				name: "notefig.workspace",
 				hooks: [
 					hook(ToolTask, {
-						// Pi's coding tools say only that there is no environment; say why the container didn't start.
+						// Pi's coding tools say only that there is no environment; say why the container didn't start. A thrown
+						// error arrives as a `tool_error` diagnostic with no output, so both are checked.
 						afterTool: (_call, result) => {
 							const reason = this.#workspaceError;
-							const text = result.output?.map((part) => ("text" in part ? part.text : "")).join("") ?? "";
+							const text = [
+								...(result.output ?? []).map((part) => ("text" in part ? part.text : "")),
+								...(result.diagnostics ?? []).map((diagnostic) => diagnostic.message),
+							].join("\n");
 							if (!result.isError || !reason || !text.includes("No execution environment")) return undefined;
-							return { ...result, output: [{ type: "text", text: `The workspace couldn't start: ${reason}` }] };
+							const explained = `The workspace couldn't start: ${reason}`;
+							return {
+								...result,
+								output: [{ type: "text", text: explained }],
+								diagnostics: (result.diagnostics ?? []).map((diagnostic) =>
+									diagnostic.message.includes("No execution environment") ? { ...diagnostic, message: explained } : diagnostic,
+								),
+							};
 						},
 					}),
 				],

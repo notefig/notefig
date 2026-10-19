@@ -81,6 +81,10 @@ export class TestIssueAgent extends IssueAgent {
 		return this.ctx.storage.kv.get<string>("prompt") ?? "";
 	}
 
+	lastToolResult(): string {
+		return this.ctx.storage.kv.get<string>("test:last-tool-result") ?? "";
+	}
+
 	lastPrompt(): string {
 		return this.ctx.storage.kv.get<string>("test:last-prompt") ?? "";
 	}
@@ -142,6 +146,8 @@ export class TestIssueAgent extends IssueAgent {
 			const messages = (_request as { messages?: { role: string; content: unknown }[] }).messages ?? [];
 			const user = [...messages].reverse().find((message) => message.role === "user");
 			if (user) kv.put("test:last-prompt", JSON.stringify(user.content));
+			const toolResult = [...messages].reverse().find((message) => message.role === "toolResult");
+			if (toolResult) kv.put("test:last-tool-result", JSON.stringify(toolResult));
 			kv.put("test:script", { ...script, next: script.next + 1 });
 			if (step === "hang") {
 				this.#hung();

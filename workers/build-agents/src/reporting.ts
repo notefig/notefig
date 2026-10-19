@@ -28,6 +28,9 @@ export function reporting(post: (activity: Activity) => Promise<void>) {
 			}),
 			hook(ToolTask, {
 				afterTool: async (call, result) => {
+					// The question is the session's last word: an action after it would take the session out of
+					// "awaiting input", since Linear derives the state from the latest activity.
+					if (call.name === "ask_maintainer") return undefined;
 					await safely({
 						type: "action",
 						action: call.name,
