@@ -527,7 +527,8 @@ async function trustContainerCa(env: ContainerEnv): Promise<void> {
 		// Without the CA file (some local runs) there is nothing to trust; a clone then fails with git's own TLS error.
 		`test -f ${CONTAINER_CA} || { echo "no container CA at ${CONTAINER_CA}" >&2; exit 0; }`,
 		`cp ${CONTAINER_CA} /usr/local/share/ca-certificates/cloudflare-containers.crt`,
-		"update-ca-certificates >/dev/null 2>&1",
+		// Its output is kept: on success it's ignored, on failure it's the reason.
+		"update-ca-certificates",
 		"git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt",
 		`printf 'export NODE_EXTRA_CA_CERTS=%s\\nexport GIT_SSL_CAINFO=%s\\nexport CARGO_HTTP_CAINFO=%s\\n' ${CONTAINER_CA} /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt > /etc/profile.d/cloudflare-ca.sh`,
 	].join(" && ");
