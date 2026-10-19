@@ -357,12 +357,23 @@ export class IssueAgent extends DurableObject<Env> {
 				name: "notefig.workspace",
 				hooks: [
 					hook(ToolTask, {
-						// Pi's coding tools say only that there is no environment; say why the container didn't start.
+						// Pi's coding tools say only that there is no environment; say why the container didn't start. A thrown
+						// error arrives as a `tool_error` diagnostic with no output, so both are checked.
 						afterTool: (_call, result) => {
 							const reason = this.#workspaceError;
-							const text = result.output?.map((part) => ("text" in part ? part.text : "")).join("") ?? "";
+							const text = [
+								...(result.output ?? []).map((part) => ("text" in part ? part.text : "")),
+								...(result.diagnostics ?? []).map((diagnostic) => diagnostic.message),
+							].join("\n");
 							if (!result.isError || !reason || !text.includes("No execution environment")) return undefined;
-							return { ...result, output: [{ type: "text", text: `The workspace couldn't start: ${reason}` }] };
+							const explained = `The workspace couldn't start: ${reason}`;
+							return {
+								...result,
+								output: [{ type: "text", text: explained }],
+								diagnostics: (result.diagnostics ?? []).map((diagnostic) =>
+									diagnostic.message.includes("No execution environment") ? { ...diagnostic, message: explained } : diagnostic,
+								),
+							};
 						},
 					}),
 				],
@@ -421,6 +432,7 @@ export class IssueAgent extends DurableObject<Env> {
 			// An agent waiting days for a review doesn't keep its container running; the next tool call restarts it.
 			await container.setInactivityTimeout(CONTAINER_IDLE_MS);
 		}
+		await trustContainerCa(env);
 
 		const exists = await env.exists(`${REPO_DIR}/.git`, context);
 		if (!exists.ok || !exists.value) {
@@ -502,6 +514,28 @@ export class IssueAgent extends DurableObject<Env> {
 	#put<K extends keyof Stored>(key: K, value: NonNullable<Stored[K]>): void {
 		this.ctx.storage.kv.put(key, value);
 	}
+}
+
+/**
+ * The container reaches GitHub and the registries through Cloudflare's intercept, which re-signs TLS with the
+ * container CA. Environment variables given to `container.start` don't reach `exec`'d commands, so the CA goes where
+ * every tool looks: the system store (git, curl, cargo), git's global config, and `/etc/profile.d` for Node (the bash
+ * tool runs login shells). Idempotent; run on every start, snapshots included.
+ */
+async function trustContainerCa(env: ContainerEnv): Promise<void> {
+	const script = [
+		// Without the CA file (some local runs) there is nothing to trust; a clone then fails with git's own TLS error.
+		`test -f ${CONTAINER_CA} || { echo "no container CA at ${CONTAINER_CA}" >&2; exit 0; }`,
+		`cp ${CONTAINER_CA} /usr/local/share/ca-certificates/cloudflare-containers.crt`,
+		// Its output is kept: on success it's ignored, on failure it's the reason.
+		"update-ca-certificates",
+		"git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt",
+		`printf 'export NODE_EXTRA_CA_CERTS=%s\\nexport GIT_SSL_CAINFO=%s\\nexport CARGO_HTTP_CAINFO=%s\\n' ${CONTAINER_CA} /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt > /etc/profile.d/cloudflare-ca.sh`,
+	].join(" && ");
+	let output = "";
+	const result = await env.exec(["sh", "-c", script], { onOutput: (text) => (output += text) }, context);
+	if (!result.ok || result.value.exitCode !== 0) throw new Error(`Could not trust the container CA:\n${output || (result.ok ? "" : result.error.message)}`);
+	if (output.includes("no container CA")) console.warn(`container: ${output.trim()}`);
 }
 
 /** Waits for a just-started container to run commands. */

@@ -168,12 +168,22 @@ describe("an issue's agent", () => {
 		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.modelCalls())).toBe(2);
 	});
 
+	it("tells the model why the workspace couldn't start, instead of Pi's generic error", async () => {
+		const stub = await prepared([{ tool: "bash", args: { command: "npm ci" } }, { text: "Asked for help." }]);
+		await start(stub);
+		await eventually(stub, (agent) => agent.modelCalls(), (calls) => calls === 2);
+		const result = await runInDurableObject(stub, (agent: TestIssueAgent) => agent.lastToolResult());
+		expect(result).toContain("The workspace couldn't start: No workspace in tests");
+		expect(result).not.toContain("No execution environment");
+	});
+
 	it("asks the maintainer and stops until they answer", async () => {
 		const stub = await prepared([{ tool: "ask_maintainer", args: { question: "Should renames keep the scroll position?" } }]);
 		await start(stub);
 		const list = await eventually(stub, (agent) => agent.activities(), (value) => value.some((activity) => activity.type === "elicitation"));
 		expect(list).toContainEqual({ type: "elicitation", body: "Should renames keep the scroll position?" });
-		expect(list).toContainEqual({ type: "action", action: "ask_maintainer", parameter: "Should renames keep the scroll position?" });
+		// The question is the session's last activity, so Linear shows it as awaiting input.
+		expect(list.at(-1)).toEqual({ type: "elicitation", body: "Should renames keep the scroll position?" });
 		await idle(stub);
 		// The question ended the run: no model call after it.
 		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.modelCalls())).toBe(1);
