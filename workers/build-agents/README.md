@@ -45,7 +45,44 @@ time so they stay out of the repository: `APPROVER_EMAILS` (from the GitHub vari
 | `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_WEBHOOK_SECRET` | the GitHub App |
 | `AI_GATEWAY_TOKEN` | a Cloudflare API token with AI Gateway Run |
 
-Registering the apps and syncing the secrets is scripted; see the setup section (stage 2).
+## Setup, or moving to other accounts
+
+Everything below is a script, except two forms no API offers: creating the Linear app, and giving the AI Gateway a
+provider key. Secrets go to the GitHub environment `build-agents`, and the release workflow copies them to the Worker.
+
+1. **Edit `wrangler.jsonc`'s vars** for the new accounts: the repo, the Linear team key, the labels, the model and the
+   custom domain in `routes`. In GitHub, set the variable `BUILD_AGENTS_APPROVERS` (comma-separated emails).
+2. **GitHub App.** As an org owner:
+   ```bash
+   npm run create-github-app -- <org>
+   ```
+   It creates the `build-agents` environment, registers the app from `github-app.json`, stores `GH_APP_ID`, `GH_APP_PRIVATE_KEY` and `GH_APP_WEBHOOK_SECRET`,
+   writes the bot's git author into `wrangler.jsonc` (commit it), and opens the page to install the app. Install it on
+   this repository only.
+3. **Linear app** (Linear has no API for creating apps). Settings → API → Applications → New:
+   - name **Notefig Build Agent**, callback URL `https://agents.notefig.com/v1/linear/installed` (the install link
+     bootstrap prints returns there);
+   - turn on **Client credentials**;
+   - webhooks on, URL `https://agents.notefig.com/v1/linear`, events **Agent session events** and
+     **Permission changes**.
+
+   Then store its values:
+   ```bash
+   gh secret set LINEAR_CLIENT_ID --env build-agents
+   gh secret set LINEAR_CLIENT_SECRET --env build-agents
+   gh secret set LINEAR_WEBHOOK_SECRET --env build-agents
+   ```
+4. **Cloudflare.** Make an API token with AI Gateway Run and store it as `AI_GATEWAY_TOKEN`. The deploy token
+   (`CLOUDFLARE_API_TOKEN`) also needs Workers, Containers, KV and AI Gateway edit rights.
+5. **Bootstrap** (idempotent; the release workflow runs the Linear and gateway parts again):
+   ```bash
+   LINEAR_CLIENT_ID=… LINEAR_CLIENT_SECRET=… CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… \
+     APPROVER_EMAILS=… npm run bootstrap
+   ```
+   It protects `main` (pull requests and checks required; admins and the release workflows bypass), creates the Linear labels, checks the
+   team and approvers, creates the AI Gateway, and prints the link that installs the Linear app as an agent.
+   In the gateway's dashboard, add a provider key or turn on unified billing.
+6. **Release.** Run the "Release Build Agents" workflow.
 
 ## Development
 

@@ -1,0 +1,15 @@
+{
+	"name": "notefig-build-agent",
+	"description": "Implements accepted Notefig issues and opens pull requests. Driven from Linear by agents.notefig.com.",
+	"url": "https://notefig.com",
+	"hook_attributes": { "url": "https://agents.notefig.com/v1/github", "active": true },
+	"public": false,
+	"default_permissions": {
+		"metadata": "read",
+		"contents": "write",
+		"pull_requests": "write",
+		"actions": "read",
+		"checks": "read"
+	},
+	"default_events": ["pull_request", "pull_request_review", "pull_request_review_comment", "workflow_run"]
+}

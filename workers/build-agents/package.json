@@ -7,7 +7,9 @@
     "test": "vitest --run",
     "typecheck": "tsc --noEmit",
     "dev": "npx wrangler@4.151.1 dev",
-    "deploy": "npx wrangler@4.151.1 deploy"
+    "deploy": "npx wrangler@4.151.1 deploy",
+    "bootstrap": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/bootstrap.ts",
+    "create-github-app": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/create-github-app.ts"
   },
   "dependencies": {
     "@cloudflare/sandbox": "1.0.1",

@@ -20,6 +20,10 @@ const MAX_BODY_BYTES = 1024 * 1024;
 export default {
 	async fetch(request, env, ctx): Promise<Response> {
 		const url = new URL(request.url);
+		// Where Linear returns after an admin installs the app (the link bootstrap prints). The install itself is done.
+		if (request.method === "GET" && url.pathname === "/v1/linear/installed") {
+			return new Response("The build agent is installed in Linear. You can close this tab.\n");
+		}
 		if (request.method !== "POST") return json(405, { error: "Method not allowed" });
 		const body = await request.text();
 		if (body.length > MAX_BODY_BYTES) return json(413, { error: "Body too large" });
