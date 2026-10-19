@@ -38,7 +38,7 @@ secrets, and the routine are removed once build agents run in production (see bu
 |---|---|
 | **Cloudflare** (Workers **Paid** plan; containers and the Kimi model need it) | Both Workers, their custom domains, KV namespaces, the rate limiter, the build agents' Durable Objects and container image, the AI Gateway `notefig-build-agents`, Workers AI |
 | **GitHub** `notefig/notefig` | The code, the deploy workflows, the `build-agents` environment (secrets and a variable), repo secrets, the `notefig-build-agent` GitHub App |
-| **Linear** (workspace with team **MET**) | Triage and issues; the **Notefig Build Agent** app; the Notefig Support user (the old routine's assignee) |
+| **Linear** (workspace with team **MET**) | Triage and issues; the **Notefig Build Agent** app; the **Notefig Support** user, whose API key the support Worker files feedback with (it was also the old routine's assignee) |
 
 ## Every secret and where it lives
 
@@ -50,7 +50,7 @@ Values are never in the repository. GitHub is the source of truth; deploys copy 
 |---|---|---|
 | `CLOUDFLARE_API_TOKEN` | `deploy-support.yml`, `deploy-marketing.yml`, `release-desktop.yml` | Cloudflare token for those deploys (set March 2026). Not used by build agents: their environment has its own |
 | `CLOUDFLARE_ACCOUNT_ID` | the deploys above, and `release-build-agents.yml` | The Cloudflare account id (not secret, kept with the token) |
-| `LINEAR_SUPPORT_API_KEY` | `deploy-support.yml` → Worker secret `LINEAR_API_KEY` | Linear personal API key the support Worker files issues and private comments with. It's currently Parsa's, so feedback issues show Parsa as the creator; a key from the Notefig Support user would change that |
+| `LINEAR_SUPPORT_API_KEY` | `deploy-support.yml` → Worker secret `LINEAR_API_KEY` | Personal API key of the **Notefig Support** Linear user: the support Worker files feedback issues and their private comments as that user |
 
 The desktop, CLI and marketing workflows have their own secrets (Apple, Tauri signing, PostHog, Vercel); they're not
 part of the Workers.
