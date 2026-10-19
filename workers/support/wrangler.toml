@@ -14,17 +14,14 @@ LINEAR_TRIAGE_STATE_ID = "8a00261b-f046-41f4-bf68-b793a66424ef"
 LINEAR_PROJECT_ID = "1acafc86-55ee-4d81-a54e-7e3d46aa9f8a"
 LINEAR_FEEDBACK_LABEL_ID = "bfabbb0a-e788-4584-848f-551a7b29f9e0"
 # The agent: an accepted issue assigned to Notefig Support by an approver
-# (Parsa) starts a Claude Managed Agents session on this repository, capped
-# at AGENT_BUDGET_CENTS. See README.md, "Agent".
+# (Parsa) starts a Claude Code routine. See README.md, "Agent".
 AGENT_USER_ID = "c62305f9-fdea-4fb1-9ecd-9c2e71069c46"
 APPROVER_IDS = "566cdfe1-fc7f-4489-bc41-99ee9694e025"
-AGENT_REPOSITORY_URL = "https://github.com/notefig/notefig"
-AGENT_BUDGET_CENTS = "2000"
 
-# The agent's memory: which Linear delivery started a session (a day), and
-# each issue's session (30 days), so later updates reach the same session.
+# Which Linear deliveries already fired a routine run (kept a day), so a
+# retried delivery can't fire a second one.
 [[kv_namespaces]]
-binding = "AGENT_SESSIONS"
+binding = "AGENT_DELIVERIES"
 id = "d737c6e09cea4fea9488e9117bc784d6"
 
 # 1 request a minute per IP, per route (the key is "<route>:<ip>").

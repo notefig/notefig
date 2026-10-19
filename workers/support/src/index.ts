@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { handleLinearWebhook } from "./agent-trigger.ts";
 import { submitFeedback } from "./feedback.ts";
 import { corsHeaders, json, readBody } from "./http.ts";
@@ -23,21 +22,13 @@ export interface Env {
   AGENT_USER_ID: string;
   /** Comma-separated Linear user ids. */
   APPROVER_IDS: string;
-  AGENT_REPOSITORY_URL: string;
-  /** Which Linear delivery started a session, and each issue's session. */
-  AGENT_SESSIONS: KVNamespace;
-  /** Each session's hard spend cap, in US cents. */
-  AGENT_BUDGET_CENTS: string;
-  // Set once with `wrangler secret put`; the agent route answers 503 until
-  // they all are.
+  /** Which Linear deliveries already fired a run. */
+  AGENT_DELIVERIES: KVNamespace;
+  // Secrets set once with `wrangler secret put`; the agent route answers
+  // 503 until they are.
   LINEAR_WEBHOOK_SECRET?: string;
-  ANTHROPIC_API_KEY?: string;
-  MANAGED_AGENT_ID?: string;
-  MANAGED_ENVIRONMENT_ID?: string;
-  AGENT_VAULT_ID?: string;
-  AGENT_GITHUB_TOKEN?: string;
-  /** The agent's Anthropic workspace (`wrkspc_…`), for the session link; "default" when unset. */
-  AGENT_WORKSPACE_ID?: string;
+  CLAUDE_ROUTINE_FIRE_URL?: string;
+  CLAUDE_ROUTINE_TOKEN?: string;
 }
 
 // Up to three 2 MB screenshots, a 50,000-character debug report, and the message.
@@ -90,51 +81,27 @@ async function route(request: Request, env: Env, fetchFn: typeof fetch): Promise
 
 async function linearWebhook(request: Request, env: Env, fetchFn: typeof fetch): Promise<Response> {
   if (request.method !== "POST") return json(405, { error: "Use POST" });
-  const secrets = agentSecrets(env);
-  if (!secrets) return json(503, { error: "Agent trigger not configured" });
+  const { LINEAR_WEBHOOK_SECRET, CLAUDE_ROUTINE_FIRE_URL, CLAUDE_ROUTINE_TOKEN } = env;
+  if (!LINEAR_WEBHOOK_SECRET || !CLAUDE_ROUTINE_FIRE_URL || !CLAUDE_ROUTINE_TOKEN) {
+    return json(503, { error: "Agent trigger not configured" });
+  }
   const read = await readBody(request, MAX_WEBHOOK_BYTES);
   if ("error" in read) return read.error;
-  const linear = linearClient(env.LINEAR_API_KEY, fetchFn);
-  const anthropic = new Anthropic({ apiKey: secrets.ANTHROPIC_API_KEY, fetch: fetchFn });
   const body = await read.body.text();
   return handleLinearWebhook(body, request.headers.get("Linear-Signature"), request.headers.get("Linear-Delivery"), {
     config: {
-      webhookSecret: secrets.LINEAR_WEBHOOK_SECRET,
+      webhookSecret: LINEAR_WEBHOOK_SECRET,
       agentUserId: env.AGENT_USER_ID,
       approverIds: env.APPROVER_IDS.split(","),
       triageStateId: env.LINEAR_TRIAGE_STATE_ID,
-      agentId: secrets.MANAGED_AGENT_ID,
-      environmentId: secrets.MANAGED_ENVIRONMENT_ID,
-      vaultId: secrets.AGENT_VAULT_ID,
-      repositoryUrl: env.AGENT_REPOSITORY_URL,
-      githubToken: secrets.AGENT_GITHUB_TOKEN,
-      budgetCents: Number(env.AGENT_BUDGET_CENTS),
-      workspaceId: env.AGENT_WORKSPACE_ID || "default",
+      routineFireUrl: CLAUDE_ROUTINE_FIRE_URL,
+      routineToken: CLAUDE_ROUTINE_TOKEN,
     },
-    createSession: (params) => anthropic.beta.sessions.create(params),
-    sendMessage: (sessionId, content) =>
-      anthropic.beta.sessions.events.send(sessionId, { events: [{ type: "user.message", content }] }),
-    issueComments: linear.issueComments,
-    createComment: linear.createComment,
-    downloadFile: linear.downloadFile,
-    kv: env.AGENT_SESSIONS,
+    fetchFn,
+    createComment: linearClient(env.LINEAR_API_KEY, fetchFn).createComment,
+    kv: env.AGENT_DELIVERIES,
     now: Date.now,
   });
-}
-
-const AGENT_SECRETS = [
-  "LINEAR_WEBHOOK_SECRET",
-  "ANTHROPIC_API_KEY",
-  "MANAGED_AGENT_ID",
-  "MANAGED_ENVIRONMENT_ID",
-  "AGENT_VAULT_ID",
-  "AGENT_GITHUB_TOKEN",
-] as const;
-
-/** The agent route's secrets, or null while any is missing. */
-function agentSecrets(env: Env): Record<(typeof AGENT_SECRETS)[number], string> | null {
-  const secrets = Object.fromEntries(AGENT_SECRETS.map((name) => [name, env[name]]));
-  return AGENT_SECRETS.every((name) => secrets[name]) ? (secrets as Record<(typeof AGENT_SECRETS)[number], string>) : null;
 }
 
 export default {

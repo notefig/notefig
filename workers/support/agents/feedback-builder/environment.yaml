@@ -1,6 +1,0 @@
-# The sandbox the feedback builder works in: package managers (npm) and the
-# agent's MCP servers only. Git reaches GitHub through Anthropic's proxy.
-name: notefig-feedback-builder
-config:
-  type: cloud
-  networking: {type: limited, allow_package_managers: true, allow_mcp_servers: true}

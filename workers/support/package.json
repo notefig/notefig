@@ -13,8 +13,5 @@
     "@cloudflare/workers-types": "5.20261006.1",
     "@types/node": "22.19.1",
     "typescript": "5.9.3"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "0.135.0"
   }
 }
