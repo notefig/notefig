@@ -56,7 +56,7 @@ provider key. Secrets go to the GitHub environment `build-agents`, and the relea
    ```bash
    npm run create-github-app -- <org>
    ```
-   It registers the app from `github-app.json`, stores `GH_APP_ID`, `GH_APP_PRIVATE_KEY` and `GH_APP_WEBHOOK_SECRET`,
+   It creates the `build-agents` environment, registers the app from `github-app.json`, stores `GH_APP_ID`, `GH_APP_PRIVATE_KEY` and `GH_APP_WEBHOOK_SECRET`,
    writes the bot's git author into `wrangler.jsonc` (commit it), and opens the page to install the app. Install it on
    this repository only.
 3. **Linear app** (Linear has no API for creating apps). Settings → API → Applications → New:

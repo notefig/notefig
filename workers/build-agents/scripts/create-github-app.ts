@@ -76,6 +76,8 @@ const conversion = await fetch(`https://api.github.com/app-manifests/${code}/con
 if (!conversion.ok) throw new Error(`Manifest conversion failed (${conversion.status}): ${await conversion.text()}`);
 const app = (await conversion.json()) as { id: number; slug: string; pem: string; webhook_secret: string; html_url: string };
 
+// The environment the secrets go on; creating it again changes nothing.
+execFileSync("gh", ["api", "-X", "PUT", `repos/${repo}/environments/${environment}`, "--silent"]);
 const setSecret = (name: string, value: string) =>
 	execFileSync("gh", ["secret", "set", name, "--env", environment, "--repo", repo], { input: value });
 setSecret("GH_APP_ID", String(app.id));
