@@ -1,0 +1,31 @@
+// The Worker as tests run it: wrangler.jsonc without the container and route, with test values for vars and secrets.
+{
+	"name": "notefig-build-agents-test",
+	"main": "../src/index.ts",
+	"compatibility_date": "2026-10-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"vars": {
+		"GITHUB_REPO": "notefig/notefig",
+		"LINEAR_TEAM_KEY": "MET",
+		"LINEAR_TEST_LABEL": "agent-test",
+		"APPROVER_EMAILS": "approver@example.com",
+		"TRUSTED_REVIEWERS": "greptile-apps[bot]",
+		"TYPE_LABELS": "Bug=fix,Feature=feat,Improvement=improve",
+		"MODEL_PROVIDER": "cloudflare-ai-gateway",
+		"MODEL_ID": "claude-sonnet-5-5",
+		"AI_GATEWAY_ID": "test",
+		"CLOUDFLARE_ACCOUNT_ID": "test",
+		"GIT_AUTHOR_NAME": "test[bot]",
+		"GIT_AUTHOR_EMAIL": "1+test[bot]@users.noreply.github.com",
+		"LINEAR_CLIENT_ID": "linear-client",
+		"LINEAR_CLIENT_SECRET": "linear-secret",
+		"LINEAR_WEBHOOK_SECRET": "linear-webhook-secret",
+		"GH_APP_ID": "1",
+		"GH_APP_PRIVATE_KEY": "",
+		"GH_APP_WEBHOOK_SECRET": "github-webhook-secret",
+		"AI_GATEWAY_TOKEN": "gateway-token"
+	},
+	"durable_objects": { "bindings": [{ "name": "ISSUE_AGENT", "class_name": "IssueAgent" }] },
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["IssueAgent"] }],
+	"kv_namespaces": [{ "binding": "BRANCHES", "id": "test-branches" }]
+}
