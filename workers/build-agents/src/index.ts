@@ -80,18 +80,25 @@ async function runGitHub(env: Env, event: GitHubEvent): Promise<void> {
 	try {
 		if (event.kind === "closed") return await stub.closed(event);
 		if (event.kind === "ci_failed") return await stub.ciFailed(event);
-		if (!(await trusted(env, event.author))) return;
+		if (!(await trusted(env, event))) {
+			console.log(`github: ignored ${event.requestId} from ${event.author}, who can't push to the repository`);
+			return;
+		}
 		await stub.feedback(event);
 	} catch (error) {
 		console.error(`github ${event.kind} failed`, error);
 	}
 }
 
-/** A review reaches the agent only from a collaborator or a listed bot; the repository is public. */
-async function trusted(env: Env, login: string): Promise<boolean> {
+/**
+ * A review reaches the agent only from someone who can push to the repository, or a listed bot; the repository is
+ * public. GitHub's `author_association` settles most cases without a call, but reports a private org membership as
+ * CONTRIBUTOR, so anyone else is checked against their permission.
+ */
+async function trusted(env: Env, event: { author: string; trusted: boolean }): Promise<boolean> {
 	const config = readConfig(env);
-	if (config.trustedReviewers.includes(login.toLowerCase())) return true;
-	return gitHubClient({ appId: env.GH_APP_ID, privateKey: env.GH_APP_PRIVATE_KEY }, config.repo).isCollaborator(login);
+	if (event.trusted || config.trustedReviewers.includes(event.author.toLowerCase())) return true;
+	return gitHubClient({ appId: env.GH_APP_ID, privateKey: env.GH_APP_PRIVATE_KEY }, config.repo).canWrite(event.author);
 }
 
 function json(status: number, body: unknown): Response {

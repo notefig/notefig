@@ -88,7 +88,7 @@ export class TestIssueAgent extends IssueAgent {
 		const refuse = async (): Promise<never> => {
 			throw new Error("No GitHub in tests");
 		};
-		return { token: refuse, upsertPullRequest: refuse, isCollaborator: async () => false, failedJobs: async () => [] };
+		return { token: refuse, upsertPullRequest: refuse, canWrite: async () => false, failedJobs: async () => [] };
 	}
 
 	protected override workspace(): Promise<ExecutionEnv> {

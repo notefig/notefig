@@ -76,9 +76,23 @@ export class IssueAgent extends DurableObject<Env> {
 				},
 				context,
 			);
+			await this.#current();
 			this.#harness.resume();
 			await this.#heartbeat();
 		});
+	}
+
+	/**
+	 * A conversation keeps the instructions and model it was created with. After a release changes either, an agent
+	 * that is already running picks the new ones up here, from its next model request on.
+	 */
+	async #current(): Promise<void> {
+		const root = await this.#root();
+		const agent = await root.agent(context);
+		const { model } = this.#config;
+		const stale =
+			agent.instructions !== INSTRUCTIONS || agent.model?.provider !== model.provider || agent.model?.modelId !== model.modelId;
+		if (stale) await root.configure({ instructions: INSTRUCTIONS, model }, context);
 	}
 
 	/** Delegated in Linear: check the issue, then start working on it. */
@@ -111,12 +125,27 @@ export class IssueAgent extends DurableObject<Env> {
 		await this.#submit(input.text, input.requestId, "steer");
 	}
 
-	async ciFailed(input: { runId: number; name: string; url: string; requestId: string }): Promise<void> {
+	async ciFailed(input: { branch: string; sha: string; runId: number; name: string; url: string; requestId: string }): Promise<void> {
 		const jobs = await this.github().failedJobs(input.runId);
-		const lines = jobs.map((job) => `- ${job.name}${job.steps.length ? `: ${job.steps.join(", ")}` : ""} (${job.url})`);
-		const text = `CI failed on your branch: ${input.name} (${input.url}).\n${lines.join("\n")}\nReproduce it locally, fix it and push again.`;
+		const sections = jobs.map((job) =>
+			[
+				`### ${job.name}${job.steps.length ? ` (failed step: ${job.steps.join(", ")})` : ""}`,
+				job.url,
+				...(job.logTail ? ["The end of its log:", "```", job.logTail, "```"] : []),
+			].join("\n"),
+		);
+		const text = [
+			`CI failed on your branch: ${input.name}, on commit ${input.sha.slice(0, 7)} (${input.url}).`,
+			// Someone else may have pushed to the branch since your last push.
+			`If your clone doesn't have that commit, run \`git pull --rebase origin ${input.branch}\` first.`,
+			"",
+			...sections,
+			"",
+			"Reproduce it locally, fix it, and push again.",
+		].join("\n");
 		await this.#submit(text, input.requestId, "steer");
 	}
+
 
 	/** The session's stop button: abort the run and free the container. */
 	async stop(): Promise<void> {

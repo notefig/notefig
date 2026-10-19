@@ -3,13 +3,13 @@ import { signedBy } from "./signature.ts";
 /**
  * The GitHub App's webhook, turned into feedback for the agent whose branch it's about: reviews and comments on its
  * pull request, a failed CI run on its branch, and the pull request closing. Only for branches of this repository: a
- * fork can open a pull request from a branch with the same name, and its events must not reach the agent. Which agent,
- * and whether the author is trusted, is decided by the caller (`index.ts`), which can look up branches and collaborators.
+ * fork can open a pull request from a branch with the same name, and its events must not reach the agent. Which agent
+ * it is, and whether a listed bot is trusted too, is decided by the caller (`index.ts`).
  */
 
 export type GitHubEvent =
-	| { kind: "feedback"; branch: string; author: string; text: string; requestId: string }
-	| { kind: "ci_failed"; branch: string; runId: number; name: string; url: string; requestId: string }
+	| { kind: "feedback"; branch: string; author: string; trusted: boolean; text: string; requestId: string }
+	| { kind: "ci_failed"; branch: string; sha: string; runId: number; name: string; url: string; requestId: string }
 	| { kind: "closed"; branch: string; merged: boolean };
 
 export type GitHubOutcome =
@@ -20,12 +20,14 @@ interface Payload {
 	action?: string;
 	sender?: { login: string; type: string };
 	pull_request?: { head: { ref: string; repo: { full_name: string } | null }; merged?: boolean; html_url: string };
-	review?: { id: number; body: string | null; state: string; user: { login: string } };
-	comment?: { id: number; body: string; path?: string; line?: number | null; user: { login: string } };
+	review?: { id: number; body: string | null; state: string; user: { login: string }; author_association?: string };
+	comment?: { id: number; body: string; path?: string; line?: number | null; user: { login: string }; author_association?: string };
 	workflow_run?: {
 		id: number;
 		name: string;
 		head_branch: string;
+		head_sha: string;
+		run_attempt?: number;
 		head_repository: { full_name: string } | null;
 		conclusion: string | null;
 		html_url: string;
@@ -64,6 +66,7 @@ function toEvent(eventName: string | null, payload: Payload, repo: string): GitH
 				kind: "feedback",
 				branch,
 				author: review.user.login,
+				trusted: maintains(review.author_association),
 				text: `Review from ${review.user.login} (${state}):\n\n${review.body?.trim() || "(no summary)"}`,
 				requestId: `github:review:${review.id}`,
 			};
@@ -76,6 +79,7 @@ function toEvent(eventName: string | null, payload: Payload, repo: string): GitH
 				kind: "feedback",
 				branch,
 				author: comment.user.login,
+				trusted: maintains(comment.author_association),
 				text: `Review comment from ${comment.user.login}${where}:\n\n${comment.body}`,
 				requestId: `github:review-comment:${comment.id}`,
 			};
@@ -87,10 +91,12 @@ function toEvent(eventName: string | null, payload: Payload, repo: string): GitH
 			return {
 				kind: "ci_failed",
 				branch: run.head_branch,
+				sha: run.head_sha,
 				runId: run.id,
 				name: run.name,
 				url: run.html_url,
-				requestId: `github:run:${run.id}`,
+				// A re-run keeps the run's id: the attempt makes each failure its own message.
+				requestId: `github:run:${run.id}:${run.run_attempt ?? 1}`,
 			};
 		}
 		case "pull_request":
@@ -99,4 +105,12 @@ function toEvent(eventName: string | null, payload: Payload, repo: string): GitH
 		default:
 			return undefined;
 	}
+}
+
+/**
+ * Whether the payload's `author_association` already says the author has a hand in the repository: its owner, an org
+ * member, or a collaborator. A private org membership shows as CONTRIBUTOR, so `false` here means "check", not "no".
+ */
+function maintains(association: string | undefined): boolean {
+	return association === "OWNER" || association === "MEMBER" || association === "COLLABORATOR";
 }
