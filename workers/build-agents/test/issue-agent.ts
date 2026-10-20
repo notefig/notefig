@@ -36,6 +36,8 @@ export class TestIssueAgent extends IssueAgent {
 	/** Resolves when this instance's model request starts and hangs. */
 	readonly hanging: Promise<void>;
 	#hung!: () => void;
+	/** While set, reading the issue from Linear waits for it. */
+	#issueHeld: Promise<void> | undefined;
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
@@ -44,6 +46,16 @@ export class TestIssueAgent extends IssueAgent {
 
 	script(steps: Step[]): void {
 		this.ctx.storage.kv.put("test:script", { steps, next: 0 } satisfies Script);
+	}
+
+	/** Holds the next issue reads until the returned function is called, as when Linear is slow. */
+	holdIssue(): () => void {
+		let release!: () => void;
+		this.#issueHeld = new Promise((resolve) => (release = resolve));
+		return () => {
+			this.#issueHeld = undefined;
+			release();
+		};
 	}
 
 	setIssue(issue: IssueDetails): void {
@@ -124,6 +136,7 @@ export class TestIssueAgent extends IssueAgent {
 			},
 			appUserId: async () => "app-user",
 			issue: async () => {
+				await this.#issueHeld;
 				const issue = kv.get<IssueDetails>("test:issue");
 				if (!issue) throw new Error("No test issue");
 				return issue;

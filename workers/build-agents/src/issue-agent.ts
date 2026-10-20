@@ -123,7 +123,8 @@ export class IssueAgent extends DurableObject<Env> {
 			// The new session's context (the comment that mentioned the agent, say) replaces the old one in the issue
 			// section, and is the follow-up itself, so a new request isn't answered from old instructions.
 			if (input.prompt.trim()) this.#put("prompt", input.prompt);
-			await this.#relabel(input.issueId);
+			// The agent may have ended (PR closed, unassigned) while Linear answered: then there's nothing to carry on.
+			if (!(await this.#relabel(input.issueId))) return;
 			await this.#post({ type: "thought", body: "Picking this up again." }).catch((error: unknown) => {
 				console.error("linear: thought not posted", error);
 			});
@@ -174,19 +175,23 @@ export class IssueAgent extends DurableObject<Env> {
 
 	/**
 	 * Delegated again: the issue's labels as they are now, so a changed Model label applies from this session. Only the
-	 * labels: the branch and the rest stay as accepted. Kept as they were if Linear can't be reached.
+	 * labels: the branch and the rest stay as accepted. Kept as they were if Linear can't be reached. False if the agent
+	 * ended while Linear answered, so nothing is restored.
 	 */
-	async #relabel(issueId: string): Promise<void> {
-		const issue = this.#get("issue");
-		if (!issue) return;
+	async #relabel(issueId: string): Promise<boolean> {
+		let labels: readonly string[] | undefined;
 		try {
-			const { labels } = await this.linear().issue(issueId);
-			this.#put("issue", { ...issue, labels });
+			({ labels } = await this.linear().issue(issueId));
 		} catch (error) {
 			console.error("linear: labels not refreshed", error);
-			return;
 		}
-		await this.#announceModel();
+		const issue = this.#get("issue");
+		if (!issue) return false;
+		if (labels) {
+			this.#put("issue", { ...issue, labels });
+			await this.#announceModel();
+		}
+		return true;
 	}
 
 	/** Says on the session which model a Model label picked; nothing for the default. */

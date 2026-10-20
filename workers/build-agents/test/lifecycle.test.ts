@@ -254,6 +254,23 @@ describe("an issue's agent", () => {
 		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.modelsUsed())).toEqual(["faux-1", "faux-2"]);
 	});
 
+	it("doesn't carry on when it ended while reading the labels of a new session", async () => {
+		const stub = await prepared([{ text: "First pass." }, { text: "Should not run." }]);
+		await start(stub);
+		await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length === 1);
+		await runInDurableObject(stub, async (agent: TestIssueAgent) => {
+			const release = agent.holdIssue();
+			// Not awaited: the PR closes while start() waits on Linear for the labels.
+			const again = agent.start({ issueId: ISSUE.id, sessionId: "session-2", prompt: "" });
+			await agent.closed({ merged: false });
+			release();
+			await again;
+		});
+		// Nothing came back: no issue, no session, no queued work.
+		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).toEqual([]);
+		expect(await env.BRANCHES.get(ISSUE.branchName)).toBeNull();
+	});
+
 	it("stops a running turn from the session's stop button", async () => {
 		const stub = await prepared(["hang", { text: "Never sent." }]);
 		await runInDurableObject(stub, async (agent: TestIssueAgent) => {
