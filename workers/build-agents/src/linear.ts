@@ -18,6 +18,8 @@ export interface IssueDetails extends IssueSummary {
 	description: string;
 	teamKey: string;
 	stateType: string;
+	/** Who the issue is delegated to (an agent's app user), if anyone: the app means it's the agent's to work on. */
+	delegateId: string | undefined;
 	/** The team's first "started" state (In Progress), which the agent moves the issue to when it starts. */
 	startedStateId: string | undefined;
 	/** The top-level comment the support Worker wrote with the debug report and screenshots, kept out of GitHub. */
@@ -119,6 +121,7 @@ const ISSUE_QUERY = `query ($id: String!) {
 		id identifier title url branchName description
 		team { key states(filter: { type: { eq: "started" } }) { nodes { id position } } }
 		state { type }
+		delegate { id }
 		labels { nodes { name } }
 		comments(first: 50) { nodes { body parent { id } } }
 	}
@@ -133,6 +136,7 @@ interface RawIssue {
 	description: string | null;
 	team: { key: string; states: { nodes: { id: string; position: number }[] } };
 	state: { type: string };
+	delegate: { id: string } | null;
 	labels: { nodes: { name: string }[] };
 	comments: { nodes: { body: string; parent: { id: string } | null }[] };
 }
@@ -148,6 +152,7 @@ export function toIssueDetails(issue: RawIssue): IssueDetails {
 		description: issue.description ?? "",
 		teamKey: issue.team.key,
 		stateType: issue.state.type,
+		delegateId: issue.delegate?.id,
 		startedStateId: [...issue.team.states.nodes].sort((a, b) => a.position - b.position)[0]?.id,
 		labels: issue.labels.nodes.map((label) => label.name),
 		privateNote: note?.body,

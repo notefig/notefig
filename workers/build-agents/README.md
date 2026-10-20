@@ -2,6 +2,8 @@
 
 Delegate an accepted Linear issue to the **Notefig Build Agent** app, and an agent implements it and opens a pull
 request. You steer it from the Linear session; reviews, failed CI and merges on its pull request reach it too.
+@-mention it on any other issue to ask it a question: it answers on the session without starting work (see
+[Asking it a question](#asking-it-a-question)).
 
 This is the complete reference: what runs where, every configuration value and secret, how to set it all up on new
 accounts, how to run and test it locally, how it's released, and what went wrong while building it. For both
@@ -12,6 +14,7 @@ Not an npm workspace: installed, tested and deployed on its own, like `workers/s
 **Contents:**
 [Overview](#overview) ·
 [A run, step by step](#a-run-step-by-step) ·
+[Asking it a question](#asking-it-a-question) ·
 [Security model](#security-model) ·
 [Configuration](#configuration) ·
 [Secrets](#secrets) ·
@@ -58,7 +61,7 @@ the object's state, and never sees a token.
 
 ## A run, step by step
 
-1. **A maintainer delegates an issue** to Notefig Build Agent in Linear (assign it, or @-mention the app). Linear
+1. **A maintainer delegates an issue** to Notefig Build Agent in Linear (assigns it as the delegate). Linear
    creates an agent session and sends `AgentSessionEvent` / `created` to `POST /v1/linear`.
 2. **The Worker** (`src/index.ts`) checks the signature (`Linear-Signature`, HMAC-SHA256 with
    `LINEAR_WEBHOOK_SECRET`) and that the webhook is under 60 seconds old (`src/linear-webhook.ts`). Only sessions
@@ -76,12 +79,15 @@ the object's state, and never sees a token.
 4. **Pi Durable** runs the conversation: the system prompt (`src/prompt.ts`: where issues come from, what's private,
    how to work) plus the issue section, then model turns and tool calls, each checkpointed in the object's SQLite
    (tables prefixed `pi_`).
-5. **The first tool call starts the container** (`#prepare` in `issue-agent.ts`):
+5. **The first file or shell call starts the container** (`#prepare` in `issue-agent.ts`). Pi builds the
+   environment before every model request and tool call, so the harness gets a `LazyEnv` (`src/lazy-env.ts`) that
+   starts nothing until an operation needs it: a turn that only answers, `ask_maintainer` and `open_pull_request`
+   don't start it. The container:
    - from the snapshot of its last push if there is one taken on the current image, otherwise from the image;
    - internet off; `github.com` intercepted by `GitGateway`, npm and crates.io by `RegistryGateway`;
    - clones the repo to `/workspace/repo` and checks out the issue's branch (creating it from `main` if it's new),
      with the bot as git author;
-   - stops on its own after 10 idle minutes; the next tool call starts it again.
+   - stops on its own after 10 idle minutes; the next file or shell call starts it again.
 6. **The agent works** with Pi's coding tools (`bash`, `read`, `edit`, `write`, through `ContainerEnv`,
    `src/container-env.ts`) and three of its own (`src/tools.ts`):
    - `push`: reads every outgoing commit's message, author and own patch (`git log --patch --cc origin/main..HEAD`,
@@ -116,6 +122,23 @@ the object's state, and never sees a token.
 10. **Between events the object sleeps.** While the harness has live tasks a heartbeat alarm comes back every 60
     seconds; if the object was evicted (a deploy, a host move), the alarm restarts it and Pi resumes from the last
     checkpoint. Once idle, the alarm clears itself.
+
+## Asking it a question
+
+@-mention Notefig Build Agent in a comment on an issue that isn't delegated to it, and it answers in the session
+instead of starting work. Linear sends the same `created` event for a mention and a delegation, so the agent tells
+them apart once it has read the issue: it's **work** when the issue's delegate is the app and the issue isn't Done or
+Canceled; anything else is a **question**, including Triage issues and issues it finished before.
+
+- Only approvers' mentions count, as for delegations.
+- A question is answered from the conversation and the issue first; the model reads the code only when the answer
+  depends on it, and that's the only thing that starts the container (on `main`, not the issue's branch). A question
+  answered without tools costs one model turn.
+- Nothing changes on the issue: no state move, no branch mapping, and `push` and `open_pull_request` refuse.
+- Messages in the question's session continue the conversation. Delegating the issue afterwards turns it into work
+  with the same transcript (the agent remembers the question); the `main` checkout is dropped first.
+- Mentioning the agent on an issue it's working on is a new session on that work: it answers a question without
+  changing anything, or follows a new request.
 
 ## Security model
 
@@ -350,7 +373,7 @@ What exists for an issue, and when it goes away:
 
 | Thing | Created | Runs (and bills) | Stopped | Deleted |
 |---|---|---|---|---|
-| **Container** | the run's first tool call | while tools run (each command is capped at 20 minutes unless the model sets its own timeout), and up to 10 idle minutes after (`setInactivityTimeout`) | after 10 idle minutes, on the stop button, on the end | on the stop button and on the end (`container.destroy()`); an idle stop restarts on the next tool call |
+| **Container** | the run's first file or shell call | while tools run (each command is capped at 20 minutes unless the model sets its own timeout), and up to 10 idle minutes after (`setInactivityTimeout`) | after 10 idle minutes, on the stop button, on the end | on the stop button and on the end (`container.destroy()`); an idle stop restarts on the next file or shell call |
 | **Container snapshot** | after every successful push | (stored, not running) | | the record is dropped when a snapshot fails or the agent ends. The container API has no call to delete a snapshot, so the snapshot itself isn't removed by the agent; how long Cloudflare keeps snapshots, and whether they bill, isn't verified yet (check before going live) |
 | **Durable Object** | the first webhook for the issue | only while handling an event or running the harness; it hibernates in between, and an evicted object costs nothing | | its storage (transcript, checkpoints, the issue, the session, the snapshot record) is erased on the end (`deleteAll`), and its alarm cleared |
 | **Heartbeat alarm** | when work is admitted | wakes the object every 60 s while the harness has live tasks | once idle, it clears itself | on the end |
@@ -460,6 +483,7 @@ config PR #435. Once build agents run in production:
 | `src/index.ts` | Routes `/v1/linear`, `/v1/github`, `/v1/linear/installed`; exports the Worker, `IssueAgent`, `GitGateway`, `RegistryGateway` |
 | `src/issue-agent.ts` | The Durable Object: harness, heartbeat, container lifecycle, snapshots, the seams tests replace |
 | `src/container-env.ts` | Pi's `ExecutionEnv` over the container (`Files` + process API), polling watcher |
+| `src/lazy-env.ts` | The environment Pi is handed: starts the container at the first operation that needs it |
 | `src/gateways.ts` | `GitGateway` (token, push permit, branch guard, streaming), `RegistryGateway` |
 | `src/receive-pack.ts` | Reads a push's ref updates from its pkt-line header |
 | `src/tools.ts` | `push`, `open_pull_request`, `ask_maintainer` |

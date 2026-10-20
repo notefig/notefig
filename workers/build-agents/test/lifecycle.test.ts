@@ -229,6 +229,86 @@ describe("an issue's agent", () => {
 		}
 	});
 
+	it("starts its workspace at the first file call, not for a model request or a tool that doesn't need it", async () => {
+		const answer = await prepared([{ text: "Fixed the flicker." }]);
+		await start(answer);
+		await eventually(answer, (agent) => agent.activities(), (value) => responses(value).length > 0);
+		expect(await runInDurableObject(answer, (agent: TestIssueAgent) => agent.workspaceStarts())).toBe(0);
+
+		const reads = await prepared([{ tool: "read", args: { path: "README.md" } }, { text: "Read it." }]);
+		await start(reads);
+		await eventually(reads, (agent) => agent.activities(), (value) => responses(value).length > 0);
+		expect(await runInDurableObject(reads, (agent: TestIssueAgent) => agent.workspaceStarts())).toBeGreaterThan(0);
+		// The read failed with why the workspace didn't start.
+		expect(await runInDurableObject(reads, (agent: TestIssueAgent) => agent.lastToolResult())).toContain("The workspace couldn't start: No workspace in tests");
+	});
+
+	describe("mentioned with a question", () => {
+		// Its own branch: the KV namespace is shared by every test in the file.
+		const asked = { ...ISSUE, delegateId: undefined, stateType: "triage", branchName: "parsa/met-42-question" };
+		const ask = (stub: Stub, sessionId = "session-q") =>
+			runInDurableObject(stub, (agent: TestIssueAgent) =>
+				agent.start({ issueId: ISSUE.id, sessionId, prompt: "@agent where does the tree keep its scroll position?" }),
+			);
+
+		it("answers on an issue that isn't its own, even in Triage, without working on it", async () => {
+			const stub = await prepared([{ text: "In the tree's virtualiser." }], asked);
+			await ask(stub);
+			const list = await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length > 0);
+			expect(list[0]).toEqual({ type: "thought", body: "Reading the issue." });
+			expect(responses(list)).toEqual(["In the tree's virtualiser."]);
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.lastPrompt())).toContain("mentioned on this issue with a question");
+			// No state change, no branch, no container: one model turn.
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.moves())).toEqual([]);
+			expect(await env.BRANCHES.get(asked.branchName)).toBeNull();
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.workspaceStarts())).toBe(0);
+			await idle(stub);
+		});
+
+		it("answers on an issue that's done, rather than starting it over", async () => {
+			const stub = await prepared([{ text: "It shipped in v0.0.147." }], { ...asked, stateType: "completed", delegateId: "app-user" });
+			await ask(stub);
+			const list = await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length > 0);
+			expect(responses(list)).toEqual(["It shipped in v0.0.147."]);
+			expect(await env.BRANCHES.get(asked.branchName)).toBeNull();
+		});
+
+		it("can't open a pull request while answering", async () => {
+			const stub = await prepared(
+				[{ tool: "open_pull_request", args: { summary: "Fix", description: "Fix", releaseNotes: [] } }, { text: "Answered." }],
+				asked,
+			);
+			await ask(stub);
+			const list = await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length > 0);
+			expect(list).toContainEqual({ type: "action", action: "open_pull_request", parameter: "Fix", result: "failed" });
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.lastToolResult())).toContain("You were asked a question");
+		});
+
+		it("starts working once the issue is delegated", async () => {
+			const stub = await prepared([{ text: "In the virtualiser." }, { text: "Fixed it." }], asked);
+			await ask(stub);
+			await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length === 1);
+			await runInDurableObject(stub, (agent: TestIssueAgent) => {
+				agent.setIssue({ ...asked, delegateId: "app-user", stateType: "unstarted" });
+				return agent.start({ issueId: ISSUE.id, sessionId: "session-2", prompt: "" });
+			});
+			const list = await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length === 2);
+			expect(responses(list)).toEqual(["In the virtualiser.", "Fixed it."]);
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.moves())).toEqual(["issue-1→state-in-progress"]);
+			expect(await env.BRANCHES.get(asked.branchName)).toBe(ISSUE.id);
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).not.toContain("answering");
+		});
+
+		it("ignores pull request events while answering", async () => {
+			const stub = await prepared([{ text: "Answered." }, { text: "Should not run." }], asked);
+			await ask(stub);
+			await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length === 1);
+			await runInDurableObject(stub, (agent: TestIssueAgent) => agent.feedback({ text: "Fix this", requestId: "github:review:1" }));
+			await idle(stub);
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.modelCalls())).toBe(1);
+		});
+	});
+
 	it("stops a running turn from the session's stop button", async () => {
 		const stub = await prepared(["hang", { text: "Never sent." }]);
 		await runInDurableObject(stub, async (agent: TestIssueAgent) => {

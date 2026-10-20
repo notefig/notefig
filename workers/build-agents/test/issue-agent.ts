@@ -28,6 +28,7 @@ export const ISSUE: IssueDetails = {
 	description: "The tree jumps when I rename a file.",
 	teamKey: "MET",
 	stateType: "started",
+	delegateId: "app-user",
 	startedStateId: "state-in-progress",
 	privateNote: undefined,
 };
@@ -83,6 +84,11 @@ export class TestIssueAgent extends IssueAgent {
 
 	lastToolResult(): string {
 		return this.ctx.storage.kv.get<string>("test:last-tool-result") ?? "";
+	}
+
+	/** How many times the agent asked for its workspace (each would start the container). */
+	workspaceStarts(): number {
+		return this.ctx.storage.kv.get<number>("test:workspace-starts") ?? 0;
 	}
 
 	lastPrompt(): string {
@@ -156,8 +162,9 @@ export class TestIssueAgent extends IssueAgent {
 	}
 
 	protected override workspace(): Promise<ExecutionEnv> {
-		if (this.ctx.storage.kv.get("test:workspace") !== "hanging") return Promise.reject(new Error("No workspace in tests"));
 		const kv = this.ctx.storage.kv;
+		kv.put("test:workspace-starts", (kv.get<number>("test:workspace-starts") ?? 0) + 1);
+		if (kv.get("test:workspace") !== "hanging") return Promise.reject(new Error("No workspace in tests"));
 		const ended = () => this.#release.promise;
 		const env = {
 			id: "hanging",

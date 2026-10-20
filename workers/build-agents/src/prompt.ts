@@ -47,11 +47,20 @@ tests, commits or the pull request. The push and open_pull_request tools refuse 
 The workspace has no credentials and reaches only the repository and the package registries. Don't look for tokens
 or try other hosts: GitHub access is the push and open_pull_request tools, and what you need from CI comes to you.
 
-When you're done, answer with two or three sentences on what changed, without private details.`;
+When you're done, answer with two or three sentences on what changed, without private details.
+
+## When you're asked a question
+
+Sometimes a maintainer mentions you with a question instead of delegating the issue; the issue section then says
+"Mode: question". Answer it from the conversation and the issue first. Read the code only when the answer depends on
+it: your workspace starts on the first file or shell command, which takes a while. Don't change files, push or open a
+pull request. Give the answer as your final reply, briefly, without private details. If the question needs work done,
+say so, and that it starts once the issue is delegated to you.`;
 
 /** The issue as the model sees it: Linear's prompt context, the issue, and its private note. */
-export function issueSection(issue: IssueDetails, promptContext: string): string {
+export function issueSection(issue: IssueDetails, promptContext: string, answering = false): string {
 	const parts = [
+		...(answering ? ["Mode: question. You were mentioned with a question; this issue isn't delegated to you."] : []),
 		`Issue ${issue.identifier}: ${issue.title}`,
 		`URL: ${issue.url}`,
 		`Branch: ${issue.branchName}`,

@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels, type Models } from "@earendil-works/pi-ai/models";
 import { cloudflareAIGatewayProvider } from "@earendil-works/pi-ai/providers/cloudflare-ai-gateway";
-import { type Conversation, createRegistry, defineExtension, Harness, hook, section, ToolTask } from "@earendil-works/pi-durable";
+import { type Conversation, createRegistry, defineExtension, Harness, section } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
@@ -10,6 +10,7 @@ import { type Config, type Env, readConfig } from "./config.ts";
 import { ContainerEnv } from "./container-env.ts";
 import { REGISTRY_HOSTS } from "./gateways.ts";
 import { type GitHubClient, gitHubClient } from "./github.ts";
+import { LazyEnv } from "./lazy-env.ts";
 import { type Activity, type IssueDetails, type LinearAgentClient, linearAgentClient } from "./linear.ts";
 import { INSTRUCTIONS, issueSection } from "./prompt.ts";
 import { reporting } from "./reporting.ts";
@@ -39,6 +40,11 @@ interface Stored {
 	/** The container's state after the last push, and the image it was taken on. */
 	snapshot?: { id: string; image: string };
 	issue?: IssueDetails;
+	/**
+	 * The agent was mentioned with a question, not delegated the issue: it answers on the session, and can't push or
+	 * open a pull request. A delegation clears it.
+	 */
+	answering?: true;
 	prompt?: string;
 	/** Messages that arrived while the agent was still reading its issue. */
 	pending?: { text: string; requestId: string }[];
@@ -50,8 +56,6 @@ export class IssueAgent extends DurableObject<Env> {
 	#github: GitHubClient | undefined;
 	#harness!: Harness;
 	#workspace: Promise<ContainerEnv> | undefined;
-	/** Why the workspace last failed to start, for the coding tools' error. */
-	#workspaceError: string | undefined;
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
@@ -79,19 +83,17 @@ export class IssueAgent extends DurableObject<Env> {
 				// Pi 1.3 frees idle conversations and documents on timers, which would keep the object awake (and
 				// billed) and stop it from being evicted. Freeing them at once costs a reload on the next use.
 				settings: { contextRetentionMs: 0, documentRetentionMs: 0 },
-				// A workspace that won't start fails only the tools that need it; the others (asking the maintainer,
-				// the pull request) still run, and coding tools get the reason in their error.
+				// The container starts at the first file or shell call, not for every model request: an answer that
+				// needs no code, asking the maintainer and the pull request don't start it. One that won't start fails
+				// only the call that needed it, with the reason.
 				env: () =>
-					this.workspace().then(
-						(workspace) => {
-							this.#workspaceError = undefined;
-							return workspace;
-						},
-						(error: unknown) => {
-							this.#workspaceError = error instanceof Error ? error.message : String(error);
-							console.error("workspace unavailable", error);
-							return undefined;
-						},
+					new LazyEnv(
+						() =>
+							this.workspace().catch((error: unknown) => {
+								console.error("workspace unavailable", error);
+								throw error;
+							}),
+						{ id: `container:${this.ctx.id.toString()}`, cwd: REPO_DIR },
 					),
 			},
 			context,
@@ -111,13 +113,16 @@ export class IssueAgent extends DurableObject<Env> {
 		if (stale) await root.configure({ instructions: INSTRUCTIONS, model }, context);
 	}
 
-	/** Delegated in Linear: check the issue, then start working on it. */
+	/**
+	 * A new Linear session: delegated (check the issue, then start working on it), or mentioned on an issue that isn't
+	 * the agent's to work on (answer the question; see `#answer`).
+	 */
 	async start(input: { issueId: string; sessionId: string; prompt: string }): Promise<void> {
 		// A session already taken (Linear retrying an older delivery) changes nothing: not the session, not the prompt.
 		// A session counts as taken once its request is admitted, so a start that failed before that can be retried.
 		if ((this.#get("sessions") ?? []).includes(input.sessionId)) return;
-		// Already accepted (delegated again): carry on in the new session.
-		if (this.#get("issue")) {
+		// Already working on it (delegated again, or mentioned): carry on in the new session.
+		if (this.#working()) {
 			this.#put("session", input.sessionId);
 			// The new session's context (the comment that mentioned the agent, say) replaces the old one in the issue
 			// section, and is the follow-up itself, so a new request isn't answered from old instructions.
@@ -126,7 +131,7 @@ export class IssueAgent extends DurableObject<Env> {
 				console.error("linear: thought not posted", error);
 			});
 			const content = input.prompt.trim()
-				? `You've been delegated this issue again, in a new session. Its context, which may hold a new request:\n\n${input.prompt.trim()}\n\nContinue from where you are, following it.`
+				? `You've been delegated or mentioned on this issue again, in a new session. Its context, which may hold a new request:\n\n${input.prompt.trim()}\n\nIf it's only a question, answer it without changing anything, and carry on with the issue only where you'd left it unfinished. Otherwise continue from where you are, following it.`
 				: "Continue working on the issue.";
 			await this.#submit(content, `linear:session:${input.sessionId}`, "followUp");
 			this.#taken(input.sessionId);
@@ -135,20 +140,29 @@ export class IssueAgent extends DurableObject<Env> {
 		// Starting: messages arriving before the issue is accepted wait in `pending` (see `steer`).
 		this.#put("session", input.sessionId);
 		let issue: IssueDetails;
+		let delegated: boolean;
 		try {
 			// Linear marks a session unresponsive without an activity within 10 seconds.
 			await this.#post({ type: "thought", body: "Reading the issue." });
 			issue = await this.linear().issue(input.issueId);
+			delegated = await this.#delegated(issue);
 		} catch (error) {
 			await this.#refuse(`I couldn't read the issue: ${error instanceof Error ? error.message : String(error)}`, "error");
 			throw error;
 		}
+		if (!delegated) return this.#answer(issue, input);
 		if (issue.stateType === "triage") {
 			return this.#refuse("This issue is still in Triage. Accept it first, then delegate it again.");
 		}
 		const { testLabel } = this.#config;
 		if (testLabel && !issue.labels.some((label) => label.toLowerCase() === testLabel.toLowerCase())) {
 			return this.#refuse(`While the agent is in testing it only takes issues labelled "${testLabel}".`);
+		}
+		if (this.#get("answering")) {
+			// It was asked about before: same transcript, but work happens on the issue's branch, not the `main`
+			// checkout a question may have started.
+			this.ctx.storage.kv.delete("answering");
+			await this.release();
 		}
 		this.#put("issue", issue);
 		this.#put("prompt", input.prompt);
@@ -162,6 +176,39 @@ export class IssueAgent extends DurableObject<Env> {
 		await this.#submit("Start working on the issue.", `linear:session:${input.sessionId}`, "followUp");
 		this.#taken(input.sessionId);
 		await this.#drainPending();
+	}
+
+	/**
+	 * Whether a session on this issue is work: the issue is delegated to the app and not finished. A mention anywhere
+	 * else (an issue delegated to nobody or someone else, in Triage, or done) is a question.
+	 */
+	async #delegated(issue: IssueDetails): Promise<boolean> {
+		if (issue.stateType === "completed" || issue.stateType === "canceled" || !issue.delegateId) return false;
+		return issue.delegateId === (await this.linear().appUserId());
+	}
+
+	/**
+	 * Mentioned with a question on an issue that isn't the agent's to work on: answers it on the session, without the
+	 * delegation's gates and effects (no Triage or test-label refusal, no state change, no branch mapping), and can't
+	 * push or open a pull request. The answer needs no container unless it has to read the code. Later messages in the
+	 * session continue the conversation; a delegation turns it into work (`start`).
+	 */
+	async #answer(issue: IssueDetails, input: { sessionId: string; prompt: string }): Promise<void> {
+		this.#put("issue", issue);
+		this.#put("answering", true);
+		this.#put("prompt", input.prompt);
+		await this.#submit(
+			"You were mentioned on this issue with a question; it isn't delegated to you. Answer it.",
+			`linear:session:${input.sessionId}`,
+			"followUp",
+		);
+		this.#taken(input.sessionId);
+		await this.#drainPending();
+	}
+
+	/** Delegated and accepted: the agent works on the issue's branch and reacts to its pull request. */
+	#working(): boolean {
+		return this.#get("issue") !== undefined && !this.#get("answering");
 	}
 
 	/** Records a session whose request is admitted; a later delivery of it is a retry. */
@@ -211,12 +258,12 @@ export class IssueAgent extends DurableObject<Env> {
 
 	/** Review feedback on the pull request, from someone the webhook trusts. Ignored once the agent has ended. */
 	async feedback(input: { text: string; requestId: string }): Promise<void> {
-		if (!this.#get("issue")) return;
+		if (!this.#working()) return;
 		await this.#submit(input.text, input.requestId, "steer");
 	}
 
 	async ciFailed(input: { branch: string; sha: string; runId: number; name: string; url: string; requestId: string }): Promise<void> {
-		if (!this.#get("issue")) return;
+		if (!this.#working()) return;
 		const jobs = await this.github().failedJobs(input.runId);
 		const sections = jobs.map((job) =>
 			[
@@ -344,7 +391,12 @@ export class IssueAgent extends DurableObject<Env> {
 		registry.install(CodingTools);
 		registry.install(
 			agentTools({
-				issue: async () => this.#issue(),
+				issue: async () => {
+					if (this.#get("answering")) {
+						throw new Error("You were asked a question, not delegated this issue: answer it in your reply. Nothing is pushed or opened.");
+					}
+					return this.#issue();
+				},
 				typeLabels: this.#config.typeLabels,
 				draft: (issue) =>
 					this.#config.testLabel !== undefined &&
@@ -360,40 +412,13 @@ export class IssueAgent extends DurableObject<Env> {
 				ask: (question) => this.#post({ type: "elicitation", body: question }),
 			}),
 		);
-		registry.install(
-			defineExtension({
-				name: "notefig.workspace",
-				hooks: [
-					hook(ToolTask, {
-						// Pi's coding tools say only that there is no environment; say why the container didn't start. A thrown
-						// error arrives as a `tool_error` diagnostic with no output, so both are checked.
-						afterTool: (_call, result) => {
-							const reason = this.#workspaceError;
-							const text = [
-								...(result.output ?? []).map((part) => ("text" in part ? part.text : "")),
-								...(result.diagnostics ?? []).map((diagnostic) => diagnostic.message),
-							].join("\n");
-							if (!result.isError || !reason || !text.includes("No execution environment")) return undefined;
-							const explained = `The workspace couldn't start: ${reason}`;
-							return {
-								...result,
-								output: [{ type: "text", text: explained }],
-								diagnostics: (result.diagnostics ?? []).map((diagnostic) =>
-									diagnostic.message.includes("No execution environment") ? { ...diagnostic, message: explained } : diagnostic,
-								),
-							};
-						},
-					}),
-				],
-			}),
-		);
 		registry.install(reporting((activity) => this.#post(activity)));
 		registry.install(
 			defineExtension({
 				name: "notefig.issue",
 				sections: [section("issue", () => {
 					const issue = this.#get("issue");
-					return issue ? issueSection(issue, this.#get("prompt") ?? "") : undefined;
+					return issue ? issueSection(issue, this.#get("prompt") ?? "", this.#get("answering") ?? false) : undefined;
 				})],
 			}),
 		);
@@ -456,7 +481,10 @@ export class IssueAgent extends DurableObject<Env> {
 				`cd ${REPO_DIR}`,
 				`git config user.name ${JSON.stringify(this.#config.gitAuthor.name)}`,
 				`git config user.email ${JSON.stringify(this.#config.gitAuthor.email)}`,
-				`(git fetch --quiet origin ${branch} && git checkout --quiet -B ${branch} origin/${branch}) || git checkout --quiet -b ${branch}`,
+				// A question reads `main`; work happens on the issue's branch.
+				...(this.#get("answering")
+					? []
+					: [`(git fetch --quiet origin ${branch} && git checkout --quiet -B ${branch} origin/${branch}) || git checkout --quiet -b ${branch}`]),
 			].join(" && ");
 			let output = "";
 			const cloned = await env.exec(script, { onOutput: (text) => (output += text) }, context);
