@@ -45,6 +45,7 @@ import { useTranslation } from "react-i18next";
 import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
 import { getLocalizedCommandKeywords } from "@/utils/command-keywords";
 import { useFileSearch, type FileSearchResult } from "@/hooks/use-file-search";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { canOpenFile } from "@/modules/editors";
 import { FileTypeIcon } from "./file-type-icon";
@@ -363,7 +364,7 @@ export function CommandPalette({
 
   const skipFocusRestoreRef = useRef(false);
 
-  const trimmedQuery = query.trim();
+  const searchQuery = useDebouncedValue(query.trim(), 100);
 
   const handleSelect = (command: CommandType) => {
     if (
@@ -463,7 +464,7 @@ export function CommandPalette({
                   <FileQuickResults
                     key={groupName}
                     workspacePath={workspacePath}
-                    query={trimmedQuery}
+                    query={searchQuery}
                     showSeparator={index > 0}
                     onClose={() => onOpenChange(false)}
                   />
