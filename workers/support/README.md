@@ -45,6 +45,34 @@ npm test
 npm run typecheck
 ```
 
+## Suggested labels
+
+Before filing, the Worker asks a decision model two multiple-choice questions
+about the message (`src/triage.ts`): what kind of issue it is (`Bug`,
+`Feature`, `Improvement`) and which build-agent model should work on it (the
+**Model** labels, the same names as `MODEL_LABELS` in
+`workers/build-agents`). Each answer whose probability is at least 0.5 adds
+its label; the approver still reviews them in Triage.
+
+- **Model:** `DECISION_MODEL`, Typesafe's Jev (`typesafe/jev`) on Workers AI,
+  called through the `AI` binding and the `notefig-build-agents` AI Gateway
+  (`AI_GATEWAY_ID`). A binding is pre-authenticated, so there's no gateway
+  token; calls show in the gateway's logs.
+- **Billing:** Jev is a third-party model, billed from the gateway's unified
+  billing balance. With no balance it answers "Insufficient balance" and
+  feedback is filed without suggestions. Cloudflare's Clef
+  (`@cf/cloudflare/clef`, or `clef-flash`) takes the same questions and bills
+  as Workers AI: set `DECISION_MODEL` to it to use that instead.
+- **Privacy:** only the user's message goes to the model, which is what the
+  public description holds anyway; never the debug report or screenshots.
+- **Best effort:** it runs beside the screenshot uploads, gives up after 5
+  seconds, and a failure or an unsure answer only means fewer labels.
+- **Labels:** by id in `LINEAR_TYPE_LABEL_IDS` and `LINEAR_MODEL_LABEL_IDS`
+  (`Name=id` pairs). What each one means to the model is in `triage.ts`; a
+  label is offered only when it has both. A new Model label needs its pair
+  here, its meaning in `triage.ts`, and its model in build agents'
+  `MODEL_LABELS`.
+
 ## One-time setup
 
 1. **Linear**
