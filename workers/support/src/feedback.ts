@@ -1,6 +1,7 @@
 import { parseAttachments, uploadScreenshots, type Screenshot } from "./attachments.ts";
 import { json } from "./http.ts";
 import type { CreateComment, CreateIssue, UploadFile } from "./linear.ts";
+import type { Classify } from "./triage.ts";
 
 /**
  * `POST /v1/feedback`: the app's feedback dialog. A valid report becomes
@@ -12,6 +13,9 @@ import type { CreateComment, CreateIssue, UploadFile } from "./linear.ts";
  * screenshots, uploaded to Linear, and the debug report go in a top-level
  * comment, which Linear's GitHub sync doesn't copy (only the issue's
  * synced thread does).
+ *
+ * Besides Feedback, the issue gets the labels a decision model suggests
+ * (`triage.ts`: its kind and a build-agent model), when it's sure enough.
  *
  * The body is JSON, or multipart: the same JSON as a `feedback` part, and
  * each screenshot as a file part named by its attachment id.
@@ -28,6 +32,8 @@ export interface FeedbackDeps {
   createIssue: CreateIssue;
   createComment: CreateComment;
   uploadFile: UploadFile;
+  /** Suggested labels; never throws, and gives none when unsure or down. */
+  classify: Classify;
   config: FeedbackConfig;
 }
 
@@ -54,13 +60,13 @@ export async function submitFeedback(
   const attachments = submission && (await parseAttachments(submission.files));
   if (!feedback || !attachments) return json(400, { error: "Invalid feedback" });
   try {
-    const { message, screenshots } = await uploadScreenshots(
-      feedback.message,
-      attachments,
-      deps.uploadFile,
-    );
+    // Side by side: the model reads only the message, which goes in the public description anyway.
+    const [{ message, screenshots }, suggested] = await Promise.all([
+      uploadScreenshots(feedback.message, attachments, deps.uploadFile),
+      deps.classify(feedback.message),
+    ]);
     const issueId = await deps.createIssue(
-      issueFor({ ...feedback, message }, screenshots.length, deps.config),
+      issueFor({ ...feedback, message }, screenshots.length, deps.config, suggested),
     );
     const note = privateNote(feedback.debugReport, screenshots);
     // Failing here leaves an issue without its private part; the 502 asks
@@ -108,7 +114,12 @@ function parseFeedback(value: unknown): Feedback | null {
   return { os, version, message: trimmed, debugReport } as Feedback;
 }
 
-function issueFor(feedback: Feedback, screenshotCount: number, config: FeedbackConfig) {
+function issueFor(
+  feedback: Feedback,
+  screenshotCount: number,
+  config: FeedbackConfig,
+  suggestedLabelIds: readonly string[],
+) {
   const firstLine = defuse(plainText(feedback.message.split("\n")[0]));
   const title =
     firstLine.length > TITLE_LENGTH ? `${firstLine.slice(0, TITLE_LENGTH - 1)}…` : firstLine;
@@ -117,7 +128,7 @@ function issueFor(feedback: Feedback, screenshotCount: number, config: FeedbackC
     teamId: config.teamId,
     stateId: config.triageStateId,
     projectId: config.projectId,
-    labelIds: [config.feedbackLabelId],
+    labelIds: [config.feedbackLabelId, ...suggestedLabelIds],
     title,
     description: [
       defuse(feedback.message),

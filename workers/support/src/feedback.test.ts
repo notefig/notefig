@@ -4,7 +4,7 @@ import { submitFeedback, type FeedbackDeps } from "./feedback.ts";
 import type { FileInput, IssueInput } from "./linear.ts";
 import { validFeedback } from "./testing.ts";
 
-function setup(overrides: Partial<Pick<FeedbackDeps, "createIssue" | "createComment" | "uploadFile">> = {}) {
+function setup(overrides: Partial<Pick<FeedbackDeps, "createIssue" | "createComment" | "uploadFile" | "classify">> = {}) {
   const issues: IssueInput[] = [];
   const comments: { issueId: string; body: string }[] = [];
   const uploads: FileInput[] = [];
@@ -18,6 +18,7 @@ function setup(overrides: Partial<Pick<FeedbackDeps, "createIssue" | "createComm
       uploads.push(file);
       return `https://uploads.linear.app/${file.filename}`;
     },
+    classify: async () => [],
     config: {
       teamId: "team",
       triageStateId: "triage",
@@ -266,4 +267,18 @@ test("titles with plain text: link text, no emphasis, snake_case kept", async ()
   const { deps, issues } = setup();
   await submit({ ...validFeedback, message: "*Crash* on [save](https://example.com) in _my_file_ ~~now~~" }, deps);
   assert.equal(issues[0].title, "Crash on save in my_file now");
+});
+
+test("adds the labels the decision model suggests, from the message alone", async () => {
+  const read: string[] = [];
+  const { deps, issues } = setup({
+    classify: async (message) => {
+      read.push(message);
+      return ["bug-label", "model-label"];
+    },
+  });
+  const response = await submit({ ...validFeedback, debugReport: "secret debug report" }, deps);
+  assert.equal(response.status, 202);
+  assert.deepEqual(issues[0].labelIds, ["feedback", "bug-label", "model-label"]);
+  assert.deepEqual(read, [validFeedback.message]);
 });

@@ -7,6 +7,7 @@ const APP_ORIGIN = "tauri://localhost";
 
 function setup({ limited = false } = {}) {
   const linearCalls: { headers: HeadersInit | undefined; body: unknown }[] = [];
+  const aiCalls: unknown[][] = [];
   const env: Env = {
     RATE_LIMITER: { limit: async () => ({ success: !limited }) },
     LINEAR_API_KEY: "lin_api_test",
@@ -18,6 +19,16 @@ function setup({ limited = false } = {}) {
     AGENT_USER_ID: "agent-user",
     APPROVER_IDS: "approver-user",
     AGENT_DELIVERIES: { get: async () => null, put: async () => {} } as unknown as KVNamespace,
+    AI: {
+      run: async (...args: unknown[]) => {
+        aiCalls.push(args);
+        return { answers: { type: { type: "choice", choice: "Bug", confidence: 0.6, probabilities: { Bug: 0.9, Feature: 0.1 } } } };
+      },
+    } as unknown as Ai,
+    DECISION_MODEL: "@cf/cloudflare/clef",
+    AI_GATEWAY_ID: "gateway",
+    LINEAR_TYPE_LABEL_IDS: "Bug=bug-label,Feature=feature-label",
+    LINEAR_MODEL_LABEL_IDS: "",
   };
   const fetchFn = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body));
@@ -28,7 +39,7 @@ function setup({ limited = false } = {}) {
         : { data: { issueCreate: { success: true, issue: { id: "issue-1" } } } },
     );
   }) as typeof fetch;
-  return { env, fetchFn, linearCalls };
+  return { env, fetchFn, linearCalls, aiCalls };
 }
 
 function post(body: string, origin = APP_ORIGIN, path = "/v1/feedback") {
@@ -49,6 +60,18 @@ test("files posted feedback with Linear, as the API key", async () => {
     "Content-Type": "application/json",
     Authorization: "lin_api_test",
   });
+});
+
+test("labels feedback with the decision model's suggestion, through the gateway", async () => {
+  const { env, fetchFn, linearCalls, aiCalls } = setup();
+  await handle(post(JSON.stringify(validFeedback)), env, fetchFn);
+  assert.equal(aiCalls.length, 1);
+  const [model, input, options] = aiCalls[0] as [string, { state: string }, unknown];
+  assert.equal(model, "@cf/cloudflare/clef");
+  assert.match(input.state, /The sidebar flickers/);
+  assert.deepEqual(options, { gateway: { id: "gateway" } });
+  const issue = linearCalls[0].body as { variables: { input: { labelIds: string[] } } };
+  assert.deepEqual(issue.variables.input.labelIds, ["feedback", "bug-label"]);
 });
 
 test("answers the app's preflight", async () => {

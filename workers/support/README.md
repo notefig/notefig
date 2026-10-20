@@ -45,6 +45,34 @@ npm test
 npm run typecheck
 ```
 
+## Suggested labels
+
+Before filing, the Worker asks a decision model two multiple-choice questions
+about the message (`src/triage.ts`): what kind of issue it is (`Bug`,
+`Feature`, `Improvement`) and which build-agent model should work on it (the
+**Model** labels, the same names as `MODEL_LABELS` in
+`workers/build-agents`). Each answer whose probability is at least 0.5 adds
+its label; the approver still reviews them in Triage.
+
+- **Model:** `DECISION_MODEL`, Cloudflare's Clef (`@cf/cloudflare/clef`, or
+  `clef-flash`) on Workers AI, called through the `AI` binding and the `notefig-build-agents` AI Gateway
+  (`AI_GATEWAY_ID`). A binding is pre-authenticated, so there's no gateway
+  token; calls show in the gateway's logs.
+- **Billing:** as Workers AI, on the account's usual plan.
+- **Privacy:** only the user's message goes to the model, which is what the
+  public description holds anyway; never the debug report or screenshots.
+- **Best effort:** it runs beside the screenshot uploads, gives up after 5
+  seconds, and a failure or an unsure answer only means fewer labels.
+- **Labels:** by id in `LINEAR_TYPE_LABEL_IDS` and `LINEAR_MODEL_LABEL_IDS`
+  (`Name=id` pairs). What each one means to the model is in `triage.ts`; a
+  label is offered only when it has both.
+- **What a Model label does:** here it's only a suggestion. Build agents run
+  on an issue's Model label once MET-243 (#459) is merged and released: it
+  adds the `MODEL_LABELS` whitelist to `workers/build-agents`, mapping these
+  label names to model ids. Until then they run on `MODEL_ID` whatever the
+  label. A new Model label needs its pair here, its meaning in `triage.ts`,
+  and, with MET-243, its model in `MODEL_LABELS`.
+
 ## One-time setup
 
 1. **Linear**

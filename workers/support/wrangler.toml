@@ -13,10 +13,21 @@ LINEAR_TEAM_ID = "c784a3cb-95a0-44ab-95b2-83943473a8b6"
 LINEAR_TRIAGE_STATE_ID = "8a00261b-f046-41f4-bf68-b793a66424ef"
 LINEAR_PROJECT_ID = "1acafc86-55ee-4d81-a54e-7e3d46aa9f8a"
 LINEAR_FEEDBACK_LABEL_ID = "bfabbb0a-e788-4584-848f-551a7b29f9e0"
+# Labels a decision model suggests on new feedback (src/triage.ts). Names as in
+# Linear; the Model labels match MODEL_LABELS in workers/build-agents.
+LINEAR_TYPE_LABEL_IDS = "Bug=1cc3a070-eaa4-499d-8f5b-1ca294a262fb,Feature=36277f68-2c77-4554-8408-90ed0509fff5,Improvement=dae30278-b0d0-4b2a-af5d-d6d38f0aaca7"
+LINEAR_MODEL_LABEL_IDS = "Kimi K2.7 Code=e2e835b3-ad04-4d1e-bcd1-67daf74a1ca2,GLM 5.3=7680387c-c7f1-44e5-a1d4-621b72b38c41,GLM 5.3 Flash=5c77c201-138e-4ce0-ad46-6b596b1befe9,DeepSeek V4 Pro=a981e7de-cc13-41e2-af0b-2174081520ed"
+# Cloudflare's Clef, through the build agents' gateway. It bills as Workers AI.
+DECISION_MODEL = "@cf/cloudflare/clef"
+AI_GATEWAY_ID = "notefig-build-agents"
 # The agent: an accepted issue assigned to Notefig Support by an approver
 # (Parsa) starts a Claude Code routine. See README.md, "Agent".
 AGENT_USER_ID = "c62305f9-fdea-4fb1-9ecd-9c2e71069c46"
 APPROVER_IDS = "566cdfe1-fc7f-4489-bc41-99ee9694e025"
+
+# Workers AI, for the decision model. Calls through a binding need no gateway token.
+[ai]
+binding = "AI"
 
 # Which Linear deliveries already fired a routine run (kept a day), so a
 # retried delivery can't fire a second one.
