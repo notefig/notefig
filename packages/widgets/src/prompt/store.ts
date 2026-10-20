@@ -168,20 +168,23 @@ export function subscribePromptBlob(
 }
 
 /** Transient UI state: which widgets are currently in-flight (queued,
- *  running, awaiting permission or auth). Used by the prompt node plugin
- *  to block ProseMirror transactions that would delete a running widget.
- *  Kept outside React so it survives tab switches and is readable from
- *  filterTransaction. */
-const inFlightBlobs = new Set<string>();
+ *  running, awaiting permission or auth). Stored as a ref count because
+ *  a copied marker can produce more than one mounted widget for the same
+ *  blobId. Used by the prompt node plugin to block ProseMirror
+ *  transactions that would delete a running widget. Kept outside React so
+ *  it survives tab switches and is readable from filterTransaction. */
+const inFlightBlobs = new Map<string, number>();
 
 export function setPromptBlobInFlight(
   blobId: string,
   inFlight: boolean,
 ): void {
-  if (inFlight) inFlightBlobs.add(blobId);
+  const count = inFlightBlobs.get(blobId) ?? 0;
+  const next = inFlight ? count + 1 : Math.max(0, count - 1);
+  if (next > 0) inFlightBlobs.set(blobId, next);
   else inFlightBlobs.delete(blobId);
 }
 
 export function isPromptBlobInFlight(blobId: string): boolean {
-  return inFlightBlobs.has(blobId);
+  return (inFlightBlobs.get(blobId) ?? 0) > 0;
 }

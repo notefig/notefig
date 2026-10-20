@@ -26,11 +26,12 @@
  */
 import type { Editor } from "@tiptap/core";
 import type { JSONContent } from "@tiptap/core";
-import type { Node as PMNode, NodeType } from "@tiptap/pm/model";
+import type { Node as PMNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import {
   PROMPT_CHANGE_META,
   PROMPT_NODE_NAME,
+  findInsertPos,
   type PromptChangeAttribution,
 } from "@notefig/widgets";
 import { recreateTransform } from "@/vendor/prosemirror-recreate-transform/recreateTransform";
@@ -95,25 +96,6 @@ function widgetBlobIds(doc: PMNode): Set<string> {
     return false;
   });
   return ids;
-}
-
-/** Nearest position at or above `rawPos` where `nodeType` may be inserted:
- *  walk outward from the resolved position until a parent accepts it. */
-function findInsertPos(
-  doc: PMNode,
-  rawPos: number,
-  nodeType: NodeType,
-): number | null {
-  const pos = Math.max(0, Math.min(rawPos, doc.content.size));
-  const $pos = doc.resolve(pos);
-  for (let depth = $pos.depth; depth >= 0; depth--) {
-    const parent = $pos.node(depth);
-    const index = $pos.index(depth);
-    if (parent.canReplaceWith(index, index, nodeType)) {
-      return depth === $pos.depth ? pos : $pos.posAtIndex(index, depth);
-    }
-  }
-  return null;
 }
 
 /** The file bytes an adoption brings in, by path and content hash, and

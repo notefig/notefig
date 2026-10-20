@@ -325,4 +325,52 @@ describe("escape on a running prompt widget", () => {
     await pressDeleteOnSelectedWidget(editor);
     expect(countPromptWidgets(editor)).toBe(0);
   });
+
+  it("keeps deletion protection when two markers share a blobId", async () => {
+    const { host, publishRound } = runningRoundHost();
+    const editor = await mountedEditor(
+      `<div data-type="ai-prompt" data-blob-id="shared" data-task-id="${TASK_ID}"><div data-type="prompt-draft"></div></div>` +
+        `<p>between</p>` +
+        `<div data-type="ai-prompt" data-blob-id="shared" data-task-id="${TASK_ID}"><div data-type="prompt-draft"></div></div>`,
+      host,
+    );
+    await act(async () => {
+      publishRound(RUNNING_ROUND);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(countPromptWidgets(editor)).toBe(2);
+
+    await pressDeleteOnSelectedWidget(editor);
+    expect(countPromptWidgets(editor)).toBe(1);
+
+    // Deleting the last copy must still be blocked because the task is
+    // still running.
+    await pressDeleteOnSelectedWidget(editor);
+    expect(countPromptWidgets(editor)).toBe(1);
+  });
+
+  it("preserves a running widget through a full-document replacement", async () => {
+    const { host, publishRound } = runningRoundHost();
+    const editor = await mountedEditor(
+      `<p>original</p><div data-type="ai-prompt" data-blob-id="shared" data-task-id="${TASK_ID}"><div data-type="prompt-draft"></div></div>`,
+      host,
+    );
+    await act(async () => {
+      publishRound(RUNNING_ROUND);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(countPromptWidgets(editor)).toBe(1);
+    expect(widgetPhase()).toBe("running");
+
+    await act(async () => {
+      editor.commands.setContent("<p>replacement text</p>");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(editor.state.doc.textContent).toContain("replacement text");
+    expect(countPromptWidgets(editor)).toBe(1);
+    expect(widgetPhase()).toBe("running");
+  });
 });

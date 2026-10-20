@@ -36,12 +36,15 @@ import { GapCursor } from "@tiptap/pm/gapcursor";
 import Suggestion from "@tiptap/suggestion";
 import { useEffect, useRef } from "react";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
+import type { Node as PMNode } from "@tiptap/pm/model";
+import { Mapping, ReplaceStep, ReplaceAroundStep } from "@tiptap/pm/transform";
 import { AiPromptNodeBase, PROMPT_NODE_NAME } from "./node";
 import { UI_ONLY_TRANSACTION_META } from "../define-widget";
 import {
   deleteWidgetTr,
   docHasPromptNode,
   docHasRealContent,
+  findInsertPos,
   findPromptNodeId,
   newPromptBlobInstanceId,
   removeToParagraphTr,
@@ -87,6 +90,90 @@ export interface AiPromptNodeOptions {
  * at the textblock's edge in that direction, so ordinary line movement stays
  * native.
  */
+function collectInFlightBlobIds(doc: PMNode): Set<string> {
+  const ids = new Set<string>();
+  doc.descendants((node) => {
+    if (node.type.name === PROMPT_NODE_NAME) {
+      const blobId = node.attrs.blobId as string | null;
+      if (blobId && isPromptBlobInFlight(blobId)) ids.add(blobId);
+    }
+    return true;
+  });
+  return ids;
+}
+
+function isFullDocumentReplace(tr: Transaction, oldContentSize: number): boolean {
+  if (tr.steps.length !== 1) return false;
+  const step = tr.steps[0];
+  return (
+    (step instanceof ReplaceStep || step instanceof ReplaceAroundStep) &&
+    step.from === 0 &&
+    step.to === oldContentSize
+  );
+}
+
+function reinsertDroppedWidgetsTr(
+  transactions: readonly Transaction[],
+  oldState: EditorState,
+  newState: EditorState,
+): Transaction | null {
+  const protectedNodes: Array<{ node: PMNode; oldPos: number }> = [];
+  oldState.doc.descendants((node, pos) => {
+    if (node.type.name === PROMPT_NODE_NAME) {
+      const blobId = node.attrs.blobId as string | null;
+      if (blobId && isPromptBlobInFlight(blobId)) {
+        protectedNodes.push({ node, oldPos: pos });
+      }
+    }
+    return true;
+  });
+  if (protectedNodes.length === 0) return null;
+
+  const survivingIds = new Set<string>();
+  newState.doc.descendants((node) => {
+    if (node.type.name === PROMPT_NODE_NAME) {
+      const blobId = node.attrs.blobId as string | null;
+      if (blobId) survivingIds.add(blobId);
+    }
+    return true;
+  });
+
+  const mapping = new Mapping();
+  for (const tr of transactions) {
+    for (const step of tr.steps) {
+      mapping.appendMap(step.getMap());
+    }
+  }
+
+  const tr = newState.tr;
+  let changed = false;
+  for (const { node, oldPos } of protectedNodes) {
+    const blobId = node.attrs.blobId as string;
+    if (survivingIds.has(blobId)) continue;
+
+    let alreadyReinserted = false;
+    tr.doc.descendants((n) => {
+      if (n.type.name === PROMPT_NODE_NAME && n.attrs.blobId === blobId) {
+        alreadyReinserted = true;
+        return false;
+      }
+      return true;
+    });
+    if (alreadyReinserted) continue;
+
+    const mapped = mapping.mapResult(oldPos, 1);
+    const insertAt = findInsertPos(tr.doc, mapped.pos, node.type);
+    if (insertAt === null) continue;
+    (tr as { insert: (pos: number, node: unknown) => void }).insert(insertAt, node);
+    changed = true;
+  }
+
+  if (!changed) return null;
+  return tr
+    .setMeta("addToHistory", false)
+    .setMeta(UI_ONLY_TRANSACTION_META, true);
+}
+
 function arrowAcrossWidget(
   editor: NodeViewProps["editor"],
   dir: -1 | 1,
@@ -622,17 +709,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
           if (tr.getMeta(UI_ONLY_TRANSACTION_META) || !tr.docChanged)
             return true;
 
-          const protectedIds = new Set<string>();
-          oldState.doc.descendants((node) => {
-            if (
-              node.type.name === PROMPT_NODE_NAME &&
-              node.attrs.blobId &&
-              isPromptBlobInFlight(node.attrs.blobId)
-            ) {
-              protectedIds.add(node.attrs.blobId as string);
-            }
-            return true;
-          });
+          const protectedIds = collectInFlightBlobIds(oldState.doc);
           if (protectedIds.size === 0) return true;
 
           const remaining = new Set<string>();
@@ -646,16 +723,33 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
             return true;
           });
 
+          let anyMissing = false;
           for (const blobId of protectedIds) {
-            if (!remaining.has(blobId)) return false;
+            if (!remaining.has(blobId)) anyMissing = true;
           }
-          return true;
+          if (!anyMissing) return true;
+
+          // A wholesale document replacement (file sync / setContent) must
+          // not be rejected: missing widgets are restored by
+          // appendTransaction, and blocking here would make the adoption
+          // commit the old content.
+          return isFullDocumentReplace(tr, oldState.doc.content.size);
         },
         appendTransaction(transactions, oldState, newState) {
           const gap = gapBesideWidgetTr(oldState, newState);
           if (gap) return gap;
-          if (!options.filePath) return null;
           if (!transactions.some((tr) => tr.docChanged)) return null;
+
+          // Reinsert any in-flight widgets dropped by a wholesale
+          // replacement before the keeper/pathways below run.
+          const reinsert = reinsertDroppedWidgetsTr(
+            transactions,
+            oldState,
+            newState,
+          );
+          if (reinsert) return reinsert;
+
+          if (!options.filePath) return null;
           // Became-empty reinsert: no caret move — the user's cursor is in
           // the editor and must stay there.
           const keeper = appendPromptTr(newState)?.tr;
