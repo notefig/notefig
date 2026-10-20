@@ -19,7 +19,13 @@ export interface Env {
 	/** `Label=type` pairs, comma-separated: the issue label that sets the commit and PR type. */
 	TYPE_LABELS: string;
 	MODEL_PROVIDER: string;
+	/** The default model, for an issue without a whitelisted Model label. */
 	MODEL_ID: string;
+	/**
+	 * `Label=modelId` pairs, comma-separated: the whitelist of models an issue's Model label can pick, all from
+	 * `MODEL_PROVIDER`. A label not listed here picks nothing.
+	 */
+	MODEL_LABELS: string;
 	AI_GATEWAY_ID: string;
 	CLOUDFLARE_ACCOUNT_ID: string;
 	/** Who the agent's commits are by: the GitHub App's bot user, so GitHub shows its avatar. */
@@ -36,6 +42,11 @@ export interface Env {
 	AI_GATEWAY_TOKEN: string;
 }
 
+export interface Model {
+	provider: string;
+	modelId: string;
+}
+
 export interface Config {
 	repo: { owner: string; name: string };
 	teamKey: string;
@@ -43,7 +54,10 @@ export interface Config {
 	approverEmails: readonly string[];
 	trustedReviewers: readonly string[];
 	typeLabels: ReadonlyMap<string, string>;
-	model: { provider: string; modelId: string };
+	/** The default model. */
+	model: Model;
+	/** The whitelist: lower-cased label → model id. */
+	modelLabels: ReadonlyMap<string, string>;
 	gitAuthor: { name: string; email: string };
 }
 
@@ -53,22 +67,42 @@ const list = (value: string | undefined) =>
 		.map((item) => item.trim())
 		.filter(Boolean);
 
+/** `Label=value` pairs, comma-separated, as a map from the lower-cased label. A pair missing either side is skipped. */
+function labelMap(value: string | undefined): Map<string, string> {
+	const map = new Map<string, string>();
+	for (const pair of list(value)) {
+		const at = pair.indexOf("=");
+		const label = pair.slice(0, at).trim();
+		const mapped = pair.slice(at + 1).trim();
+		if (at > 0 && label && mapped) map.set(label.toLowerCase(), mapped);
+	}
+	return map;
+}
+
 export function readConfig(env: Env): Config {
 	const [owner, name] = env.GITHUB_REPO.split("/");
 	if (!owner || !name) throw new Error(`GITHUB_REPO must be owner/name, got "${env.GITHUB_REPO}"`);
-	const typeLabels = new Map<string, string>();
-	for (const pair of list(env.TYPE_LABELS)) {
-		const [label, type] = pair.split("=").map((part) => part.trim());
-		if (label && type) typeLabels.set(label.toLowerCase(), type);
-	}
 	return {
 		repo: { owner, name },
 		teamKey: env.LINEAR_TEAM_KEY,
 		testLabel: env.LINEAR_TEST_LABEL.trim() || undefined,
 		approverEmails: list(env.APPROVER_EMAILS).map((email) => email.toLowerCase()),
 		trustedReviewers: list(env.TRUSTED_REVIEWERS).map((login) => login.toLowerCase()),
-		typeLabels,
+		typeLabels: labelMap(env.TYPE_LABELS),
 		model: { provider: env.MODEL_PROVIDER, modelId: env.MODEL_ID },
+		modelLabels: labelMap(env.MODEL_LABELS),
 		gitAuthor: { name: env.GIT_AUTHOR_NAME, email: env.GIT_AUTHOR_EMAIL },
 	};
+}
+
+/**
+ * The model for an issue: the one its first whitelisted label picks (and that label), or the default. Only whitelisted
+ * ids ever reach the provider, so a label can't point an agent at any other model.
+ */
+export function modelFor(labels: readonly string[], config: Pick<Config, "model" | "modelLabels">): { model: Model; label?: string } {
+	for (const label of labels) {
+		const modelId = config.modelLabels.get(label.toLowerCase());
+		if (modelId) return { model: { provider: config.model.provider, modelId }, label };
+	}
+	return { model: config.model };
 }

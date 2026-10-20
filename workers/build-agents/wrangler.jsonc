@@ -21,7 +21,11 @@
 		"TYPE_LABELS": "Bug=fix,Feature=feat,Improvement=improve",
 		// Any model in pi-ai's catalog for the provider; through AI Gateway, so switching vendors is these two lines.
 		"MODEL_PROVIDER": "cloudflare-ai-gateway",
+		// The default, for an issue without a Model label.
 		"MODEL_ID": "workers-ai/@cf/moonshotai/kimi-k2.7-code",
+		// The whitelist an issue's Model label picks from (Linear's "Model" label group; names match its labels). Workers
+		// AI models only: they need no provider key in the gateway. A label not listed here picks the default.
+		"MODEL_LABELS": "Kimi K2.7 Code=workers-ai/@cf/moonshotai/kimi-k2.7-code,GLM 5.3=workers-ai/@cf/zai-org/glm-5.3,GLM 5.3 Flash=workers-ai/@cf/zai-org/glm-5.3-flash,DeepSeek V4 Pro=workers-ai/@cf/deepseek-ai/deepseek-v4-pro-0813",
 		"AI_GATEWAY_ID": "notefig-build-agents",
 		// Set at deploy from the CLOUDFLARE_ACCOUNT_ID secret.
 		"CLOUDFLARE_ACCOUNT_ID": "",

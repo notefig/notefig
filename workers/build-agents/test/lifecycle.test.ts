@@ -229,6 +229,31 @@ describe("an issue's agent", () => {
 		}
 	});
 
+	it("runs on the model its issue's Model label picks, and only a whitelisted one", async () => {
+		const picked = await prepared([{ text: "Fixed." }], { ...ISSUE, labels: [...ISSUE.labels, "Faux Two"] });
+		await start(picked);
+		const list = await eventually(picked, (agent) => agent.activities(), (value) => responses(value).length > 0);
+		expect(list).toContainEqual({ type: "thought", body: "Working with Faux Two (faux-2), from the issue's Model label." });
+		expect(await runInDurableObject(picked, (agent: TestIssueAgent) => agent.modelsUsed())).toEqual(["faux-2"]);
+
+		const unknown = await prepared([{ text: "Fixed." }], { ...ISSUE, labels: [...ISSUE.labels, "faux-3"] });
+		await start(unknown);
+		await eventually(unknown, (agent) => agent.activities(), (value) => responses(value).length > 0);
+		expect(await runInDurableObject(unknown, (agent: TestIssueAgent) => agent.modelsUsed())).toEqual(["faux-1"]);
+	});
+
+	it("switches model when it's delegated again after the Model label changed", async () => {
+		const stub = await prepared([{ text: "First pass." }, { text: "Carried on." }]);
+		await start(stub);
+		await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length === 1);
+		await runInDurableObject(stub, (agent: TestIssueAgent) => {
+			agent.setIssue({ ...ISSUE, labels: [...ISSUE.labels, "Faux Two"] });
+			return agent.start({ issueId: ISSUE.id, sessionId: "session-2", prompt: "" });
+		});
+		await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length === 2);
+		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.modelsUsed())).toEqual(["faux-1", "faux-2"]);
+	});
+
 	it("stops a running turn from the session's stop button", async () => {
 		const stub = await prepared(["hang", { text: "Never sent." }]);
 		await runInDurableObject(stub, async (agent: TestIssueAgent) => {
