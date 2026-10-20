@@ -307,7 +307,12 @@ describe("persisted tasks collection", () => {
 
 describe("lifecycle", () => {
   it("workspace dispose demotes sessionful rows to restored (persisted), drops sessionless", async () => {
-    store.tasks.insert(taskRow({ status: "idle" }));
+    store.tasks.insert(
+      taskRow({
+        status: "idle",
+        lastSettled: { turnId: "trn_1", at: 7, status: "completed" },
+      }),
+    );
     store.tasks.insert(
       taskRow({ taskId: "task_never", sessionId: undefined, status: "error" }),
     );
@@ -316,6 +321,7 @@ describe("lifecycle", () => {
 
     expect(store.tasks.get("task_a")).toMatchObject({
       status: "restored",
+      lastSettled: { turnId: "trn_1", at: 7, status: "completed" },
     });
     // A demoted session must not start claiming attention just because it
     // still carries its old lastSettled turn.
