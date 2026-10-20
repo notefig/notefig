@@ -1,5 +1,5 @@
 /**
- * A first guess at a new feedback issue's labels, from a decision model (Typesafe's Jev on Workers AI, through AI
+ * A first guess at a new feedback issue's labels, from a decision model (Cloudflare's Clef on Workers AI, through AI
  * Gateway): which kind of issue it is (Bug, Feature, Improvement) and which build-agent model should work on it (the
  * Model labels, matching `MODEL_LABELS` in workers/build-agents). The approver still reviews both in Triage.
  *
@@ -14,7 +14,7 @@ export type Classify = (message: string) => Promise<string[]>;
 export type RunModel = (model: string, input: DecisionInput) => Promise<unknown>;
 
 export interface TriageConfig {
-  /** `typesafe/jev`, or a model with the same API (`@cf/cloudflare/clef`). */
+  /** `@cf/cloudflare/clef` or `@cf/cloudflare/clef-flash`. */
   model: string;
   /** Label name → Linear label id, for the kinds of issue in `TYPES`. */
   typeLabelIds: ReadonlyMap<string, string>;
@@ -23,8 +23,8 @@ export interface TriageConfig {
 }
 
 export interface DecisionInput {
-  /** Clef's API asks which Clef model; Jev's takes no such field. */
-  model?: string;
+  /** Which Clef model: `clef` or `clef-flash`. */
+  model: string;
   state: string;
   questions: Record<string, { type: "choice"; instructions: string; criteria: Record<string, string> }>;
 }
@@ -71,8 +71,7 @@ export function decisionInput(message: string, config: TriageConfig): DecisionIn
     };
   }
   if (Object.keys(questions).length === 0) return null;
-  const [, clef] = /^@cf\/cloudflare\/(clef[\w-]*)$/.exec(config.model) ?? [];
-  return { ...(clef ? { model: clef } : {}), state: `App feedback from a user:\n\n${message}`, questions };
+  return { model: config.model.replace(/^@cf\/cloudflare\//, ""), state: `App feedback from a user:\n\n${message}`, questions };
 }
 
 export function classifier(run: RunModel, config: TriageConfig): Classify {

@@ -17,10 +17,8 @@ LINEAR_FEEDBACK_LABEL_ID = "bfabbb0a-e788-4584-848f-551a7b29f9e0"
 # Linear; the Model labels match MODEL_LABELS in workers/build-agents.
 LINEAR_TYPE_LABEL_IDS = "Bug=1cc3a070-eaa4-499d-8f5b-1ca294a262fb,Feature=36277f68-2c77-4554-8408-90ed0509fff5,Improvement=dae30278-b0d0-4b2a-af5d-d6d38f0aaca7"
 LINEAR_MODEL_LABEL_IDS = "Kimi K2.7 Code=e2e835b3-ad04-4d1e-bcd1-67daf74a1ca2,GLM 5.3=7680387c-c7f1-44e5-a1d4-621b72b38c41,GLM 5.3 Flash=5c77c201-138e-4ce0-ad46-6b596b1befe9,DeepSeek V4 Pro=a981e7de-cc13-41e2-af0b-2174081520ed"
-# Typesafe's Jev, through the build agents' gateway. It bills through the
-# gateway's unified billing balance; "@cf/cloudflare/clef" takes the same
-# questions and bills as Workers AI.
-DECISION_MODEL = "typesafe/jev"
+# Cloudflare's Clef, through the build agents' gateway. It bills as Workers AI.
+DECISION_MODEL = "@cf/cloudflare/clef"
 AI_GATEWAY_ID = "notefig-build-agents"
 # The agent: an accepted issue assigned to Notefig Support by an approver
 # (Parsa) starts a Claude Code routine. See README.md, "Agent".

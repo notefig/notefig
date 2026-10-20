@@ -25,7 +25,7 @@ function setup({ limited = false } = {}) {
         return { answers: { type: { type: "choice", choice: "Bug", confidence: 0.6, probabilities: { Bug: 0.9, Feature: 0.1 } } } };
       },
     } as unknown as Ai,
-    DECISION_MODEL: "typesafe/jev",
+    DECISION_MODEL: "@cf/cloudflare/clef",
     AI_GATEWAY_ID: "gateway",
     LINEAR_TYPE_LABEL_IDS: "Bug=bug-label,Feature=feature-label",
     LINEAR_MODEL_LABEL_IDS: "",
@@ -67,7 +67,7 @@ test("labels feedback with the decision model's suggestion, through the gateway"
   await handle(post(JSON.stringify(validFeedback)), env, fetchFn);
   assert.equal(aiCalls.length, 1);
   const [model, input, options] = aiCalls[0] as [string, { state: string }, unknown];
-  assert.equal(model, "typesafe/jev");
+  assert.equal(model, "@cf/cloudflare/clef");
   assert.match(input.state, /The sidebar flickers/);
   assert.deepEqual(options, { gateway: { id: "gateway" } });
   const issue = linearCalls[0].body as { variables: { input: { labelIds: string[] } } };

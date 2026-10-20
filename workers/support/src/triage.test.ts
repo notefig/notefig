@@ -3,7 +3,7 @@ import { mock, test } from "node:test";
 import { classifier, decisionInput, labelIds, type TriageConfig } from "./triage.ts";
 
 const config: TriageConfig = {
-  model: "typesafe/jev",
+  model: "@cf/cloudflare/clef",
   typeLabelIds: labelIds("Bug=bug-id, Feature = feature-id,Improvement=improvement-id"),
   modelLabelIds: labelIds("Kimi K2.7 Code=kimi-id,GLM 5.3=glm-id,Unknown Model=unknown-id"),
 };
@@ -35,7 +35,7 @@ test("reads Name=id pairs, skipping broken ones", () => {
 test("asks about the message alone: its kind, and a model among the labels it has ids for", () => {
   const input = decisionInput("Renaming a file loses the scroll position", config);
   assert.ok(input);
-  assert.equal(input.model, undefined);
+  assert.equal(input.model, "clef");
   assert.equal(input.state, "App feedback from a user:\n\nRenaming a file loses the scroll position");
   assert.deepEqual(Object.keys(input.questions.type.criteria), ["Bug", "Feature", "Improvement"]);
   // Only models described here and given an id: "Unknown Model" has no meaning to offer.
@@ -44,7 +44,7 @@ test("asks about the message alone: its kind, and a model among the labels it ha
 
 test("names the Clef model for Clef's API, and asks nothing without labels to choose from", () => {
   assert.equal(decisionInput("x", { ...config, model: "@cf/cloudflare/clef-flash" })?.model, "clef-flash");
-  assert.equal(decisionInput("x", { model: "typesafe/jev", typeLabelIds: new Map(), modelLabelIds: new Map() }), null);
+  assert.equal(decisionInput("x", { model: "@cf/cloudflare/clef", typeLabelIds: new Map(), modelLabelIds: new Map() }), null);
 });
 
 test("suggests the labels the model is sure enough of", async () => {
@@ -54,7 +54,7 @@ test("suggests the labels the model is sure enough of", async () => {
     return { answers: { type: answer("Bug", 0.82), model: answer("GLM 5.3", 0.3) } };
   }, config);
   assert.deepEqual(await classify("It crashes"), ["bug-id"]);
-  assert.deepEqual(calls, ["typesafe/jev"]);
+  assert.deepEqual(calls, ["@cf/cloudflare/clef"]);
 });
 
 test("suggests nothing for an answer it has no label for, or an answer of the wrong shape", async () => {

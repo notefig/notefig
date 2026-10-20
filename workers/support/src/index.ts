@@ -19,7 +19,7 @@ export interface Env {
   LINEAR_FEEDBACK_LABEL_ID: string;
   /** Workers AI, for the decision model that suggests labels (`triage.ts`). */
   AI: Ai;
-  /** The decision model: `typesafe/jev`. */
+  /** The decision model: `@cf/cloudflare/clef`. */
   DECISION_MODEL: string;
   /** The AI Gateway its calls go through. */
   AI_GATEWAY_ID: string;
