@@ -16,6 +16,8 @@ import {
 import { createNodeTestDb, type NodeTestDb } from "@/testing/node-db";
 import { fakeMcpEndpoint, testAgents } from "@/testing/test-agents";
 import { testKv } from "@/testing/test-kv";
+import { deriveAttention } from "@/utils/attention";
+import { workspaceKey } from "@/utils/path";
 
 // The tasks collection persists into a real (in-memory) SQLite through the
 // same driver the desktop uses, so these tests exercise write-through and the
@@ -59,6 +61,18 @@ function onDisk(taskId: string): Record<string, unknown> | undefined {
  *  hydrated — given the tasks this test says are live. */
 async function boot(): Promise<void> {
   await store.reconcile((taskId) => live.get(taskId));
+}
+
+/** Attention over the current store state, with no other rounds/asks. */
+function attentionForTasks(tasks: AgentTaskRow[]) {
+  return deriveAttention({
+    tasks,
+    rounds: [],
+    runningTurns: [],
+    openWorkspaceKeys: new Set([workspaceKey("/ws")]),
+    pendingPermissions: [],
+    seen: new Map(),
+  });
 }
 
 beforeEach(async () => {
@@ -303,6 +317,9 @@ describe("lifecycle", () => {
     expect(store.tasks.get("task_a")).toMatchObject({
       status: "restored",
     });
+    // A demoted session must not start claiming attention just because it
+    // still carries its old lastSettled turn.
+    expect(attentionForTasks(store.tasks.toArray).items).toEqual([]);
     expect(store.tasks.get("task_never")).toBeUndefined();
     // dispose does not await durability — it demotes optimistically and lets
     // the commits land behind it.
@@ -310,6 +327,18 @@ describe("lifecycle", () => {
       expect(onDisk("task_a")).toMatchObject({ status: "restored" });
       expect(onDisk("task_never")).toBeUndefined();
     });
+  });
+
+  it("booting a stored session into restored does not inherit attention", async () => {
+    await seedDisk({
+      status: "running",
+      lastSettled: { turnId: "trn_1", at: 7, status: "completed" },
+    });
+    // No live runtime: reconcile boots the row back as restored.
+    await boot();
+
+    expect(store.tasks.get("task_a")).toMatchObject({ status: "restored" });
+    expect(attentionForTasks(store.tasks.toArray).items).toEqual([]);
   });
 
   it("delete removes the row, its transcript rows, and the disk row", async () => {
