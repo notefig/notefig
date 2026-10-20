@@ -98,6 +98,33 @@ function widgetBlobIds(doc: PMNode): Set<string> {
   return ids;
 }
 
+function widgetBlobIdsFromJSON(json: JSONContent): Set<string> {
+  const ids = new Set<string>();
+  const walk = (node: JSONContent): void => {
+    if (node.type === PROMPT_NODE_NAME) {
+      const blobId = node.attrs?.blobId as string | undefined;
+      if (blobId) ids.add(blobId);
+    }
+    node.content?.forEach(walk);
+  };
+  walk(json);
+  return ids;
+}
+
+function countReinsertedWidgets(
+  incomingIds: Set<string>,
+  finalDoc: PMNode,
+): number {
+  let count = 0;
+  finalDoc.descendants((node) => {
+    if (node.type.name !== PROMPT_NODE_NAME) return true;
+    const blobId = node.attrs.blobId as string | null;
+    if (blobId && !incomingIds.has(blobId)) count++;
+    return false;
+  });
+  return count;
+}
+
 /** The file bytes an adoption brings in, by path and content hash, and
  *  who to ask which prompt round wrote them (`core.turnWrites`). */
 export type AdoptionSource = {
@@ -129,6 +156,7 @@ export function adoptExternalContent(
   // Drafts ride along in both modes: harmless when the diff would have
   // kept them anyway, load-bearing for the fallback.
   const prepared = carryDraftsForward(incoming, oldDoc);
+  const incomingBlobIds = widgetBlobIdsFromJSON(prepared);
 
   let newDoc: PMNode | null = null;
   try {
@@ -139,7 +167,7 @@ export function adoptExternalContent(
   }
 
   if (!newDoc || oldDoc.nodeSize + newDoc.nodeSize > maxDiffNodeSize) {
-    return applyReplaceFallback(editor, prepared, oldDoc);
+    return applyReplaceFallback(editor, prepared, oldDoc, incomingBlobIds);
   }
 
   try {
@@ -154,7 +182,7 @@ export function adoptExternalContent(
       if (applied.failed) throw new Error(applied.failed);
     }
     const draftCaret = captureDraftCaret(editor);
-    const reinsertedWidgets = reassertDroppedWidgets(oldDoc, tr, (pos) =>
+    const reassertCount = reassertDroppedWidgets(oldDoc, tr, (pos) =>
       tr.mapping.map(pos),
     );
     restoreDraftCaret(tr, draftCaret);
@@ -165,7 +193,13 @@ export function adoptExternalContent(
     );
     if (round) tr.setMeta(PROMPT_CHANGE_META, round);
     editor.view.dispatch(tr);
-    return { mode: "diffed", reinsertedWidgets };
+    return {
+      mode: "diffed",
+      reinsertedWidgets: Math.max(
+        reassertCount,
+        countReinsertedWidgets(incomingBlobIds, editor.state.doc),
+      ),
+    };
   } catch (error) {
     // A diff the engine cannot express (or a step that no longer applies)
     // degrades to the historical behavior rather than failing adoption.
@@ -173,7 +207,7 @@ export function adoptExternalContent(
       "[adoption] differential adoption failed, falling back to replace",
       error,
     );
-    return applyReplaceFallback(editor, prepared, oldDoc);
+    return applyReplaceFallback(editor, prepared, oldDoc, incomingBlobIds);
   }
 }
 
@@ -189,13 +223,14 @@ function applyReplaceFallback(
   editor: Editor,
   prepared: JSONContent,
   oldDoc: PMNode,
+  incomingBlobIds: Set<string>,
 ): AdoptionResult {
   const draftCaret = captureDraftCaret(editor);
   editor.commands.setContent(prepared, { emitUpdate: false });
   const tr = editor.state.tr;
   const oldSize = Math.max(oldDoc.content.size, 1);
   const scale = tr.doc.content.size / oldSize;
-  const reinsertedWidgets = reassertDroppedWidgets(oldDoc, tr, (pos) =>
+  const reassertCount = reassertDroppedWidgets(oldDoc, tr, (pos) =>
     Math.round(pos * scale),
   );
   restoreDraftCaret(tr, draftCaret);
@@ -203,7 +238,13 @@ function applyReplaceFallback(
   if (tr.steps.length > 0 || tr.selectionSet) {
     editor.view.dispatch(tr);
   }
-  return { mode: "replaced", reinsertedWidgets };
+  return {
+    mode: "replaced",
+    reinsertedWidgets: Math.max(
+      reassertCount,
+      countReinsertedWidgets(incomingBlobIds, editor.state.doc),
+    ),
+  };
 }
 
 /** The caret's home when it sits inside a widget's draft: which widget
