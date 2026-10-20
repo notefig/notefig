@@ -146,7 +146,8 @@ All in `wrangler.jsonc`. Names, not ids: the Linear team, labels and approvers a
 | `TRUSTED_REVIEWERS` | `greptile-apps[bot]` | GitHub logins besides collaborators whose reviews reach the agent |
 | `TYPE_LABELS` | `Bug=fix,Feature=feat,Improvement=improve` | Issue label → commit/PR type. No match: `chore` |
 | `MODEL_PROVIDER` | `cloudflare-ai-gateway` | pi-ai provider |
-| `MODEL_ID` | `workers-ai/@cf/moonshotai/kimi-k2.7-code` | Model in that provider's catalog. Claude would be `claude-sonnet-5-5` (needs an Anthropic key in the gateway) |
+| `MODEL_ID` | `workers-ai/@cf/moonshotai/kimi-k2.7-code` | The default model, in that provider's catalog. Claude would be `claude-sonnet-5-5` (needs an Anthropic key in the gateway) |
+| `MODEL_LABELS` | `Kimi K2.7 Code=…kimi-k2.7-code,GLM 5.3=…glm-5.3,GLM 5.3 Flash=…glm-5.3-flash,DeepSeek V4 Pro=…deepseek-v4-pro-0813` | The whitelist an issue's **Model** label picks from (`Label=modelId`). See "Choosing the model" |
 | `AI_GATEWAY_ID` | `notefig-build-agents` | The gateway bootstrap creates |
 | `CLOUDFLARE_ACCOUNT_ID` | (empty in the file) | Set at deploy from the secret of the same name |
 | `GIT_AUTHOR_NAME` | `notefig-build-agent[bot]` | Written by `create-github-app` |
@@ -215,6 +216,7 @@ Also used by the workflow: the repo secret `CLOUDFLARE_ACCOUNT_ID` and the envir
     the agent stops it) and **Permission changes**;
   - installed as an agent once by an admin, through the link `bootstrap` prints (`actor=app`, scopes
     `read,write,app:assignable,app:mentionable`). Installed agents take no seat.
+- **The "Model" label group** (workspace level), with one label per `MODEL_LABELS` entry.
 - **Team MET**, with the labels `agent-test`, `Bug`, `Feature`, `Improvement`. The app can't create labels in this
   workspace (label management is admin-only), so bootstrap lists missing ones to create by hand.
 - **Approvers:** members whose **Linear account email** is in `BUILD_AGENTS_APPROVERS` (currently `mail@parsa.pro`;
@@ -345,7 +347,26 @@ the old image isn't reused; the next start clones afresh.
 - **Turn it off entirely:** turn off the Linear app's webhook (or empty `BUILD_AGENTS_APPROVERS` and release).
 - **Live mode** (since MET-241): `LINEAR_TEST_LABEL` is empty, so any accepted issue an approver delegates starts an
   agent, and its PRs are ready for review. **Back to testing mode:** set it to `agent-test` and release.
-- **Switch model:** `MODEL_PROVIDER`/`MODEL_ID` (any entry in pi-ai's catalog for that provider), release.
+- **Switch the default model:** `MODEL_PROVIDER`/`MODEL_ID` (any entry in pi-ai's catalog for that provider), release.
+
+### Choosing the model
+
+An issue's model is its **Model** label (Linear's workspace label group "Model", one child per model, so an issue has
+at most one), set by hand or suggested when feedback is filed. Only labels in `MODEL_LABELS` count: their model ids
+are the only ones a label can reach, so a label can't point an agent at an arbitrary or expensive model. No Model
+label, or one not on the whitelist: `MODEL_ID`.
+
+| Label | Model | For |
+|---|---|---|
+| Kimi K2.7 Code | `workers-ai/@cf/moonshotai/kimi-k2.7-code` | The default; everyday fixes and features |
+| GLM 5.3 | `workers-ai/@cf/zai-org/glm-5.3` | 1M-token context; large changes across packages |
+| GLM 5.3 Flash | `workers-ai/@cf/zai-org/glm-5.3-flash` | Cheap and fast; small, well-specified changes |
+| DeepSeek V4 Pro | `workers-ai/@cf/deepseek-ai/deepseek-v4-pro-0813` | Strongest reasoning; hard bugs |
+
+All four are Workers AI models, so the gateway needs no provider key; each answered through `notefig-build-agents` on
+2026-10-20. The model is read when the agent accepts the issue and again when it's delegated again, and the agent
+says on the session which one a label picked. A conversation already running switches at its next model request.
+To add one: a child label under "Model" in Linear, its pair in `MODEL_LABELS`, release.
 
 ## Lifecycle and cost
 

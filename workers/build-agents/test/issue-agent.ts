@@ -36,6 +36,8 @@ export class TestIssueAgent extends IssueAgent {
 	/** Resolves when this instance's model request starts and hangs. */
 	readonly hanging: Promise<void>;
 	#hung!: () => void;
+	/** While set, reading the issue from Linear waits for it. */
+	#issueHeld: Promise<void> | undefined;
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
@@ -44,6 +46,16 @@ export class TestIssueAgent extends IssueAgent {
 
 	script(steps: Step[]): void {
 		this.ctx.storage.kv.put("test:script", { steps, next: 0 } satisfies Script);
+	}
+
+	/** Holds the next issue reads until the returned function is called, as when Linear is slow. */
+	holdIssue(): () => void {
+		let release!: () => void;
+		this.#issueHeld = new Promise((resolve) => (release = resolve));
+		return () => {
+			this.#issueHeld = undefined;
+			release();
+		};
 	}
 
 	setIssue(issue: IssueDetails): void {
@@ -89,12 +101,18 @@ export class TestIssueAgent extends IssueAgent {
 		return this.ctx.storage.kv.get<string>("test:last-prompt") ?? "";
 	}
 
+	/** The model id of each request, in order. */
+	modelsUsed(): string[] {
+		return this.ctx.storage.kv.get<string[]>("test:models") ?? [];
+	}
+
 	modelCalls(): number {
 		return this.ctx.storage.kv.get<Script>("test:script")?.next ?? 0;
 	}
 
 	protected override models(): Models {
-		const faux = fauxProvider();
+		// The default model and the one `MODEL_LABELS` whitelists in test/wrangler.jsonc.
+		const faux = fauxProvider({ models: [{ id: "faux-1" }, { id: "faux-2" }] });
 		faux.setResponses(Array.from({ length: 16 }, () => this.#step()));
 		const models = createModels();
 		models.setProvider(faux.provider);
@@ -118,6 +136,7 @@ export class TestIssueAgent extends IssueAgent {
 			},
 			appUserId: async () => "app-user",
 			issue: async () => {
+				await this.#issueHeld;
 				const issue = kv.get<IssueDetails>("test:issue");
 				if (!issue) throw new Error("No test issue");
 				return issue;
@@ -175,8 +194,9 @@ export class TestIssueAgent extends IssueAgent {
 
 	/** The next scripted response. The position is stored before the response is used, so a new instance continues. */
 	#step(): FauxResponseStep {
-		return (_request, options) => {
+		return (_request, options, _state, model) => {
 			const kv = this.ctx.storage.kv;
+			kv.put("test:models", [...(kv.get<string[]>("test:models") ?? []), model.id]);
 			const script = kv.get<Script>("test:script") ?? { steps: [], next: 0 };
 			const step = script.steps[script.next] ?? { text: "unscripted" };
 			// The newest user message the model was sent, for tests that check what reached it.

@@ -6,7 +6,7 @@ import { type Conversation, createRegistry, defineExtension, Harness, hook, sect
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
-import { type Config, type Env, readConfig } from "./config.ts";
+import { type Config, type Env, type Model, modelFor, readConfig } from "./config.ts";
 import { ContainerEnv } from "./container-env.ts";
 import { REGISTRY_HOSTS } from "./gateways.ts";
 import { type GitHubClient, gitHubClient } from "./github.ts";
@@ -99,13 +99,14 @@ export class IssueAgent extends DurableObject<Env> {
 	}
 
 	/**
-	 * A conversation keeps the instructions and model it was created with. After a release changes either, an agent
-	 * that is already running picks the new ones up here, from its next model request on.
+	 * A conversation keeps the instructions and model it was created with. After a release changes either, or the
+	 * issue's Model label picks another model, an agent that is already running picks the new ones up here (on open and
+	 * before each submission), from its next model request on.
 	 */
 	async #current(): Promise<void> {
 		const root = await this.#root();
 		const agent = await root.agent(context);
-		const { model } = this.#config;
+		const model = this.#model();
 		const stale =
 			agent.instructions !== INSTRUCTIONS || agent.model?.provider !== model.provider || agent.model?.modelId !== model.modelId;
 		if (stale) await root.configure({ instructions: INSTRUCTIONS, model }, context);
@@ -122,6 +123,8 @@ export class IssueAgent extends DurableObject<Env> {
 			// The new session's context (the comment that mentioned the agent, say) replaces the old one in the issue
 			// section, and is the follow-up itself, so a new request isn't answered from old instructions.
 			if (input.prompt.trim()) this.#put("prompt", input.prompt);
+			// The agent may have ended (PR closed, unassigned) while Linear answered: then there's nothing to carry on.
+			if (!(await this.#relabel(input.issueId))) return;
 			await this.#post({ type: "thought", body: "Picking this up again." }).catch((error: unknown) => {
 				console.error("linear: thought not posted", error);
 			});
@@ -152,6 +155,7 @@ export class IssueAgent extends DurableObject<Env> {
 		}
 		this.#put("issue", issue);
 		this.#put("prompt", input.prompt);
+		await this.#announceModel();
 		// The issue shows it's being worked on. Draft PRs don't move it, and an issue already further along stays put.
 		if ((issue.stateType === "backlog" || issue.stateType === "unstarted") && issue.startedStateId) {
 			await this.linear()
@@ -162,6 +166,41 @@ export class IssueAgent extends DurableObject<Env> {
 		await this.#submit("Start working on the issue.", `linear:session:${input.sessionId}`, "followUp");
 		this.#taken(input.sessionId);
 		await this.#drainPending();
+	}
+
+	/** The model this issue's conversation runs on: its whitelisted Model label's, or the default. */
+	#model(): Model {
+		return modelFor(this.#get("issue")?.labels ?? [], this.#config).model;
+	}
+
+	/**
+	 * Delegated again: the issue's labels as they are now, so a changed Model label applies from this session. Only the
+	 * labels: the branch and the rest stay as accepted. Kept as they were if Linear can't be reached. False if the agent
+	 * ended while Linear answered, so nothing is restored.
+	 */
+	async #relabel(issueId: string): Promise<boolean> {
+		let labels: readonly string[] | undefined;
+		try {
+			({ labels } = await this.linear().issue(issueId));
+		} catch (error) {
+			console.error("linear: labels not refreshed", error);
+		}
+		const issue = this.#get("issue");
+		if (!issue) return false;
+		if (labels) {
+			this.#put("issue", { ...issue, labels });
+			await this.#announceModel();
+		}
+		return true;
+	}
+
+	/** Says on the session which model a Model label picked; nothing for the default. */
+	async #announceModel(): Promise<void> {
+		const { model, label } = modelFor(this.#get("issue")?.labels ?? [], this.#config);
+		if (!label) return;
+		await this.#post({ type: "thought", body: `Working with ${label} (${model.modelId}), from the issue's Model label.` }).catch(
+			(error: unknown) => console.error("linear: model thought not posted", error),
+		);
 	}
 
 	/** Records a session whose request is admitted; a later delivery of it is a retry. */
@@ -296,13 +335,14 @@ export class IssueAgent extends DurableObject<Env> {
 		if (!this.#get("issue")) return;
 		// Armed before admitting work: an object that dies after the commit is still woken.
 		await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);
+		await this.#current();
 		const root = await this.#root();
 		await root.submit({ type: "input", content, requestId, ...(whenBusy === "steer" ? { whenBusy: "steer" } : {}) }, context);
 	}
 
 	#root(): Promise<Conversation> {
 		return this.#harness.root(context, {
-			agent: { model: this.#config.model, instructions: INSTRUCTIONS, cwd: REPO_DIR },
+			agent: { model: this.#model(), instructions: INSTRUCTIONS, cwd: REPO_DIR },
 		});
 	}
 
