@@ -80,6 +80,7 @@ import {
   blobCardClass,
   referenceRemovalArmed,
   type BlobPhase,
+  type ComposerKeyAction,
 } from "../state";
 
 /**
@@ -336,24 +337,26 @@ function usePromptBlobDisplay({
 }
 
 /**
- * Escape anywhere cancels this widget's in-flight turn and restores the
- * prompt into the composer (MET-94). A global hotkey, not a card-level
- * keydown: after send the composer unmounts and focus returns to the
- * document, so no element inside the widget could hear the key. The dock
- * unmounting unselected tabs scopes it to the visible document for free;
- * "sending" is excluded (nothing to cancel yet — the dispatch is still
- * racing the session spawn, a sub-second window).
+ * Escape on an in-flight agent stops it but does not remove it from the
+ * page (MET-248). For queued prompts that means withdrawing them, which
+ * restores the composer; for running / needs-permission / needs-auth turns
+ * the widget stays bound to the original session and degrades to a stopped
+ * done face. A global hotkey, not a card-level keydown: after send the
+ * composer unmounts and focus returns to the document, so no element
+ * inside the widget could hear the key. The dock unmounting unselected
+ * tabs scopes it to the visible document for free; "sending" is excluded
+ * (nothing to stop yet).
  */
 function useInFlightEscape({
   blobId,
   phase,
   boundTurnId,
-  cancelAndRestore,
+  stop,
 }: {
   blobId: string;
   phase: BlobPhase;
   boundTurnId: string | null;
-  cancelAndRestore: () => void;
+  stop: () => void;
 }) {
   const inFlight =
     phase === "queued" ||
@@ -370,7 +373,7 @@ function useInFlightEscape({
       // A layer that consumed the key (dialog/menu dismissal) wins.
       if (event.defaultPrevented) return;
       if (!holdsLatestInFlightEscape(blobId)) return;
-      cancelAndRestore();
+      stop();
     },
     // 'allow': several widgets can legitimately hold this registration;
     // the latest-sent claim decides which one acts.
@@ -482,6 +485,37 @@ function usePromptBlobFocus({
  * has rows to offer. "Caret in THIS draft" is the extension's dispatch
  * condition, so it needs no re-check here.
  */
+type ComposerKeyActions = Pick<
+  PromptBlobFaceActions,
+  "send" | "sendFollowUp" | "escapeToEditor" | "revertToSlash" | "backspaceDismiss" | "stop"
+> & { replying: boolean; inFlight: boolean };
+
+/** Run the resolved composer action. Kept outside the key handler so the
+ *  handler itself stays small and the dispatch table is explicit. */
+function runComposerAction(
+  action: ComposerKeyAction,
+  live: ComposerKeyActions,
+): void {
+  if (action.type === "send") {
+    if (live.replying) void live.sendFollowUp();
+    else void live.send();
+    return;
+  }
+  if (action.type === "cancelRestore") {
+    live.stop();
+    return;
+  }
+  if (action.type === "revert") {
+    live.revertToSlash?.();
+    return;
+  }
+  if (action.type === "backspaceDismiss") {
+    live.backspaceDismiss?.();
+    return;
+  }
+  live.escapeToEditor();
+}
+
 function useComposerKeys({
   blobId,
   documentPath,
@@ -495,14 +529,7 @@ function useComposerKeys({
   draft: string;
   draftIO: DraftIO;
   canRevert: boolean;
-  actions: Pick<
-    PromptBlobFaceActions,
-    | "send"
-    | "sendFollowUp"
-    | "escapeToEditor"
-    | "revertToSlash"
-    | "backspaceDismiss"
-  > & { replying: boolean };
+  actions: ComposerKeyActions;
 }) {
   const latest = useRef({ draftIO, canRevert, actions });
   latest.current = { draftIO, canRevert, actions };
@@ -521,26 +548,22 @@ function useComposerKeys({
         // stale "empty" here would dismiss the widget on the very keypress
         // meant to delete the last character.
         const text = io.read();
+        const notReplyingOrInFlight = !live.replying && !live.inFlight;
         const action = deriveComposerKeyAction({
           key: input.key,
           shiftKey: input.shiftKey,
           draftEmpty: text.trim().length === 0,
           // Reverting to "/" belongs to a summoned widget that has never
           // been sent; dismissal to any removable one. A reply row (a
-          // widget showing its round) gets neither.
-          canRevert: revertable && !live.replying,
-          canDismiss: live.backspaceDismiss !== undefined && !live.replying,
-          // Escape mid-turn is a global hotkey with its own claim map
-          // (useInFlightEscape) — it must not be resolved twice.
-          inFlight: false,
+          // widget showing its round) gets neither. A queued/running turn
+          // is stopped, never removed from the page (MET-248).
+          canRevert: revertable && notReplyingOrInFlight,
+          canDismiss:
+            live.backspaceDismiss !== undefined && notReplyingOrInFlight,
+          inFlight: live.inFlight,
         });
         if (action.type === "none") return false;
-        if (action.type === "send") {
-          if (live.replying) void live.sendFollowUp();
-          else void live.send();
-        } else if (action.type === "revert") live.revertToSlash?.();
-        else if (action.type === "backspaceDismiss") live.backspaceDismiss?.();
-        else live.escapeToEditor();
+        runComposerAction(action, live);
         return true;
       }),
     [blobId, documentPath],
@@ -923,19 +946,18 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
   const draftIO = useDraftIO(editor, blobId, workspacePath);
 
   const { label: harnessLabel } = host.useDefaultHarness();
-  const { isSending, confirmTrust, cancelAndRestore, ...actions } =
-    usePromptBlobActions({
-      blobId,
-      workspacePath,
-      documentPath,
-      editor,
-      getPos,
-      summoned: placement.summoned === true,
-      reference,
-      removeNode: placement.removeNode,
-      onSessionBound: placement.onSessionBound,
-      draftIO,
-    });
+  const { isSending, confirmTrust, ...actions } = usePromptBlobActions({
+    blobId,
+    workspacePath,
+    documentPath,
+    editor,
+    getPos,
+    summoned: placement.summoned === true,
+    reference,
+    removeNode: placement.removeNode,
+    onSessionBound: placement.onSessionBound,
+    draftIO,
+  });
 
   const { turn, task, sortedEntries, taskTurns, phase } = usePromptBlobRound({
     boundTurnId,
@@ -943,7 +965,7 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     isSending,
   });
 
-  useInFlightEscape({ blobId, phase, boundTurnId, cancelAndRestore });
+  useInFlightEscape({ blobId, phase, boundTurnId, stop: actions.stop });
   useStaleTurnReset({ blobId, boundTurnId, isSending, hasTurn: Boolean(turn) });
   const escapeToEditor = usePromptBlobFocus({
     blobId,
@@ -963,6 +985,12 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     workspacePath,
   });
 
+  const inFlight =
+    phase === "queued" ||
+    phase === "running" ||
+    phase === "needs-permission" ||
+    phase === "needs-auth";
+
   useComposerKeys({
     blobId,
     documentPath,
@@ -973,6 +1001,7 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
       ...actions,
       escapeToEditor,
       replying: phase === "done" || phase === "error",
+      inFlight,
     },
   });
 
@@ -1247,23 +1276,6 @@ function usePromptBlobActions({
     if (running) host.cancelTask(running.taskId);
   }, [host, blobId, restorePromptToDraft]);
 
-  // Escape while in flight (MET-94): cancel the turn and — when the agent
-  // hadn't responded yet — return to the composing face with the prompt
-  // restored, its round forgotten (the restored prompt must not also
-  // linger in the history it was pulled out of). Once a response exists
-  // the round is real: forgetting it would hide context the session still
-  // holds, so Escape then degrades to Stop (stay bound, "Stopped" done
-  // face, no restore — the prompt is right there in the round). A queued
-  // turn is withdrawn, which already deletes its rows.
-  const cancelAndRestore = useCallback(() => {
-    const running = withdrawIfQueued(host, blobId, restorePromptToDraft);
-    if (running) {
-      void host.cancelTurnAndForget(running.taskId).then((forgot) => {
-        if (forgot) restorePromptToDraft();
-      });
-    }
-  }, [host, blobId, restorePromptToDraft]);
-
   // In a doc with real content the widget is transient — ✕ removes the
   // node outright. In an empty doc removal is pointless (the keeper would
   // reinsert), so just reset to composing.
@@ -1328,7 +1340,6 @@ function usePromptBlobActions({
     editPrompt,
     retry,
     stop,
-    cancelAndRestore,
     dismiss,
     revertToSlash,
     backspaceDismiss,

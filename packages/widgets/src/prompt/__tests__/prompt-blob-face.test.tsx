@@ -31,6 +31,7 @@ const record = {
   boundTurnId: "trn_1",
   boundTaskId: "task_1",
   lastSentPrompt: "the sent prompt",
+  documentPath: "/ws/doc.md",
 };
 
 const actions = {
@@ -110,6 +111,7 @@ function render(
             read: () => overrides.draft ?? "",
             write: noop,
             holdsCaret: () => false,
+            focus: noop,
           },
           // The draft is document content, so the face is handed a content
           // hole rather than rendering a composer of its own.
