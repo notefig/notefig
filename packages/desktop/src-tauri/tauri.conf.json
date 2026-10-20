@@ -7,7 +7,7 @@
     "frontendDist": "../dist"
   },
   "productName": "Notefig",
-  "version": "0.0.147",
+  "version": "0.0.148",
   "identifier": "com.notefig.app",
   "plugins": {
     "shell": {
