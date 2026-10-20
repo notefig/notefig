@@ -4,7 +4,7 @@
  * a later prompt resumes the same agent (MET-248).
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { act, createElement, useEffect } from "react";
+import { act, createElement, useEffect, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 vi.mock("react-i18next", () => ({
@@ -14,10 +14,7 @@ vi.mock("react-i18next", () => ({
 
 import { Editor, EditorContent, useEditor } from "@tiptap/react";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
-import {
-  widgetRendererNodes,
-  selectionDraft,
-} from "@notefig/widgets";
+import { widgetRendererNodes, selectionDraft } from "@notefig/widgets";
 import { fakePromptWidgetHost, withHost } from "@notefig/widgets/testing";
 import type { PromptWidgetHost, PromptRound } from "@notefig/widgets";
 import type { AgentTurn, AgentTaskRow } from "@notefig/shared/agent";
@@ -45,46 +42,77 @@ const EMPTY_ROUND: PromptRound = {
 const TASK_ID = "task_escape_test";
 const TURN_ID = "trn_escape_test";
 
+const RUNNING_ROUND: PromptRound = {
+  turn: {
+    turnId: TURN_ID,
+    taskId: TASK_ID,
+    sessionId: "sess_escape_test",
+    status: "running",
+    startedAt: Date.now(),
+  } as AgentTurn,
+  task: {
+    taskId: TASK_ID,
+    workspacePath: "/ws",
+    title: "escape test",
+    status: "running",
+    harnessId: "claude",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  } as AgentTaskRow,
+  entries: [],
+  taskTurns: [],
+  pendingPermissions: [],
+};
+
+const CANCELLED_ROUND: PromptRound = {
+  ...RUNNING_ROUND,
+  turn: { ...RUNNING_ROUND.turn, status: "cancelled" as const },
+  task: { ...RUNNING_ROUND.task, status: "cancelled" as const },
+};
+
+/** Minimal external store so the test can drive round transitions from
+ *  outside React, matching how the real host's collections update the
+ *  widget. */
+function createRoundStore() {
+  let round = EMPTY_ROUND;
+  const listeners = new Set<() => void>();
+  return {
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    getSnapshot: () => round,
+    publish: (next: PromptRound) => {
+      round = next;
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
 function runningRoundHost(): {
   host: PromptWidgetHost;
   cancelTask: ReturnType<typeof vi.fn>;
   cancelTurnAndForget: ReturnType<typeof vi.fn>;
+  publishRound: (round: PromptRound) => void;
 } {
-  let round = EMPTY_ROUND;
   const cancelTask = vi.fn();
   const cancelTurnAndForget = vi.fn(async () => true);
+  const store = createRoundStore();
+
   const host = fakePromptWidgetHost({
     startOrGetSharedSession: vi.fn(async () => TASK_ID),
-    useRound: vi.fn(() => round),
-    getTurnStatus: vi.fn(() => round.turn?.status),
+    useRound: vi.fn(() =>
+      useSyncExternalStore(store.subscribe, store.getSnapshot),
+    ),
+    getTurnStatus: vi.fn(() => store.getSnapshot().turn?.status),
     dispatchPrompt: vi.fn(() => {
-      round = {
-        turn: {
-          turnId: TURN_ID,
-          taskId: TASK_ID,
-          sessionId: "sess_escape_test",
-          status: "running",
-          startedAt: Date.now(),
-        } as AgentTurn,
-        task: {
-          taskId: TASK_ID,
-          workspacePath: "/ws",
-          title: "escape test",
-          status: "running",
-          harnessId: "claude",
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        } as AgentTaskRow,
-        entries: [],
-        taskTurns: [],
-        pendingPermissions: [],
-      };
+      store.publish(RUNNING_ROUND);
       return { turnId: TURN_ID };
     }),
     cancelTask,
     cancelTurnAndForget,
   });
-  return { host, cancelTask, cancelTurnAndForget };
+  return { host, cancelTask, cancelTurnAndForget, publishRound: store.publish };
 }
 
 function Harness({
@@ -143,23 +171,31 @@ function typeText(editor: Editor, text: string): boolean {
   );
 }
 
-function pressKey(editor: Editor, key: string): { handled: boolean } {
-  const event = new KeyboardEvent("keydown", {
-    key,
-    bubbles: true,
-    cancelable: true,
-  });
-  editor.view.dom.dispatchEvent(event);
-  return { handled: event.defaultPrevented };
+function pressKey(editor: Editor, key: string): void {
+  editor.view.dom.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
 }
 
-function hasWidget(editor: Editor): boolean {
-  let found = false;
+function widgetPhase(): string | null {
+  const widget = container!.querySelector('[data-type="ai-prompt"]');
+  return widget?.querySelector('[data-blob-phase]')?.getAttribute("data-blob-phase") ?? null;
+}
+
+function widgetTaskId(editor: Editor): string | null {
+  let taskId: string | null = null;
   editor.state.doc.descendants((node) => {
-    if (node.type.name === "aiPrompt") found = true;
-    return !found;
+    if (node.type.name === "aiPrompt") {
+      taskId = node.attrs.taskId ?? null;
+      return false;
+    }
+    return true;
   });
-  return found;
+  return taskId;
 }
 
 async function summonWidget(editor: Editor): Promise<void> {
@@ -168,13 +204,13 @@ async function summonWidget(editor: Editor): Promise<void> {
     typeText(editor, "/");
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  expect(hasWidget(editor)).toBe(true);
   expect(selectionDraft(editor.state)).toBeTruthy();
 }
 
 describe("escape on a running prompt widget", () => {
   it("stops the agent but keeps the widget bound to its session", async () => {
-    const { host, cancelTask, cancelTurnAndForget } = runningRoundHost();
+    const { host, cancelTask, cancelTurnAndForget, publishRound } =
+      runningRoundHost();
     const editor = await mountedEditor("<p>Hi there</p><p></p>", host);
     await summonWidget(editor);
 
@@ -190,14 +226,11 @@ describe("escape on a running prompt widget", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    const widget = container!.querySelector('[data-type="ai-prompt"]');
-    expect(widget).not.toBeNull();
-    expect(widget?.querySelector('[data-blob-phase]')?.getAttribute("data-blob-phase")).toBe("running");
+    expect(widgetPhase()).toBe("running");
+    expect(widgetTaskId(editor)).toBe(TASK_ID);
 
-    // Keep the caret in the draft (the same path the global hotkey defers
-    // to) and press Escape: a running turn must be stopped, not removed.
-    expect(selectionDraft(editor.state)).toBeTruthy();
-
+    // Escape stops the turn. The widget must not be removed and its task
+    // binding must survive so a follow-up targets the same session.
     await act(async () => {
       pressKey(editor, "Escape");
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -206,5 +239,30 @@ describe("escape on a running prompt widget", () => {
     expect(cancelTask).toHaveBeenCalledTimes(1);
     expect(cancelTask).toHaveBeenCalledWith(TASK_ID);
     expect(cancelTurnAndForget).not.toHaveBeenCalled();
+
+    // Publish the cancelled turn the real facade would surface.
+    await act(async () => {
+      publishRound(CANCELLED_ROUND);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(widgetPhase()).toBe("done");
+    expect(widgetTaskId(editor)).toBe(TASK_ID);
+
+    // A follow-up from the stopped widget must resume the original task.
+    await act(async () => {
+      editor.commands.insertContent("follow up");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await act(async () => {
+      pressKey(editor, "Enter");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(host.dispatchPrompt).toHaveBeenCalledTimes(2);
+    const followUpCall = vi.mocked(host.dispatchPrompt).mock.calls[1];
+    expect(followUpCall[0].taskId).toBe(TASK_ID);
   });
 });
