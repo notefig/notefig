@@ -217,6 +217,20 @@ describe("deriveAttention", () => {
     expect(attention.asks[0].permission?.id).toBe("p1");
   });
 
+  it("a restored session is quiet until it is revived", () => {
+    const restored = task({
+      taskId: "task_restored",
+      status: "restored",
+      lastSettled: { turnId: "t1", at: 10, status: "completed" },
+    });
+    expect(deriveAttention({ ...EMPTY, tasks: [restored] }).items).toEqual([]);
+
+    const revived = { ...restored, status: "idle" as const };
+    expect(
+      deriveAttention({ ...EMPTY, tasks: [revived] }).byTask.get("task_restored"),
+    ).toBe("bau");
+  });
+
   it("the sidebar's one dot is terracotta when anything is an error, else sage", () => {
     expect(mostPressing(null, null)).toBeNull();
     expect(mostPressing("bau", null)).toBe("bau");

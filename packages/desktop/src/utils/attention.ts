@@ -147,6 +147,10 @@ function taskAttention(
     workspaceKey: workspaceKey(task.workspacePath),
     task,
   };
+  // A restored session is live-but-unspawned: nothing new has happened to
+  // it since it was last closed, so its old turns must not claim attention
+  // again before the user revives it and it actually starts running.
+  if (task.status === "restored") return null;
   // Asks clear when answered, not when looked at: the run is blocked on it.
   const ask = askOf(task, permission);
   if (ask) return { ...base, kind: "error", ...ask };
