@@ -74,8 +74,13 @@ function loadImage(
     const error = new Error(
       `image path is outside the workspace: ${imagePath}`,
     );
+    const promise = Promise.reject(error);
+    // readEntry throws the stored error, so nothing ever awaits this
+    // promise; handle it here so a refused image isn't reported as an
+    // unhandled rejection before the boundary renders its fallback.
+    promise.catch(() => {});
     const entry: CacheEntry = {
-      promise: Promise.reject(error),
+      promise,
       status: "rejected",
       error,
     };
