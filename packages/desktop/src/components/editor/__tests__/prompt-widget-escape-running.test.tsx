@@ -14,6 +14,7 @@ vi.mock("react-i18next", () => ({
 
 import { Editor, EditorContent, useEditor } from "@tiptap/react";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
+import { adoptExternalContent } from "@/components/editor/adopt-external-content";
 import { widgetRendererNodes, selectionDraft } from "@notefig/widgets";
 import { fakePromptWidgetHost, withHost } from "@notefig/widgets/testing";
 import type { PromptWidgetHost, PromptRound } from "@notefig/widgets";
@@ -350,7 +351,7 @@ describe("escape on a running prompt widget", () => {
     expect(countPromptWidgets(editor)).toBe(1);
   });
 
-  it("preserves a running widget through a full-document replacement", async () => {
+  it("preserves a running widget through an adoption fallback", async () => {
     const { host, publishRound } = runningRoundHost();
     const editor = await mountedEditor(
       `<p>original</p><div data-type="ai-prompt" data-blob-id="shared" data-task-id="${TASK_ID}"><div data-type="prompt-draft"></div></div>`,
@@ -364,11 +365,25 @@ describe("escape on a running prompt widget", () => {
     expect(countPromptWidgets(editor)).toBe(1);
     expect(widgetPhase()).toBe("running");
 
+    const incoming = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "replacement text" }],
+        },
+      ],
+    };
+    let result: { mode: string; reinsertedWidgets: number } | undefined;
     await act(async () => {
-      editor.commands.setContent("<p>replacement text</p>");
+      result = adoptExternalContent(editor, incoming as never, {
+        maxDiffNodeSize: 0,
+      });
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
+    expect(result?.mode).toBe("replaced");
+    expect(result?.reinsertedWidgets).toBe(1);
     expect(editor.state.doc.textContent).toContain("replacement text");
     expect(countPromptWidgets(editor)).toBe(1);
     expect(widgetPhase()).toBe("running");
