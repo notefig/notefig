@@ -179,15 +179,24 @@ function parseLinearImageAttrs(
   const raw = element.textContent ?? "";
   try {
     const data = JSON.parse(raw) as {
-      type?: string;
-      attrs?: { src?: string; alt?: string | null; title?: string | null };
+      type?: unknown;
+      attrs?: {
+        src?: unknown;
+        alt?: unknown;
+        title?: unknown;
+      };
     };
-    if (data.type !== "image" || !data.attrs?.src) return false;
-    return {
-      src: data.attrs.src,
-      alt: data.attrs.alt ?? null,
-      title: data.attrs.title ?? null,
-    };
+    const attrs = data.attrs;
+    if (data.type !== "image" || !attrs || typeof attrs.src !== "string") {
+      return false;
+    }
+    const src = attrs.src;
+    if (src.length === 0) return false;
+    const alt = attrs.alt ?? null;
+    const title = attrs.title ?? null;
+    if (alt !== null && typeof alt !== "string") return false;
+    if (title !== null && typeof title !== "string") return false;
+    return { src, alt, title };
   } catch {
     return false;
   }

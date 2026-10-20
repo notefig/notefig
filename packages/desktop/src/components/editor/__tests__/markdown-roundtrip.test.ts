@@ -256,6 +256,24 @@ describe("linear-image assets (MET-247)", () => {
     expect(editor.getJSON().content?.[0]?.type).not.toBe("image");
     expect(editor.getText()).toContain("not json");
   });
+
+  it.each([
+    ["a non-string src", `{"type":"image","attrs":{"src":123}}`],
+    [
+      "a non-string alt",
+      `{"type":"image","attrs":{"src":"https://example.com/x.png","alt":123}}`,
+    ],
+    [
+      "a non-string title",
+      `{"type":"image","attrs":{"src":"https://example.com/x.png","title":[]}}`,
+    ],
+    ["an empty src", `{"type":"image","attrs":{"src":""}}`],
+  ])("leaves envelopes with %s as text", (_label, json) => {
+    const envelope = `<linear-image quality="preview">${json}</linear-image>`;
+    const editor = createEditor(envelope);
+    expect(editor.getJSON().content?.[0]?.type).not.toBe("image");
+    expect(editor.getText()).toContain(json);
+  });
 });
 
 describe("marks without native markdown syntax", () => {
