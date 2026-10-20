@@ -34,6 +34,8 @@ export class LazyEnv implements ExecutionEnv {
 	#forward<K extends Operation>(name: K): ExecutionEnv[K] {
 		const call = async (...args: unknown[]) => {
 			const env = await this.#real();
+			// The wrapper's `cwd` is the one Pi sees and may change; the real environment resolves paths with its own.
+			env.cwd = this.cwd;
 			return (env[name] as (...args: unknown[]) => unknown).apply(env, args);
 		};
 		return call as unknown as ExecutionEnv[K];

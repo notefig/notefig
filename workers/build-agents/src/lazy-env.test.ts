@@ -31,6 +31,14 @@ describe("LazyEnv", () => {
 		expect(opened.count).toBe(1);
 	});
 
+	it("runs each operation in the wrapper's current directory", async () => {
+		const real = { cwd: "/", async absolutePath(this: { cwd: string }, path: string) { return { ok: true as const, value: `${this.cwd}/${path}` }; } };
+		const env = new LazyEnv(async () => real as unknown as ExecutionEnv, { id: "container:1", cwd: "/workspace/repo" });
+		expect(await env.absolutePath("a.ts", context)).toEqual({ ok: true, value: "/workspace/repo/a.ts" });
+		env.cwd = "/workspace/repo/packages";
+		expect(await env.absolutePath("a.ts", context)).toEqual({ ok: true, value: "/workspace/repo/packages/a.ts" });
+	});
+
 	it("cleans up only a workspace it opened", async () => {
 		const { opened, open } = workspace();
 		const env = new LazyEnv(open, { id: "container:1", cwd: "/" });
