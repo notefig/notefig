@@ -69,9 +69,13 @@ its label; the approver still reviews them in Triage.
   seconds, and a failure or an unsure answer only means fewer labels.
 - **Labels:** by id in `LINEAR_TYPE_LABEL_IDS` and `LINEAR_MODEL_LABEL_IDS`
   (`Name=id` pairs). What each one means to the model is in `triage.ts`; a
-  label is offered only when it has both. A new Model label needs its pair
-  here, its meaning in `triage.ts`, and its model in build agents'
-  `MODEL_LABELS`.
+  label is offered only when it has both.
+- **What a Model label does:** here it's only a suggestion. Build agents run
+  on an issue's Model label once MET-243 (#459) is merged and released: it
+  adds the `MODEL_LABELS` whitelist to `workers/build-agents`, mapping these
+  label names to model ids. Until then they run on `MODEL_ID` whatever the
+  label. A new Model label needs its pair here, its meaning in `triage.ts`,
+  and, with MET-243, its model in `MODEL_LABELS`.
 
 ## One-time setup
 

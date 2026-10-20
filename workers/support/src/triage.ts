@@ -36,7 +36,10 @@ const TYPES: Record<string, string> = {
   Improvement: "Making something that already works better: faster, clearer, easier",
 };
 
-/** The build-agent models, by their Model label. Keep in step with `MODEL_LABELS` in workers/build-agents. */
+/**
+ * The build-agent models, by their Model label. Build agents pick their model from that label through the
+ * `MODEL_LABELS` whitelist in workers/build-agents (MET-243); keep the names in step with it.
+ */
 const MODELS: Record<string, string> = {
   "Kimi K2.7 Code": "Everyday fixes and features of ordinary size: the default",
   "GLM 5.3": "Large changes that span several parts of the app",
