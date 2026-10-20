@@ -42,7 +42,7 @@ const EMPTY_ROUND: PromptRound = {
 const TASK_ID = "task_escape_test";
 const TURN_ID = "trn_escape_test";
 
-const RUNNING_ROUND: PromptRound = {
+const RUNNING_ROUND = {
   turn: {
     turnId: TURN_ID,
     taskId: TASK_ID,
@@ -62,13 +62,13 @@ const RUNNING_ROUND: PromptRound = {
   entries: [],
   taskTurns: [],
   pendingPermissions: [],
-};
+} satisfies PromptRound;
 
-const CANCELLED_ROUND: PromptRound = {
+const CANCELLED_ROUND = {
   ...RUNNING_ROUND,
   turn: { ...RUNNING_ROUND.turn, status: "cancelled" as const },
   task: { ...RUNNING_ROUND.task, status: "cancelled" as const },
-};
+} satisfies PromptRound;
 
 /** Minimal external store so the test can drive round transitions from
  *  outside React, matching how the real host's collections update the
