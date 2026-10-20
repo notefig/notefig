@@ -161,8 +161,9 @@ export class IssueAgent extends DurableObject<Env> {
 		if (this.#get("answering")) {
 			// It was asked about before: same transcript, but work happens on the issue's branch, not the `main`
 			// checkout a question may have started.
-			this.ctx.storage.kv.delete("answering");
+			// Cleared only once the checkout is gone: a failed release leaves a question, so a retry does all of this again.
 			await this.release();
+			this.ctx.storage.kv.delete("answering");
 		}
 		this.#put("issue", issue);
 		this.#put("prompt", input.prompt);

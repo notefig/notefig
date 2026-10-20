@@ -155,7 +155,16 @@ export class TestIssueAgent extends IssueAgent {
 
 	#release = deferred();
 
+	/** The next release fails, as when destroying the container does. */
+	failNextRelease(): void {
+		this.ctx.storage.kv.put("test:fail-release", true);
+	}
+
 	protected override async release(): Promise<void> {
+		if (this.ctx.storage.kv.get("test:fail-release")) {
+			this.ctx.storage.kv.delete("test:fail-release");
+			throw new Error("The container could not be destroyed");
+		}
 		await this.env.BRANCHES.put(`test:released:${this.ctx.id.toString()}`, "yes");
 		this.#release.resolve();
 		this.#release = deferred();

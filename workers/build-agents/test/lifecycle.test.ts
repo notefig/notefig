@@ -299,6 +299,23 @@ describe("an issue's agent", () => {
 			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).not.toContain("answering");
 		});
 
+		it("is still a question if dropping its checkout fails, so delegating again sets the work up", async () => {
+			const stub = await prepared([{ text: "In the virtualiser." }, { text: "Fixed it." }], asked);
+			await ask(stub);
+			await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length === 1);
+			const delegated = { ...asked, delegateId: "app-user", stateType: "unstarted" };
+			await runInDurableObject(stub, async (agent: TestIssueAgent) => {
+				agent.setIssue(delegated);
+				agent.failNextRelease();
+				await expect(agent.start({ issueId: ISSUE.id, sessionId: "session-2", prompt: "" })).rejects.toThrow("could not be destroyed");
+			});
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).toContain("answering");
+			// Linear's retry of the same delivery now does the whole setup.
+			await runInDurableObject(stub, (agent: TestIssueAgent) => agent.start({ issueId: ISSUE.id, sessionId: "session-2", prompt: "" }));
+			expect(await env.BRANCHES.get(asked.branchName)).toBe(ISSUE.id);
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.moves())).toEqual(["issue-1→state-in-progress"]);
+		});
+
 		it("ignores pull request events while answering", async () => {
 			const stub = await prepared([{ text: "Answered." }, { text: "Should not run." }], asked);
 			await ask(stub);
