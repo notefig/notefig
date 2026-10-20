@@ -141,7 +141,7 @@ All in `wrangler.jsonc`. Names, not ids: the Linear team, labels and approvers a
 |---|---|---|
 | `GITHUB_REPO` | `notefig/notefig` | The one repository the agent clones and pushes to |
 | `LINEAR_TEAM_KEY` | `MET` | The Linear team (bootstrap checks it) |
-| `LINEAR_TEST_LABEL` | `agent-test` | While set, only issues with this label start an agent, and their PRs are drafts. Empty it to go live |
+| `LINEAR_TEST_LABEL` | (empty: live) | Testing mode. While set (it was `agent-test` until go-live), only issues with this label start an agent, and their PRs are drafts |
 | `APPROVER_EMAILS` | (empty in the file) | Set at deploy from the `BUILD_AGENTS_APPROVERS` GitHub variable, so no address is in the repo |
 | `TRUSTED_REVIEWERS` | `greptile-apps[bot]` | GitHub logins besides collaborators whose reviews reach the agent |
 | `TYPE_LABELS` | `Bug=fix,Feature=feat,Improvement=improve` | Issue label → commit/PR type. No match: `chore` |
@@ -298,11 +298,13 @@ CLOUDFLARE_API_TOKEN=…    # not read by the Worker; handy for running bootstra
 3. `npx -y cloudflared@0.7.1 tunnel --url http://localhost:8788 --no-autoupdate` prints a `trycloudflare.com` URL.
 4. Point the Linear app's webhook at `<tunnel>/v1/linear` and the GitHub App's at `<tunnel>/v1/github`. **Point them
    back at agents.notefig.com afterwards.** (Or use a separate dev app for each.)
-5. Label an MET issue `agent-test` and delegate it to Notefig Build Agent. Watch the `wrangler dev` output.
+5. Delegate an accepted MET issue to Notefig Build Agent. Watch the `wrangler dev` output. To keep a local run to
+   labelled issues and draft PRs, set `LINEAR_TEST_LABEL=agent-test` in `.dev.vars`.
 
 Checklist for a run:
 1. A thought appears within 10 s, then actions as it works.
-2. The branch is the issue's `branchName`; a draft PR opens with the type prefix, release notes and `Closes`.
+2. The branch is the issue's `branchName`; a PR (a draft in testing mode) opens with the type prefix, release notes
+   and `Closes`.
 3. A message in the session during work lands at the next tool round.
 4. Stopping `wrangler dev` mid-turn and starting it again resumes the run without duplicate activities.
 5. A forced CI failure gets a fix pushed; a collaborator's review comment is addressed, a stranger's ignored.
@@ -341,7 +343,8 @@ the old image isn't reused; the next start clones afresh.
 - **Stop an agent:** the stop button in its Linear session, or unassign it (remove it as the delegate, or delegate
   the issue to someone else). Unassigning needs the Linear app's **Issues** webhook events.
 - **Turn it off entirely:** turn off the Linear app's webhook (or empty `BUILD_AGENTS_APPROVERS` and release).
-- **Go live:** empty `LINEAR_TEST_LABEL` in `wrangler.jsonc` and release. PRs stop being drafts.
+- **Live mode** (since MET-241): `LINEAR_TEST_LABEL` is empty, so any accepted issue an approver delegates starts an
+  agent, and its PRs are ready for review. **Back to testing mode:** set it to `agent-test` and release.
 - **Switch model:** `MODEL_PROVIDER`/`MODEL_ID` (any entry in pi-ai's catalog for that provider), release.
 
 ## Lifecycle and cost
@@ -448,7 +451,6 @@ config PR #435. Once build agents run in production:
   `CLAUDE_ROUTINE_TOKEN`;
 - delete the Linear webhook pointing at support.notefig.com/v1/linear, and the routine in claude.ai;
 - close #435;
-- empty `LINEAR_TEST_LABEL` when ready to go live.
 
 ## Files
 

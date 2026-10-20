@@ -13,8 +13,8 @@
 	"vars": {
 		"GITHUB_REPO": "notefig/notefig",
 		"LINEAR_TEAM_KEY": "MET",
-		// While set, only issues with this label start an agent.
-		"LINEAR_TEST_LABEL": "agent-test",
+		// Testing mode: while set (e.g. "agent-test"), only issues with this label start an agent, and their PRs are drafts.
+		"LINEAR_TEST_LABEL": "",
 		// Set at deploy from the GitHub variable BUILD_AGENTS_APPROVERS, so no address is in the repository.
 		"APPROVER_EMAILS": "",
 		"TRUSTED_REVIEWERS": "greptile-apps[bot]",
