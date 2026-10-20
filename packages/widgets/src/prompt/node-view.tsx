@@ -58,6 +58,7 @@ import {
   adoptPersistedPromptBinding,
   bindPromptBlobDocument,
   getPromptBlob,
+  isPromptBlobInFlight,
 } from "./store";
 import { promptChangeTrackingPlugin } from "./change-tracking";
 import { promptChangeGutterPlugin } from "./change-gutter";
@@ -615,6 +616,40 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
             view.dispatch(selectPromptDraftTr(tr, blobId));
             return true;
           },
+        },
+        filterTransaction(tr, oldState) {
+          // Keeper and other UI-only edits are harmless.
+          if (tr.getMeta(UI_ONLY_TRANSACTION_META) || !tr.docChanged)
+            return true;
+
+          const protectedIds = new Set<string>();
+          oldState.doc.descendants((node) => {
+            if (
+              node.type.name === PROMPT_NODE_NAME &&
+              node.attrs.blobId &&
+              isPromptBlobInFlight(node.attrs.blobId)
+            ) {
+              protectedIds.add(node.attrs.blobId as string);
+            }
+            return true;
+          });
+          if (protectedIds.size === 0) return true;
+
+          const remaining = new Set<string>();
+          tr.doc.descendants((node) => {
+            if (
+              node.type.name === PROMPT_NODE_NAME &&
+              protectedIds.has(node.attrs.blobId as string)
+            ) {
+              remaining.add(node.attrs.blobId as string);
+            }
+            return true;
+          });
+
+          for (const blobId of protectedIds) {
+            if (!remaining.has(blobId)) return false;
+          }
+          return true;
         },
         appendTransaction(transactions, oldState, newState) {
           const gap = gapBesideWidgetTr(oldState, newState);

@@ -166,3 +166,22 @@ export function subscribePromptBlob(
     if (set.size === 0) listeners.delete(blobId);
   };
 }
+
+/** Transient UI state: which widgets are currently in-flight (queued,
+ *  running, awaiting permission or auth). Used by the prompt node plugin
+ *  to block ProseMirror transactions that would delete a running widget.
+ *  Kept outside React so it survives tab switches and is readable from
+ *  filterTransaction. */
+const inFlightBlobs = new Set<string>();
+
+export function setPromptBlobInFlight(
+  blobId: string,
+  inFlight: boolean,
+): void {
+  if (inFlight) inFlightBlobs.add(blobId);
+  else inFlightBlobs.delete(blobId);
+}
+
+export function isPromptBlobInFlight(blobId: string): boolean {
+  return inFlightBlobs.has(blobId);
+}

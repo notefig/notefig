@@ -65,6 +65,7 @@ import {
   getPromptBlob,
   updatePromptBlob,
   clearPromptBlobTurn,
+  setPromptBlobInFlight,
   type PromptBlobRecord,
   subscribePromptBlob,
 } from "../store";
@@ -358,11 +359,7 @@ function useInFlightEscape({
   boundTurnId: string | null;
   stop: () => void;
 }) {
-  const inFlight =
-    phase === "queued" ||
-    phase === "running" ||
-    phase === "needs-permission" ||
-    phase === "needs-auth";
+  const inFlight = isInFlightPhase(phase);
   useEffect(() => {
     if (!inFlight || !boundTurnId) return;
     return claimInFlightEscape(blobId, boundTurnId);
@@ -924,6 +921,29 @@ function openBoundChatAction(
   return () => host.openAgentTab(boundTaskId);
 }
 
+/** Registers whether this blob's turn is in-flight so ProseMirror plugins
+ *  can guard the widget node without reaching React context. Kept in its
+ *  own hook so the lifecycle is local and the parent hook stays readable. */
+function usePromptBlobInFlight(blobId: string, inFlight: boolean): void {
+  useEffect(() => {
+    setPromptBlobInFlight(blobId, inFlight);
+    return () => setPromptBlobInFlight(blobId, false);
+  }, [blobId, inFlight]);
+}
+
+function isInFlightPhase(phase: BlobPhase): boolean {
+  return (
+    phase === "queued" ||
+    phase === "running" ||
+    phase === "needs-permission" ||
+    phase === "needs-auth"
+  );
+}
+
+function isReplyingPhase(phase: BlobPhase): boolean {
+  return phase === "done" || phase === "error";
+}
+
 /**
  * Everything the face needs, assembled from the store, the collections and
  * the action hooks. Splitting it out keeps the component itself a container
@@ -985,11 +1005,9 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     workspacePath,
   });
 
-  const inFlight =
-    phase === "queued" ||
-    phase === "running" ||
-    phase === "needs-permission" ||
-    phase === "needs-auth";
+  const inFlight = isInFlightPhase(phase);
+
+  usePromptBlobInFlight(blobId, inFlight);
 
   useComposerKeys({
     blobId,
@@ -1000,7 +1018,7 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     actions: {
       ...actions,
       escapeToEditor,
-      replying: phase === "done" || phase === "error",
+      replying: isReplyingPhase(phase),
       inFlight,
     },
   });

@@ -3,7 +3,7 @@
  * forgetting it — the widget must stay bound to its original session so
  * a later prompt resumes the same agent (MET-248).
  */
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi, type Mock } from "vitest";
 import { act, createElement, useEffect, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
@@ -181,6 +181,31 @@ function pressKey(editor: Editor, key: string): void {
   );
 }
 
+function countPromptWidgets(editor: Editor): number {
+  let count = 0;
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === "aiPrompt") {
+      count += 1;
+      return false;
+    }
+    return true;
+  });
+  return count;
+}
+
+function selectPromptWidget(editor: Editor): boolean {
+  let pos: number | null = null;
+  editor.state.doc.descendants((node, p) => {
+    if (node.type.name === "aiPrompt") {
+      pos = p;
+      return false;
+    }
+    return true;
+  });
+  if (pos === null) return false;
+  return editor.commands.setNodeSelection(pos) && editor.commands.focus();
+}
+
 function widgetPhase(): string | null {
   const widget = container!.querySelector('[data-type="ai-prompt"]');
   return widget?.querySelector('[data-blob-phase]')?.getAttribute("data-blob-phase") ?? null;
@@ -207,62 +232,97 @@ async function summonWidget(editor: Editor): Promise<void> {
   expect(selectionDraft(editor.state)).toBeTruthy();
 }
 
+async function setupRunningWidget(editor: Editor): Promise<void> {
+  await summonWidget(editor);
+  await act(async () => {
+    editor.commands.insertContent("hello agent");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await act(async () => {
+    pressKey(editor, "Enter");
+    // send() awaits resolvePromptTarget → give the microtasks room.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+async function pressEscape(editor: Editor): Promise<void> {
+  await act(async () => {
+    pressKey(editor, "Escape");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+async function pressDeleteOnSelectedWidget(editor: Editor): Promise<void> {
+  await act(async () => {
+    selectPromptWidget(editor);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await act(async () => {
+    pressKey(editor, "Delete");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+async function stopAndAssertStillBound(
+  editor: Editor,
+  cancelTask: Mock,
+  cancelTurnAndForget: Mock,
+): Promise<void> {
+  await pressEscape(editor);
+  expect(cancelTask).toHaveBeenCalledTimes(1);
+  expect(cancelTask).toHaveBeenCalledWith(TASK_ID);
+  expect(cancelTurnAndForget).not.toHaveBeenCalled();
+}
+
+async function publishCancelled(
+  editor: Editor,
+  publishRound: (round: PromptRound) => void,
+): Promise<void> {
+  await act(async () => {
+    publishRound(CANCELLED_ROUND);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(widgetPhase()).toBe("done");
+  expect(widgetTaskId(editor)).toBe(TASK_ID);
+}
+
+async function sendFollowUpAndAssertSameTask(editor: Editor, host: PromptWidgetHost): Promise<void> {
+  await act(async () => {
+    editor.commands.insertContent("follow up");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await act(async () => {
+    pressKey(editor, "Enter");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(host.dispatchPrompt).toHaveBeenCalledTimes(2);
+  const followUpCall = vi.mocked(host.dispatchPrompt).mock.calls[1];
+  expect(followUpCall[0].taskId).toBe(TASK_ID);
+}
+
 describe("escape on a running prompt widget", () => {
   it("stops the agent but keeps the widget bound to its session", async () => {
     const { host, cancelTask, cancelTurnAndForget, publishRound } =
       runningRoundHost();
     const editor = await mountedEditor("<p>Hi there</p><p></p>", host);
-    await summonWidget(editor);
+    await setupRunningWidget(editor);
+    await stopAndAssertStillBound(editor, cancelTask, cancelTurnAndForget);
+    await publishCancelled(editor, publishRound);
+    await sendFollowUpAndAssertSameTask(editor, host);
+  });
 
-    await act(async () => {
-      editor.commands.insertContent("hello agent");
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    await act(async () => {
-      pressKey(editor, "Enter");
-      // send() awaits resolvePromptTarget → give the microtasks room.
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
+  it("blocks ProseMirror deletion while the task is running", async () => {
+    const { host, publishRound } = runningRoundHost();
+    const editor = await mountedEditor("<p>Hi there</p><p></p>", host);
+    await setupRunningWidget(editor);
+    await pressDeleteOnSelectedWidget(editor);
+    expect(countPromptWidgets(editor)).toBe(1);
     expect(widgetPhase()).toBe("running");
-    expect(widgetTaskId(editor)).toBe(TASK_ID);
 
-    // Escape stops the turn. The widget must not be removed and its task
-    // binding must survive so a follow-up targets the same session.
-    await act(async () => {
-      pressKey(editor, "Escape");
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    expect(cancelTask).toHaveBeenCalledTimes(1);
-    expect(cancelTask).toHaveBeenCalledWith(TASK_ID);
-    expect(cancelTurnAndForget).not.toHaveBeenCalled();
-
-    // Publish the cancelled turn the real facade would surface.
-    await act(async () => {
-      publishRound(CANCELLED_ROUND);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    expect(widgetPhase()).toBe("done");
-    expect(widgetTaskId(editor)).toBe(TASK_ID);
-
-    // A follow-up from the stopped widget must resume the original task.
-    await act(async () => {
-      editor.commands.insertContent("follow up");
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    await act(async () => {
-      pressKey(editor, "Enter");
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    expect(host.dispatchPrompt).toHaveBeenCalledTimes(2);
-    const followUpCall = vi.mocked(host.dispatchPrompt).mock.calls[1];
-    expect(followUpCall[0].taskId).toBe(TASK_ID);
+    await publishCancelled(editor, publishRound);
+    await pressDeleteOnSelectedWidget(editor);
+    expect(countPromptWidgets(editor)).toBe(0);
   });
 });
