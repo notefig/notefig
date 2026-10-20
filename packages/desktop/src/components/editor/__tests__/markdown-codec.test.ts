@@ -74,7 +74,6 @@ export const fixtures: string[] = [
   "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |",
   "text before ![inline](pic.png) text after",
   "Before\n\n<div>raw html</div>\n\nAfter",
-  '<linear-image quality="preview">{"type":"image","attrs":{"src":"https://uploads.linear.app/example.png","alt":"screenshot"}}</linear-image>',
   // A persisted prompt widget (MET-163) — the marker is content now, so the
   // worker codec and the live editor must agree on it like any other block.
   '<!-- notefig:prompt id="blob_1a2b" task="task_9f8e" -->',
