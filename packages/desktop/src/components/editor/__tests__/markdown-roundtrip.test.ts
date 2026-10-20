@@ -224,6 +224,40 @@ describe("stability round-trip (may normalize once, then fixed)", () => {
     ));
 });
 
+describe("linear-image assets (MET-247)", () => {
+  const linearImage = `<linear-image quality="preview">{"type":"image","attrs":{"src":"https://uploads.linear.app/example.png","alt":"screenshot"}}</linear-image>`;
+
+  it("parses a linear-image envelope into an image node", () => {
+    const editor = createEditor(linearImage);
+    const first = editor.getJSON().content?.[0];
+    expect(first?.type).toBe("image");
+    expect(first?.attrs?.src).toBe("https://uploads.linear.app/example.png");
+    expect(first?.attrs?.alt).toBe("screenshot");
+    expect(editor.getText()).not.toContain("linear-image");
+    expect(editor.getText()).not.toContain("attrs");
+  });
+
+  it("serializes to canonical markdown image syntax", () => {
+    expect(roundTrip(linearImage)).toBe(
+      "![screenshot](https://uploads.linear.app/example.png)",
+    );
+  });
+
+  it("leaves non-image linear-image envelopes as text", () => {
+    const notImage = `<linear-image quality="preview">{"type":"file","attrs":{"src":"https://example.com/file.pdf"}}</linear-image>`;
+    const editor = createEditor(notImage);
+    expect(editor.getJSON().content?.[0]?.type).not.toBe("image");
+    expect(editor.getText()).toContain("file.pdf");
+  });
+
+  it("leaves malformed linear-image envelopes as text", () => {
+    const malformed = `<linear-image quality="preview">not json</linear-image>`;
+    const editor = createEditor(malformed);
+    expect(editor.getJSON().content?.[0]?.type).not.toBe("image");
+    expect(editor.getText()).toContain("not json");
+  });
+});
+
 describe("marks without native markdown syntax", () => {
   // These extensions are in the toolbar/kit, so a user can apply them — the
   // serialized file must not silently drop them (html is disabled in the

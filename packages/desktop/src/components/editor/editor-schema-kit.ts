@@ -165,6 +165,35 @@ export const MarkdownTaskItem = TaskItem.extend({
 });
 
 /**
+ * Linear's issue export wraps pasted images in a custom `<linear-image>`
+ * element whose text is the image's JSON envelope. The asset is the `src`
+ * inside that envelope; with the stock image parse rules the tag is unknown
+ * HTML and collapses to its JSON text on first save, so the image never
+ * renders. Teach the image node to read that envelope directly: the
+ * resulting node is an ordinary image, so it serializes back to canonical
+ * `![alt](src)` markdown.
+ */
+function parseLinearImageAttrs(
+  element: HTMLElement,
+): Record<string, unknown> | false {
+  const raw = element.textContent ?? "";
+  try {
+    const data = JSON.parse(raw) as {
+      type?: string;
+      attrs?: { src?: string; alt?: string | null; title?: string | null };
+    };
+    if (data.type !== "image" || !data.attrs?.src) return false;
+    return {
+      src: data.attrs.src,
+      alt: data.attrs.alt ?? null,
+      title: data.attrs.title ?? null,
+    };
+  } catch {
+    return false;
+  }
+}
+
+/**
  * tiptap-markdown reuses prosemirror-markdown's image serializer, which is
  * written for schemas where image is an inline node. Tiptap's Image is a
  * block node, so without closeBlock the following block gets glued onto the
@@ -175,6 +204,16 @@ export const MarkdownTaskItem = TaskItem.extend({
  * schema, and therefore doc JSON compatibility, unchanged).
  */
 export const MarkdownImageBase = Image.extend({
+  parseHTML() {
+    return [
+      ...(this.parent?.() ?? []),
+      {
+        tag: "linear-image",
+        getAttrs: (element) => parseLinearImageAttrs(element as HTMLElement),
+      },
+    ];
+  },
+
   addStorage() {
     return {
       markdown: {
