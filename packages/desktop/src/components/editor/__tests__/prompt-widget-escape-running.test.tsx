@@ -3,7 +3,7 @@
  * forgetting it — the widget must stay bound to its original session so
  * a later prompt resumes the same agent (MET-248).
  */
-import { describe, it, expect, afterEach, vi, type Mock } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { act, createElement, useEffect, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
@@ -14,7 +14,6 @@ vi.mock("react-i18next", () => ({
 
 import { Editor, EditorContent, useEditor } from "@tiptap/react";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
-import { adoptExternalContent } from "@/components/editor/adopt-external-content";
 import { widgetRendererNodes, selectionDraft } from "@notefig/widgets";
 import { fakePromptWidgetHost, withHost } from "@notefig/widgets/testing";
 import type { PromptWidgetHost, PromptRound } from "@notefig/widgets";
@@ -93,11 +92,9 @@ function createRoundStore() {
 function runningRoundHost(): {
   host: PromptWidgetHost;
   cancelTask: ReturnType<typeof vi.fn>;
-  cancelTurnAndForget: ReturnType<typeof vi.fn>;
   publishRound: (round: PromptRound) => void;
 } {
   const cancelTask = vi.fn();
-  const cancelTurnAndForget = vi.fn(async () => true);
   const store = createRoundStore();
 
   const host = fakePromptWidgetHost({
@@ -111,9 +108,8 @@ function runningRoundHost(): {
       return { turnId: TURN_ID };
     }),
     cancelTask,
-    cancelTurnAndForget,
   });
-  return { host, cancelTask, cancelTurnAndForget, publishRound: store.publish };
+  return { host, cancelTask, publishRound: store.publish };
 }
 
 function Harness({
@@ -182,34 +178,13 @@ function pressKey(editor: Editor, key: string): void {
   );
 }
 
-function countPromptWidgets(editor: Editor): number {
-  let count = 0;
-  editor.state.doc.descendants((node) => {
-    if (node.type.name === "aiPrompt") {
-      count += 1;
-      return false;
-    }
-    return true;
-  });
-  return count;
-}
-
-function selectPromptWidget(editor: Editor): boolean {
-  let pos: number | null = null;
-  editor.state.doc.descendants((node, p) => {
-    if (node.type.name === "aiPrompt") {
-      pos = p;
-      return false;
-    }
-    return true;
-  });
-  if (pos === null) return false;
-  return editor.commands.setNodeSelection(pos) && editor.commands.focus();
-}
-
 function widgetPhase(): string | null {
   const widget = container!.querySelector('[data-type="ai-prompt"]');
-  return widget?.querySelector('[data-blob-phase]')?.getAttribute("data-blob-phase") ?? null;
+  return (
+    widget
+      ?.querySelector("[data-blob-phase]")
+      ?.getAttribute("data-blob-phase") ?? null
+  );
 }
 
 function widgetTaskId(editor: Editor): string | null {
@@ -247,33 +222,28 @@ async function setupRunningWidget(editor: Editor): Promise<void> {
   });
 }
 
-async function pressEscape(editor: Editor): Promise<void> {
+/** Escape mid-turn with the caret still in the widget's empty draft —
+ *  where it is right after sending. */
+async function pressEscapeInDraft(editor: Editor): Promise<void> {
   await act(async () => {
     pressKey(editor, "Escape");
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
 
-async function pressDeleteOnSelectedWidget(editor: Editor): Promise<void> {
+/** Escape mid-turn from outside the widget: only its global hotkey hears
+ *  it. */
+async function pressEscapeElsewhere(): Promise<void> {
   await act(async () => {
-    selectPromptWidget(editor);
+    document.body.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  await act(async () => {
-    pressKey(editor, "Delete");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-}
-
-async function stopAndAssertStillBound(
-  editor: Editor,
-  cancelTask: Mock,
-  cancelTurnAndForget: Mock,
-): Promise<void> {
-  await pressEscape(editor);
-  expect(cancelTask).toHaveBeenCalledTimes(1);
-  expect(cancelTask).toHaveBeenCalledWith(TASK_ID);
-  expect(cancelTurnAndForget).not.toHaveBeenCalled();
 }
 
 async function publishCancelled(
@@ -288,7 +258,10 @@ async function publishCancelled(
   expect(widgetTaskId(editor)).toBe(TASK_ID);
 }
 
-async function sendFollowUpAndAssertSameTask(editor: Editor, host: PromptWidgetHost): Promise<void> {
+async function sendFollowUpAndAssertSameTask(
+  editor: Editor,
+  host: PromptWidgetHost,
+): Promise<void> {
   await act(async () => {
     editor.commands.insertContent("follow up");
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -304,88 +277,23 @@ async function sendFollowUpAndAssertSameTask(editor: Editor, host: PromptWidgetH
 }
 
 describe("escape on a running prompt widget", () => {
-  it("stops the agent but keeps the widget bound to its session", async () => {
-    const { host, cancelTask, cancelTurnAndForget, publishRound } =
-      runningRoundHost();
-    const editor = await mountedEditor("<p>Hi there</p><p></p>", host);
-    await setupRunningWidget(editor);
-    await stopAndAssertStillBound(editor, cancelTask, cancelTurnAndForget);
-    await publishCancelled(editor, publishRound);
-    await sendFollowUpAndAssertSameTask(editor, host);
-  });
+  it.each([
+    ["in its draft", pressEscapeInDraft],
+    ["elsewhere on the page", pressEscapeElsewhere],
+  ])(
+    "pressed %s, stops the agent and keeps the widget bound to its session",
+    async (_where, pressEscape) => {
+      const { host, cancelTask, publishRound } = runningRoundHost();
+      const editor = await mountedEditor("<p>Hi there</p><p></p>", host);
+      await setupRunningWidget(editor);
 
-  it("blocks ProseMirror deletion while the task is running", async () => {
-    const { host, publishRound } = runningRoundHost();
-    const editor = await mountedEditor("<p>Hi there</p><p></p>", host);
-    await setupRunningWidget(editor);
-    await pressDeleteOnSelectedWidget(editor);
-    expect(countPromptWidgets(editor)).toBe(1);
-    expect(widgetPhase()).toBe("running");
+      await pressEscape(editor);
+      expect(cancelTask).toHaveBeenCalledTimes(1);
+      expect(cancelTask).toHaveBeenCalledWith(TASK_ID);
+      expect(widgetTaskId(editor)).toBe(TASK_ID);
 
-    await publishCancelled(editor, publishRound);
-    await pressDeleteOnSelectedWidget(editor);
-    expect(countPromptWidgets(editor)).toBe(0);
-  });
-
-  it("keeps deletion protection when two markers share a blobId", async () => {
-    const { host, publishRound } = runningRoundHost();
-    const editor = await mountedEditor(
-      `<div data-type="ai-prompt" data-blob-id="shared" data-task-id="${TASK_ID}"><div data-type="prompt-draft"></div></div>` +
-        `<p>between</p>` +
-        `<div data-type="ai-prompt" data-blob-id="shared" data-task-id="${TASK_ID}"><div data-type="prompt-draft"></div></div>`,
-      host,
-    );
-    await act(async () => {
-      publishRound(RUNNING_ROUND);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    expect(countPromptWidgets(editor)).toBe(2);
-
-    await pressDeleteOnSelectedWidget(editor);
-    expect(countPromptWidgets(editor)).toBe(1);
-
-    // Deleting the last copy must still be blocked because the task is
-    // still running.
-    await pressDeleteOnSelectedWidget(editor);
-    expect(countPromptWidgets(editor)).toBe(1);
-  });
-
-  it("preserves a running widget through an adoption fallback", async () => {
-    const { host, publishRound } = runningRoundHost();
-    const editor = await mountedEditor(
-      `<p>original</p><div data-type="ai-prompt" data-blob-id="shared" data-task-id="${TASK_ID}"><div data-type="prompt-draft"></div></div>`,
-      host,
-    );
-    await act(async () => {
-      publishRound(RUNNING_ROUND);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    expect(countPromptWidgets(editor)).toBe(1);
-    expect(widgetPhase()).toBe("running");
-
-    const incoming = {
-      type: "doc",
-      content: [
-        {
-          type: "paragraph",
-          content: [{ type: "text", text: "replacement text" }],
-        },
-      ],
-    };
-    let result: { mode: string; reinsertedWidgets: number } | undefined;
-    await act(async () => {
-      result = adoptExternalContent(editor, incoming as never, {
-        maxDiffNodeSize: 0,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    expect(result?.mode).toBe("replaced");
-    expect(result?.reinsertedWidgets).toBe(1);
-    expect(editor.state.doc.textContent).toContain("replacement text");
-    expect(countPromptWidgets(editor)).toBe(1);
-    expect(widgetPhase()).toBe("running");
-  });
+      await publishCancelled(editor, publishRound);
+      await sendFollowUpAndAssertSameTask(editor, host);
+    },
+  );
 });

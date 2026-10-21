@@ -304,8 +304,9 @@ export function deriveTouchedFiles(
  * the textarea. Enter (no Shift) always submits — send() itself no-ops on
  * an empty/sending draft, so this never needs to know draft state to decide
  * "send"; while a turn runs, sending queues, so Enter still wins over
- * `inFlight`. Escape with a turn in flight is "cancelRestore" (MET-94):
- * cancel the turn and put the sent prompt back into the composer. Idle
+ * `inFlight`. Escape with a turn in flight is "cancel": the caller stops
+ * the turn (the chat composer also puts the sent prompt back, MET-94; the
+ * prompt widget keeps its round and session, MET-248). Idle
  * Escape and "/" only special-case to "revert" (turn back into a literal
  * "/") when the draft is empty and the widget is summoned; a non-empty
  * draft on Escape falls back to "escape" (return focus to the doc, draft
@@ -318,7 +319,7 @@ export function deriveTouchedFiles(
  */
 export type ComposerKeyAction =
   | { type: "send" }
-  | { type: "cancelRestore" }
+  | { type: "cancel" }
   | { type: "revert" }
   | { type: "backspaceDismiss" }
   | { type: "escape" }
@@ -336,7 +337,7 @@ export function deriveComposerKeyAction(params: {
   const canDismiss = params.canDismiss ?? canRevert;
   if (key === "Enter" && !shiftKey) return { type: "send" };
   if (key === "Escape") {
-    if (inFlight) return { type: "cancelRestore" };
+    if (inFlight) return { type: "cancel" };
     return draftEmpty && canRevert ? { type: "revert" } : { type: "escape" };
   }
   // The "//" path: a second "/" right after summoning means the user

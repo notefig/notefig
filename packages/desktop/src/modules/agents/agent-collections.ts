@@ -116,6 +116,8 @@ export interface AgentStore {
   >;
   entriesForTask(taskId: string): AgentEntry[];
   turnsForTask(taskId: string): AgentTurn[];
+  /** Whether the task has a turn queued or running. */
+  isTaskBusy(taskId: string): boolean;
   /** The live target: entries land in the collections as they stream. */
   readonly liveEntryWriter: AgentEntryWriter;
   /** A fresh staging target for one session/load replay. */
@@ -220,6 +222,10 @@ export function createAgentStore(
     permissionRequests,
     entriesForTask,
     turnsForTask,
+    isTaskBusy: (taskId) =>
+      turnsForTask(taskId).some(
+        (turn) => turn.status === "queued" || turn.status === "running",
+      ),
     liveEntryWriter: {
       insert: (row) => entries.insert({ ...row, createdAt: Date.now() }),
       update: (id, mutate) => entries.update(id, mutate),

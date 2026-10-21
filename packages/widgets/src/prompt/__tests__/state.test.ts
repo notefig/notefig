@@ -307,7 +307,7 @@ describe("deriveComposerKeyAction", () => {
     ).toEqual({ type: "escape" });
   });
 
-  it("Escape with a turn in flight is cancelRestore, beating revert/escape (MET-94)", () => {
+  it("Escape with a turn in flight is cancel, beating revert/escape (MET-94)", () => {
     for (const draftEmpty of [false, true]) {
       for (const canRevert of [false, true]) {
         expect(
@@ -318,7 +318,7 @@ describe("deriveComposerKeyAction", () => {
             canRevert,
             inFlight: true,
           }),
-        ).toEqual({ type: "cancelRestore" });
+        ).toEqual({ type: "cancel" });
       }
     }
   });

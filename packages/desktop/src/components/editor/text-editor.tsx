@@ -38,12 +38,17 @@ export function TextEditor({
   contentError,
   initialDoc,
 }: TextEditorProps) {
-  const { platform, editors, turnWrites, tabs } = useCore();
+  const { platform, editors, turnWrites, tabs, agentStore } = useCore();
   const { fs } = platform;
   const instance = getOrCreateEditor(
     editors,
     file.path,
-    { type: "markdown", content: initialDoc, basePath },
+    {
+      type: "markdown",
+      content: initialDoc,
+      basePath,
+      isTaskBusy: agentStore.isTaskBusy,
+    },
     fs,
   );
 

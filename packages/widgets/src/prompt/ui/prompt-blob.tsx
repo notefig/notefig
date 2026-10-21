@@ -65,7 +65,6 @@ import {
   getPromptBlob,
   updatePromptBlob,
   clearPromptBlobTurn,
-  setPromptBlobInFlight,
   type PromptBlobRecord,
   subscribePromptBlob,
 } from "../store";
@@ -81,7 +80,6 @@ import {
   blobCardClass,
   referenceRemovalArmed,
   type BlobPhase,
-  type ComposerKeyAction,
 } from "../state";
 
 /**
@@ -337,16 +335,24 @@ function usePromptBlobDisplay({
   };
 }
 
+function isInFlight(phase: BlobPhase): boolean {
+  return (
+    phase === "queued" ||
+    phase === "running" ||
+    phase === "needs-permission" ||
+    phase === "needs-auth"
+  );
+}
+
 /**
- * Escape on an in-flight agent stops it but does not remove it from the
- * page (MET-248). For queued prompts that means withdrawing them, which
- * restores the composer; for running / needs-permission / needs-auth turns
- * the widget stays bound to the original session and degrades to a stopped
- * done face. A global hotkey, not a card-level keydown: after send the
- * composer unmounts and focus returns to the document, so no element
- * inside the widget could hear the key. The dock unmounting unselected
- * tabs scopes it to the visible document for free; "sending" is excluded
- * (nothing to stop yet).
+ * Escape anywhere stops this widget's in-flight turn, as the Stop button
+ * does: the widget stays bound to its session, so a follow-up continues the
+ * same agent (MET-248). A global hotkey, not a card-level
+ * keydown: after send the composer unmounts and focus returns to the
+ * document, so no element inside the widget could hear the key. The dock
+ * unmounting unselected tabs scopes it to the visible document for free;
+ * "sending" is excluded (nothing to cancel yet — the dispatch is still
+ * racing the session spawn, a sub-second window).
  */
 function useInFlightEscape({
   blobId,
@@ -359,7 +365,7 @@ function useInFlightEscape({
   boundTurnId: string | null;
   stop: () => void;
 }) {
-  const inFlight = isInFlightPhase(phase);
+  const inFlight = isInFlight(phase);
   useEffect(() => {
     if (!inFlight || !boundTurnId) return;
     return claimInFlightEscape(blobId, boundTurnId);
@@ -373,8 +379,10 @@ function useInFlightEscape({
       stop();
     },
     // 'allow': several widgets can legitimately hold this registration;
-    // the latest-sent claim decides which one acts.
-    { enabled: inFlight, conflictBehavior: "allow" },
+    // the latest-sent claim decides which one acts. No preventDefault: the
+    // library would call it before the handler, which then reads its own
+    // call as a layer having consumed the key and never stops.
+    { enabled: inFlight, conflictBehavior: "allow", preventDefault: false },
   );
 }
 
@@ -482,37 +490,6 @@ function usePromptBlobFocus({
  * has rows to offer. "Caret in THIS draft" is the extension's dispatch
  * condition, so it needs no re-check here.
  */
-type ComposerKeyActions = Pick<
-  PromptBlobFaceActions,
-  "send" | "sendFollowUp" | "escapeToEditor" | "revertToSlash" | "backspaceDismiss" | "stop"
-> & { replying: boolean; inFlight: boolean };
-
-/** Run the resolved composer action. Kept outside the key handler so the
- *  handler itself stays small and the dispatch table is explicit. */
-function runComposerAction(
-  action: ComposerKeyAction,
-  live: ComposerKeyActions,
-): void {
-  if (action.type === "send") {
-    if (live.replying) void live.sendFollowUp();
-    else void live.send();
-    return;
-  }
-  if (action.type === "cancelRestore") {
-    live.stop();
-    return;
-  }
-  if (action.type === "revert") {
-    live.revertToSlash?.();
-    return;
-  }
-  if (action.type === "backspaceDismiss") {
-    live.backspaceDismiss?.();
-    return;
-  }
-  live.escapeToEditor();
-}
-
 function useComposerKeys({
   blobId,
   documentPath,
@@ -526,7 +503,15 @@ function useComposerKeys({
   draft: string;
   draftIO: DraftIO;
   canRevert: boolean;
-  actions: ComposerKeyActions;
+  actions: Pick<
+    PromptBlobFaceActions,
+    | "send"
+    | "sendFollowUp"
+    | "escapeToEditor"
+    | "revertToSlash"
+    | "backspaceDismiss"
+    | "stop"
+  > & { replying: boolean; inFlight: boolean; removable: boolean };
 }) {
   const latest = useRef({ draftIO, canRevert, actions });
   latest.current = { draftIO, canRevert, actions };
@@ -545,22 +530,27 @@ function useComposerKeys({
         // stale "empty" here would dismiss the widget on the very keypress
         // meant to delete the last character.
         const text = io.read();
-        const notReplyingOrInFlight = !live.replying && !live.inFlight;
         const action = deriveComposerKeyAction({
           key: input.key,
           shiftKey: input.shiftKey,
           draftEmpty: text.trim().length === 0,
           // Reverting to "/" belongs to a summoned widget that has never
           // been sent; dismissal to any removable one. A reply row (a
-          // widget showing its round) gets neither. A queued/running turn
-          // is stopped, never removed from the page (MET-248).
-          canRevert: revertable && notReplyingOrInFlight,
-          canDismiss:
-            live.backspaceDismiss !== undefined && notReplyingOrInFlight,
+          // widget showing its round) gets neither, and neither does a
+          // widget whose turn is in flight: it stays on the page (MET-248).
+          canRevert: revertable && live.removable,
+          canDismiss: live.backspaceDismiss !== undefined && live.removable,
+          // Escape mid-turn with the caret in the draft: handled here, so
+          // the global hotkey (useInFlightEscape) sees it consumed.
           inFlight: live.inFlight,
         });
         if (action.type === "none") return false;
-        runComposerAction(action, live);
+        if (action.type === "send") {
+          void (live.replying ? live.sendFollowUp() : live.send());
+        } else if (action.type === "cancel") live.stop();
+        else if (action.type === "revert") live.revertToSlash?.();
+        else if (action.type === "backspaceDismiss") live.backspaceDismiss?.();
+        else live.escapeToEditor();
         return true;
       }),
     [blobId, documentPath],
@@ -921,29 +911,6 @@ function openBoundChatAction(
   return () => host.openAgentTab(boundTaskId);
 }
 
-/** Registers whether this blob's turn is in-flight so ProseMirror plugins
- *  can guard the widget node without reaching React context. Kept in its
- *  own hook so the lifecycle is local and the parent hook stays readable. */
-function usePromptBlobInFlight(blobId: string, inFlight: boolean): void {
-  useEffect(() => {
-    setPromptBlobInFlight(blobId, inFlight);
-    return () => setPromptBlobInFlight(blobId, false);
-  }, [blobId, inFlight]);
-}
-
-function isInFlightPhase(phase: BlobPhase): boolean {
-  return (
-    phase === "queued" ||
-    phase === "running" ||
-    phase === "needs-permission" ||
-    phase === "needs-auth"
-  );
-}
-
-function isReplyingPhase(phase: BlobPhase): boolean {
-  return phase === "done" || phase === "error";
-}
-
 /**
  * Everything the face needs, assembled from the store, the collections and
  * the action hooks. Splitting it out keeps the component itself a container
@@ -1005,10 +972,8 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     workspacePath,
   });
 
-  const inFlight = isInFlightPhase(phase);
-
-  usePromptBlobInFlight(blobId, inFlight);
-
+  const replying = phase === "done" || phase === "error";
+  const inFlight = isInFlight(phase);
   useComposerKeys({
     blobId,
     documentPath,
@@ -1018,8 +983,9 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     actions: {
       ...actions,
       escapeToEditor,
-      replying: isReplyingPhase(phase),
+      replying,
       inFlight,
+      removable: !replying && !inFlight,
     },
   });
 

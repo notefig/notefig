@@ -404,23 +404,3 @@ export function trailingParagraphTr(state: EditorState): Transaction | null {
   if (!paragraph) return null;
   return state.tr.insert(state.doc.content.size, paragraph);
 }
-
-/** Nearest position at or above `rawPos` where `nodeType` may be inserted:
- *  walk outward from the resolved position until a parent accepts it.
- */
-export function findInsertPos(
-  doc: PMNode,
-  rawPos: number,
-  nodeType: NodeType,
-): number | null {
-  const pos = Math.max(0, Math.min(rawPos, doc.content.size));
-  const $pos = doc.resolve(pos);
-  for (let depth = $pos.depth; depth >= 0; depth--) {
-    const parent = $pos.node(depth);
-    const index = $pos.index(depth);
-    if (parent.canReplaceWith(index, index, nodeType)) {
-      return depth === $pos.depth ? pos : $pos.posAtIndex(index, depth);
-    }
-  }
-  return null;
-}

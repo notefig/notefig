@@ -21,6 +21,7 @@ import {
   widgetMinimapExtension,
   PageLinkSuggestion,
 } from "@notefig/widgets";
+import { runningWidgetGuard, type IsTaskBusy } from "./running-widget-guard";
 import {
   closeDocumentSync,
   flushDocumentSync,
@@ -303,6 +304,7 @@ function createMarkdownInstance(
   content: JSONContent,
   basePath: string | undefined,
   fs: EditorFs,
+  isTaskBusy: IsTaskBusy,
 ): MarkdownInstance {
   const workspaceRoot = basePath || getDirectoryPath(filePath);
 
@@ -326,6 +328,7 @@ function createMarkdownInstance(
     // workspace; they also arm the prompt widget's empty-doc keeper
     // (unconfigured schema-only instances never self-insert).
     ...widgetRendererNodes({ filePath, basePath: workspaceRoot }),
+    runningWidgetGuard(isTaskBusy),
     // "@" page links (MET-78) in ordinary prose — the complement of the
     // prompt widget's draft-scoped mention suggestion, sharing its popup.
     // The href policy is the app's (tiptap-link-utils), injected whole.
@@ -508,6 +511,9 @@ interface MarkdownConfig {
   /** Parsed doc JSON; may be omitted only when the editor already exists. */
   content?: JSONContent;
   basePath?: string;
+  /** Whether an agent task has a turn queued or running; its widget is
+   *  then kept on the page (running-widget-guard.ts). Never, if omitted. */
+  isTaskBusy?: IsTaskBusy;
 }
 
 interface ImageConfig {
@@ -572,6 +578,7 @@ export function getOrCreateEditor(
         config.content,
         config.basePath,
         fs,
+        config.isTaskBusy ?? (() => false),
       );
       break;
     case "image":

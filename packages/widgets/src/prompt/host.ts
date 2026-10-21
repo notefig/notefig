@@ -116,12 +116,6 @@ export interface PromptWidgetHost {
     target: WidgetPromptTarget;
   }): { turnId: string };
   cancelTask(taskId: string): void;
-  /**
-   * Cancel the running turn and drop it from the transcript when the agent
-   * had not responded yet. Resolves true iff the round was forgotten — which
-   * is what tells the widget it may restore the prompt to the composer.
-   */
-  cancelTurnAndForget(taskId: string): Promise<boolean>;
   /** Withdraw a turn that is still queued behind others. */
   removeQueuedPrompt(taskId: string, turnId: string): void;
   /** Status of a single turn, read at call time (not a subscription). */

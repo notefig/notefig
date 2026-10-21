@@ -43,7 +43,6 @@ const demoHost: PromptWidgetHost = {
 
   dispatchPrompt: () => ({ turnId: "trn_demo" }),
   cancelTask: noop,
-  cancelTurnAndForget: async () => true,
   removeQueuedPrompt: noop,
   getTurnStatus: () => undefined,
   ensureRuntime: () => true,

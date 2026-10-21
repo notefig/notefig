@@ -328,8 +328,6 @@ export function usePromptWidgetHost(): PromptWidgetHost {
         return { turnId };
       },
       cancelTask: (taskId) => void agents.task(taskId).cancel(),
-      cancelTurnAndForget: (taskId) =>
-        agents.task(taskId).cancelTurnAndForget(),
       removeQueuedPrompt: (taskId, turnId) =>
         agents.task(taskId).removeQueuedPrompt(turnId),
       getTurnStatus: (turnId) => agentStore.turns.get(turnId)?.status,

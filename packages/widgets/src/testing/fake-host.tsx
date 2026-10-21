@@ -45,7 +45,6 @@ export function fakePromptWidgetHost(
 
     dispatchPrompt: vi.fn(() => ({ turnId: "trn_fake" })),
     cancelTask: vi.fn(),
-    cancelTurnAndForget: vi.fn(async () => true),
     removeQueuedPrompt: vi.fn(),
     getTurnStatus: vi.fn(() => undefined),
     ensureRuntime: vi.fn(() => true),

@@ -54,7 +54,6 @@ export {
   deleteWidgetTr,
   docHasPromptNode,
   docHasRealContent,
-  findInsertPos,
   findPromptNodeId,
   findPromptNodePos,
   MAX_REFERENCE_CHARS,
