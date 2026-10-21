@@ -8,6 +8,7 @@
  */
 export {
   defineEditorWidget,
+  ADOPTION_TRANSACTION_META,
   UI_ONLY_TRANSACTION_META,
   type EditorWidgetDefinition,
   type WidgetMarkerCodec,

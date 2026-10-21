@@ -65,6 +65,7 @@ import {
   getPromptBlob,
   updatePromptBlob,
   clearPromptBlobTurn,
+  setPromptBlobInFlight,
   type PromptBlobRecord,
   subscribePromptBlob,
 } from "../store";
@@ -261,6 +262,12 @@ function usePromptBlobRound({
     [entries],
   );
 
+  // If a send already bound this widget to a turnId but the row hasn't
+  // reached the store yet, show the sending face instead of flipping back
+  // to composing. That keeps the shimmer/readonly state and protects the
+  // node from deletion until the round actually lands.
+  const effectiveIsSending = isSending || (!!boundTurnId && !turn);
+
   return {
     turn,
     task,
@@ -270,7 +277,7 @@ function usePromptBlobRound({
       turn,
       task,
       hasPendingPermission: pendingPermissions.length > 0,
-      isSending,
+      isSending: effectiveIsSending,
     }) as BlobPhase,
   };
 }
@@ -342,6 +349,53 @@ function isInFlight(phase: BlobPhase): boolean {
     phase === "needs-permission" ||
     phase === "needs-auth"
   );
+}
+
+/** Phases where the widget must stay on the page even if the agent store
+ *  hasn't written a queued/running turn yet. The standalone guard reads the
+ *  store; this ref count is the bridge for the sending window and any other
+ *  time the UI knows a prompt is in flight before the task row does. */
+function shouldProtectNode(phase: BlobPhase): boolean {
+  return phase === "sending" || isInFlight(phase);
+}
+
+function usePromptBlobInFlight(blobId: string, inFlight: boolean): void {
+  useEffect(() => {
+    setPromptBlobInFlight(blobId, inFlight);
+    return () => setPromptBlobInFlight(blobId, false);
+  }, [blobId, inFlight]);
+}
+
+/** Lifecycle effects for a bound widget: register in-flight protection,
+ *  claim the Escape hotkey, and keep the turn binding alive while its row
+ *  is in transit from the agent store. */
+function usePromptBlobLifecycle({
+  blobId,
+  boundTurnId,
+  turn,
+  isSending,
+  phase,
+  stop,
+}: {
+  blobId: string;
+  boundTurnId: string | null;
+  turn: AgentTurn | undefined;
+  isSending: boolean;
+  phase: BlobPhase;
+  stop: () => void;
+}): void {
+  // A turn row can lag behind the boundTurnId the send hook wrote into
+  // the blob store. Treat that window as "still sending" so the stale
+  // reset doesn't wipe the binding before the row lands.
+  const sendingUntilTurnAppears = isSending || (!!boundTurnId && !turn);
+  usePromptBlobInFlight(blobId, shouldProtectNode(phase));
+  useInFlightEscape({ blobId, phase, boundTurnId, stop });
+  useStaleTurnReset({
+    blobId,
+    boundTurnId,
+    isSending: sendingUntilTurnAppears,
+    hasTurn: Boolean(turn),
+  });
 }
 
 /**
@@ -952,8 +1006,14 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     isSending,
   });
 
-  useInFlightEscape({ blobId, phase, boundTurnId, stop: actions.stop });
-  useStaleTurnReset({ blobId, boundTurnId, isSending, hasTurn: Boolean(turn) });
+  usePromptBlobLifecycle({
+    blobId,
+    boundTurnId,
+    turn,
+    isSending,
+    phase,
+    stop: actions.stop,
+  });
   const escapeToEditor = usePromptBlobFocus({
     blobId,
     editor,
@@ -974,6 +1034,7 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
 
   const replying = phase === "done" || phase === "error";
   const inFlight = isInFlight(phase);
+  usePromptBlobInFlight(blobId, shouldProtectNode(phase));
   useComposerKeys({
     blobId,
     documentPath,

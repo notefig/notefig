@@ -37,7 +37,10 @@ import Suggestion from "@tiptap/suggestion";
 import { useEffect, useRef } from "react";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import { AiPromptNodeBase, PROMPT_NODE_NAME } from "./node";
-import { UI_ONLY_TRANSACTION_META } from "../define-widget";
+import {
+  ADOPTION_TRANSACTION_META,
+  UI_ONLY_TRANSACTION_META,
+} from "../define-widget";
 import {
   deleteWidgetTr,
   docHasPromptNode,
@@ -58,6 +61,7 @@ import {
   adoptPersistedPromptBinding,
   bindPromptBlobDocument,
   getPromptBlob,
+  isPromptBlobInFlight,
 } from "./store";
 import { promptChangeTrackingPlugin } from "./change-tracking";
 import { promptChangeGutterPlugin } from "./change-gutter";
@@ -124,6 +128,23 @@ function insertDraftHardBreak(editor: NodeViewProps["editor"]): boolean {
     state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView(),
   );
   return true;
+}
+
+/** Session ids of prompt widgets whose React face has declared them
+ *  in-flight. The standalone guard covers queued/running turns; this covers
+ *  the sending window and any time the widget knows a prompt is active
+ *  before the agent store does. */
+function collectInFlightBlobIds(doc: NodeViewProps["editor"]["state"]["doc"]): Set<string> {
+  const ids = new Set<string>();
+  doc.descendants((node) => {
+    if (node.type.name === PROMPT_NODE_NAME) {
+      const blobId = node.attrs.blobId as string | null;
+      if (blobId && isPromptBlobInFlight(blobId)) ids.add(blobId);
+      return false;
+    }
+    return !node.isTextblock;
+  });
+  return ids;
 }
 
 /** Leaving the draft: the selection in the block next to the widget, or
@@ -615,6 +636,24 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
             view.dispatch(selectPromptDraftTr(tr, blobId));
             return true;
           },
+        },
+        filterTransaction(tr, oldState) {
+          if (
+            !tr.docChanged ||
+            tr.getMeta(UI_ONLY_TRANSACTION_META) ||
+            tr.getMeta(ADOPTION_TRANSACTION_META)
+          ) {
+            return true;
+          }
+
+          const protectedIds = collectInFlightBlobIds(oldState.doc);
+          if (protectedIds.size === 0) return true;
+
+          const remaining = collectInFlightBlobIds(tr.doc);
+          for (const blobId of protectedIds) {
+            if (!remaining.has(blobId)) return false;
+          }
+          return true;
         },
         appendTransaction(transactions, oldState, newState) {
           const gap = gapBesideWidgetTr(oldState, newState);

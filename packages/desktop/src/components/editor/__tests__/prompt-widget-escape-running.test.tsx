@@ -112,6 +112,29 @@ function runningRoundHost(): {
   return { host, cancelTask, publishRound: store.publish };
 }
 
+/** Host that does NOT publish a round automatically when dispatch runs —
+ *  the widget spends a render cycle in `sending` before the test decides
+ *  when the turn appears. */
+function delayedRoundHost(): {
+  host: PromptWidgetHost;
+  cancelTask: ReturnType<typeof vi.fn>;
+  publishRound: (round: PromptRound) => void;
+} {
+  const cancelTask = vi.fn();
+  const store = createRoundStore();
+
+  const host = fakePromptWidgetHost({
+    startOrGetSharedSession: vi.fn(async () => TASK_ID),
+    useRound: vi.fn(() =>
+      useSyncExternalStore(store.subscribe, store.getSnapshot),
+    ),
+    getTurnStatus: vi.fn(() => store.getSnapshot().turn?.status),
+    dispatchPrompt: vi.fn(() => ({ turnId: TURN_ID })),
+    cancelTask,
+  });
+  return { host, cancelTask, publishRound: store.publish };
+}
+
 function Harness({
   content,
   onEditor,
@@ -197,6 +220,42 @@ function widgetTaskId(editor: Editor): string | null {
     return true;
   });
   return taskId;
+}
+
+function countPromptWidgets(editor: Editor): number {
+  let count = 0;
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === "aiPrompt") {
+      count += 1;
+      return false;
+    }
+    return true;
+  });
+  return count;
+}
+
+function selectPromptWidget(editor: Editor): boolean {
+  let pos: number | null = null;
+  editor.state.doc.descendants((node, p) => {
+    if (node.type.name === "aiPrompt") {
+      pos = p;
+      return false;
+    }
+    return true;
+  });
+  if (pos === null) return false;
+  return editor.commands.setNodeSelection(pos) && editor.commands.focus();
+}
+
+async function pressDeleteOnSelectedWidget(editor: Editor): Promise<void> {
+  await act(async () => {
+    selectPromptWidget(editor);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await act(async () => {
+    pressKey(editor, "Delete");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 async function summonWidget(editor: Editor): Promise<void> {
@@ -296,4 +355,54 @@ describe("escape on a running prompt widget", () => {
       await sendFollowUpAndAssertSameTask(editor, host);
     },
   );
+
+  it("keeps the widget on the page from send through queue/running and blocks editing", async () => {
+    const { host, publishRound } = delayedRoundHost();
+    const editor = await mountedEditor("<p>Hi there</p><p></p>", host);
+    await setupRunningWidget(editor);
+    // Let the bound-turnId store update and re-render land.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    // The turn hasn't reached the store yet; the widget is in the sending
+    // face and cannot be removed.
+    expect(widgetTaskId(editor)).toBe(TASK_ID);
+    expect(widgetPhase()).toBe("sending");
+    expect(countPromptWidgets(editor)).toBe(1);
+    await pressDeleteOnSelectedWidget(editor);
+    expect(countPromptWidgets(editor)).toBe(1);
+
+    // Once queued, the draft is hidden and the widget still cannot be
+    // deleted.
+    const queuedRound = {
+      ...RUNNING_ROUND,
+      turn: { ...RUNNING_ROUND.turn, status: "queued" as const },
+    } satisfies PromptRound;
+    await act(async () => {
+      publishRound(queuedRound);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(widgetPhase()).toBe("queued");
+    await pressDeleteOnSelectedWidget(editor);
+    expect(countPromptWidgets(editor)).toBe(1);
+
+    // After it starts running, it is still protected.
+    await act(async () => {
+      publishRound(RUNNING_ROUND);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(widgetPhase()).toBe("running");
+    await pressDeleteOnSelectedWidget(editor);
+    expect(countPromptWidgets(editor)).toBe(1);
+
+    // Only once the turn settles can the widget be deleted.
+    await act(async () => {
+      publishRound(CANCELLED_ROUND);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(widgetPhase()).toBe("done");
+    await pressDeleteOnSelectedWidget(editor);
+    expect(countPromptWidgets(editor)).toBe(0);
+  });
 });

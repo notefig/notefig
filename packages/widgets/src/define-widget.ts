@@ -113,3 +113,8 @@ export function defineEditorWidget<Options>(
  * app's schema kit because widgets are the entire reason it exists.
  */
 export const UI_ONLY_TRANSACTION_META = "uiOnlyNodeChange";
+
+/** Transactions that re-write the document from disk carry this meta so
+ *  widget-protection plugins can let them through: the adoption path itself
+ *  re-asserts any running widgets it drops. */
+export const ADOPTION_TRANSACTION_META = "notefig-external-adoption";
