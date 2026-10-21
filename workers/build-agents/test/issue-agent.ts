@@ -134,7 +134,10 @@ export class TestIssueAgent extends IssueAgent {
 			moveIssue: async (issueId, stateId) => {
 				kv.put("test:moves", [...(kv.get<string[]>("test:moves") ?? []), `${issueId}→${stateId}`]);
 			},
-			appUserId: async () => "app-user",
+			appUser: async () => ({ id: "app-user", url: "https://linear.app/notefig/profiles/agent", displayName: "agent" }),
+			comment: async () => {
+				throw new Error("not used by the agent");
+			},
 			issue: async () => {
 				await this.#issueHeld;
 				const issue = kv.get<IssueDetails>("test:issue");
@@ -148,7 +151,7 @@ export class TestIssueAgent extends IssueAgent {
 		const refuse = async (): Promise<never> => {
 			throw new Error("No GitHub in tests");
 		};
-		return { token: refuse, upsertPullRequest: refuse, canWrite: async () => false, failedJobs: async () => [] };
+		return { token: refuse, upsertPullRequest: refuse, canWrite: async () => false, failedJobs: async () => [], pullRequestHead: refuse };
 	}
 
 	/** Gives the agent a workspace whose commands run until it's released, as a long test run in a container would. */

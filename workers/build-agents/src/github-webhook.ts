@@ -2,13 +2,15 @@ import { signedBy } from "./signature.ts";
 
 /**
  * The GitHub App's webhook, turned into feedback for the agent whose branch it's about: reviews and comments on its
- * pull request, a failed CI run on its branch, and the pull request closing. Only for branches of this repository: a
+ * pull request (inline or in its conversation), a failed CI run on its branch, and the pull request closing. Only for branches of this repository: a
  * fork can open a pull request from a branch with the same name, and its events must not reach the agent. Which agent
  * it is, and whether a listed bot is trusted too, is decided by the caller (`index.ts`).
  */
 
 export type GitHubEvent =
 	| { kind: "feedback"; branch: string; author: string; text: string; requestId: string }
+	/** A comment in a pull request's conversation: its payload names the pull request but not its branch. */
+	| { kind: "pr_comment"; pullRequest: number; author: string; text: string; requestId: string }
 	| { kind: "ci_failed"; branch: string; sha: string; runId: number; name: string; url: string; requestId: string }
 	| { kind: "closed"; branch: string; merged: boolean };
 
@@ -22,6 +24,7 @@ interface Payload {
 	pull_request?: { head: { ref: string; repo: { full_name: string } | null }; merged?: boolean; html_url: string };
 	review?: { id: number; body: string | null; state: string; user: { login: string } };
 	comment?: { id: number; body: string; path?: string; line?: number | null; user: { login: string } };
+	issue?: { number: number; pull_request?: unknown };
 	workflow_run?: {
 		id: number;
 		name: string;
@@ -80,6 +83,18 @@ function toEvent(eventName: string | null, payload: Payload, repo: string): GitH
 				author: comment.user.login,
 				text: `Review comment from ${comment.user.login}${where}:\n\n${comment.body}`,
 				requestId: `github:review-comment:${comment.id}`,
+			};
+		}
+		case "issue_comment": {
+			// Issues and pull requests share these comments; only a pull request's reach the agent.
+			const comment = payload.comment;
+			if (payload.action !== "created" || !comment || !payload.issue?.pull_request) return undefined;
+			return {
+				kind: "pr_comment",
+				pullRequest: payload.issue.number,
+				author: comment.user.login,
+				text: `Comment from ${comment.user.login} on the pull request:\n\n${comment.body}`,
+				requestId: `github:comment:${comment.id}`,
 			};
 		}
 		case "workflow_run": {

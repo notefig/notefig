@@ -2,7 +2,7 @@ import { type Env, readConfig } from "./config.ts";
 import { type GitHubEvent, readGitHubWebhook } from "./github-webhook.ts";
 import { gitHubClient } from "./github.ts";
 import { linearAgentClient } from "./linear.ts";
-import { type AgentCommand, readLinearWebhook } from "./linear-webhook.ts";
+import { type AgentCommand, commentForAgent, readLinearWebhook } from "./linear-webhook.ts";
 
 export { GitGateway, RegistryGateway } from "./gateways.ts";
 export { IssueAgent } from "./issue-agent.ts";
@@ -10,7 +10,8 @@ export { IssueAgent } from "./issue-agent.ts";
 /**
  * agents.notefig.com. Two webhooks in, each handed to the Durable Object of the issue it's about:
  *
- * - `POST /v1/linear`: Linear's agent session events (delegated, a message, stop) and issue updates (unassigned).
+ * - `POST /v1/linear`: Linear's agent session events (delegated, a message, stop), issue updates (unassigned) and
+ *   comments on the issue.
  * - `POST /v1/github`: the GitHub App's events on the agent's pull requests and branches.
  *
  * Both answer as soon as the event is verified and handed over; Linear wants an answer within five seconds.
@@ -69,10 +70,19 @@ async function runLinear(env: Env, command: AgentCommand): Promise<void> {
 		if (command.kind === "start") await stub.start(command);
 		else if (command.kind === "steer") await stub.steer(command);
 		else if (command.kind === "stop") await stub.stop();
-		else {
+		else if (command.kind === "comment") {
+			const linear = linearAgentClient({ clientId: env.LINEAR_CLIENT_ID, clientSecret: env.LINEAR_CLIENT_SECRET });
+			const comment = await linear.comment(command.commentId);
+			const ignored = commentForAgent(comment, await linear.appUser(), readConfig(env));
+			if (ignored) return console.log(`linear: ignored comment ${comment.id}: ${ignored}`);
+			await stub.feedback({
+				text: `Comment from ${comment.author?.name} on the Linear issue:\n\n${comment.body.trim()}`,
+				requestId: `linear:comment:${comment.id}`,
+			});
+		} else {
 			// Unassigned: stop only if the issue was this app's to work on.
-			const app = await linearAgentClient({ clientId: env.LINEAR_CLIENT_ID, clientSecret: env.LINEAR_CLIENT_SECRET }).appUserId();
-			if (command.previousDelegateId === app) await stub.undelegated();
+			const app = await linearAgentClient({ clientId: env.LINEAR_CLIENT_ID, clientSecret: env.LINEAR_CLIENT_SECRET }).appUser();
+			if (command.previousDelegateId === app.id) await stub.undelegated();
 		}
 	} catch (error) {
 		console.error(`linear ${command.kind} failed`, error);
@@ -80,10 +90,11 @@ async function runLinear(env: Env, command: AgentCommand): Promise<void> {
 }
 
 async function runGitHub(env: Env, event: GitHubEvent): Promise<void> {
-	const issueId = await env.BRANCHES.get(event.branch);
-	if (!issueId) return;
-	const stub = agent(env, issueId);
 	try {
+		const branch = event.kind === "pr_comment" ? await commentedBranch(env, event.pullRequest) : event.branch;
+		const issueId = branch && (await env.BRANCHES.get(branch));
+		if (!issueId) return;
+		const stub = agent(env, issueId);
 		if (event.kind === "closed") return await stub.closed(event);
 		if (event.kind === "ci_failed") return await stub.ciFailed(event);
 		if (!(await trusted(env, event))) {
@@ -94,6 +105,13 @@ async function runGitHub(env: Env, event: GitHubEvent): Promise<void> {
 	} catch (error) {
 		console.error(`github ${event.kind} failed`, error);
 	}
+}
+
+/** The branch of a commented pull request, unless it's a fork's: a fork's branch can share the agent's name. */
+async function commentedBranch(env: Env, pullRequest: number): Promise<string | undefined> {
+	const config = readConfig(env);
+	const head = await gitHubClient({ appId: env.GH_APP_ID, privateKey: env.GH_APP_PRIVATE_KEY }, config.repo).pullRequestHead(pullRequest);
+	return head?.repo?.toLowerCase() === env.GITHUB_REPO.toLowerCase() ? head.branch : undefined;
 }
 
 /**
