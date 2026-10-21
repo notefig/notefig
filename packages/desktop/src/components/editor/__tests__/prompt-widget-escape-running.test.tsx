@@ -115,7 +115,7 @@ function runningRoundHost(): {
 /** Host that does NOT publish a round automatically when dispatch runs —
  *  the widget spends a render cycle in `sending` before the test decides
  *  when the turn appears. */
-function delayedRoundHost(): {
+function queuedRoundHost(): {
   host: PromptWidgetHost;
   cancelTask: ReturnType<typeof vi.fn>;
   publishRound: (round: PromptRound) => void;
@@ -123,13 +123,21 @@ function delayedRoundHost(): {
   const cancelTask = vi.fn();
   const store = createRoundStore();
 
+  const QUEUED_ROUND = {
+    ...RUNNING_ROUND,
+    turn: { ...RUNNING_ROUND.turn, status: "queued" as const },
+  } satisfies PromptRound;
+
   const host = fakePromptWidgetHost({
     startOrGetSharedSession: vi.fn(async () => TASK_ID),
     useRound: vi.fn(() =>
       useSyncExternalStore(store.subscribe, store.getSnapshot),
     ),
     getTurnStatus: vi.fn(() => store.getSnapshot().turn?.status),
-    dispatchPrompt: vi.fn(() => ({ turnId: TURN_ID })),
+    dispatchPrompt: vi.fn(() => {
+      store.publish(QUEUED_ROUND);
+      return { turnId: TURN_ID };
+    }),
     cancelTask,
   });
   return { host, cancelTask, publishRound: store.publish };
@@ -356,34 +364,16 @@ describe("escape on a running prompt widget", () => {
     },
   );
 
-  it("keeps the widget on the page from send through queue/running and blocks editing", async () => {
-    const { host, publishRound } = delayedRoundHost();
+  it("keeps the widget on the page while queued/running and blocks editing", async () => {
+    const { host, publishRound } = queuedRoundHost();
     const editor = await mountedEditor("<p>Hi there</p><p></p>", host);
     await setupRunningWidget(editor);
-    // Let the bound-turnId store update and re-render land.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    });
 
-    // The turn hasn't reached the store yet; the widget is in the sending
-    // face and cannot be removed.
+    // Send published a queued turn; the widget must stay and the draft
+    // must be hidden.
     expect(widgetTaskId(editor)).toBe(TASK_ID);
-    expect(widgetPhase()).toBe("sending");
-    expect(countPromptWidgets(editor)).toBe(1);
-    await pressDeleteOnSelectedWidget(editor);
-    expect(countPromptWidgets(editor)).toBe(1);
-
-    // Once queued, the draft is hidden and the widget still cannot be
-    // deleted.
-    const queuedRound = {
-      ...RUNNING_ROUND,
-      turn: { ...RUNNING_ROUND.turn, status: "queued" as const },
-    } satisfies PromptRound;
-    await act(async () => {
-      publishRound(queuedRound);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
     expect(widgetPhase()).toBe("queued");
+    expect(countPromptWidgets(editor)).toBe(1);
     await pressDeleteOnSelectedWidget(editor);
     expect(countPromptWidgets(editor)).toBe(1);
 

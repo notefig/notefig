@@ -262,12 +262,6 @@ function usePromptBlobRound({
     [entries],
   );
 
-  // If a send already bound this widget to a turnId but the row hasn't
-  // reached the store yet, show the sending face instead of flipping back
-  // to composing. That keeps the shimmer/readonly state and protects the
-  // node from deletion until the round actually lands.
-  const effectiveIsSending = isSending || (!!boundTurnId && !turn);
-
   return {
     turn,
     task,
@@ -277,7 +271,7 @@ function usePromptBlobRound({
       turn,
       task,
       hasPendingPermission: pendingPermissions.length > 0,
-      isSending: effectiveIsSending,
+      isSending,
     }) as BlobPhase,
   };
 }
@@ -354,9 +348,16 @@ function isInFlight(phase: BlobPhase): boolean {
 /** Phases where the widget must stay on the page even if the agent store
  *  hasn't written a queued/running turn yet. The standalone guard reads the
  *  store; this ref count is the bridge for the sending window and any other
- *  time the UI knows a prompt is in flight before the task row does. */
+ *  time the UI knows a prompt is in flight before the task row does.
+ *  Auth holds are deliberately excluded: the sign-in card is the only
+ *  remaining UI, and the user must still be able to delete the widget. */
 function shouldProtectNode(phase: BlobPhase): boolean {
-  return phase === "sending" || isInFlight(phase);
+  return (
+    phase === "sending" ||
+    phase === "queued" ||
+    phase === "running" ||
+    phase === "needs-permission"
+  );
 }
 
 function usePromptBlobInFlight(blobId: string, inFlight: boolean): void {
@@ -384,16 +385,16 @@ function usePromptBlobLifecycle({
   phase: BlobPhase;
   stop: () => void;
 }): void {
-  // A turn row can lag behind the boundTurnId the send hook wrote into
-  // the blob store. Treat that window as "still sending" so the stale
-  // reset doesn't wipe the binding before the row lands.
-  const sendingUntilTurnAppears = isSending || (!!boundTurnId && !turn);
+  // The in-flight ref count protects the node during the send itself and
+  // while the UI shows a queued/running/permission round. Auth holds are
+  // deliberately left to the standalone task-busy guard, so a sign-in card
+  // does not make the widget undeletable.
   usePromptBlobInFlight(blobId, shouldProtectNode(phase));
   useInFlightEscape({ blobId, phase, boundTurnId, stop });
   useStaleTurnReset({
     blobId,
     boundTurnId,
-    isSending: sendingUntilTurnAppears,
+    isSending,
     hasTurn: Boolean(turn),
   });
 }
@@ -1034,7 +1035,6 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
 
   const replying = phase === "done" || phase === "error";
   const inFlight = isInFlight(phase);
-  usePromptBlobInFlight(blobId, shouldProtectNode(phase));
   useComposerKeys({
     blobId,
     documentPath,
