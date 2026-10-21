@@ -90,4 +90,18 @@ describe("runningWidgetGuard", () => {
       expect(widgetCount(editor)).toBe(1);
     }
   });
+
+  it("restores a busy widget into a cleared file without adding a composer", () => {
+    busy.add("task_1");
+    for (const maxDiffNodeSize of [Infinity, 0]) {
+      const editor = makeEditor();
+      adoptExternalContent(
+        editor,
+        { type: "doc", content: [{ type: "paragraph" }] },
+        { maxDiffNodeSize },
+      );
+      expect(widgetCount(editor)).toBe(1);
+      editor.destroy();
+    }
+  });
 });
