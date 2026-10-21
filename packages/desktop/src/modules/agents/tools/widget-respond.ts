@@ -38,6 +38,11 @@ export const widgetRespond: AgentTool<WidgetResponse, { recorded: true }> = {
     `document; run long only when the answer itself demands it. Call it even ` +
     `when the request needed no edits or tool actions — a prose-only answer to ` +
     `a widget prompt is still delivered through this tool, not as chat text. ` +
+    `When the user's answer requires choosing between alternatives, also pass ` +
+    `\`options\` — a few short labels (e.g. ["Free", "Pro", "Enterprise"]) ` +
+    `the widget renders as buttons; the user's click sends that label back as ` +
+    `their next prompt, so make each one sendable on its own. Only when a ` +
+    `real choice exists — never decorate an answer that needs none. ` +
     `Only for prompts that carried a widget-context resource_link or an ` +
     `empty-document widget framing — never for chat conversations.`,
   input: WidgetRespondInputSchema,

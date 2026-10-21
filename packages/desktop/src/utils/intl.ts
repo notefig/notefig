@@ -671,7 +671,6 @@ i18n
           agentToolHistoryDiff: "Compare Versions",
           agentToolHistoryCheckpoint: "Save Checkpoint",
           agentToolHistoryRestore: "Restore Version",
-          agentToolAuthorBlob: "Add Interactive Block",
           agentToolWidgetRespond: "Respond in Widget",
 
           // Telemetry consent + Privacy settings

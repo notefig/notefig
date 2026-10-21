@@ -4,7 +4,7 @@ import { toolRegistry } from "./tools";
  * MCP's `tools/list` schema is enough for the model to call a tool
  * correctly, but not enough to make it *reach* for one — a real session
  * defaulted to native Read/cat/Write for workspace files and wrote plain
- * text instead of calling `author_blob` for an explicit "add a question"
+ * text instead of calling our tools for an explicit "add a question"
  * request, only using the MCP tools once told to directly. This steering
  * text rides MCP's own channel for exactly that purpose —
  * `initialize.instructions` — instead of a prompt preamble: the server
@@ -22,7 +22,7 @@ export function serverInstructions(): string {
     `you are running as an agent inside that app. Notefig registers this server ` +
     `automatically for the session via a per-task, ephemeral config — it will not ` +
     `appear in your global or project config files, and you don't need to locate ` +
-    `or verify it. Four of these are your PRIMARY tools — keep them top of mind; ` +
+    `or verify it. Three of these are your PRIMARY tools — keep them top of mind; ` +
     `everything else is secondary, for when the task specifically calls for it. ` +
     `(1) The widget-context resource: a prompt sent from an in-document widget ` +
     `always carries a \`resource_link\` whose URI starts with ` +
@@ -50,18 +50,18 @@ export function serverInstructions(): string {
     `sentences, never a paste-back of content you wrote into the document. When ` +
     `a prompt has no \`notefig://widget-context\` resource_link (it came from ` +
     `the chat panel), do NOT call \`widget_respond\` — answer in chat as normal. ` +
+    `When the user must choose or decide something — a preference, a direction, ` +
+    `a plan to approve — end the markdown with the decision stated plainly and ` +
+    `pass \`options\`: a few short labels (e.g. ["Free", "Pro", "Enterprise"]) ` +
+    `the widget renders as buttons, where clicking one sends that label back ` +
+    `as the user's next prompt — so each option must be sendable on its own. ` +
+    `Offer options only when a real choice exists, never as decoration. ` +
     `Separately, a prompt from either surface may carry \`file://\` ` +
     `resource_links: files the user explicitly referenced with @ — do NOT call ` +
     `\`resources/read\` on those; read each one before acting (prefer ` +
     `\`workspace_read_document\` with its workspace-relative name so you see ` +
     `live editor state). ` +
-    `(3) \`author_blob\` with a multiple-choice question: whenever you need the ` +
-    `user to decide or clarify something — or they ask you to add an interactive ` +
-    `question, approval, or status block to a document — author a block instead ` +
-    `of asking in prose. It renders as an answerable widget, and you'll get a ` +
-    `follow-up prompt with the user's answer once they respond — don't re-ask or ` +
-    `wait synchronously. ` +
-    `(4) \`workspace_read_document\`: the fallback when the widget context ` +
+    `(3) \`workspace_read_document\`: the fallback when the widget context ` +
     `genuinely doesn't cover what the request needs — e.g. editing a different ` +
     `section you can see named in the outline but whose text isn't in the ` +
     `surrounding-text window. Do NOT read the entire document by default: that ` +

@@ -250,7 +250,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Some app tools (workspace_read_document, history_restore, author_blob, …)
+ * Some app tools (workspace_read_document, history_restore, …)
  * don't get `locations` from the adapter the way native tool calls
  * sometimes do (confirmed absent on every MCP tool_call in
  * docs/architecture/spikes/v2-mcp-passthrough-spike.md). Derive the same
@@ -1498,7 +1498,8 @@ export class AgentTask {
    * MCP tool names arrive prefixed (`mcp__notefig__author_blob`, confirmed
    * on claude-agent-acp) and without `locations` — normalize the former and
    * derive the latter from `rawInput.path` so app tools render and address
-   * (`findBlobAuthorTask`) exactly like any other tool call.
+   * exactly like any other tool call. (The example tool is gone from the
+   * registry, but persisted transcripts still carry it.)
    */
   private upsertToolEntry(
     update: Extract<
@@ -2169,9 +2170,11 @@ export interface AgentRuntime {
   ): Promise<ActionResult>;
   /**
    * Which task authored a given blob, and its type/path — read straight off
-   * the `author_blob` tool call's transcript entry (every fence tool call
-   * already gets one, with `rawInput` verbatim), rather than a dedicated
-   * blob-tracking table. Used by `answerBlob` (blob-actions.ts) to address
+   * the `author_blob` tool call's transcript entry (every tool call
+   * already gets one, with `rawInput` verbatim; the authoring tool itself is
+   * retired, so only legacy sessions' transcripts still carry these), rather
+   * than a dedicated blob-tracking table. Used by `answerBlob`
+   * (blob-actions.ts) to address
    * a fresh prompt back at the right session once the user interacts with
    * the blob; the answer is a plain prompt, no interaction bookkeeping.
    *

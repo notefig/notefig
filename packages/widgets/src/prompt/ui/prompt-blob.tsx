@@ -565,6 +565,8 @@ interface PromptBlobDisplay {
 interface PromptBlobFaceActions {
   send: () => Promise<void> | void;
   sendFollowUp: () => Promise<void> | void;
+  /** Send one of the response's options back as the next prompt (MET-250). */
+  chooseOption: (option: string) => void;
   editPrompt: () => void;
   retry: () => void;
   stop: () => void;
@@ -858,6 +860,7 @@ function SettledState({
         documentPath={documentPath}
         changeCounts={display.changeCounts}
         changes={display.changes}
+        onChooseOption={actions.chooseOption}
         onOpenFile={(path) => actions.openFile(path)}
         onOpenChat={() => boundTaskId && actions.openAgentTab(boundTaskId)}
         onDismiss={actions.dismiss}
@@ -1144,34 +1147,55 @@ function usePromptSendActions({
   // widget's first round. A new FIFO turn on the same ACP session; the
   // rebind below is the whole "replace the round behind the scenes". No
   // trust gate: round one already required it for this workspace.
+  //
+  // The one reply dispatch both reply paths share: the composer's
+  // sendFollowUp sends the draft text, and an option click (MET-250) sends
+  // the option label verbatim. Returns true when the turn was dispatched
+  // (so the caller can clear the draft); false when there was nothing to
+  // send or the session was unreachable (draft kept, widget unbound).
+  const sendReply = useCallback(
+    async (text: string): Promise<boolean> => {
+      const taskId = getPromptBlob(blobId).boundTaskId;
+      if (!text || isSending || !taskId) return false;
+      if (!host.ensureRuntime()) return false;
+      // dispatchPrompt is infallible by contract: a missing task mints a
+      // turnId with no row, and binding to it would trip the stale-turn reset
+      // — silently wiping this reply. Check first; on a dead task keep the
+      // draft and fall back to composing (re-send starts a fresh session).
+      // Reachable covers a session that is merely asleep: a widget restored
+      // from the document (MET-163) has no runtime until this prompt revives
+      // it via session/load, which is exactly the point of persisting it.
+      if (!(await host.isTaskReachable(taskId))) {
+        toast(t("promptBlobSessionGone"));
+        clearPromptBlobTurn(blobId);
+        return false;
+      }
+      setIsSending(true);
+      try {
+        const turnId = dispatchPrompt(taskId, text);
+        updatePromptBlob(blobId, { boundTurnId: turnId, lastSentPrompt: text });
+        return true;
+      } finally {
+        setIsSending(false);
+      }
+    },
+    [host, blobId, isSending, dispatchPrompt, t],
+  );
+
   const sendFollowUp = useCallback(async () => {
     const text = draftIO.read().trim();
-    const taskId = getPromptBlob(blobId).boundTaskId;
-    if (!text || isSending || !taskId) return;
-    if (!host.ensureRuntime()) return;
-    // dispatchPrompt is infallible by contract: a missing task mints a
-    // turnId with no row, and binding to it would trip the stale-turn reset
-    // — silently wiping this reply. Check first; on a dead task keep the
-    // draft and fall back to composing (re-send starts a fresh session).
-    // Reachable covers a session that is merely asleep: a widget restored
-    // from the document (MET-163) has no runtime until this prompt revives
-    // it via session/load, which is exactly the point of persisting it.
-    if (!(await host.isTaskReachable(taskId))) {
-      toast(t("promptBlobSessionGone"));
-      clearPromptBlobTurn(blobId);
-      return;
-    }
-    setIsSending(true);
-    try {
-      const turnId = dispatchPrompt(taskId, text);
-      updatePromptBlob(blobId, { boundTurnId: turnId, lastSentPrompt: text });
-      draftIO.write("");
-    } finally {
-      setIsSending(false);
-    }
-  }, [host, blobId, isSending, dispatchPrompt, t, draftIO]);
+    if (await sendReply(text)) draftIO.write("");
+  }, [sendReply, draftIO]);
 
-  return { isSending, confirmTrust, send, sendFollowUp };
+  // Response options (MET-250): the agent delivered choices with its
+  // answer; clicking one sends the label verbatim as the next prompt —
+  // the same reply path, no round-trip through the composer's draft.
+  const chooseOption = useCallback(
+    (option: string) => void sendReply(option.trim()),
+    [sendReply],
+  );
+
+  return { isSending, confirmTrust, send, sendFollowUp, chooseOption };
 }
 
 /**
@@ -1198,15 +1222,16 @@ function usePromptBlobActions({
   draftIO: DraftIO;
 }) {
   const host = usePromptWidgetHost();
-  const { isSending, confirmTrust, send, sendFollowUp } = usePromptSendActions({
-    blobId,
-    workspacePath,
-    documentPath,
-    editor,
-    getPos,
-    onSessionBound,
-    draftIO,
-  });
+  const { isSending, confirmTrust, send, sendFollowUp, chooseOption } =
+    usePromptSendActions({
+      blobId,
+      workspacePath,
+      documentPath,
+      editor,
+      getPos,
+      onSessionBound,
+      draftIO,
+    });
 
   // Unbind and pull the sent prompt back into the composer, then focus it.
   // A draft already being typed (a half-written reply) always wins over the
@@ -1325,6 +1350,7 @@ function usePromptBlobActions({
     confirmTrust,
     send,
     sendFollowUp,
+    chooseOption,
     editPrompt,
     retry,
     stop,
@@ -1861,6 +1887,7 @@ export function DoneState({
   documentPath = "",
   changeCounts = new Map(),
   changes,
+  onChooseOption,
   onOpenFile,
   onOpenChat,
   onDismiss,
@@ -1875,6 +1902,8 @@ export function DoneState({
   documentPath?: string;
   changeCounts?: ReadonlyMap<string, number>;
   changes?: PromptChangeNavigation;
+  /** Send a clicked response option back as the user's next prompt. */
+  onChooseOption?: (option: string) => void;
   onOpenFile: (path: string) => void;
   onOpenChat: () => void;
   onDismiss: () => void;
@@ -1885,6 +1914,7 @@ export function DoneState({
       response={response}
       fallbackText={fallbackText}
       cancelled={cancelled}
+      onChooseOption={onChooseOption}
       actions={
         <>
           <button

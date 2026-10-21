@@ -15,6 +15,12 @@ import { CopyTextButton } from "./copy-text-button";
  * Placement-specific chrome comes in from the caller: `actions` sit at the
  * end of the heading row, `children` below the body.
  *
+ * When the response carries `options` (MET-250), they render below the body.
+ * With an `onChooseOption` handler (the document's done face) they are
+ * buttons — clicking one sends that label back as the user's next prompt;
+ * without one (the chat transcript, where the composer is the reply
+ * surface) they render as plain chips.
+ *
  * The content prefers the response and falls back to `fallbackText` (the
  * turn's last assistant text), so a harness that never calls the tool still
  * leaves something readable behind.
@@ -25,6 +31,7 @@ export function WidgetResponseView({
   cancelled = false,
   defaultExpanded = true,
   actions,
+  onChooseOption,
   children,
 }: {
   response: WidgetResponse | null;
@@ -34,6 +41,9 @@ export function WidgetResponseView({
    *  The chat lands collapsed: the answer is one row among many there. */
   defaultExpanded?: boolean;
   actions?: ReactNode;
+  /** Send a clicked option back as the user's next prompt. Absent in the
+   *  chat transcript, where options render as read-only chips. */
+  onChooseOption?: (option: string) => void;
   children?: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -52,6 +62,7 @@ export function WidgetResponseView({
       issue: t("promptBlobIssue"),
     },
   });
+  const options = response?.options ?? [];
   return (
     <div
       className="flex flex-col gap-0.5 px-2 py-1"
@@ -94,10 +105,40 @@ export function WidgetResponseView({
           )}
         />
       )}
+      {expanded && options.length > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-1 pt-0.5"
+          data-widget-response-options=""
+        >
+          {options.map((option, index) =>
+            onChooseOption ? (
+              <button
+                key={`${index}:${option}`}
+                type="button"
+                className={cn(
+                  optionChipClass,
+                  "cursor-pointer border border-border bg-card text-foreground/80",
+                  "transition-colors hover:bg-accent hover:text-foreground",
+                )}
+                onClick={() => onChooseOption(option)}
+              >
+                {option}
+              </button>
+            ) : (
+              <span key={`${index}:${option}`} className={optionChipClass}>
+                {option}
+              </span>
+            ),
+          )}
+        </div>
+      )}
       {children}
     </div>
   );
 }
+
+const optionChipClass =
+  "max-w-full truncate rounded-md px-1.5 py-0.5 text-[0.6875rem]";
 
 function SummaryLine({
   summary,

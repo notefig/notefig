@@ -23,6 +23,7 @@ function render(props: {
   response: WidgetResponse | null;
   fallbackText?: string | null;
   actions?: ReactNode;
+  onChooseOption?: (option: string) => void;
   children?: ReactNode;
 }) {
   container = document.createElement("div");
@@ -41,6 +42,11 @@ function body(): HTMLElement | null {
 
 function heading(): HTMLButtonElement {
   return container!.querySelector("button")!;
+}
+
+/** The options row, present only when the response carries options. */
+function optionsRow(): HTMLElement | null {
+  return container!.querySelector('[data-widget-response-options]');
 }
 
 afterEach(() => {
@@ -130,5 +136,55 @@ describe("WidgetResponseView", () => {
     expect(
       body()!.compareDocumentPosition(below) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("response options render below the body, hidden with it when collapsed", () => {
+    render({
+      response: {
+        kind: "answer",
+        markdown: "pick one",
+        options: ["Free", "Pro"],
+      },
+    });
+    expect(optionsRow()?.textContent).toBe("FreePro");
+    // Collapsed hides the body and the options with it (MET-250): they are
+    // part of the answer, not a header-level control.
+    act(() => heading().click());
+    expect(optionsRow()).toBeNull();
+    act(() => heading().click());
+    expect(optionsRow()?.textContent).toBe("FreePro");
+  });
+
+  it("no options row when the response carries none", () => {
+    render({ response: { kind: "answer", markdown: "plain" } });
+    expect(optionsRow()).toBeNull();
+  });
+
+  it("with a handler, options are buttons and a click delivers that option", () => {
+    const chosen: string[] = [];
+    render({
+      response: {
+        kind: "answer",
+        markdown: "pick one",
+        options: ["Free", "Pro"],
+      },
+      onChooseOption: (option) => chosen.push(option),
+    });
+    const buttons = optionsRow()!.querySelectorAll("button");
+    expect(buttons.length).toBe(2);
+    act(() => (buttons[1] as HTMLButtonElement).click());
+    expect(chosen).toEqual(["Pro"]);
+  });
+
+  it("without a handler (chat transcript), options render as read-only chips", () => {
+    render({
+      response: {
+        kind: "answer",
+        markdown: "pick one",
+        options: ["Free"],
+      },
+    });
+    expect(optionsRow()!.querySelectorAll("button")).toHaveLength(0);
+    expect(optionsRow()!.textContent).toBe("Free");
   });
 });

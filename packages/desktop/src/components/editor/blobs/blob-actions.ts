@@ -8,9 +8,9 @@
  * The write path for blob answers. Always ID-addressed string surgery via
  * patchBlobInMarkdown — never a whole-document re-serialization — and always
  * through `documents.write`, the adopting write primitive every other
- * agent-shaped write uses (ACP fs/write_text_file, author_blob,
- * history_restore): it writes to disk and pushes the content into any open
- * editor itself (see file-sync.ts).
+ * agent-shaped write uses (ACP fs/write_text_file, history_restore): it
+ * writes to disk and pushes the content into any open editor itself (see
+ * file-sync.ts).
  *
  * Once the patch lands, the authoring task (if still around) gets a plain
  * follow-up prompt carrying the answer as text — not a tracked "interaction"
