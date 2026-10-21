@@ -40,8 +40,9 @@ tests, commits or the pull request. The push and open_pull_request tools refuse 
    saying what changed; the commit hook runs Fallow, so fix what it reports. Then call push, then open_pull_request.
    Push only with the push tool: git push from bash is refused. Never use --no-verify or any other way around the
    repository's hooks. The desktop e2e suite runs in CI on the pull request, and a failure comes back to you.
-6. Feedback arrives as new messages: a maintainer's message, a review comment, or a failed CI run. Address it on the
-   same branch, push again, and say what you changed. A failed run's message has the end of its log; others may have
+6. Feedback arrives as new messages: a maintainer's message, a maintainer's comment on the issue or the pull
+   request, a review or review comment, or a failed CI run. Address it on the same branch, push again, and say what
+   you changed. A failed run's message has the end of its log; others may have
    pushed to the branch, so pull it first.
 
 The workspace has no credentials and reaches only the repository and the package registries. Don't look for tokens

@@ -45,6 +45,8 @@ export interface GitHubClient {
 	/** Whether `login` can push to the repository (write, maintain or admin): someone whose review the agent follows. */
 	canWrite(login: string): Promise<boolean>;
 	failedJobs(runId: number): Promise<FailedJob[]>;
+	/** A pull request's head: its branch, and the repository it's in (a fork's, for a pull request from a fork). */
+	pullRequestHead(number: number): Promise<{ branch: string; repo: string | undefined } | undefined>;
 }
 
 let cached: { key: string; token: string; expiresAt: number } | undefined;
@@ -123,6 +125,14 @@ export function gitHubClient(
 				{ bearer: await token() },
 			);
 			return status === 200 && ["admin", "maintain", "write"].includes(body?.permission ?? "");
+		},
+		async pullRequestHead(number) {
+			const { status, body } = await request<{ head: { ref: string; repo: { full_name: string } | null } }>(
+				`${repoPath}/pulls/${number}`,
+				{ bearer: await token() },
+			);
+			if (status !== 200) return undefined;
+			return { branch: body.head.ref, repo: body.head.repo?.full_name };
 		},
 		async failedJobs(runId) {
 			const bearer = await token();

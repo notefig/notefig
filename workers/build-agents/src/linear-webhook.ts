@@ -1,10 +1,12 @@
 import type { Config } from "./config.ts";
+import type { AppUser, IssueComment } from "./linear.ts";
 import { signedBy } from "./signature.ts";
 
 /**
  * Linear's agent session webhook, turned into what the issue's agent should do. Delegating an issue to the app, or
  * mentioning it, sends `created`; a message in the session sends `prompted`, and the session's stop button sends
- * `prompted` with the `stop` signal. Only approvers start or steer an agent.
+ * `prompted` with the `stop` signal. A comment on the issue outside the session arrives as a `Comment` event. Only
+ * approvers start or steer an agent.
  */
 
 export type AgentCommand =
@@ -12,7 +14,9 @@ export type AgentCommand =
 	| { kind: "steer"; issueId: string; sessionId: string; text: string; requestId: string }
 	| { kind: "stop"; issueId: string; sessionId: string }
 	/** The issue's delegate changed: if it was this app, its agent stops (`index.ts` knows the app's user id). */
-	| { kind: "undelegated"; issueId: string; previousDelegateId: string };
+	| { kind: "undelegated"; issueId: string; previousDelegateId: string }
+	/** A comment on the issue: whether it's for the agent is decided once it's fetched (`commentForAgent`). */
+	| { kind: "comment"; issueId: string; commentId: string };
 
 export type WebhookOutcome =
 	| { ok: false; status: number; error: string }
@@ -25,6 +29,14 @@ interface IssueEvent {
 	webhookTimestamp: number;
 	data: { id: string; delegateId?: string | null };
 	updatedFrom?: { delegateId?: string | null };
+}
+
+/** A `Comment` data webhook. A comment by an integration or a bot has no `userId`. */
+interface CommentEvent {
+	type: "Comment";
+	action: string;
+	webhookTimestamp: number;
+	data: { id: string; issueId?: string | null; userId?: string | null };
 }
 
 interface AgentSessionEvent {
@@ -51,14 +63,15 @@ export async function readLinearWebhook(
 	now: number,
 ): Promise<WebhookOutcome> {
 	if (!(await signedBy(secret, rawBody, signature))) return { ok: false, status: 401, error: "Bad signature" };
-	let event: AgentSessionEvent | IssueEvent;
+	let event: AgentSessionEvent | IssueEvent | CommentEvent;
 	try {
-		event = JSON.parse(rawBody) as AgentSessionEvent | IssueEvent;
+		event = JSON.parse(rawBody) as AgentSessionEvent | IssueEvent | CommentEvent;
 	} catch {
 		return { ok: false, status: 400, error: "Body is not JSON" };
 	}
 	if (Math.abs(now - event.webhookTimestamp) > MAX_CLOCK_SKEW_MS) return { ok: false, status: 401, error: "Stale webhook" };
 	if (event.type === "Issue") return undelegation(event as IssueEvent);
+	if (event.type === "Comment") return comment(event as CommentEvent);
 	if (event.type !== "AgentSessionEvent") return { ok: true, command: undefined, reason: "not an agent session event" };
 
 	const session = (event as AgentSessionEvent).agentSession;
@@ -98,4 +111,24 @@ function undelegation(event: IssueEvent): WebhookOutcome {
 		return { ok: true, command: undefined, reason: "not an undelegation" };
 	}
 	return { ok: true, command: { kind: "undelegated", issueId: event.data.id, previousDelegateId: previous } };
+}
+
+function comment(event: CommentEvent): WebhookOutcome {
+	const { id, issueId, userId } = event.data;
+	if (event.action !== "create" || !issueId || !userId) return { ok: true, command: undefined, reason: "not a person's new comment on an issue" };
+	return { ok: true, command: { kind: "comment", issueId, commentId: id } };
+}
+
+/**
+ * Whether a comment on an issue is feedback for its agent: an approver's, on an issue delegated to the app, and not
+ * already on its way. A comment in an agent session's thread arrives as `prompted`, and one mentioning the app opens a
+ * session of its own, so both are left to those. Undefined when it's for the agent, else why not.
+ */
+export function commentForAgent(comment: IssueComment, app: AppUser, config: Pick<Config, "approverEmails">): string | undefined {
+	if (comment.issue?.delegateId !== app.id) return "issue not delegated to the agent";
+	if (!comment.author || !config.approverEmails.includes(comment.author.email.toLowerCase())) return "not from an approver";
+	if (comment.inAgentThread) return "in an agent session's thread";
+	if (comment.body.includes(app.url) || comment.body.includes(`@${app.displayName}`)) return "mentions the agent";
+	if (!comment.body.trim()) return "empty comment";
+	return undefined;
 }

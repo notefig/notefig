@@ -103,8 +103,12 @@ the object's state, and never sees a token.
      container destroyed, but the transcript stays, so a message picks it up again;
    - **unassigning** the agent (an `Issue` update whose previous delegate was the app) ends it: see "Lifecycle and
      cost";
-   - a review or review comment on the PR, from someone who can push to the repository or a `TRUSTED_REVIEWERS`
-     bot, steers it. Every human reviewer is checked with the permission endpoint (write, maintain or admin):
+   - an approver's comment on the issue in Linear (a `Comment` event) steers it, with request id
+     `linear:comment:<comment id>`, while the issue is delegated to the app. Comments in an agent session's thread
+     arrive as `prompted` and one that mentions the app opens its own session, so neither is passed on twice; nor is a
+     comment by an integration, such as one synced from GitHub;
+   - a review, a review comment or a comment in the PR's conversation (`issue_comment`, whose branch the Worker
+     looks up from the PR), from someone who can push to the repository or a `TRUSTED_REVIEWERS` bot, steers it. Every human reviewer is checked with the permission endpoint (write, maintain or admin):
      `author_association` can't tell, since MEMBER and COLLABORATOR don't mean write access and a private org
      membership shows as CONTRIBUTOR;
    - a failed workflow run on the branch arrives with the commit it ran on, a hint to pull first (others may have
@@ -194,7 +198,7 @@ Also used by the workflow: the repo secret `CLOUDFLARE_ACCOUNT_ID` and the envir
 ### GitHub
 - **App `notefig-build-agent`** (org notefig, private), from `github-app.json`:
   - permissions: metadata read, contents write, pull requests write, actions read, checks read;
-  - events: `pull_request`, `pull_request_review`, `pull_request_review_comment`, `workflow_run`;
+  - events: `issue_comment`, `pull_request`, `pull_request_review`, `pull_request_review_comment`, `workflow_run`;
   - webhook `https://agents.notefig.com/v1/github`;
   - installed on **notefig/notefig only**;
   - its bot user `notefig-build-agent[bot]` (id 344640214) is the commit author.
@@ -213,7 +217,7 @@ Also used by the workflow: the repo secret `CLOUDFLARE_ACCOUNT_ID` and the envir
   - **Client credentials** on (the Worker mints its own app-actor token);
   - callback URL `https://agents.notefig.com/v1/linear/installed` (the Worker answers it with a short page);
   - webhooks on: `https://agents.notefig.com/v1/linear`, events **Agent session events**, **Issues** (so unassigning
-    the agent stops it) and **Permission changes**;
+    the agent stops it), **Comments** (so an approver's comment on the issue reaches it) and **Permission changes**;
   - installed as an agent once by an admin, through the link `bootstrap` prints (`actor=app`, scopes
     `read,write,app:assignable,app:mentionable`). Installed agents take no seat.
 - **The "Model" label group** (workspace level), with one label per `MODEL_LABELS` entry.

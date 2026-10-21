@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readConfig, type Env } from "./config.ts";
-import { readLinearWebhook } from "./linear-webhook.ts";
+import { commentForAgent, readLinearWebhook } from "./linear-webhook.ts";
+import type { IssueComment } from "./linear.ts";
 import { env } from "cloudflare:workers";
 import { sign } from "../test/sign.ts";
 
@@ -68,6 +69,17 @@ describe("readLinearWebhook", () => {
 		expect(await read(issue({ delegateId: "app-user" }, { title: "old" }))).toMatchObject({ ok: true, command: undefined });
 	});
 
+	it("hands on a person's new comment on an issue, and nothing else about comments", async () => {
+		const comment = (action: string, data: Record<string, unknown>) => ({ type: "Comment", action, webhookTimestamp: NOW, data: { id: "comment-1", ...data } });
+		expect(await read(comment("create", { issueId: "issue-1", userId: "user-1" }))).toEqual({
+			ok: true,
+			command: { kind: "comment", issueId: "issue-1", commentId: "comment-1" },
+		});
+		expect(await read(comment("update", { issueId: "issue-1", userId: "user-1" }))).toMatchObject({ ok: true, command: undefined });
+		expect(await read(comment("create", { issueId: "issue-1", userId: null }))).toMatchObject({ ok: true, command: undefined });
+		expect(await read(comment("create", { projectUpdateId: "update-1", userId: "user-1" }))).toMatchObject({ ok: true, command: undefined });
+	});
+
 	it("refuses a session without an id", async () => {
 		expect(await read(event({ agentSession: { id: "", issue: { id: "i" }, creator: { email: "approver@example.com" } } }))).toMatchObject({
 			ok: false,
@@ -79,5 +91,30 @@ describe("readLinearWebhook", () => {
 		expect(await read(event(), null)).toMatchObject({ ok: false, status: 401 });
 		expect(await read(event(), "zz")).toMatchObject({ ok: false, status: 401 });
 		expect(await read(event({ webhookTimestamp: NOW - 61_000 }))).toMatchObject({ ok: false, status: 401 });
+	});
+});
+
+describe("commentForAgent", () => {
+	const app = { id: "app-user", url: "https://linear.app/notefig/profiles/notefigbuildagent", displayName: "notefigbuildagent" };
+	const comment = (overrides: Partial<IssueComment> = {}): IssueComment => ({
+		id: "comment-1",
+		body: "Look at the raw markdown",
+		author: { name: "Parsa", email: "Approver@example.com" },
+		inAgentThread: false,
+		issue: { id: "issue-1", delegateId: "app-user" },
+		...overrides,
+	});
+
+	it("passes an approver's comment on an issue delegated to the agent", () => {
+		expect(commentForAgent(comment(), app, config)).toBeUndefined();
+	});
+
+	it("leaves out comments that aren't the agent's, or that reach it another way", () => {
+		expect(commentForAgent(comment({ issue: { id: "issue-1", delegateId: "someone" } }), app, config)).toBe("issue not delegated to the agent");
+		expect(commentForAgent(comment({ author: null }), app, config)).toBe("not from an approver");
+		expect(commentForAgent(comment({ author: { name: "S", email: "stranger@example.com" } }), app, config)).toBe("not from an approver");
+		expect(commentForAgent(comment({ inAgentThread: true }), app, config)).toBe("in an agent session's thread");
+		expect(commentForAgent(comment({ body: `[@notefigbuildagent](${app.url}) why?` }), app, config)).toBe("mentions the agent");
+		expect(commentForAgent(comment({ body: "  " }), app, config)).toBe("empty comment");
 	});
 });

@@ -31,6 +31,25 @@ describe("readGitHubWebhook", () => {
 		});
 	});
 
+	it("turns a comment in the pull request's conversation into feedback, and ignores one on an issue", async () => {
+		const comment = { id: 11, body: "Look at the raw markdown", user: { login: "parsasi" } };
+		expect(await read("issue_comment", { action: "created", issue: { number: 465, pull_request: { url: "u" } }, comment })).toEqual({
+			ok: true,
+			event: {
+				kind: "pr_comment",
+				pullRequest: 465,
+				author: "parsasi",
+				text: "Comment from parsasi on the pull request:\n\nLook at the raw markdown",
+				requestId: "github:comment:11",
+			},
+		});
+		expect(await read("issue_comment", { action: "created", issue: { number: 464 }, comment })).toEqual({ ok: true, event: undefined });
+		expect(await read("issue_comment", { action: "edited", issue: { number: 465, pull_request: { url: "u" } }, comment })).toEqual({
+			ok: true,
+			event: undefined,
+		});
+	});
+
 	it("ignores a fork's pull request from a branch with the agent's branch name", async () => {
 		const closed = await read("pull_request", { action: "closed", pull_request: { ...pullRequest("someone/notefig"), merged: false } });
 		expect(closed).toEqual({ ok: true, event: undefined });

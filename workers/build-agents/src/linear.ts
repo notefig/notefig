@@ -30,8 +30,27 @@ export interface LinearAgentClient {
 	issue(issueId: string): Promise<IssueDetails>;
 	/** Moves the issue to a state. */
 	moveIssue(issueId: string, stateId: string): Promise<void>;
-	/** The app's own Linear user id: the delegate of every issue handed to it. */
-	appUserId(): Promise<string>;
+	/** The app's own Linear user: the delegate of every issue handed to it, and what a mention of it links to. */
+	appUser(): Promise<AppUser>;
+	/** A comment on an issue, with what decides whether it's for the agent working on that issue. */
+	comment(commentId: string): Promise<IssueComment>;
+}
+
+export interface AppUser {
+	id: string;
+	/** The user's profile page, which a mention in markdown links to. */
+	url: string;
+	displayName: string;
+}
+
+export interface IssueComment {
+	id: string;
+	body: string;
+	/** Null for a comment by an integration (one synced from GitHub, say) or a bot. */
+	author: { name: string; email: string } | null;
+	/** The comment opens an agent session (one that mentions an agent), or replies in one's thread. */
+	inAgentThread: boolean;
+	issue: { id: string; delegateId: string | undefined } | undefined;
 }
 
 export interface LinearCredentials {
@@ -43,7 +62,7 @@ export interface LinearCredentials {
 export const PRIVATE_NOTE_MARKER = "_Private: comments outside the synced thread stay out of GitHub._";
 
 let cached: { key: string; token: string } | undefined;
-let cachedViewer: { key: string; id: string } | undefined;
+let cachedViewer: { key: string; user: AppUser } | undefined;
 
 export function linearAgentClient(credentials: LinearCredentials, fetchFn: typeof fetch = fetch): LinearAgentClient {
 	const key = credentials.clientId;
@@ -101,11 +120,21 @@ export function linearAgentClient(credentials: LinearCredentials, fetchFn: typeo
 				input: { stateId },
 			});
 		},
-		async appUserId() {
-			if (cachedViewer?.key === key) return cachedViewer.id;
-			const { viewer } = await graphql<{ viewer: { id: string } }>(`{ viewer { id } }`, {});
-			cachedViewer = { key, id: viewer.id };
-			return viewer.id;
+		async appUser() {
+			if (cachedViewer?.key === key) return cachedViewer.user;
+			const { viewer } = await graphql<{ viewer: AppUser }>(`{ viewer { id url displayName } }`, {});
+			cachedViewer = { key, user: viewer };
+			return viewer;
+		},
+		async comment(commentId) {
+			const { comment } = await graphql<{ comment: RawComment }>(COMMENT_QUERY, { id: commentId });
+			return {
+				id: comment.id,
+				body: comment.body,
+				author: comment.user,
+				inAgentThread: Boolean(comment.agentSession || comment.parent?.agentSession),
+				issue: comment.issue ? { id: comment.issue.id, delegateId: comment.issue.delegate?.id } : undefined,
+			};
 		},
 		async issue(issueId) {
 			const { issue } = await graphql<{ issue: RawIssue }>(ISSUE_QUERY, { id: issueId });
@@ -123,6 +152,25 @@ const ISSUE_QUERY = `query ($id: String!) {
 		comments(first: 50) { nodes { body parent { id } } }
 	}
 }`;
+
+const COMMENT_QUERY = `query ($id: String!) {
+	comment(id: $id) {
+		id body
+		user { name email }
+		agentSession { id }
+		parent { agentSession { id } }
+		issue { id delegate { id } }
+	}
+}`;
+
+interface RawComment {
+	id: string;
+	body: string;
+	user: { name: string; email: string } | null;
+	agentSession: { id: string } | null;
+	parent: { agentSession: { id: string } | null } | null;
+	issue: { id: string; delegate: { id: string } | null } | null;
+}
 
 interface RawIssue {
 	id: string;
