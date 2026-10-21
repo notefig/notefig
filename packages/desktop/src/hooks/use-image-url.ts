@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
-import { buildInternalCandidates } from "@/components/editor/tiptap-link-utils";
+import { path as pathutil } from "@/utils/path";
 import { useCore } from "@notefig/core/react";
 
 export interface ResolvedImage {
@@ -20,23 +20,6 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>();
 
 type ImageFs = Pick<FileSystemSurface, "exists" | "resolveAssetUrl">;
-
-/**
- * Local image src → candidate absolute paths, in priority order. Mirrors the
- * page-link resolver: file-relative first, workspace root second, with `.`/
- * `..` collapsed and paths outside the workspace refused.
- */
-export function resolveImageCandidates(
-  imagePath: string,
-  basePaths: string[],
-): string[] {
-  const fileDir = basePaths[0];
-  const workspaceRoot = basePaths[basePaths.length - 1] ?? fileDir;
-  return buildInternalCandidates(imagePath, {
-    fileDir,
-    basePath: workspaceRoot,
-  });
-}
 
 function loadImage(
   fs: ImageFs,
@@ -62,31 +45,15 @@ function loadImage(
     return entry;
   }
 
-  // Local paths — a relative src can be anchored at the containing file's
-  // directory or at the workspace root (Obsidian accepts both), and `..`
-  // segments resolve before the path reaches the platform. Reuse the link
-  // resolver so images and page links agree on what a path means, and so
-  // traversal outside the workspace is refused rather than handed to the OS.
-  const candidates = resolveImageCandidates(imagePath, basePaths);
-  const workspaceRoot = basePaths[basePaths.length - 1] ?? basePaths[0];
-
-  if (candidates.length === 0) {
-    const error = new Error(
-      `image path is outside the workspace: ${imagePath}`,
-    );
-    const promise = Promise.reject(error);
-    // readEntry throws the stored error, so nothing ever awaits this
-    // promise; handle it here so a refused image isn't reported as an
-    // unhandled rejection before the boundary renders its fallback.
-    promise.catch(() => {});
-    const entry: CacheEntry = {
-      promise,
-      status: "rejected",
-      error,
-    };
-    cache.set(cacheKey, entry);
-    return entry;
-  }
+  // Local paths — a relative src can be anchored at any of the candidate
+  // bases (Obsidian resolves both from the document's directory and from
+  // the vault root). Probe in order and resolve the first that exists;
+  // when nothing exists, fall through with the first candidate so the
+  // <img> reaches its broken state.
+  const nativePath = pathutil.fromTreePath(imagePath);
+  const candidates = pathutil.isAbsolute(nativePath)
+    ? [nativePath]
+    : basePaths.map((base) => pathutil.join(base, nativePath));
 
   const promise = (async (): Promise<ResolvedImage> => {
     let chosen = candidates[0];
@@ -98,7 +65,7 @@ function loadImage(
       );
       if (hit) chosen = hit;
     }
-    const url = await fs.resolveAssetUrl(chosen, workspaceRoot);
+    const url = await fs.resolveAssetUrl(chosen, basePaths[0]);
     return { url, absolutePath: chosen };
   })()
     .then((value) => {

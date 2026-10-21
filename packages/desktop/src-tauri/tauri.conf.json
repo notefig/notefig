@@ -41,7 +41,7 @@
       "capabilities": ["main-capability"],
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$DESKTOP/**"]
+        "scope": ["$HOME/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$DESKTOP/**", "$HOME/**/.notefig/scratchpads/**"]
       }
     }
   },
