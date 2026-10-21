@@ -115,6 +115,13 @@ describe("commentForAgent", () => {
 		expect(commentForAgent(comment({ author: { name: "S", email: "stranger@example.com" } }), app, config)).toBe("not from an approver");
 		expect(commentForAgent(comment({ inAgentThread: true }), app, config)).toBe("in an agent session's thread");
 		expect(commentForAgent(comment({ body: `[@notefigbuildagent](${app.url}) why?` }), app, config)).toBe("mentions the agent");
+		expect(commentForAgent(comment({ body: "@notefigbuildagent why?" }), app, config)).toBe("mentions the agent");
 		expect(commentForAgent(comment({ body: "  " }), app, config)).toBe("empty comment");
+	});
+
+	it("passes a comment that only quotes the app's name in code, or names another user", () => {
+		expect(commentForAgent(comment({ body: "Drop `@notefigbuildagent` from the string" }), app, config)).toBeUndefined();
+		expect(commentForAgent(comment({ body: "```\nconst who = \"@notefigbuildagent\";\n```\nRename this" }), app, config)).toBeUndefined();
+		expect(commentForAgent(comment({ body: "Ask @notefigbuildagent2 instead" }), app, config)).toBeUndefined();
 	});
 });

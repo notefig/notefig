@@ -128,7 +128,14 @@ export function commentForAgent(comment: IssueComment, app: AppUser, config: Pic
 	if (comment.issue?.delegateId !== app.id) return "issue not delegated to the agent";
 	if (!comment.author || !config.approverEmails.includes(comment.author.email.toLowerCase())) return "not from an approver";
 	if (comment.inAgentThread) return "in an agent session's thread";
-	if (comment.body.includes(app.url) || comment.body.includes(`@${app.displayName}`)) return "mentions the agent";
+	if (mentions(comment.body, app)) return "mentions the agent";
 	if (!comment.body.trim()) return "empty comment";
 	return undefined;
+}
+
+/** A mention of the app: a link to its profile, or `@` and its name as a whole word. Code that quotes either isn't one. */
+function mentions(body: string, app: AppUser): boolean {
+	const prose = body.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "");
+	const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return new RegExp(`${escape(app.url)}(?![\\w/-])|@${escape(app.displayName)}(?![\\w-])`, "i").test(prose);
 }
