@@ -162,4 +162,50 @@ describe("DoneState", () => {
       "open /ws/plain.md",
     ]);
   });
+
+  it("response options render as buttons and a click delivers that option (MET-250)", () => {
+    const chosen: string[] = [];
+    render({
+      response: {
+        kind: "answer",
+        markdown: "Which tier?",
+        options: ["Free", "Pro", "Enterprise"],
+      },
+    });
+    // Re-render with the handler, since render() builds its own props.
+    act(() => root?.unmount());
+    container?.remove();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root!.render(
+        withHost(
+          fakePromptWidgetHost(),
+          createElement(DoneState, {
+            cancelled: false,
+            response: {
+              kind: "answer",
+              markdown: "Which tier?",
+              options: ["Free", "Pro", "Enterprise"],
+            },
+            fallbackText: null,
+            touchedFiles: [],
+            onChooseOption: (option) => chosen.push(option),
+            onOpenFile: noop,
+            onOpenChat: noop,
+            onDismiss: noop,
+          }),
+        ),
+      ),
+    );
+    const row = container!.querySelector('[data-widget-response-options]')!;
+    expect(row.querySelectorAll("button").length).toBe(3);
+    act(() => {
+      ([...row.querySelectorAll("button")].find(
+        (button) => button.textContent === "Pro",
+      ) as HTMLButtonElement).click();
+    });
+    expect(chosen).toEqual(["Pro"]);
+  });
 });

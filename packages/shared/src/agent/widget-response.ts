@@ -19,6 +19,14 @@ export const WidgetRespondInputSchema = z.object({
   kind: z.enum(["answer", "issue"]),
   markdown: z.string().min(1),
   title: z.string().optional(),
+  /**
+   * Response options (MET-250): short labels the user can send back as their
+   * next prompt — the way an agent asks the user to decide something, since
+   * the old question-block tool is gone. Optional; most answers carry none.
+   * Strings, like everything above, so the widget can render them as buttons
+   * without trusting any nested structure the harness may have mangled.
+   */
+  options: z.array(z.string().min(1)).min(1).optional(),
 });
 
 export type WidgetResponse = z.infer<typeof WidgetRespondInputSchema>;

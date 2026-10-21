@@ -565,6 +565,17 @@ describe("deriveWidgetResponse", () => {
     expect(deriveWidgetResponse(entries)?.markdown).toBe("the real one");
   });
 
+  it("carries response options through from the raw input (MET-250)", () => {
+    const entries = [
+      respond("evt_1", {
+        kind: "answer",
+        markdown: "pick a tier",
+        options: ["Free", "Pro"],
+      }),
+    ];
+    expect(deriveWidgetResponse(entries)?.options).toEqual(["Free", "Pro"]);
+  });
+
   it("ignores other tool calls and returns null when no response exists", () => {
     const entries = [
       toolEntry("evt_1", {

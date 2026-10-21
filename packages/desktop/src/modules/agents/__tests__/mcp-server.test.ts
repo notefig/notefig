@@ -1,32 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { z } from "zod";
 
-// Real blob-registry.ts glob-imports the *.blob.tsx files, which pull in
-// blob-node-view -> blob-actions -> agent-service -> tools/index ->
-// author-blob -> blob-registry: a circular import that only resolves
-// cleanly when entered via agent-service.ts (as agent-service.test.ts does),
-// not via blob-registry.ts directly (as this file would). Mock it with real
-// Zod schemas (unlike author-blob.test.ts's hand-rolled safeParse stub) so
-// zodToJsonSchema still has something real to render.
-const { blobTypes } = vi.hoisted(() => ({
-  blobTypes: [
-    { type: "question", schema: undefined as unknown },
-    { type: "approval", schema: undefined as unknown },
-    { type: "status", schema: undefined as unknown },
-  ],
-}));
-vi.mock("@/components/editor/blobs/blob-registry", () => ({
-  getAllBlobTypes: () => blobTypes,
-  getBlobType: (type: string) => blobTypes.find((t) => t.type === type),
-}));
-
-// author_blob's execute reads/writes through the task's documents; fake
-// them so the stringified-payload repair test below exercises the full
-// dispatch without touching a real workspace.
+// The workspace_read_document tests below read through the task's
+// documents; fake them so dispatch exercises the real tools without
+// touching a real workspace.
 const readWorkspaceTextFile = vi.fn(async (_path: string) => "# Doc\n");
-const writeWorkspaceTextFile = vi.fn(
-  async (_path: string, _content: string) => {},
-);
 
 // The payload builder is an injected dep of the handler now (it reads live
 // editor state, so the real one stays out of this suite); URI decoding is
@@ -42,24 +20,13 @@ import {
 import type { McpEndpoint, ToolContext } from "@notefig/agent";
 import { PermissionBroker } from "../permission-broker";
 import type { AgentStore } from "../agent-collections";
+import type { AgentTool } from "@notefig/agent";
 import { toolRegistry, getTool } from "../tools";
 import { serverInstructions } from "../mcp-instructions";
 import i18n from "@/utils/intl";
 import { createLayout } from "@/modules/layout";
 import { memoryUrlState } from "@/testing/test-core";
 import { testAgentStore } from "@/testing/test-agents";
-
-// vi.hoisted can't reference `z` (hoisted above the "zod" import); assign
-// real schemas onto the mocked blob types now that imports have resolved.
-blobTypes[0].schema = z.object({
-  prompt: z.string(),
-  options: z.array(z.string()).optional(),
-});
-blobTypes[1].schema = z.object({ prompt: z.string() });
-blobTypes[2].schema = z.object({
-  label: z.string(),
-  state: z.enum(["pending", "done"]),
-});
 
 const ctx: ToolContext = {
   workspacePath: "/ws",
@@ -69,7 +36,7 @@ const ctx: ToolContext = {
     workspace: () => ({ createTask: vi.fn() }),
   },
   services: {
-    documents: { read: readWorkspaceTextFile, write: writeWorkspaceTextFile },
+    documents: { read: readWorkspaceTextFile },
     // workspace_open_files reads the task's layout.
     layout: createLayout(memoryUrlState()),
   } as unknown as ToolContext["services"],
@@ -83,16 +50,38 @@ function handler(
     ctx.taskId,
     store.permissionRequests,
   ),
+  tools = { list: () => toolRegistry, get: getTool },
 ) {
   return createMcpRequestHandler({
     ctx,
     permissionBroker,
     // The real desktop registry — this suite is deliberately an integration
-    // test of the protocol handler against the actual tool set.
-    tools: { list: () => toolRegistry, get: getTool },
+    // test of the protocol handler against the actual tool set. The repair
+    // tests swap in a registry with one extra nested-object tool, since no
+    // real tool takes an object argument anymore.
+    tools,
     translate: (key) => i18n.t(key),
     instructions: serverInstructions,
     buildWidgetContextPayload,
+  });
+}
+
+/** A stand-in for the old author_blob: the one tool shape whose argument
+ *  arrives as a JSON *string* from a harness (the OpenCode quirk the repair
+ *  pass exists for) — an object-valued field no remaining real tool has. */
+function handlerWithNestedTool() {
+  const echoNested: AgentTool<{ payload: { prompt: string } }, unknown> = {
+    name: "echo_nested",
+    title: "agentToolWidgetRespond",
+    description: "echoes its object payload",
+    input: z.object({ payload: z.object({ prompt: z.string() }) }),
+    async execute(_ctx, input) {
+      return { ok: true, value: input };
+    },
+  };
+  return handler(undefined, {
+    list: () => [echoNested],
+    get: (name: string) => (name === "echo_nested" ? echoNested : undefined),
   });
 }
 
@@ -123,7 +112,11 @@ describe("createMcpRequestHandler", () => {
       .instructions;
     // The steering text lives on the server's own channel (not a prompt
     // preamble) so only sessions that have the server hear about its tools.
-    expect(instructions).toContain("author_blob");
+    // The old question-block tool is gone (MET-250): its steering is gone
+    // with it, and choosing between alternatives happens through
+    // widget_respond's options instead.
+    expect(instructions).not.toContain("author_blob");
+    expect(instructions).toContain("options");
     expect(instructions).toContain("resources/read");
     // Steering is directive, not optional: resources/read first, and full
     // document reads are the fallback, not the default (context-size ask).
@@ -192,7 +185,7 @@ describe("createMcpRequestHandler", () => {
     expect(response).toBeNull();
   });
 
-  it("tools/list includes every registered tool with a title, a JSON Schema, and author_blob's payload is an anyOf over registered blob types", async () => {
+  it("tools/list includes every registered tool with a title and a JSON Schema — and no author_blob (MET-250)", async () => {
     const response = await handler()({
       jsonrpc: "2.0",
       id: 2,
@@ -212,39 +205,35 @@ describe("createMcpRequestHandler", () => {
         "history_diff",
         "history_checkpoint",
         "history_restore",
-        "author_blob",
         "widget_respond",
       ]),
     );
     // Every tool has a human-readable title distinct from its snake_case name.
     expect(result.tools.every((t) => t.title && t.title !== t.name)).toBe(true);
+    // The old question-choice tool is off the list entirely.
+    expect(names).not.toContain("author_blob");
 
-    const authorBlob = result.tools.find((t) => t.name === "author_blob");
-    expect(authorBlob?.title).toBe("Add Interactive Block");
-    const schema = authorBlob?.inputSchema as {
-      type: string;
-      required: string[];
-      properties: { payload: { anyOf: unknown[] }; type: { enum: string[] } };
+    const widgetRespond = result.tools.find((t) => t.name === "widget_respond");
+    const schema = widgetRespond?.inputSchema as {
+      properties: { options?: { type: string } };
     };
-    expect(schema.required).toEqual(["path", "type", "id"]);
-    expect(schema.properties.payload.anyOf.length).toBeGreaterThan(0);
-    expect(schema.properties.type.enum).toEqual(
-      expect.arrayContaining(["question", "approval", "status"]),
-    );
+    // The choice affordance the old tool used to carry lives on
+    // widget_respond now: an optional list of short labels.
+    expect(schema.properties.options?.type).toBe("array");
   });
 
-  // MET-92: execute is validate-and-acknowledge only — the tool_call
-  // transcript entry the service writes is the record the widget derives
-  // from (deriveWidgetResponse), so there's no state to assert here beyond
-  // the ack round-trip and the schema gate.
-  it("tools/call: widget_respond acknowledges valid input and rejects a bad kind", async () => {
+  it("tools/call: widget_respond acknowledges valid input, options included, and rejects a bad kind", async () => {
     const ok = await handler()({
       jsonrpc: "2.0",
       id: 40,
       method: "tools/call",
       params: {
         name: "widget_respond",
-        arguments: { kind: "answer", markdown: "Two options stand out." },
+        arguments: {
+          kind: "answer",
+          markdown: "Two options stand out.",
+          options: ["Free", "Pro"],
+        },
       },
     });
     const result = ok?.result as {
@@ -252,9 +241,21 @@ describe("createMcpRequestHandler", () => {
     };
     expect(JSON.parse(result.content[0].text)).toEqual({ recorded: true });
 
-    const bad = await handler()({
+    // An empty options list is not a list — rejected like a missing field.
+    const emptyOptions = await handler()({
       jsonrpc: "2.0",
       id: 41,
+      method: "tools/call",
+      params: {
+        name: "widget_respond",
+        arguments: { kind: "answer", markdown: "x", options: [] },
+      },
+    });
+    expect(emptyOptions?.error?.code).toBe(-32602);
+
+    const bad = await handler()({
+      jsonrpc: "2.0",
+      id: 42,
       method: "tools/call",
       params: {
         name: "widget_respond",
@@ -290,19 +291,18 @@ describe("createMcpRequestHandler", () => {
   });
 
   it("tools/call: repairs a nested argument delivered as a JSON string (OpenCode quirk)", async () => {
-    // OpenCode has been observed sending `payload` as the JSON *string* of
-    // the object (v2-opencode-config-mcp-spike.md); one repair pass re-parses
-    // it before rejecting.
-    const response = await handler()({
+    // OpenCode has been observed sending an object argument as the JSON
+    // *string* of that object (v2-opencode-config-mcp-spike.md); one repair
+    // pass re-parses it before rejecting. echo_nested is the shape that
+    // exercises this — an object-valued field, which no remaining real tool
+    // takes.
+    const response = await handlerWithNestedTool()({
       jsonrpc: "2.0",
       id: 9,
       method: "tools/call",
       params: {
-        name: "author_blob",
+        name: "echo_nested",
         arguments: {
-          path: "notes.md",
-          type: "question",
-          id: "question_str1",
           payload: '{"prompt": "Pick one"}',
         },
       },
@@ -314,14 +314,8 @@ describe("createMcpRequestHandler", () => {
     };
     expect(result.isError).toBeUndefined();
     expect(JSON.parse(result.content[0].text)).toEqual({
-      blobId: "question_str1",
+      payload: { prompt: "Pick one" },
     });
-    // The written fence carries the parsed payload, not the string.
-    const written = writeWorkspaceTextFile.mock.calls.at(-1) as unknown as [
-      string,
-      string,
-    ];
-    expect(written[1]).toContain("Pick one");
   });
 
   it("tools/call: happy path dispatches to the tool and wraps the result as MCP content", async () => {
@@ -423,22 +417,19 @@ describe("createMcpRequestHandler", () => {
 
     // A value that looks like JSON but doesn't parse keeps the original
     // string and still fails validation.
-    const brokenJson = await handler()({
+    const brokenJson = await handlerWithNestedTool()({
       jsonrpc: "2.0",
       id: 54,
       method: "tools/call",
       params: {
-        name: "author_blob",
+        name: "echo_nested",
         arguments: {
-          path: "notes.md",
-          type: "question",
-          id: "question_bad1",
           payload: '{"prompt": broken',
         },
       },
     });
     expect(brokenJson?.error?.code).toBe(-32602);
-    expect(brokenJson?.error?.message).toMatch(/invalid input for author_blob/);
+    expect(brokenJson?.error?.message).toMatch(/invalid input for echo_nested/);
   });
 
   it("resources/list is empty (widget-context URIs are handed out inline, not enumerated)", async () => {

@@ -325,7 +325,7 @@ export type MockTurnContext = {
   /**
    * Call the app's own MCP tool server the way a harness does — a JSON-RPC
    * request over the task's (loopback) McpEndpoint, answered by the real
-   * handler with the real tools (widget_respond, author_blob, history_*…).
+   * handler with the real tools (widget_respond, history_*…).
    * `mcp.call("tools/call", { name, arguments })` is the common form.
    */
   mcp: { call: (method: string, params: Json) => Promise<Json> };
@@ -1017,7 +1017,7 @@ let mockMcpRequestId = 0;
  * call directly. It never advertises an `mcpServer` (nothing spawns), but
  * the real request handler is attached to it by AgentTask.start exactly as
  * in production, so `tools/call` runs the real tools — which is what lets
- * recordings of widget_respond / author_blob / history_* turns replay.
+ * recordings of widget_respond / history_* turns replay.
  */
 export function createMockMcpEndpoint(
   spec: { taskId?: string } = {},
