@@ -65,6 +65,7 @@ import {
   arrowOntoReadOnlyWidget,
   backspaceIntoWidget,
   deleteIntoWidget,
+  deleteRangeOverWidgets,
   deleteSelectedWidget,
   enterSelectedWidget,
   promptInteractionsPlugin,
@@ -512,6 +513,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // A selected widget: refused when it can't be removed. Beside one:
       // selects it — the counterpart of Backspace from the line below.
       Delete: () =>
+        deleteRangeOverWidgets(this.editor) ||
         deleteSelectedWidget(this.editor, this.options.prompts) ||
         deleteIntoWidget(this.editor),
       // In a draft: the draft first, the whole document on a second press.
@@ -539,6 +541,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // runs, and dispatching that stale tr afterwards reverts the
       // removal).
       Backspace: () => {
+        if (deleteRangeOverWidgets(this.editor)) return true;
         if (forward("Backspace")()) return true;
         if (deleteSelectedWidget(this.editor, this.options.prompts)) return true;
         if (backspaceIntoWidget(this.editor)) return true;
@@ -595,6 +598,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // mangles the widget's DOM badly enough that the re-parse drops the
       // whole node.
       "Mod-Backspace": () => {
+        if (deleteRangeOverWidgets(this.editor)) return true;
         if (forward("Backspace")()) return true;
         return this.editor.commands.command(({ state, tr }) => {
           const draft = selectionDraft(state);
@@ -612,6 +616,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // the boundary just like the soft-line variant). Empty summoned draft:
       // same dismiss as plain Backspace.
       "Alt-Backspace": () => {
+        if (deleteRangeOverWidgets(this.editor)) return true;
         if (forward("Backspace")()) return true;
         return this.editor.commands.command(({ state, tr }) => {
           const draft = selectionDraft(state);

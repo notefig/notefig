@@ -443,10 +443,10 @@
 
   /* The widget's chrome never paints a selection (it's user-select:none
      anyway), but the draft is ordinary document text and paints like the
-     prose around it — a document-wide drag or ⌘A includes it, deliberately:
-     the composer's text IS part of the document. System colors rather than
-     a hardcoded blue: this is restoring the platform default, not
-     inventing a highlight. */
+     prose around it — a drag that ends inside it, say. A selection that
+     takes in the whole widget (⌘A, a drag across it) shows as the card's
+     tint instead (tiptap.css). System colors rather than a hardcoded blue:
+     this is restoring the platform default, not inventing a highlight. */
   [data-type="ai-prompt"] ::selection {
     background-color: transparent;
   }

@@ -9,14 +9,16 @@
  *    still applies, and the widget is put back where it was.
  * 3. Selection: only the keyboard selects a widget (Backspace/Delete from
  *    the neighbouring line, arrows onto a read-only field), never a click.
- *    A selected widget shows a ring, a widget inside a text range a tint;
- *    both show a lock when it can't be removed. A delete on a selected
- *    widget that can't be removed is refused out loud.
+ *    A widget looks selected the same way whichever way it got there —
+ *    picked by the keyboard or inside a text range: the selection's tint,
+ *    plus a lock when it can't be removed. A delete on a selected widget
+ *    that can't be removed is refused out loud.
  * 4. Escape: what `escape` says (the composer key map and the face's
  *    global hotkey own it).
  *
- * Plus paste: a pasted widget is always a fresh one — never a second
- * widget on another's session.
+ * Plus paste: a pasted (or drag-copied) widget is always a fresh one —
+ * never a second widget on another's session. A drag that moves a widget
+ * keeps it as it is: the same widget, with its round and its answer.
  */
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode, Slice } from "@tiptap/pm/model";
@@ -138,6 +140,33 @@ export function deleteIntoWidget(editor: Editor): boolean {
 }
 
 /**
+ * A range delete (Backspace, Delete and their word/line variants) over a
+ * widget the range covers only through its draft — a select-all with the
+ * widget opening or closing the document hands back such a range, since a
+ * text selection can't start or end beside it. The range is deleted from
+ * the widget's edge, so the widget goes the way it would from the middle
+ * of the document (or is put back while it works) instead of keeping a
+ * cleared draft.
+ */
+export function deleteRangeOverWidgets(editor: Editor): boolean {
+  const { state } = editor;
+  const { selection } = state;
+  if (!(selection instanceof TextSelection) || selection.empty) return false;
+  let { from, to } = selection;
+  state.doc.nodesBetween(from, to, (node, pos) => {
+    if (node.type.name !== PROMPT_NODE_NAME) return true;
+    if (rangeCovers(state, pos, node)) {
+      from = Math.min(from, pos);
+      to = Math.max(to, pos + node.nodeSize);
+    }
+    return false;
+  });
+  if (from === selection.from && to === selection.to) return false;
+  editor.view.dispatch(state.tr.delete(from, to).scrollIntoView());
+  return true;
+}
+
+/**
  * Backspace or Delete on a selected widget: deleted when it is removable
  * (left to the default delete), otherwise refused — the key is consumed and
  * the widget says why.
@@ -230,6 +259,12 @@ export function restoreKeptWidgetsTr(
   return restored > 0 ? tr : null;
 }
 
+/** The modifier that turns a drag-move into a copy (ProseMirror's own). */
+const COPY_KEY =
+  typeof navigator !== "undefined" && /Mac|iP(hone|[oa]d)/.test(navigator.platform)
+    ? "altKey"
+    : "ctrlKey";
+
 /** A pasted widget as a fresh composer: a new identity, no session. */
 function freshWidgets(fragment: Fragment): Fragment {
   const nodes: PMNode[] = [];
@@ -249,28 +284,35 @@ function freshWidgets(fragment: Fragment): Fragment {
   return Fragment.from(nodes);
 }
 
-function rangeCovers(state: EditorState, from: number, to: number): boolean {
+/** Whether a text selection covers the widget at `pos`. A text selection
+ *  can't start or end beside a widget that opens or closes the document,
+ *  so it lands in the draft instead: one that runs from the draft's start
+ *  past the widget, or from before it to the draft's end, covers it too. */
+function rangeCovers(state: EditorState, pos: number, node: PMNode): boolean {
   const { selection } = state;
   if (selection.empty || selection instanceof NodeSelection) return false;
   if (selection instanceof AllSelection) return true;
-  return selection.from <= from && selection.to >= to;
+  const end = pos + node.nodeSize;
+  const draftFrom = pos + 2;
+  const draftTo = pos + 1 + (node.firstChild?.nodeSize ?? 2) - 1;
+  return (
+    (selection.from <= draftFrom && selection.to >= end) ||
+    (selection.from <= pos && selection.to >= draftTo)
+  );
 }
 
-/** The ring, the tint, and the refusal — as attributes on each widget's
- *  node view; the CSS (tiptap.css) and the face draw them. */
+/** The selected look — one attribute on each selected widget's node
+ *  view, whether the keyboard picked it or a text range covers it; the
+ *  CSS (tiptap.css) and the face draw it. */
 function widgetDecorations(state: EditorState): DecorationSet {
   const selected = selectedWidget(state);
   const decorations: Decoration[] = [];
   state.doc.descendants((node, pos) => {
     if (node.type.name !== PROMPT_NODE_NAME) return true;
     const end = pos + node.nodeSize;
-    if (selected?.pos === pos) {
+    if (selected?.pos === pos || rangeCovers(state, pos, node)) {
       decorations.push(
         Decoration.node(pos, end, { "data-widget-selected": "" }),
-      );
-    } else if (rangeCovers(state, pos, end)) {
-      decorations.push(
-        Decoration.node(pos, end, { "data-widget-in-range": "" }),
       );
     }
     return false;
@@ -281,6 +323,10 @@ function widgetDecorations(state: EditorState): DecorationSet {
 /** The widget rules that ride the editor's plugins rather than its key
  *  map: the selection state and its look, clicks, typing, and paste. */
 export function promptInteractionsPlugin(prompts: PromptWidgetsApi): Plugin {
+  // Whether the drop in progress moves what's dragged (ProseMirror's
+  // default) or copies it (Alt on a Mac, Ctrl elsewhere). The drop event
+  // reaches handleDOMEvents before ProseMirror transforms the slice.
+  let dropCopies = false;
   return new Plugin<SelectionState>({
     key: interactionsKey,
     state: {
@@ -332,8 +378,19 @@ export function promptInteractionsPlugin(prompts: PromptWidgetsApi): Plugin {
         view.dispatch(tr);
         return true;
       },
-      transformPasted: (slice: Slice) =>
-        new PMSlice(freshWidgets(slice.content), slice.openStart, slice.openEnd),
+      handleDOMEvents: {
+        drop(_view, event) {
+          dropCopies = event[COPY_KEY];
+          return false;
+        },
+      },
+      transformPasted(slice: Slice, view) {
+        const moving = view.dragging?.move === true && !dropCopies;
+        dropCopies = false;
+        return moving
+          ? slice
+          : new PMSlice(freshWidgets(slice.content), slice.openStart, slice.openEnd);
+      },
     },
   });
 }

@@ -60,28 +60,27 @@
   vertical-align: top;
 }
 
-/* A widget's selected look (MET-248). Only the keyboard selects a widget,
-   and the widget plugin marks it (interactions.ts) — so a NodeSelection
-   from anywhere else (the drag grip, an undo) shows nothing, and the
-   generic node-selection outline never does. Selected: a ring. Inside a
-   text selection (a drag, Shift+arrows, ⌘A): the selection's tint. Either
-   way, a widget that can't be removed while its agent works shows its
-   lock. A refused delete shakes it. */
+/* A widget's selected look (MET-248) — one look, however it got
+   selected: the keyboard picking it, or a text selection (a drag,
+   Shift+arrows, ⌘A) covering it. The widget plugin marks it
+   (interactions.ts), so a NodeSelection from anywhere else (the drag
+   grip, an undo) shows nothing, and the generic node-selection outline
+   never does. A widget that can't be removed while its agent works shows
+   its lock; a refused delete shakes it. */
 .ProseMirror [data-type="ai-prompt"].ProseMirror-selectednode {
   outline: none;
 }
 .ProseMirror [data-type="ai-prompt"] {
   border-radius: var(--radius);
 }
-/* The decorations land on the node view's outer element. */
+/* The decoration lands on the node view's outer element. The card's tint
+   is the whole look: its draft paints no text selection of its own on
+   top (styles.css's draft ::selection), which would otherwise show only
+   under a range, and color the text under a keyboard selection. */
 .ProseMirror .node-aiPrompt[data-widget-selected] > [data-type="ai-prompt"] {
-  outline: 2px solid hsl(var(--ring) / 0.6);
-  outline-offset: 2px;
-}
-.ProseMirror .node-aiPrompt[data-widget-in-range] > [data-type="ai-prompt"] {
   position: relative;
 }
-.ProseMirror .node-aiPrompt[data-widget-in-range] > [data-type="ai-prompt"]::after {
+.ProseMirror .node-aiPrompt[data-widget-selected] > [data-type="ai-prompt"]::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -90,10 +89,14 @@
   opacity: 0.25;
   pointer-events: none;
 }
+.ProseMirror .node-aiPrompt[data-widget-selected] [data-prompt-draft] ::selection {
+  background-color: transparent;
+  color: inherit;
+}
 .ProseMirror [data-type="ai-prompt"] .prompt-widget-lock {
   display: none;
 }
-.ProseMirror .node-aiPrompt:is([data-widget-selected], [data-widget-in-range]) .prompt-widget-lock {
+.ProseMirror .node-aiPrompt[data-widget-selected] .prompt-widget-lock {
   display: block;
 }
 .ProseMirror [data-type="ai-prompt"] [data-widget-refused] {
