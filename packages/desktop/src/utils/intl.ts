@@ -330,6 +330,7 @@ i18n
 
           // Settings Commands
           openSettings: "Open Settings",
+          openUsage: "Open Usage",
           keyboardShortcuts: "Keyboard Shortcuts",
           toggleTheme: "Toggle Theme",
 
@@ -345,6 +346,7 @@ i18n
             commandPalette: "Open command palette",
             quickSwitcher: "Quick switcher",
             openSettings: "Open settings",
+            openUsage: "Open usage",
             toggleSidebar: "Toggle sidebar",
             sessionsSidebar: "Open agent sessions",
             sendFeedback: "Send feedback",
@@ -389,7 +391,22 @@ i18n
             toggleSidebar: ["sidebar", "panel", "toggle", "files"],
             toggleFullscreen: ["fullscreen", "maximize", "window"],
             openSettings: ["settings", "preferences", "options"],
-            sendFeedback: ["feedback", "bug", "report", "idea", "help", "support"],
+            openUsage: [
+              "usage",
+              "tokens",
+              "cost",
+              "statistics",
+              "settings",
+              "billing",
+            ],
+            sendFeedback: [
+              "feedback",
+              "bug",
+              "report",
+              "idea",
+              "help",
+              "support",
+            ],
             toggleTheme: [
               "theme",
               "appearance",
@@ -719,7 +736,8 @@ i18n
           usageCacheHitRate: "hit rate",
           usageCacheDetail: "{{read}} of {{input}} input from cache",
           usageDailyPattern: "Daily pattern",
-          usagePatternDesc: "Average {{metric}} per hour of day, last {{count}} days",
+          usagePatternDesc:
+            "Average {{metric}} per hour of day, last {{count}} days",
           usageHarness: "Harness",
           usageNoModelData: "No per-model data",
           usageCapCost: "Tokens + cost",
@@ -729,8 +747,10 @@ i18n
           usageCapNoLimits: "No limits",
           usageDetailDesc: "{{metric}} by model per {{grain}} · {{range}}",
           usageAllDesc: "{{metric}} by harness per {{grain}} · {{range}}",
-          usageAllNoCost: "None of these harnesses reports cost, so there is no cost to chart.",
-          usageDetailNoCost: "{{name}} reports tokens only, so there is no cost to chart.",
+          usageAllNoCost:
+            "None of these harnesses reports cost, so there is no cost to chart.",
+          usageDetailNoCost:
+            "{{name}} reports tokens only, so there is no cost to chart.",
           usageNoModelNames: "{{name}} doesn’t say which models it used.",
           usageLimitsUnsupported: "{{name}} doesn’t report account limits.",
           usageLimitsNone: "No limits reported yet.",

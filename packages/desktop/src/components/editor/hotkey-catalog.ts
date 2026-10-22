@@ -64,6 +64,13 @@ export const HOTKEY_CATALOG: HotkeyEntry[] = [
     labelKey: "sessionsSidebar",
     group: "general",
   },
+  // src/components/editor/settings-modal.tsx
+  {
+    id: "openUsage",
+    binding: "Mod+Shift+U",
+    labelKey: "openUsage",
+    group: "general",
+  },
   // src/modules/feedback/react.tsx
   {
     id: "sendFeedback",
