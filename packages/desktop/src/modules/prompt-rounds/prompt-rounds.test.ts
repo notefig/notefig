@@ -1,11 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   MAX_PROMPT_ROUNDS,
+  PROMPT_ROUND_RETENTION_MS,
   createPromptRounds,
   derivePromptRounds,
   isLiveRound,
+  roundsToEvict,
+  type PromptRoundRow,
   type PromptRoundsApi,
 } from "@/modules/prompt-rounds";
+import type { AgentEntry } from "@notefig/shared/agent";
 import { createNodeTestDb } from "@/testing/node-db";
 import { createHooks, type Hooks } from "@notefig/core";
 import { workspaceKey } from "@/utils/path";
@@ -23,14 +27,17 @@ describe("prompt rounds", () => {
   let rounds: PromptRoundsApi;
   /** The turn rows this run holds; a live round without one is an orphan. */
   let liveTurns: Set<string>;
+  let transcripts: Map<string, AgentEntry[]>;
   let hooks: Hooks;
 
   beforeEach(() => {
     liveTurns = new Set();
+    transcripts = new Map();
     hooks = createHooks();
     rounds = createPromptRounds({
       persistence: createNodeTestDb().get(),
       turns: { get: (turnId) => (liveTurns.has(turnId) ? ({ turnId } as never) : undefined) },
+      transcript: (turnId) => transcripts.get(turnId) ?? [],
       hooks,
     });
   });
@@ -49,6 +56,63 @@ describe("prompt rounds", () => {
     await rounds.recordSettled({ taskId: "task_1", turnId: "t_unknown", status: "completed", at: 43 });
     expect(rounds.collection.get("t1")).toMatchObject({ status: "error", settledAt: 42 });
     expect(rounds.collection.size).toBe(1);
+  });
+
+  it("records the widget and the whole prompt, and snapshots the outcome when it settles", async () => {
+    await rounds.recordStarted({ ...started("t1"), blobId: "blob_1" }, 10);
+    expect(rounds.collection.get("t1")).toMatchObject({
+      blobId: "blob_1",
+      workspacePath: "/ws/a",
+      fullPrompt: "Do the thing\nsecond line",
+    });
+    transcripts.set("t1", [
+      { id: "evt_1", turnId: "t1", taskId: "task_1", type: "assistant", text: "Shortened it." },
+      {
+        id: "evt_2",
+        turnId: "t1",
+        taskId: "task_1",
+        type: "tool_call",
+        toolCall: {
+          toolCallId: "tc",
+          kind: "edit",
+          status: "completed",
+          locations: [{ path: "/ws/a/doc.md" }],
+        },
+      },
+    ] as unknown as AgentEntry[]);
+    await rounds.recordSettled({ taskId: "task_1", turnId: "t1", status: "completed", at: 42 });
+    expect(rounds.collection.get("t1")?.outcome).toEqual({
+      response: null,
+      summary: "Shortened it.",
+      error: null,
+      touchedFiles: ["/ws/a/doc.md"],
+    });
+  });
+
+  it("keeps a document's review ranges on the rounds that made them", async () => {
+    await rounds.recordStarted({ ...started("t1"), blobId: "blob_1" }, 10);
+    await rounds.recordStarted({ ...started("t2"), blobId: "blob_2" }, 11);
+    expect(rounds.reviewRanges.load("/ws/a/doc.md")).toBeNull();
+    const changes = [
+      { blobId: "blob_1", turnId: "t1", from: 1, to: 4 },
+      { blobId: "blob_2", turnId: "t2", from: 9, to: 12 },
+    ];
+    rounds.reviewRanges.save("/ws/a/doc.md", { fingerprint: "f1", changes });
+    await vi.waitFor(() =>
+      expect(rounds.reviewRanges.load("/ws/a/doc.md")).toEqual({
+        fingerprint: "f1",
+        changes,
+      }),
+    );
+    // A later save replaces the document's ranges; others stay.
+    rounds.reviewRanges.save("/ws/a/doc.md", { fingerprint: "f2", changes: [changes[1]] });
+    await vi.waitFor(() =>
+      expect(rounds.reviewRanges.load("/ws/a/doc.md")).toEqual({
+        fingerprint: "f2",
+        changes: [changes[1]],
+      }),
+    );
+    expect(rounds.collection.get("t1")?.changes).toEqual([]);
   });
 
   it("settles rounds left live by a previous run, keeps live ones with a turn row", async () => {
@@ -102,5 +166,33 @@ describe("prompt rounds", () => {
     hooks.emit("agent:turn-settled", { taskId: "task_1", turnId: "t9", status: "completed", at: 1 });
     await vi.waitFor(() => expect(rounds.collection.get("t9")?.status).toBe("completed"));
     stop();
+  });
+});
+
+describe("roundsToEvict", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const NOW = 100 * DAY;
+  const row = (turnId: string, startedAt: number, extra: Partial<PromptRoundRow> = {}): PromptRoundRow => ({
+    turnId, taskId: "task_1", workspaceKey: "k", documentPath: "/d.md", prompt: "p",
+    status: "completed", startedAt, settledAt: startedAt, ...extra,
+  });
+
+  it("drops settled rounds past the retention window, never live ones", () => {
+    const rows = [
+      row("old", NOW - PROMPT_ROUND_RETENTION_MS - DAY),
+      row("recent", NOW - DAY),
+      row("live", NOW - 30 * DAY, { status: "live", settledAt: undefined }),
+    ];
+    expect(roundsToEvict(rows, NOW)).toEqual(["old"]);
+  });
+
+  it("caps storage oldest first, but keeps each widget's newest round", () => {
+    const rows = Array.from({ length: MAX_PROMPT_ROUNDS + 2 }, (_, i) =>
+      row(`t${i}`, NOW - DAY + i, i === 0 ? { blobId: "blob_kept" } : {}),
+    );
+    const doomed = roundsToEvict(rows, NOW);
+    expect(doomed).toHaveLength(2);
+    expect(doomed).not.toContain("t0");
+    expect(doomed).toEqual(["t1", "t2"]);
   });
 });

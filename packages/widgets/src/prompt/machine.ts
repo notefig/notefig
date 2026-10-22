@@ -36,6 +36,10 @@ export type RoundFacts = {
   turn: AgentTurn["status"] | undefined;
   authRequired: boolean;
   pendingPermission: boolean;
+  /** How the round settled, as stored with it (MET-251) — what stands in
+   *  for a turn row that is gone (an app restart, a session revival
+   *  replaying its turns away). */
+  settled?: "completed" | "cancelled" | "error";
 };
 
 export type WidgetEvent =
@@ -59,7 +63,7 @@ export const COMPOSING: WidgetState = {
  *  status: an auth block holds the prompt whether the turn is queued behind
  *  it or errored out on it. */
 export function stateFromRound(facts: RoundFacts): WidgetState {
-  const { turn } = facts;
+  const turn = facts.turn ?? facts.settled;
   if (!turn) return COMPOSING;
   if (facts.authRequired && turn !== "completed") {
     return { name: "asking", ask: { kind: "auth" } };

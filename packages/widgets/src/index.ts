@@ -112,6 +112,8 @@ export {
   type PromptWidgetLocation,
   type PromptWidgetsApi,
   type PromptWidgetsDeps,
+  type ReviewRangeStore,
+  type SavedReviewRanges,
   type StopCommands,
 } from "./prompt/widgets-service";
 export { capabilitiesOf, type WidgetState } from "./prompt/machine";
@@ -124,7 +126,11 @@ export {
   type PromptChange,
   type PromptChangeAttribution,
 } from "./prompt/change-store";
-export { isMutatingToolCall } from "./prompt/state";
+export {
+  deriveRoundOutcome,
+  isMutatingToolCall,
+  type RoundOutcome,
+} from "./prompt/state";
 
 /** The document minimap (MET-172): the collector the editor registers. */
 export {

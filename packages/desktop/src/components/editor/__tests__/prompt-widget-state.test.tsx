@@ -424,3 +424,35 @@ describe("deleting and selecting a widget", () => {
     expect(copy.attrs.blobId).not.toBe(node.attrs.blobId);
   });
 });
+
+describe("a restored widget (MET-251)", () => {
+  it("shows its last round's stored outcome after a restart", async () => {
+    prompts = testPrompts();
+    prompts.storeRound("blob_r", {
+      turnId: "trn_old",
+      taskId: "task_saved",
+      status: "completed",
+      prompt: "make it shorter",
+      outcome: {
+        response: null,
+        summary: "Shortened it.",
+        error: null,
+        touchedFiles: ["/ws/doc.md"],
+      },
+    });
+    host = fakePromptWidgetHost();
+    const editor = await mount(
+      `<p>Hi</p><div data-type="ai-prompt" data-blob-id="blob_r" data-task-id="task_saved"></div><p></p>`,
+    );
+    await act(async () => {
+      await tick();
+    });
+    expect(prompts.prompts.get("blob_r").state).toEqual({
+      name: "settled",
+      outcome: "done",
+    });
+    expect(widgetElement()?.querySelector("[data-blob-phase]")?.getAttribute("data-blob-phase")).toBe("done");
+    expect(widgetElement()?.textContent).toContain("Shortened it.");
+    expect(widgetTaskId(editor)).toBe("task_saved");
+  });
+});

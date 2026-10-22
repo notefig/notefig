@@ -20,6 +20,7 @@ import {
   promptChangeTrackingPlugin,
   promptChangesOf,
 } from "../change-tracking";
+import { inertPromptWidgets } from "../widgets-service";
 import { promptChangeMarks } from "../change-gutter";
 
 const schema = new Schema({
@@ -34,6 +35,9 @@ const schema = new Schema({
 const DOC_PATH = "/ws/notes.md";
 const ROUND = { blobId: "blob_a", turnId: "trn_1" };
 
+/** The service the plugin keeps its review ranges with — one per test. */
+let prompts = inertPromptWidgets();
+
 function stateOf(...blocks: Array<string | "widget">) {
   const doc = schema.node(
     "doc",
@@ -46,7 +50,7 @@ function stateOf(...blocks: Array<string | "widget">) {
   );
   return EditorState.create({
     doc,
-    plugins: [promptChangeTrackingPlugin(DOC_PATH)],
+    plugins: [promptChangeTrackingPlugin(DOC_PATH, prompts)],
   });
 }
 
@@ -58,6 +62,7 @@ const spans = (state: EditorState) =>
   promptChangesOf(state).map(({ from, to }) => [from, to]);
 
 afterEach(() => {
+  prompts = inertPromptWidgets();
   discardPromptChanges(ROUND.blobId);
   discardPromptChanges("blob_b");
 });
@@ -140,7 +145,7 @@ describe("prompt change tracking", () => {
     const recreate = (content: typeof doc) =>
       EditorState.create({
         doc: content,
-        plugins: [promptChangeTrackingPlugin(DOC_PATH)],
+        plugins: [promptChangeTrackingPlugin(DOC_PATH, prompts)],
       });
     expect(spans(recreate(doc))).toEqual([[7, 11]]);
     // Same size, other text: the file changed while no editor held it.

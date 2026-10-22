@@ -71,10 +71,8 @@ import {
 import {
   deriveActiveToolLine,
   deriveLatestAssistantLine,
-  deriveTouchedFiles,
   deriveQueuePosition,
   deriveComposerKeyAction,
-  deriveWidgetResponse,
   widgetPromptTarget,
   blobCardClass,
   referenceRemovalArmed,
@@ -255,63 +253,64 @@ function usePromptBlobRound({
 }
 
 /**
- * Everything the card shows that is derived from the transcript rather than
- * stored: which files the turn touched, the agent's widget_respond answer,
- * the live tool line, the assistant teaser, and the queue position. Each is
- * scoped to the phases that display it, so a running turn does no done-state
- * work and vice versa.
+ * Everything the card shows besides its state. A settled round's face — the
+ * answer, the summary, the error, the files it touched — is its stored
+ * outcome (MET-251), the same live or after a restart. Only what a working
+ * agent is doing right now comes from the transcript: the live tool line,
+ * the assistant teaser, the queue position.
  */
 function usePromptBlobDisplay({
   blobId,
   editor,
   phase,
+  widget,
   sortedEntries,
   taskTurns,
-  boundTurnId,
-  workspacePath,
 }: {
   blobId: string;
   editor: Editor;
   phase: BlobPhase;
+  widget: PromptWidget;
   sortedEntries: AgentEntry[];
   taskTurns: AgentTurn[];
-  boundTurnId: string | null;
-  workspacePath: string;
 }): PromptBlobDisplay {
-  const touchedFiles = useMemo(
-    () =>
-      phase === "done" ? deriveTouchedFiles(sortedEntries, workspacePath) : [],
-    [phase, sortedEntries, workspacePath],
-  );
-  const widgetResponse = useMemo(
-    () => (phase === "done" ? deriveWidgetResponse(sortedEntries) : null),
-    [phase, sortedEntries],
-  );
-  const rawActiveToolLine =
-    phase === "running" ? deriveActiveToolLine(sortedEntries) : null;
+  const running = phase === "running";
+  const rawActiveToolLine = running ? deriveActiveToolLine(sortedEntries) : null;
   const activeToolLine = useDebouncedActiveToolLine(rawActiveToolLine);
-  // Running: live teaser under the status line. Done: the fallback summary
-  // line when the turn has no widget_respond response.
-  const assistantTeaser =
-    phase === "running" || phase === "done"
-      ? deriveLatestAssistantLine(sortedEntries)
-      : null;
-  const queueAhead =
-    phase === "queued" && boundTurnId
-      ? deriveQueuePosition(taskTurns, boundTurnId)
-      : 0;
-
-  const changeCounts = usePromptChangeCounts(blobId);
-
+  const settled = settledDisplay(widget);
   return {
-    touchedFiles,
-    widgetResponse,
+    ...settled,
     activeToolLine,
-    assistantTeaser,
-    queueAhead,
-    changeCounts,
+    // Running: live teaser under the status line. Done: the stored summary,
+    // the fallback line when the turn has no widget_respond response.
+    assistantTeaser: running
+      ? deriveLatestAssistantLine(sortedEntries)
+      : settled.summary,
+    queueAhead: queuePosition(phase, taskTurns, widget.boundTurnId),
+    changeCounts: usePromptChangeCounts(blobId),
     changes: usePromptChangeNavigation(blobId, editor),
   };
+}
+
+/** A settled round's face, from its stored outcome. */
+function settledDisplay({ outcome, state }: PromptWidget) {
+  return {
+    touchedFiles: outcome?.touchedFiles ?? [],
+    widgetResponse: outcome?.response ?? null,
+    summary: outcome?.summary ?? null,
+    cancelled: state.name === "settled" && state.outcome === "cancelled",
+    errorMessage: outcome?.error ?? undefined,
+  };
+}
+
+function queuePosition(
+  phase: BlobPhase,
+  taskTurns: AgentTurn[],
+  boundTurnId: string | null,
+): number {
+  return phase === "queued" && boundTurnId
+    ? deriveQueuePosition(taskTurns, boundTurnId)
+    : 0;
 }
 
 /**
@@ -501,7 +500,12 @@ function useComposerKeys({
 /** What the face renders from the transcript, per phase. */
 interface PromptBlobDisplay {
   touchedFiles: string[];
-  widgetResponse: ReturnType<typeof deriveWidgetResponse>;
+  widgetResponse: WidgetResponse | null;
+  /** The round was stopped. Absent for a face with no widget behind it
+   *  (the demo): read off the turn. */
+  cancelled?: boolean;
+  /** Why the round failed, as stored with it. */
+  errorMessage?: string;
   activeToolLine: string | null;
   assistantTeaser: string | null;
   queueAhead: number;
@@ -902,7 +906,7 @@ function SettledState({
   if (phase === "done") {
     return (
       <DoneState
-        cancelled={turn?.status === "cancelled"}
+        cancelled={display.cancelled ?? turn?.status === "cancelled"}
         response={display.widgetResponse}
         fallbackText={display.assistantTeaser}
         touchedFiles={display.touchedFiles}
@@ -918,7 +922,7 @@ function SettledState({
   if (phase === "error") {
     return (
       <ErrorState
-        message={turn?.error}
+        message={display.errorMessage ?? turn?.error}
         onRetry={actions.retry}
         onEdit={actions.editPrompt}
         onDismiss={actions.dismiss}
@@ -1015,10 +1019,9 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     blobId,
     editor,
     phase,
+    widget,
     sortedEntries,
     taskTurns,
-    boundTurnId,
-    workspacePath,
   });
 
   useComposerKeys({
@@ -1119,6 +1122,7 @@ function usePromptSendActions({
         text,
         workspacePath,
         target: widgetPromptTarget({
+          blobId,
           documentPath,
           workspacePath,
           pos: getPos?.(),

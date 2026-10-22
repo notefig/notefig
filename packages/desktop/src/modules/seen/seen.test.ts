@@ -26,6 +26,7 @@ describe("seen", () => {
     rounds = createPromptRounds({
       persistence: db.get(),
       turns: { get: () => undefined },
+      transcript: () => [],
       hooks,
     });
     seen = createSeen({ persistence: db.get(), rounds: rounds.collection, hooks });

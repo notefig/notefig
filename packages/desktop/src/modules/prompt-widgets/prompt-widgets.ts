@@ -8,6 +8,10 @@
  * card shows. The service only keeps state: sending and stopping are the
  * widget's, through its host.
  *
+ * What outlives a run is the widget's stored rounds (`core.promptRounds`,
+ * MET-251): the service reads each widget's newest one, so a widget comes
+ * back as it was left and its settled face survives a session revival.
+ *
  * The editor hands the service to its widgets (editor-store.ts); the app
  * reads it for session → widget lookups (jump-to-task, change attribution).
  */
@@ -17,10 +21,16 @@ import {
   type PromptRoundObserverFactory,
   type PromptRoundSnapshot,
   type PromptWidgetsApi,
+  type PromptWidgetsDeps,
 } from "@notefig/widgets";
 import { defineModule } from "@notefig/core";
 import type { AgentStore } from "@/modules/agents/agent-collections";
 import { agentStoreModule } from "@/modules/agents/agent-collections";
+import {
+  promptRoundsModule,
+  type PromptRoundRow,
+  type PromptRoundsCollection,
+} from "@/modules/prompt-rounds";
 
 declare module "@notefig/core" {
   interface CoreModules {
@@ -73,11 +83,45 @@ export const roundObserverFor =
     };
   };
 
+/** A widget's newest stored round, subscription-based. */
+export const storedRoundObserverFor =
+  (
+    rounds: PromptRoundsCollection,
+  ): NonNullable<PromptWidgetsDeps["observeStoredRound"]> =>
+  (blobId, onChange) => {
+    const subscription = rounds.subscribeChanges(onChange, {
+      where: (row) => eq(row.blobId, blobId),
+    });
+    return {
+      get() {
+        let newest: PromptRoundRow | undefined;
+        for (const row of rounds.values()) {
+          if (row.blobId !== blobId) continue;
+          if (!newest || row.startedAt > newest.startedAt) newest = row;
+        }
+        return newest
+          ? {
+              turnId: newest.turnId,
+              taskId: newest.taskId,
+              status: newest.status,
+              prompt: newest.fullPrompt ?? newest.prompt,
+              outcome: newest.outcome ?? null,
+            }
+          : undefined;
+      },
+      destroy: () => subscription.unsubscribe(),
+    };
+  };
+
 export const promptWidgetsModule = defineModule({
   name: "promptWidgets",
-  needs: [agentStoreModule],
+  needs: [agentStoreModule, promptRoundsModule],
   register: (ctx) =>
     createPromptWidgets({
       observeRound: roundObserverFor(ctx.use("agentStore")),
+      observeStoredRound: storedRoundObserverFor(
+        ctx.use("promptRounds").collection,
+      ),
+      reviewRanges: ctx.use("promptRounds").reviewRanges,
     }),
 });

@@ -21,9 +21,11 @@ import type {
   AgentTaskRow,
   AgentTurn,
 } from "@notefig/shared/agent";
-import { discardPromptChanges } from "./change-store";
+import { discardPromptChanges, type PromptChange } from "./change-store";
+import type { RoundOutcome } from "./state";
 import {
   COMPOSING,
+  stateFromRound,
   transition,
   type RoundFacts,
   type WidgetEvent,
@@ -57,7 +59,44 @@ export type PromptRoundObserverFactory = (
  *  commands by their caller. */
 export interface PromptWidgetsDeps {
   observeRound: PromptRoundObserverFactory;
+  /** Watch the newest round the app stored for a widget (MET-251). Absent:
+   *  nothing is stored, and a widget's round lives as long as its rows. */
+  observeStoredRound?: (
+    blobId: string,
+    onChange: () => void,
+  ) => StoredRoundObservation;
+  /** Where a document's review ranges are kept between runs (MET-251).
+   *  Absent: they live as long as the run. */
+  reviewRanges?: ReviewRangeStore;
 }
+
+/** A document's review ranges, with the fingerprint of the document they
+ *  were mapped onto — they only mean something against that document. */
+export type SavedReviewRanges = {
+  fingerprint: string;
+  changes: PromptChange[];
+};
+
+export interface ReviewRangeStore {
+  load(documentPath: string): SavedReviewRanges | null;
+  save(documentPath: string, saved: SavedReviewRanges): void;
+}
+
+/** A widget's round as the app stored it: what outlives the turn's rows. */
+export type StoredRound = {
+  turnId: string;
+  taskId: string;
+  status: "live" | "completed" | "cancelled" | "error";
+  /** The prompt as sent, whole. */
+  prompt: string;
+  /** Written when the round settles. */
+  outcome: RoundOutcome | null;
+};
+
+export type StoredRoundObservation = {
+  get(): StoredRound | undefined;
+  destroy(): void;
+};
 
 /** The agent commands a stop runs. */
 export interface StopCommands {
@@ -81,6 +120,9 @@ export type PromptWidget = {
   /** When an edit last tried and failed to delete this widget (it can't be
    *  removed while the agent works), for the face's "stop it first" hint. */
   removalRefusedAt: number | null;
+  /** What the bound round left behind once it settled, as stored with it —
+   *  the settled face reads this, live or restored. */
+  outcome: RoundOutcome | null;
 };
 
 /** A widget bound to a session, located in its document. */
@@ -111,6 +153,11 @@ export interface PromptWidgetsApi {
 
   /** A delete was refused: the widget can't be removed now. */
   refuseRemoval(blobId: string): void;
+
+  /** A document's saved review ranges, if any were kept. */
+  loadReviewRanges(documentPath: string): SavedReviewRanges | null;
+  /** Keep a document's review ranges past this run. */
+  saveReviewRanges(documentPath: string, saved: SavedReviewRanges): void;
 
   /** The workspace trust warning, armed by a first Send. */
   askTrust(blobId: string): void;
@@ -161,6 +208,7 @@ const EMPTY: PromptWidget = {
   lastSentPrompt: "",
   documentPath: null,
   removalRefusedAt: null,
+  outcome: null,
 };
 
 type Watch = {
@@ -186,8 +234,24 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
   const escapeClaims = new Map<string, number>();
   const listeners = new Map<string, Set<() => void>>();
   const watches = new Map<string, Watch>();
+  /** Each widget's newest stored round, watched once it is touched. */
+  const storedRounds = new Map<string, StoredRoundObservation>();
+  /** Widgets restored from a file marker whose stored round may still be
+   *  loading: adopted when it arrives, unless the user acts first. */
+  const pendingRestore = new Set<string>();
 
   const get = (blobId: string) => widgets.get(blobId) ?? EMPTY;
+  /** Kept by the app, or for this run only when it keeps none. */
+  const reviewRanges = deps.reviewRanges ?? inMemoryReviewRanges();
+
+  /** The stored round of the turn the widget is bound to, once settled. */
+  const settledOnRecord = (blobId: string): StoredRound | undefined => {
+    const stored = storedRounds.get(blobId)?.get();
+    const { boundTurnId } = get(blobId);
+    return stored && stored.turnId === boundTurnId && stored.status !== "live"
+      ? stored
+      : undefined;
+  };
 
   const emit = (blobId: string) => {
     for (const listener of listeners.get(blobId) ?? []) listener();
@@ -204,6 +268,12 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
       return;
     }
     widgets.set(blobId, next);
+    if (next.boundTurnId !== previous.boundTurnId) {
+      widgets.set(blobId, {
+        ...next,
+        outcome: settledOnRecord(blobId)?.outcome ?? null,
+      });
+    }
     // Review state belongs to the watched round: a new send, a dismiss or an
     // edit rebinds the widget, and what the old round changed stops being
     // this widget's to show.
@@ -231,9 +301,13 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
   const fold = (blobId: string, watch: Watch) => {
     const widget = get(blobId);
     if (widget.state.name === "sending") return;
-    const facts = factsOf(watch.observation.get());
+    const facts: RoundFacts = {
+      ...factsOf(watch.observation.get()),
+      settled: settledOnRecord(blobId)?.status as RoundFacts["settled"],
+    };
     if (facts.turn !== undefined) watch.seenTurn = true;
-    if (widget.boundTurnId && facts.turn === undefined) {
+    // Settled on record: the round stands even with its turn row gone.
+    if (widget.boundTurnId && facts.turn === undefined && !facts.settled) {
       if (!watch.seenTurn) return;
       write(blobId, {
         state: transition(widget.state, { type: "unbound" }),
@@ -302,7 +376,47 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
     return preferTurnId ? null : fallback;
   };
 
+  /** Watch the widget's newest stored round, once. */
+  const watchStored = (blobId: string) => {
+    if (!deps.observeStoredRound || storedRounds.has(blobId)) return;
+    storedRounds.set(
+      blobId,
+      deps.observeStoredRound(blobId, () => onStored(blobId)),
+    );
+  };
+
+  /** A widget restored from its file marker takes up its last round when
+   *  that round settled on the same session: it comes back as it was left,
+   *  not as a blank composer. */
+  const adoptStored = (blobId: string) => {
+    if (!pendingRestore.has(blobId)) return;
+    const stored = storedRounds.get(blobId)?.get();
+    const widget = get(blobId);
+    if (!stored || stored.status === "live") return;
+    pendingRestore.delete(blobId);
+    if (widget.boundTurnId || widget.boundTaskId !== stored.taskId) return;
+    write(blobId, {
+      boundTurnId: stored.turnId,
+      lastSentPrompt: stored.prompt,
+      state: stateFromRound({
+        turn: undefined,
+        authRequired: false,
+        pendingPermission: false,
+        settled: stored.status,
+      }),
+    });
+  };
+
+  function onStored(blobId: string) {
+    adoptStored(blobId);
+    write(blobId, { outcome: settledOnRecord(blobId)?.outcome ?? null });
+    const watch = watches.get(blobId);
+    if (watch) fold(blobId, watch);
+    emit(blobId);
+  }
+
   const unbind = (blobId: string) => {
+    pendingRestore.delete(blobId);
     write(blobId, {
       state: transition(get(blobId).state, { type: "unbound" }),
       boundTaskId: null,
@@ -352,13 +466,18 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
     round: (blobId) => watches.get(blobId)?.observation.get(),
 
     setDocument(blobId, documentPath) {
+      watchStored(blobId);
       write(blobId, { documentPath });
     },
     restore(blobId, taskId) {
       if (get(blobId).boundTaskId) return;
+      pendingRestore.add(blobId);
+      watchStored(blobId);
       write(blobId, { boundTaskId: taskId });
+      adoptStored(blobId);
     },
     rebind(blobId, taskId) {
+      pendingRestore.delete(blobId);
       write(blobId, {
         state: transition(get(blobId).state, { type: "unbound" }),
         boundTaskId: taskId,
@@ -368,6 +487,9 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
     unbind,
 
     refuseRemoval: (blobId) => write(blobId, { removalRefusedAt: Date.now() }),
+    loadReviewRanges: (documentPath) => reviewRanges.load(documentPath),
+    saveReviewRanges: (documentPath, saved) =>
+      reviewRanges.save(documentPath, saved),
     askTrust: (blobId) => fire(blobId, { type: "trustAsked" }),
     answerTrust: (blobId) => fire(blobId, { type: "trustAnswered" }),
 
@@ -375,6 +497,8 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
       const before = get(blobId).state;
       const sending = transition(before, { type: "sendStarted" });
       if (sending === before) return false;
+      pendingRestore.delete(blobId);
+      watchStored(blobId);
       write(blobId, { state: sending });
       try {
         const { taskId, turnId } = await dispatch();
@@ -429,6 +553,16 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
         if (other.boundTurnId! > mine.boundTurnId!) return false;
       }
       return true;
+    },
+  };
+}
+
+function inMemoryReviewRanges(): ReviewRangeStore {
+  const byDocument = new Map<string, SavedReviewRanges>();
+  return {
+    load: (documentPath) => byDocument.get(documentPath) ?? null,
+    save: (documentPath, saved) => {
+      byDocument.set(documentPath, saved);
     },
   };
 }

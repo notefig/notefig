@@ -31,6 +31,8 @@ import type { DirectiveSource } from "./composer/mention-suggestion";
 
 /** Where in the document a widget's prompt was sent from. */
 export interface WidgetPromptTarget {
+  /** The widget sending, so its round can be found again by widget. */
+  blobId?: string;
   /** Workspace-relative document path (absolute if outside the workspace). */
   path: string;
   /** Document position the widget sat at when the prompt was sent. */

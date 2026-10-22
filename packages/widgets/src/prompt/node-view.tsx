@@ -673,7 +673,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // tracking and its look are separate plugins on purpose.
       ...(options.filePath
         ? [
-            promptChangeTrackingPlugin(options.filePath),
+            promptChangeTrackingPlugin(options.filePath, options.prompts),
             promptChangeGutterPlugin(),
             promptInteractionsPlugin(options.prompts),
           ]

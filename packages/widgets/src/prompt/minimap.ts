@@ -9,7 +9,6 @@
  * with the card.
  */
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { sortEntriesChronologically } from "@notefig/shared/agent";
 import type {
   MinimapDotState,
   MinimapObserveHandle,
@@ -18,7 +17,6 @@ import type {
 } from "../minimap/contract";
 import {
   deriveQueuePosition,
-  deriveWidgetResponse,
   type BlobPhase,
 } from "./state";
 import { phaseOf } from "./machine";
@@ -109,18 +107,6 @@ export function describeDotState(
   }
 }
 
-/** A completed turn whose widget_respond answer flags an issue. */
-function roundHasIssue(
-  snapshot: PromptRoundSnapshot | undefined,
-  phase: BlobPhase,
-): boolean {
-  if (phase !== "done" || !snapshot) return false;
-  const response = deriveWidgetResponse(
-    sortEntriesChronologically(snapshot.entries),
-  );
-  return response?.kind === "issue";
-}
-
 function queuedBehind(
   snapshot: PromptRoundSnapshot | undefined,
   phase: BlobPhase,
@@ -160,7 +146,8 @@ function deriveDotInputs(
     roundKey,
     unseen: roundKey ? !seenRounds.has(roundKey) : false,
     queueAhead: queuedBehind(snapshot, phase, widget.boundTurnId),
-    issue: roundHasIssue(snapshot, phase),
+    // A done round whose stored answer flags an issue.
+    issue: phase === "done" && widget.outcome?.response?.kind === "issue",
   };
 }
 

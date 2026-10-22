@@ -182,3 +182,83 @@ describe("createPromptWidgets", () => {
     discardPromptChanges("blob_s");
   });
 });
+
+describe("stored rounds (MET-251)", () => {
+  const OUTCOME = {
+    response: null,
+    summary: "Shortened it.",
+    error: null,
+    touchedFiles: ["/ws/doc.md"],
+  };
+  const settled = (turnId = "trn_1", taskId = "task_1") => ({
+    turnId,
+    taskId,
+    status: "completed" as const,
+    prompt: "make it shorter\nplease",
+    outcome: OUTCOME,
+  });
+
+  it("a restored widget comes back as it was left", () => {
+    const t = testPrompts();
+    t.storeRound("blob", settled());
+    t.prompts.restore("blob", "task_1");
+    expect(t.prompts.get("blob")).toMatchObject({
+      state: { name: "settled", outcome: "done" },
+      boundTaskId: "task_1",
+      boundTurnId: "trn_1",
+      lastSentPrompt: "make it shorter\nplease",
+      outcome: OUTCOME,
+    });
+  });
+
+  it("adopts a stored round that loads after the restore", () => {
+    const t = testPrompts();
+    t.prompts.restore("blob", "task_1");
+    expect(t.prompts.get("blob").state.name).toBe("composing");
+    t.storeRound("blob", settled());
+    expect(t.prompts.get("blob").state).toEqual({ name: "settled", outcome: "done" });
+  });
+
+  it("doesn't adopt a live round, another session's, or once the user moved on", () => {
+    const t = testPrompts();
+    t.storeRound("live", { ...settled(), status: "live" });
+    t.prompts.restore("live", "task_1");
+    t.storeRound("other", settled("trn_2", "task_other"));
+    t.prompts.restore("other", "task_1");
+    t.prompts.restore("moved", "task_1");
+    t.prompts.rebind("moved", "task_1");
+    t.storeRound("moved", settled());
+    for (const blobId of ["live", "other", "moved"]) {
+      expect(t.prompts.get(blobId)).toMatchObject({
+        state: { name: "composing" },
+        boundTurnId: null,
+        outcome: null,
+      });
+    }
+  });
+
+  it("stays settled when a session revival replays its turn away", async () => {
+    const t = testPrompts();
+    await t.send("blob", "make it shorter", ROUND);
+    t.setTurn("trn_1", "task_1", "completed");
+    t.storeRound("blob", settled());
+    expect(t.prompts.get("blob").outcome).toEqual(OUTCOME);
+    t.removeTurn("trn_1");
+    expect(t.prompts.get("blob")).toMatchObject({
+      state: { name: "settled", outcome: "done" },
+      boundTurnId: "trn_1",
+      outcome: OUTCOME,
+    });
+  });
+
+  it("shows only the outcome of the round it is bound to", async () => {
+    const t = testPrompts();
+    await t.send("blob", "first", ROUND);
+    t.setTurn("trn_1", "task_1", "completed");
+    t.storeRound("blob", settled());
+    await t.send("blob", "second", { taskId: "task_1", turnId: "trn_2" });
+    expect(t.prompts.get("blob").outcome).toBeNull();
+    t.prompts.unbind("blob");
+    expect(t.prompts.get("blob").outcome).toBeNull();
+  });
+});

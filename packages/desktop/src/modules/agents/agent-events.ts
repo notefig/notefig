@@ -19,6 +19,8 @@ declare module "@notefig/core" {
     "widget:round-started": {
       taskId: string;
       turnId: string;
+      /** The widget that sent it, when the sender named one. */
+      blobId?: string;
       workspacePath: string;
       /** Absolute path of the document the widget lives in. */
       documentPath: string;

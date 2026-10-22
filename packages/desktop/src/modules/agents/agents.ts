@@ -50,6 +50,8 @@ export interface AgentTaskHandle {
   promptFromWidget(
     text: string,
     widget: {
+      /** The widget sending (its blobId). */
+      blobId?: string;
       /** The workspace the widget's document is in. */
       workspacePath: string;
       /** The document, absolute or relative to `workspacePath`. */
@@ -305,6 +307,7 @@ export function createAgents({
         hooks.emit("widget:round-started", {
           taskId,
           turnId: sent.turnId,
+          ...(widget.blobId ? { blobId: widget.blobId } : {}),
           workspacePath: widget.workspacePath,
           documentPath: pathutil.isAbsolute(widget.path)
             ? widget.path

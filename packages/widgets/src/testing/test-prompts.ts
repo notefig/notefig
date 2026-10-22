@@ -9,6 +9,8 @@ import type { AgentTaskRow, AgentTurn } from "@notefig/shared/agent";
 import {
   createPromptWidgets,
   type PromptRoundObserverFactory,
+  type PromptWidgetsDeps,
+  type StoredRound,
 } from "../prompt/widgets-service";
 
 export function testPrompts() {
@@ -39,7 +41,23 @@ export function testPrompts() {
     };
   };
 
-  const prompts = createPromptWidgets({ observeRound });
+  /** The app's stored rounds, newest per widget. */
+  const stored = new Map<string, StoredRound>();
+  const storedListeners = new Set<() => void>();
+  const observeStoredRound: NonNullable<PromptWidgetsDeps["observeStoredRound"]> = (
+    blobId,
+    onChange,
+  ) => {
+    storedListeners.add(onChange);
+    return {
+      get: () => stored.get(blobId),
+      destroy: () => {
+        storedListeners.delete(onChange);
+      },
+    };
+  };
+
+  const prompts = createPromptWidgets({ observeRound, observeStoredRound });
 
   return {
     prompts,
@@ -59,6 +77,11 @@ export function testPrompts() {
         startedAt: 0,
       });
       notify();
+    },
+    /** Store (or overwrite) a widget's newest round, as the app does. */
+    storeRound(blobId: string, round: StoredRound): void {
+      stored.set(blobId, round);
+      for (const listener of [...storedListeners]) listener();
     },
     /** Drop a turn row (a withdrawn or forgotten turn). */
     removeTurn(turnId: string): void {

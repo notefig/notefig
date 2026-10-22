@@ -5,6 +5,7 @@
  * without mounting Tiptap.
  */
 import {
+  sortEntriesChronologically,
   WIDGET_RESPOND_TOOL_NAME,
   WidgetRespondInputSchema,
   type AgentEntry,
@@ -157,6 +158,7 @@ export function blobCardClass(phase: BlobPhase, hasIssue: boolean): string {
  * keeps this function testable without one.
  */
 export function widgetPromptTarget(params: {
+  blobId?: string;
   documentPath: string;
   workspacePath: string;
   pos: number | undefined;
@@ -169,6 +171,7 @@ export function widgetPromptTarget(params: {
   ) => string | undefined;
 }): WidgetPromptTarget {
   const {
+    blobId,
     documentPath,
     workspacePath,
     pos,
@@ -179,6 +182,7 @@ export function widgetPromptTarget(params: {
   } = params;
   const path = toRelativePath(workspacePath, documentPath) || documentPath;
   return {
+    ...(blobId ? { blobId } : {}),
     path,
     pos: pos ?? docContentSize,
     isDocEmpty,
@@ -342,4 +346,38 @@ export function deriveQueuePosition(
   return taskTurns.filter(
     (turn) => turn.status === "queued" && turn.turnId < myTurnId,
   ).length;
+}
+
+/**
+ * What a settled round leaves behind, snapshotted when it settles: the
+ * agent's widget_respond answer, the last assistant line (the summary when
+ * there is no answer), the failure reason, and the documents it changed.
+ * Stored with the round (the app's prompt-rounds collection), so the done
+ * face reads the same thing whether the turn ended a second ago or before
+ * a restart — the transcript it came from doesn't outlive the run.
+ */
+export type RoundOutcome = {
+  response: WidgetResponse | null;
+  summary: string | null;
+  error: string | null;
+  touchedFiles: string[];
+};
+
+export function deriveRoundOutcome({
+  entries,
+  error,
+  workspacePath,
+}: {
+  /** The turn's transcript, in any order. */
+  entries: AgentEntry[];
+  error: string | undefined;
+  workspacePath: string;
+}): RoundOutcome {
+  const sorted = sortEntriesChronologically(entries);
+  return {
+    response: deriveWidgetResponse(sorted),
+    summary: deriveLatestAssistantLine(sorted),
+    error: error ?? null,
+    touchedFiles: deriveTouchedFiles(sorted, workspacePath),
+  };
 }

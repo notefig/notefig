@@ -4,9 +4,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { createPromptWidgets } from "@notefig/widgets";
-import type { AgentTurn } from "@/modules/agents/agent-collections";
+import { createHooks } from "@notefig/core";
+import type { AgentEntry, AgentTurn } from "@/modules/agents/agent-collections";
+import { createPromptRounds } from "@/modules/prompt-rounds";
+import { createNodeTestDb } from "@/testing/node-db";
 import { testAgentStore } from "@/testing/test-agents";
-import { roundObserverFor } from "./prompt-widgets";
+import { roundObserverFor, storedRoundObserverFor } from "./prompt-widgets";
 
 function turn(status: AgentTurn["status"]): AgentTurn {
   return {
@@ -69,5 +72,85 @@ describe("promptWidgets over the agent store", () => {
       boundTurnId: null,
       boundTaskId: "task_1",
     });
+  });
+});
+
+describe("promptWidgets over stored rounds (MET-251)", () => {
+  /** The app's pieces as the modules wire them, over one database. */
+  function app(db = createNodeTestDb()) {
+    const store = testAgentStore();
+    const hooks = createHooks();
+    const rounds = createPromptRounds({
+      persistence: db.get(),
+      turns: store.turns,
+      transcript: (turnId) =>
+        store.entries.toArray.filter((entry) => entry.turnId === turnId),
+      hooks,
+    });
+    rounds.track();
+    const prompts = createPromptWidgets({
+      observeRound: roundObserverFor(store),
+      observeStoredRound: storedRoundObserverFor(rounds.collection),
+    });
+    return { db, store, hooks, rounds, prompts };
+  }
+
+  /** Send from "blob", answer, and settle — as the agent service would. */
+  async function settledRound(a: ReturnType<typeof app>) {
+    await a.prompts.send("blob", "make it shorter", async () => {
+      a.store.turns.insert(turn("queued"));
+      a.hooks.emit("widget:round-started", {
+        taskId: "task_1",
+        turnId: "trn_1",
+        blobId: "blob",
+        workspacePath: "/ws",
+        documentPath: "/ws/doc.md",
+        prompt: "make it shorter",
+      });
+      return { taskId: "task_1", turnId: "trn_1" };
+    });
+    a.store.entries.insert({
+      id: "evt_1",
+      turnId: "trn_1",
+      taskId: "task_1",
+      type: "assistant",
+      text: "Shortened it.",
+    } as AgentEntry);
+    a.store.turns.update("trn_1", (draft) => {
+      draft.status = "completed";
+    });
+    await a.rounds.recordSettled({
+      taskId: "task_1",
+      turnId: "trn_1",
+      status: "completed",
+      at: Date.now(),
+    });
+  }
+
+  it("keeps a settled widget's face when a revival replays its turn away", async () => {
+    const a = app();
+    await settledRound(a);
+    expect(a.prompts.get("blob").outcome?.summary).toBe("Shortened it.");
+    a.store.turns.delete("trn_1");
+    expect(a.prompts.get("blob")).toMatchObject({
+      state: { name: "settled", outcome: "done" },
+      boundTurnId: "trn_1",
+    });
+    expect(a.prompts.get("blob").outcome?.summary).toBe("Shortened it.");
+  });
+
+  it("brings a widget back as it was left after a restart", async () => {
+    const before = app();
+    await settledRound(before);
+    // A new run over the same database: no turn rows, no widget state.
+    const after = app(before.db);
+    await after.rounds.collection.preload();
+    after.prompts.restore("blob", "task_1");
+    expect(after.prompts.get("blob")).toMatchObject({
+      state: { name: "settled", outcome: "done" },
+      boundTurnId: "trn_1",
+      lastSentPrompt: "make it shorter",
+    });
+    expect(after.prompts.get("blob").outcome?.summary).toBe("Shortened it.");
   });
 });
