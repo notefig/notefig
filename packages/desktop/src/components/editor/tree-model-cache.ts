@@ -101,6 +101,13 @@ function makeComparator(sortState: TreeSortState) {
     const shared = Math.min(aSegments.length, bSegments.length);
     for (let i = 0; i < shared; i++) {
       if (aSegments[i] !== bSegments[i]) {
+        // Scratchpads live under the app dir. Keep that root pinned at the
+        // top of the tree regardless of the current sort order; items
+        // inside the scratchpads still sort normally (MET-254).
+        if (i === 0) {
+          if (aSegments[0] === APP_DIR_NAME) return -1;
+          if (bSegments[0] === APP_DIR_NAME) return 1;
+        }
         return compareSiblings(
           aSegments[i],
           bSegments[i],
