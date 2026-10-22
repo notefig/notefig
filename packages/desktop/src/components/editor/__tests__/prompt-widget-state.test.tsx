@@ -398,6 +398,55 @@ describe("deleting and selecting a widget", () => {
     expect(editor.state.selection.to).toBe(draft.to);
   });
 
+  it("Cmd-A in an empty draft stays in the draft first", async () => {
+    const { editor } = await composingWidget();
+    const pressSelectAll = async () =>
+      act(async () => {
+        editor.view.dom.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "a",
+            ctrlKey: true,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        await tick();
+      });
+    await pressSelectAll();
+    expect(selectionDraft(editor.state)).not.toBeNull();
+    expect(editor.state.selection.empty).toBe(true);
+    await pressSelectAll();
+    expect(editor.state.selection.from).toBe(0);
+    expect(editor.state.selection.to).toBe(editor.state.doc.content.size);
+  });
+
+  it("working widgets keep their order when everything around them is deleted", async () => {
+    prompts = testPrompts();
+    host = fakePromptWidgetHost();
+    for (const [blobId, turnId] of [
+      ["blob_a", "trn_a"],
+      ["blob_b", "trn_b"],
+    ]) {
+      await prompts.send(blobId, "hi", { taskId: TASK, turnId });
+      prompts.setTurn(turnId, TASK, "running");
+    }
+    const editor = await mount(
+      `<p>one</p><div data-type="ai-prompt" data-blob-id="blob_a" data-task-id="${TASK}"></div><p>two</p><div data-type="ai-prompt" data-blob-id="blob_b" data-task-id="${TASK}"></div><p>three</p>`,
+    );
+    await act(async () => {
+      editor.commands.selectAll();
+      editor.commands.deleteSelection();
+      await tick();
+    });
+    const order: string[] = [];
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "aiPrompt") order.push(node.attrs.blobId);
+      return true;
+    });
+    expect(order).toEqual(["blob_a", "blob_b"]);
+    expect(editor.state.doc.textContent).not.toContain("two");
+  });
+
   it("a click on the card never selects it", async () => {
     const { editor } = await composingWidget();
     const pos = widgetPos(editor);
