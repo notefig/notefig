@@ -33,7 +33,7 @@ import {
   type Transaction,
 } from "@tiptap/pm/state";
 import { Mapping } from "@tiptap/pm/transform";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { PROMPT_NODE_NAME } from "./node";
 import { capabilitiesOf, type WidgetCapabilities } from "./machine";
 import type { PromptWidgetsApi } from "./widgets-service";
@@ -149,9 +149,22 @@ export function deleteIntoWidget(editor: Editor): boolean {
  * cleared draft.
  */
 export function deleteRangeOverWidgets(editor: Editor): boolean {
-  const { state } = editor;
+  const range = rangeOverWidgets(editor.state);
+  if (!range) return false;
+  editor.view.dispatch(
+    editor.state.tr.delete(range.from, range.to).scrollIntoView(),
+  );
+  return true;
+}
+
+/** The selection widened to the edges of the widgets it covers through
+ *  their drafts (see deleteRangeOverWidgets); null when it covers none
+ *  that way. */
+function rangeOverWidgets(
+  state: EditorState,
+): { from: number; to: number } | null {
   const { selection } = state;
-  if (!(selection instanceof TextSelection) || selection.empty) return false;
+  if (!(selection instanceof TextSelection) || selection.empty) return null;
   let { from, to } = selection;
   state.doc.nodesBetween(from, to, (node, pos) => {
     if (node.type.name !== PROMPT_NODE_NAME) return true;
@@ -161,9 +174,58 @@ export function deleteRangeOverWidgets(editor: Editor): boolean {
     }
     return false;
   });
-  if (from === selection.from && to === selection.to) return false;
-  editor.view.dispatch(state.tr.delete(from, to).scrollIntoView());
+  return from === selection.from && to === selection.to ? null : { from, to };
+}
+
+/** Typing over such a range: the same widening, the text in its place. */
+function typeOverWidgets(view: EditorView, text: string): boolean {
+  const range = rangeOverWidgets(view.state);
+  if (!range) return false;
+  const tr = view.state.tr.delete(range.from, range.to);
+  const $at = tr.doc.resolve(tr.mapping.map(range.from));
+  tr.setSelection(TextSelection.near($at)).insertText(text);
+  view.dispatch(tr.scrollIntoView());
   return true;
+}
+
+/**
+ * A printable key on a selected widget, before it types: into the field
+ * when it takes typing — the key then types there as any other would —
+ * and swallowed otherwise. Left to the keypress, the first character
+ * would be inserted by hand under the node selection and the rest typed
+ * wherever the browser's own caret was, which WebKit doesn't move into
+ * the draft: the first character in the widget, the rest on the next line.
+ */
+function typeIntoSelectedWidget(
+  view: EditorView,
+  event: KeyboardEvent,
+  prompts: PromptWidgetsApi,
+): boolean {
+  if (event.key.length !== 1 || event.ctrlKey || event.metaKey) return false;
+  if (event.isComposing) return false;
+  const field = selectedWidgetField(view.state, prompts);
+  if (field === null) return false;
+  if (field === "closed") return true;
+  view.dispatch(
+    view.state.tr.setSelection(TextSelection.create(view.state.doc, field.to)),
+  );
+  return false;
+}
+
+/** The selected widget's field: its range when it takes typing,
+ *  "closed" when it doesn't, null with no widget selected. */
+function selectedWidgetField(
+  state: EditorState,
+  prompts: PromptWidgetsApi,
+): { to: number } | "closed" | null {
+  const selected = selectedWidget(state);
+  if (!selected) return null;
+  if (!widgetCapabilities(prompts, selected.node).fieldEditable) return "closed";
+  const range = promptDraftRange(
+    state.doc,
+    selected.node.attrs.blobId as string,
+  );
+  return range ?? "closed";
 }
 
 /**
@@ -355,7 +417,12 @@ export function promptInteractionsPlugin(prompts: PromptWidgetsApi): Plugin {
         direct && node.type.name === PROMPT_NODE_NAME,
       handleTripleClickOn: (_view, _pos, node, _nodePos, _event, direct) =>
         direct && node.type.name === PROMPT_NODE_NAME,
+      handleKeyDown: (view, event) =>
+        typeIntoSelectedWidget(view, event, prompts),
       handleTextInput(view, _from, _to, text) {
+        // Over a widget the range covers through its draft: replaced from
+        // the widget's edge, as Delete does.
+        if (typeOverWidgets(view, text)) return true;
         // A read-only field takes no typing (the belt — the caret isn't
         // left there).
         const draft = selectionDraft(view.state);
@@ -365,16 +432,13 @@ export function promptInteractionsPlugin(prompts: PromptWidgetsApi): Plugin {
         }
         // Typing on a selected widget goes into its field — never replaces
         // the widget, which is what ProseMirror would do to a selected node.
-        const selected = selectedWidget(view.state);
-        if (!selected) return false;
-        if (!widgetCapabilities(prompts, selected.node).fieldEditable) return true;
-        const range = promptDraftRange(
-          view.state.doc,
-          selected.node.attrs.blobId as string,
-        );
-        if (!range) return true;
-        const tr = view.state.tr.insertText(text, range.to);
-        tr.setSelection(TextSelection.create(tr.doc, range.to + text.length));
+        // The belt for input that skips keydown (handleKeyDown moves the
+        // caret in first).
+        const field = selectedWidgetField(view.state, prompts);
+        if (field === null) return false;
+        if (field === "closed") return true;
+        const tr = view.state.tr.insertText(text, field.to);
+        tr.setSelection(TextSelection.create(tr.doc, field.to + text.length));
         view.dispatch(tr);
         return true;
       },
