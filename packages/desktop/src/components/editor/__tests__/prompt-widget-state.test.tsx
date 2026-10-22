@@ -590,6 +590,13 @@ describe("deleting and selecting a widget", () => {
     ).not.toBeNull();
   });
 
+  it("a working widget dragged elsewhere moves, not doubles", async () => {
+    const { editor, blobId } = await runningWidget();
+    await dropWidget(editor, { copy: false });
+    expect(widgetCount(editor)).toBe(1);
+    expect(editor.state.doc.nodeAt(0)?.attrs.blobId).toBe(blobId);
+  });
+
   it("a widget drag-copied is a fresh one", async () => {
     const { editor, blobId } = await runningWidget();
     await act(async () => {
