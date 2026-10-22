@@ -55,7 +55,14 @@ export function widgetCapabilities(
   });
 }
 
-type SelectionState = { selected: string | null };
+type SelectionState = {
+  /** The widget the keyboard selected. */
+  selected: string | null;
+  /** The draft a Cmd-A just selected — the next one goes to the whole
+   *  document. Remembered rather than read off the selection: an empty
+   *  draft's caret already spans it. */
+  draftSelectedAll?: string;
+};
 
 const interactionsKey = new PluginKey<SelectionState>("promptInteractions");
 
@@ -160,17 +167,22 @@ export function enterSelectedWidget(
   return true;
 }
 
-/** Cmd-A in a draft selects the draft first; a second press (the draft
- *  already selected) falls through to the whole document. */
+/** Cmd-A in a draft selects the draft first; a second press falls
+ *  through to the whole document. */
 export function selectAllInDraft(editor: Editor): boolean {
-  const draft = selectionDraft(editor.state);
+  const { state } = editor;
+  const draft = selectionDraft(state);
   if (!draft) return false;
-  const { from, to } = editor.state.selection;
-  if (from === draft.from && to === draft.to) return false;
+  if (interactionsKey.getState(state)?.draftSelectedAll === draft.blobId) {
+    return false;
+  }
   editor.view.dispatch(
-    editor.state.tr.setSelection(
-      TextSelection.create(editor.state.doc, draft.from, draft.to),
-    ),
+    state.tr
+      .setSelection(TextSelection.create(state.doc, draft.from, draft.to))
+      .setMeta(interactionsKey, {
+        selected: null,
+        draftSelectedAll: draft.blobId,
+      }),
   );
   return true;
 }
@@ -207,10 +219,12 @@ export function restoreKeptWidgetsTr(
   const mapping = new Mapping();
   for (const tr of transactions) mapping.appendMapping(tr.mapping);
   const tr = newState.tr;
+  // Through the edit, then past what this restore already put back: two
+  // widgets the edit collapsed onto one spot go back in their order.
   const restored = restoreDroppedWidgets(
     oldState.doc,
     tr,
-    (pos) => mapping.map(pos, -1),
+    (pos) => tr.mapping.map(mapping.map(pos, -1), 1),
     { keep: (node) => !widgetCapabilities(prompts, node).removable },
   );
   return restored > 0 ? tr : null;
@@ -274,6 +288,10 @@ export function promptInteractionsPlugin(prompts: PromptWidgetsApi): Plugin {
       apply(tr, value, _old, newState) {
         const meta = tr.getMeta(interactionsKey) as SelectionState | undefined;
         if (meta) return meta;
+        // Any other edit or selection move ends a Cmd-A in a draft.
+        if (value.draftSelectedAll && (tr.docChanged || tr.selectionSet)) {
+          value = { selected: value.selected };
+        }
         if (!value.selected) return value;
         // Kept only while the selection still is that widget.
         const { selection } = newState;
