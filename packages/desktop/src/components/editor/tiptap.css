@@ -65,7 +65,7 @@
    Shift+arrows, ⌘A) covering it. The widget plugin marks it
    (interactions.ts), so a NodeSelection from anywhere else (the drag
    grip, an undo) shows nothing, and the generic node-selection outline
-   never does. A refused delete shakes it. */
+   never does. A refused delete shakes it (prompt-blob.tsx). */
 .ProseMirror [data-type="ai-prompt"].ProseMirror-selectednode {
   outline: none;
 }
@@ -91,19 +91,6 @@
 .ProseMirror .node-aiPrompt[data-widget-selected] [data-prompt-draft] ::selection {
   background-color: transparent;
   color: inherit;
-}
-.ProseMirror [data-type="ai-prompt"] [data-widget-refused] {
-  animation: prompt-widget-refuse 0.3s ease-in-out;
-}
-@keyframes prompt-widget-refuse {
-  0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-3px); }
-  75% { transform: translateX(3px); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ProseMirror [data-type="ai-prompt"] [data-widget-refused] {
-    animation: none;
-  }
 }
 
 /* The draft is document content, so the editor's own outline rules would

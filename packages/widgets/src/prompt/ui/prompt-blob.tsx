@@ -723,7 +723,7 @@ export function PromptBlobFace({
     <FaceFrame
       phase={phase}
       response={response}
-      refused={rules?.removalRefused === true}
+      refusedAt={rules?.removalRefusedAt ?? null}
     >
       <AnimatedHeight>
         <div
@@ -788,8 +788,10 @@ export function PromptBlobFace({
 interface FaceRules {
   /** The draft takes typing (the widget's `fieldEditable`). */
   fieldEditable: boolean;
-  /** A delete was just refused: shake, and say how to remove it. */
+  /** A delete was just refused: say how to remove it. */
   removalRefused: boolean;
+  /** When the last delete was refused: each one shakes the face. */
+  removalRefusedAt: number | null;
 }
 
 /** The quoted selection a widget was summoned over, when there is one. */
@@ -807,35 +809,58 @@ function ReferenceLine({
 }
 
 /** The face's outer element: pointer ownership, the inspection hooks, and
- *  the refusal's shake (tiptap.css). */
+ *  the refusal's shake. */
 function FaceFrame({
   phase,
   response,
-  refused,
+  refusedAt,
   children,
 }: {
   phase: BlobPhase;
   response: string | undefined;
-  refused: boolean;
+  refusedAt: number | null;
   children: React.ReactNode;
 }) {
+  const frame = useRef<HTMLDivElement>(null);
+  useShakeOn(frame, refusedAt);
   return (
     <div
+      ref={frame}
       onMouseDown={claimWidgetPointerEvents}
       className="relative w-full"
       // Test/inspection hook: the widget's phase-machine state.
       data-blob-phase={phase}
       data-blob-response={response}
-      data-widget-refused={dataFlag(refused)}
     >
       {children}
     </div>
   );
 }
 
-/** A boolean data attribute: present (empty) or absent. */
-function dataFlag(on: boolean): "" | undefined {
-  return on ? "" : undefined;
+/** A quick shake each time `at` moves on — every refused attempt, not
+ *  just the first in a row (a CSS animation keyed to an attribute that's
+ *  already set wouldn't replay). Still under reduced motion. */
+function useShakeOn(
+  element: React.RefObject<HTMLElement | null>,
+  at: number | null,
+): void {
+  useEffect(() => {
+    const node = element.current;
+    // A refusal from before this mount isn't news.
+    if (at === null || !node || Date.now() - at > 500) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (typeof node.animate !== "function") return;
+    const shake = node.animate(
+      [
+        { transform: "translateX(0)" },
+        { transform: "translateX(-3px)" },
+        { transform: "translateX(3px)" },
+        { transform: "translateX(0)" },
+      ],
+      { duration: 150, easing: "ease-in-out" },
+    );
+    return () => shake.cancel();
+  }, [element, at]);
 }
 
 /** The draft takes typing in these phases, for faces rendered without a
@@ -1014,6 +1039,7 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     rules: {
       fieldEditable: capabilities.fieldEditable,
       removalRefused,
+      removalRefusedAt: widget.removalRefusedAt,
     },
     record: widget,
     turn,

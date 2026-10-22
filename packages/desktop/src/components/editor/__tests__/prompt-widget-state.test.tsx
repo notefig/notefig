@@ -349,6 +349,28 @@ describe("deleting and selecting a widget", () => {
     expect(document.body.textContent).toContain("promptBlobStopToRemove");
   });
 
+  it("shakes on every refused attempt, not just the first", async () => {
+    const animate = vi.fn(() => ({ cancel: () => {} }));
+    const original = HTMLElement.prototype.animate;
+    HTMLElement.prototype.animate = animate as unknown as typeof original;
+    try {
+      const { editor } = await runningWidget();
+      await act(async () => {
+        caretBelowWidget(editor);
+        await tick();
+      });
+      await press(editor, "Backspace");
+      for (const key of ["Backspace", "Delete", "Backspace"]) {
+        // Attempts a moment apart, each one news.
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        await press(editor, key);
+      }
+      expect(animate).toHaveBeenCalledTimes(3);
+    } finally {
+      HTMLElement.prototype.animate = original;
+    }
+  });
+
   it("Delete at the end of the line above selects the widget", async () => {
     const { editor } = await runningWidget();
     await act(async () => {
