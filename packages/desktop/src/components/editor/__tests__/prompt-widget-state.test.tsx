@@ -5,7 +5,7 @@
  * prompt-widget-backspace.test.tsx, over a prompt service a test drives.
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { act, createElement, useEffect } from "react";
+import { StrictMode, act, createElement, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 vi.mock("react-i18next", () => ({
@@ -74,15 +74,20 @@ async function mount(content?: string): Promise<Editor> {
   root = createRoot(container);
   let editor: Editor | null = null;
   await act(async () => {
+    // StrictMode like the app's root: mount effects run twice.
     root!.render(
-      withHost(
-        host,
-        createElement(Harness, {
-          content,
-          onEditor: (instance) => {
-            editor = instance;
-          },
-        }),
+      createElement(
+        StrictMode,
+        null,
+        withHost(
+          host,
+          createElement(Harness, {
+            content,
+            onEditor: (instance) => {
+              editor = instance;
+            },
+          }),
+        ),
       ),
     );
     await tick();

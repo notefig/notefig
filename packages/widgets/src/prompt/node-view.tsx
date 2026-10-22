@@ -298,11 +298,13 @@ function usePromptBinding({
     ),
     () => (blobId ? prompts.get(blobId).boundTaskId : null),
   );
-  const mounted = useRef(false);
+  // Erasing needs an observed unbind (a session, then none) — not "no
+  // session yet" seen on a mount, which StrictMode runs twice.
+  const previous = useRef<string | null>(null);
   useEffect(() => {
-    const first = !mounted.current;
-    mounted.current = true;
-    if (first && boundTaskId === null) return;
+    const before = previous.current;
+    previous.current = boundTaskId;
+    if (boundTaskId === null && before === null) return;
     if (persistedTaskId !== boundTaskId) writeTaskId(boundTaskId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boundTaskId]);
