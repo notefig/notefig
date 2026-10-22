@@ -80,6 +80,12 @@ export type SavedReviewRanges = {
 export interface ReviewRangeStore {
   load(documentPath: string): SavedReviewRanges | null;
   save(documentPath: string, saved: SavedReviewRanges): void;
+  /** Drop every range a widget's rounds made, in every document — open or
+   *  not — when it moves on to another round. */
+  forget(blobId: string): void;
+  /** Called when what `load` returns may have changed (stored rows still
+   *  loading when an editor opened). */
+  subscribe?(listener: () => void): () => void;
 }
 
 /** A widget's round as the app stored it: what outlives the turn's rows. */
@@ -158,6 +164,8 @@ export interface PromptWidgetsApi {
   loadReviewRanges(documentPath: string): SavedReviewRanges | null;
   /** Keep a document's review ranges past this run. */
   saveReviewRanges(documentPath: string, saved: SavedReviewRanges): void;
+  /** Hear when saved review ranges may have changed. */
+  subscribeReviewRanges(listener: () => void): () => void;
 
   /** The workspace trust warning, armed by a first Send. */
   askTrust(blobId: string): void;
@@ -275,9 +283,14 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
       });
     }
     // Review state belongs to the watched round: a new send, a dismiss or an
-    // edit rebinds the widget, and what the old round changed stops being
-    // this widget's to show.
-    if (next.boundTurnId !== previous.boundTurnId) discardPromptChanges(blobId);
+    // edit moves the widget off its round, and what that round changed
+    // stops being this widget's to show — in open documents and saved
+    // ones alike. Taking a round up (a restore adopting its stored round)
+    // is not moving off one: its saved ranges are what it restores.
+    if (previous.boundTurnId && next.boundTurnId !== previous.boundTurnId) {
+      discardPromptChanges(blobId);
+      reviewRanges.forget(blobId);
+    }
     if (
       next.boundTurnId !== previous.boundTurnId ||
       next.boundTaskId !== previous.boundTaskId
@@ -490,6 +503,8 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
     loadReviewRanges: (documentPath) => reviewRanges.load(documentPath),
     saveReviewRanges: (documentPath, saved) =>
       reviewRanges.save(documentPath, saved),
+    subscribeReviewRanges: (listener) =>
+      reviewRanges.subscribe?.(listener) ?? (() => {}),
     askTrust: (blobId) => fire(blobId, { type: "trustAsked" }),
     answerTrust: (blobId) => fire(blobId, { type: "trustAnswered" }),
 
@@ -563,6 +578,14 @@ function inMemoryReviewRanges(): ReviewRangeStore {
     load: (documentPath) => byDocument.get(documentPath) ?? null,
     save: (documentPath, saved) => {
       byDocument.set(documentPath, saved);
+    },
+    forget: (blobId) => {
+      for (const [documentPath, saved] of byDocument) {
+        byDocument.set(documentPath, {
+          ...saved,
+          changes: saved.changes.filter((change) => change.blobId !== blobId),
+        });
+      }
     },
   };
 }

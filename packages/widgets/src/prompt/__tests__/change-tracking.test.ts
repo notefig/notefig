@@ -17,10 +17,15 @@ import {
   setPromptReview,
 } from "../change-store";
 import {
+  documentFingerprint,
   promptChangeTrackingPlugin,
   promptChangesOf,
 } from "../change-tracking";
-import { inertPromptWidgets } from "../widgets-service";
+import {
+  createPromptWidgets,
+  inertPromptWidgets,
+  type SavedReviewRanges,
+} from "../widgets-service";
 import { promptChangeMarks } from "../change-gutter";
 
 const schema = new Schema({
@@ -164,5 +169,70 @@ describe("prompt change tracking", () => {
     expect(getPromptReview()).toBe("blob_b");
     discardPromptChanges("blob_b");
     expect(getPromptReview()).toBeNull();
+  });
+});
+
+describe("saved review ranges", () => {
+  const nested = new Schema({
+    nodes: {
+      doc: { content: "block+" },
+      paragraph: { group: "block", content: "text*" },
+      blockquote: { group: "block", content: "block+" },
+      text: {},
+    },
+  });
+  const p = (text: string) => nested.node("paragraph", null, [nested.text(text)]);
+  const quote = (...children: ReturnType<typeof p>[]) =>
+    nested.node("blockquote", null, children);
+
+  it("fingerprints structure, not just the text in order", () => {
+    // Same text, same node types in the same order — a paragraph inside
+    // the quote vs after it shifts every later position by one.
+    const inside = nested.node("doc", null, [quote(p("a"), p("b"))]);
+    const after = nested.node("doc", null, [quote(p("a")), p("b")]);
+    expect(documentFingerprint(inside)).not.toBe(documentFingerprint(after));
+    expect(documentFingerprint(inside)).toBe(
+      documentFingerprint(nested.node("doc", null, [quote(p("a"), p("b"))])),
+    );
+  });
+
+  it("takes up ranges that are saved after the editor opened", () => {
+    let saved: SavedReviewRanges | null = null;
+    const listeners = new Set<() => void>();
+    const service = createPromptWidgets({
+      observeRound: () => ({
+        get: () => ({
+          turn: undefined,
+          task: undefined,
+          taskTurns: [],
+          hasPendingPermission: false,
+          entries: [],
+        }),
+        destroy: () => {},
+      }),
+      reviewRanges: {
+        load: () => saved,
+        save: () => {},
+        forget: () => {},
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+    });
+    const state = EditorState.create({
+      doc: schema.node("doc", null, [schema.node("paragraph", null, [schema.text("hello world")])]),
+      plugins: [promptChangeTrackingPlugin(DOC_PATH, service)],
+    });
+    const view = new EditorView(document.createElement("div"), { state });
+    expect(promptChangesOf(view.state)).toEqual([]);
+    // The app's stored rows finish loading.
+    saved = {
+      fingerprint: documentFingerprint(view.state.doc),
+      changes: [{ ...ROUND, from: 1, to: 6 }],
+    };
+    for (const listener of listeners) listener();
+    expect(spans(view.state)).toEqual([[1, 6]]);
+    view.destroy();
   });
 });

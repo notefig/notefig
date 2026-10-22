@@ -224,6 +224,23 @@ export function createPromptRounds({
             console.error("Failed to save review ranges:", error);
           });
       },
+      forget(blobId) {
+        const held = [...rounds.values()]
+          .filter((row) => row.blobId === blobId && row.changes?.length)
+          .map((row) => row.turnId);
+        if (held.length === 0) return;
+        void rounds
+          .update(held, (drafts) => {
+            for (const draft of drafts) draft.changes = [];
+          })
+          .isPersisted.promise.catch((error) => {
+            console.error("Failed to forget review ranges:", error);
+          });
+      },
+      subscribe(listener) {
+        const subscription = rounds.subscribeChanges(listener);
+        return () => subscription.unsubscribe();
+      },
     },
     async recordStarted(detail, now = Date.now()) {
       await rounds.preload();
@@ -266,8 +283,12 @@ export function createPromptRounds({
         .filter((row) => row.status === "live" && !turns.get(row.turnId))
         .map((row) => row.turnId);
       if (orphaned.length === 0) return;
+      const now = Date.now();
       await rounds.update(orphaned, (drafts) => {
-        for (const draft of drafts) draft.status = "cancelled";
+        for (const draft of drafts) {
+          draft.status = "cancelled";
+          draft.settledAt = now;
+        }
       }).isPersisted.promise;
     },
     track() {
@@ -299,10 +320,11 @@ export function createPromptRounds({
  * what its done face reads.
  */
 export function roundsToEvict(rows: PromptRoundRow[], now: number): string[] {
+  // A settled row without a settle time (one settled as orphaned before
+  // it recorded one) ages from when it started.
   const expired = (row: PromptRoundRow) =>
     row.status !== "live" &&
-    row.settledAt !== undefined &&
-    now - row.settledAt > PROMPT_ROUND_RETENTION_MS;
+    now - (row.settledAt ?? row.startedAt) > PROMPT_ROUND_RETENTION_MS;
   const doomed = new Set(rows.filter(expired).map((row) => row.turnId));
   const kept = rows
     .filter((row) => !doomed.has(row.turnId))

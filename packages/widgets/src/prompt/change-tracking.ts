@@ -177,12 +177,14 @@ function recordRound(
 }
 
 /**
- * A document's text and shape — everything positions depend on — minus
- * widget drafts, which never reach the file. Saved with the review ranges
- * and compared on restore: ranges are positions, and they only mean
- * something against the document they were mapped onto. If the file
- * changed while no editor held it (or across a restart), nothing can map
- * them, and they are dropped.
+ * A document's text and shape — everything positions depend on: every
+ * node's open and close (so a paragraph inside a blockquote differs from
+ * one after it), every text run, and widget drafts too, whose length
+ * shifts every position after them. Saved with the review ranges and
+ * compared on restore: ranges are positions, and they only mean something
+ * against the document they were mapped onto. If the file changed while no
+ * editor held it — or a draft held text that a restart dropped — nothing
+ * can map them, and they are dropped.
  */
 export function documentFingerprint(doc: PMNode): string {
   let hash = 0x811c9dc5;
@@ -192,14 +194,16 @@ export function documentFingerprint(doc: PMNode): string {
       hash = Math.imul(hash, 0x01000193);
     }
   };
-  doc.descendants((node) => {
-    if (node.type.name === PROMPT_NODE_NAME) {
-      feed(`\u0000widget:${String(node.attrs.blobId)}`);
-      return false;
+  const walk = (node: PMNode) => {
+    if (node.isText) {
+      feed(`\u0002${node.text ?? ""}`);
+      return;
     }
-    feed(node.isText ? (node.text ?? "") : `\u0001${node.type.name}`);
-    return true;
-  });
+    feed(`\u0000${node.type.name}`);
+    node.forEach(walk);
+    feed("\u0001");
+  };
+  walk(doc);
   return (hash >>> 0).toString(16);
 }
 
@@ -256,7 +260,10 @@ export function applyPromptChanges(
 
 export function promptChangeTrackingPlugin(
   documentPath: string,
-  prompts: Pick<PromptWidgetsApi, "loadReviewRanges" | "saveReviewRanges">,
+  prompts: Pick<
+    PromptWidgetsApi,
+    "loadReviewRanges" | "saveReviewRanges" | "subscribeReviewRanges"
+  >,
 ): Plugin {
   return new Plugin<readonly PromptChange[]>({
     key: promptChangesKey,
@@ -286,6 +293,14 @@ export function promptChangeTrackingPlugin(
         });
       };
       let destroying = false;
+      // Saved ranges can arrive after the editor opened (the app's stored
+      // rows still loading): take them up then, unless this editor already
+      // tracks ranges of its own.
+      const unsubscribeSaved = prompts.subscribeReviewRanges(() => {
+        if (view.isDestroyed || promptChangesOf(view.state).length > 0) return;
+        const restored = restore(documentPath, view.state.doc, prompts);
+        if (restored.length > 0) setDocumentPromptChanges(documentPath, restored);
+      });
       const unsubscribe = subscribePromptChanges(() => {
         const stored = getDocumentPromptChanges(documentPath);
         if (stored === promptChangesOf(view.state) || view.isDestroyed) return;
@@ -309,6 +324,7 @@ export function promptChangeTrackingPlugin(
         },
         destroy() {
           unsubscribe();
+          unsubscribeSaved();
           if (pending) {
             clearTimeout(pending);
             destroying = true;

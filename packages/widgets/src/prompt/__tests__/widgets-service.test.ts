@@ -262,3 +262,35 @@ describe("stored rounds (MET-251)", () => {
     expect(t.prompts.get("blob").outcome).toBeNull();
   });
 });
+
+describe("review ranges (MET-251)", () => {
+  const DOC = "/ws/doc.md";
+  const ranges = (blobId: string, turnId: string) => ({
+    fingerprint: "f",
+    changes: [{ blobId, turnId, from: 1, to: 4 }],
+  });
+
+  it("forgets a widget's saved ranges when it moves to a new round, open document or not", async () => {
+    const t = testPrompts();
+    await t.send("blob", "one", ROUND);
+    t.prompts.saveReviewRanges(DOC, ranges("blob", "trn_1"));
+    t.setTurn("trn_1", "task_1", "completed");
+    await t.send("blob", "two", { taskId: "task_1", turnId: "trn_2" });
+    expect(t.prompts.loadReviewRanges(DOC)?.changes).toEqual([]);
+  });
+
+  it("keeps them when a restore takes up the round that made them", () => {
+    const t = testPrompts();
+    t.prompts.saveReviewRanges(DOC, ranges("blob", "trn_1"));
+    t.storeRound("blob", {
+      turnId: "trn_1",
+      taskId: "task_1",
+      status: "completed",
+      prompt: "one",
+      outcome: null,
+    });
+    t.prompts.restore("blob", "task_1");
+    expect(t.prompts.get("blob").boundTurnId).toBe("trn_1");
+    expect(t.prompts.loadReviewRanges(DOC)?.changes).toHaveLength(1);
+  });
+});

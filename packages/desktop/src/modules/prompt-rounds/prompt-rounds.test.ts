@@ -115,12 +115,35 @@ describe("prompt rounds", () => {
     expect(rounds.collection.get("t1")?.changes).toEqual([]);
   });
 
+  it("forgets a widget's review ranges in every document", async () => {
+    await rounds.recordStarted({ ...started("t1"), blobId: "blob_1" }, 10);
+    await rounds.recordStarted({ ...started("t2"), blobId: "blob_2" }, 11);
+    rounds.reviewRanges.save("/ws/a/doc.md", {
+      fingerprint: "f",
+      changes: [
+        { blobId: "blob_1", turnId: "t1", from: 1, to: 4 },
+        { blobId: "blob_2", turnId: "t2", from: 9, to: 12 },
+      ],
+    });
+    await vi.waitFor(() =>
+      expect(rounds.reviewRanges.load("/ws/a/doc.md")?.changes).toHaveLength(2),
+    );
+    rounds.reviewRanges.forget("blob_1");
+    await vi.waitFor(() =>
+      expect(rounds.reviewRanges.load("/ws/a/doc.md")?.changes).toEqual([
+        { blobId: "blob_2", turnId: "t2", from: 9, to: 12 },
+      ]),
+    );
+  });
+
   it("settles rounds left live by a previous run, keeps live ones with a turn row", async () => {
     await rounds.recordStarted(started("t_orphan"), 1);
     await rounds.recordStarted(started("t_kept"), 2);
     liveTurns.add("t_kept");
     await rounds.settleOrphaned();
     expect(rounds.collection.get("t_orphan")?.status).toBe("cancelled");
+    // Settled now, so it ages out like any other settled round.
+    expect(rounds.collection.get("t_orphan")?.settledAt).toBeGreaterThan(0);
     expect(rounds.collection.get("t_kept")?.status).toBe("live");
   });
 
@@ -184,6 +207,13 @@ describe("roundsToEvict", () => {
       row("live", NOW - 30 * DAY, { status: "live", settledAt: undefined }),
     ];
     expect(roundsToEvict(rows, NOW)).toEqual(["old"]);
+  });
+
+  it("ages a settled round with no settle time from when it started", () => {
+    const rows = [
+      row("legacy", NOW - PROMPT_ROUND_RETENTION_MS - DAY, { status: "cancelled", settledAt: undefined }),
+    ];
+    expect(roundsToEvict(rows, NOW)).toEqual(["legacy"]);
   });
 
   it("caps storage oldest first, but keeps each widget's newest round", () => {
