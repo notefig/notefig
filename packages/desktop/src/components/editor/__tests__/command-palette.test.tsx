@@ -80,21 +80,20 @@ function itemLabels(): string[] {
 }
 
 beforeEach(async () => {
+  vi.useFakeTimers();
   vi.clearAllMocks();
   openFile.mockReturnValue(true);
   adapter.getMetadata.mockResolvedValue({ succeeded: [], failed: [] });
-  adapter.readDirectory.mockImplementation(
-    async () => ({
-      ok: true,
-      value: [
-        { path: `${WS}/archive`, type: "directory" as const },
-        { path: `${WS}/notes.md`, type: "file" as const },
-        { path: `${WS}/archive/old-notes.md`, type: "file" as const },
-        { path: `${WS}/theme.md`, type: "file" as const },
-        { path: `${WS}/binary.bin`, type: "file" as const },
-      ],
-    }),
-  );
+  adapter.readDirectory.mockImplementation(async () => ({
+    ok: true,
+    value: [
+      { path: `${WS}/archive`, type: "directory" as const },
+      { path: `${WS}/notes.md`, type: "file" as const },
+      { path: `${WS}/archive/old-notes.md`, type: "file" as const },
+      { path: `${WS}/theme.md`, type: "file" as const },
+      { path: `${WS}/binary.bin`, type: "file" as const },
+    ],
+  }));
 
   files = testWorkspaceFiles(WS, adapter);
   // The settings the palette reads persist through the kv store over the
@@ -118,6 +117,7 @@ afterEach(() => {
   root = null;
   files.dispose();
   document.body.innerHTML = "";
+  vi.useRealTimers();
 });
 
 describe("CommandPalette file search", () => {
@@ -127,11 +127,14 @@ describe("CommandPalette file search", () => {
     expect(itemLabels().join("\n")).not.toContain("notes.md");
 
     await typeQuery("notes");
+    // File search is debounced: results are not computed until typing pauses.
+    act(() => vi.advanceTimersByTime(150));
     const labels = itemLabels().join("\n");
     expect(labels).toContain("notes.md");
     expect(labels).toContain("archive/old-notes.md");
     // binary.bin is refused by the canOpenFile filter and never listed.
     await typeQuery("binary");
+    act(() => vi.advanceTimersByTime(150));
     expect(itemLabels().join("\n")).not.toContain("binary.bin");
   });
 
@@ -139,6 +142,7 @@ describe("CommandPalette file search", () => {
     renderPalette();
     await act(async () => {});
     await typeQuery("notes");
+    act(() => vi.advanceTimersByTime(150));
     const item = [...document.querySelectorAll("[cmdk-item]")].find((el) =>
       (el.textContent ?? "").includes("notes.md"),
     ) as HTMLElement;
@@ -168,11 +172,25 @@ describe("CommandPalette file search", () => {
     renderPalette();
     await act(async () => {});
     await typeQuery("theme");
+    act(() => vi.advanceTimersByTime(150));
     const labels = itemLabels();
     const commandIndex = labels.findIndex((l) => l.includes("Toggle Theme"));
     const fileIndex = labels.findIndex((l) => l.includes("theme.md"));
     expect(commandIndex).toBeGreaterThanOrEqual(0);
     expect(fileIndex).toBeGreaterThan(commandIndex);
+  });
+
+  it("declines file search during rapid typing and only searches after the debounce window", async () => {
+    renderPalette();
+    await act(async () => {});
+
+    await typeQuery("not");
+    // Within the debounce window the file-search query still trails, so no
+    // file rows are computed yet.
+    expect(itemLabels().join("\n")).not.toContain("notes.md");
+
+    act(() => vi.advanceTimersByTime(150));
+    expect(itemLabels().join("\n")).toContain("notes.md");
   });
 });
 
