@@ -5,7 +5,10 @@
 
 export interface Env {
 	ISSUE_AGENT: DurableObjectNamespace<import("./issue-agent.ts").IssueAgent>;
-	/** Branch name → Linear issue id, so a GitHub event finds its agent. */
+	/**
+	 * Branch name → Linear issue id, so a GitHub event finds its agent; and `issueKey(id)` → branch name, so a Linear
+	 * event about the issue (closed, deleted) knows it has one.
+	 */
 	BRANCHES: KVNamespace;
 
 	GITHUB_REPO: string;
@@ -40,6 +43,11 @@ export interface Env {
 	GH_APP_PRIVATE_KEY: string;
 	GH_APP_WEBHOOK_SECRET: string;
 	AI_GATEWAY_TOKEN: string;
+}
+
+/** An issue's key in `BRANCHES`. A branch name can't hold a colon, so it never meets one. */
+export function issueKey(issueId: string): string {
+	return `issue:${issueId}`;
 }
 
 export interface Model {

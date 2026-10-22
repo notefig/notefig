@@ -6,10 +6,11 @@ import { type Conversation, createRegistry, defineExtension, Harness, hook, sect
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
-import { type Config, type Env, type Model, modelFor, readConfig } from "./config.ts";
+import { type Config, type Env, issueKey, type Model, modelFor, readConfig } from "./config.ts";
 import { ContainerEnv } from "./container-env.ts";
 import { REGISTRY_HOSTS } from "./gateways.ts";
 import { type GitHubClient, gitHubClient } from "./github.ts";
+import type { IssueEnd } from "./linear-webhook.ts";
 import { type Activity, type IssueDetails, type LinearAgentClient, linearAgentClient } from "./linear.ts";
 import { INSTRUCTIONS, issueSection } from "./prompt.ts";
 import { reporting } from "./reporting.ts";
@@ -163,6 +164,7 @@ export class IssueAgent extends DurableObject<Env> {
 				.catch((error: unknown) => console.error("linear: issue not moved to started", error));
 		}
 		await this.env.BRANCHES.put(issue.branchName, issue.id);
+		await this.env.BRANCHES.put(issueKey(issue.id), issue.branchName);
 		await this.#submit("Start working on the issue.", `linear:session:${input.sessionId}`, "followUp");
 		this.#taken(input.sessionId);
 		await this.#drainPending();
@@ -297,6 +299,12 @@ export class IssueAgent extends DurableObject<Env> {
 		await this.#end("Unassigned, so I've stopped and cleared my workspace. Delegate the issue again to start over.");
 	}
 
+	/** The issue was marked done, cancelled or deleted in Linear: the work on it is over. */
+	async ended(why: IssueEnd): Promise<void> {
+		const what = { completed: "marked done", canceled: "cancelled", deleted: "deleted" }[why];
+		await this.#end(`The issue was ${what}, so I've stopped and cleared my workspace.`);
+	}
+
 	/** The pull request merged or closed: nothing more to do on this branch. */
 	async closed(input: { merged: boolean }): Promise<void> {
 		await this.#end(input.merged ? "The pull request was merged." : "The pull request was closed.");
@@ -313,7 +321,7 @@ export class IssueAgent extends DurableObject<Env> {
 		await this.release();
 		await (await this.#root()).abort(context);
 		await this.release();
-		if (issue) await this.env.BRANCHES.delete(issue.branchName);
+		if (issue) await Promise.all([this.env.BRANCHES.delete(issue.branchName), this.env.BRANCHES.delete(issueKey(issue.id))]);
 		await this.#post({ type: "response", body: farewell }).catch((error: unknown) => console.error("linear: farewell not posted", error));
 		await this.#harness.close(context);
 		await this.ctx.storage.deleteAlarm();
