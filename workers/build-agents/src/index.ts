@@ -1,4 +1,4 @@
-import { type Env, readConfig } from "./config.ts";
+import { type Env, issueKey, readConfig } from "./config.ts";
 import { type GitHubEvent, readGitHubWebhook } from "./github-webhook.ts";
 import { gitHubClient } from "./github.ts";
 import { linearAgentClient } from "./linear.ts";
@@ -10,8 +10,8 @@ export { IssueAgent } from "./issue-agent.ts";
 /**
  * agents.notefig.com. Two webhooks in, each handed to the Durable Object of the issue it's about:
  *
- * - `POST /v1/linear`: Linear's agent session events (delegated, a message, stop), issue updates (unassigned) and
- *   comments on the issue.
+ * - `POST /v1/linear`: Linear's agent session events (delegated, a message, stop), issue updates (unassigned, done,
+ *   cancelled, deleted) and comments on the issue.
  * - `POST /v1/github`: the GitHub App's events on the agent's pull requests and branches.
  *
  * Both answer as soon as the event is verified and handed over; Linear wants an answer within five seconds.
@@ -79,6 +79,13 @@ async function runLinear(env: Env, command: AgentCommand): Promise<void> {
 				text: `Comment from ${comment.author?.name} on the Linear issue:\n\n${comment.body.trim()}`,
 				requestId: `linear:comment:${comment.id}`,
 			});
+		} else if (command.kind === "ended") {
+			// Only an issue an agent took: one started before its issue key was kept is found by its delegate.
+			if (!(await env.BRANCHES.get(issueKey(command.issueId)))) {
+				const app = await linearAgentClient({ clientId: env.LINEAR_CLIENT_ID, clientSecret: env.LINEAR_CLIENT_SECRET }).appUser();
+				if (!command.delegateIds.includes(app.id)) return;
+			}
+			await stub.ended(command.why);
 		} else {
 			// Unassigned: stop only if the issue was this app's to work on.
 			const app = await linearAgentClient({ clientId: env.LINEAR_CLIENT_ID, clientSecret: env.LINEAR_CLIENT_SECRET }).appUser();

@@ -15,6 +15,11 @@ export type AgentCommand =
 	| { kind: "stop"; issueId: string; sessionId: string }
 	/** The issue's delegate changed: if it was this app, its agent stops (`index.ts` knows the app's user id). */
 	| { kind: "undelegated"; issueId: string; previousDelegateId: string }
+	/**
+	 * The issue was closed (done or cancelled) or deleted. `index.ts` passes it on only if the issue has an agent, so a
+	 * closed issue doesn't wake an object of its own.
+	 */
+	| { kind: "ended"; issueId: string; why: IssueEnd; delegateIds: string[] }
 	/** A comment on the issue: whether it's for the agent is decided once it's fetched (`commentForAgent`). */
 	| { kind: "comment"; issueId: string; commentId: string };
 
@@ -22,13 +27,15 @@ export type WebhookOutcome =
 	| { ok: false; status: number; error: string }
 	| { ok: true; command: AgentCommand | undefined; reason?: string };
 
-/** An `Issue` data webhook: only its delegate changing matters here. */
+export type IssueEnd = "completed" | "canceled" | "deleted";
+
+/** An `Issue` data webhook: only its delegate changing, and the issue closing or going away, matter here. */
 interface IssueEvent {
 	type: "Issue";
 	action: string;
 	webhookTimestamp: number;
-	data: { id: string; delegateId?: string | null };
-	updatedFrom?: { delegateId?: string | null };
+	data: { id: string; delegateId?: string | null; state?: { type: string }; trashed?: boolean | null };
+	updatedFrom?: { delegateId?: string | null; stateId?: string; trashed?: boolean | null };
 }
 
 /** A `Comment` data webhook. A comment by an integration or a bot has no `userId`. */
@@ -70,7 +77,7 @@ export async function readLinearWebhook(
 		return { ok: false, status: 400, error: "Body is not JSON" };
 	}
 	if (Math.abs(now - event.webhookTimestamp) > MAX_CLOCK_SKEW_MS) return { ok: false, status: 401, error: "Stale webhook" };
-	if (event.type === "Issue") return undelegation(event as IssueEvent);
+	if (event.type === "Issue") return issueChange(event as IssueEvent);
 	if (event.type === "Comment") return comment(event as CommentEvent);
 	if (event.type !== "AgentSessionEvent") return { ok: true, command: undefined, reason: "not an agent session event" };
 
@@ -102,15 +109,26 @@ export async function readLinearWebhook(
 }
 
 /**
- * Unassigning an agent (removing it as the delegate, or delegating to someone else) stops it. Anyone may do that: it
- * only ever stops work. Whose delegation it was is checked by the caller.
+ * Unassigning an agent (removing it as the delegate, or delegating to someone else) stops it, and so does its issue
+ * being marked done, cancelled (a duplicate is a cancelled state too) or deleted. Anyone may do either: it only ever
+ * stops work. Whose issue it was is checked by the caller.
  */
-function undelegation(event: IssueEvent): WebhookOutcome {
-	const previous = event.updatedFrom?.delegateId;
-	if (event.action !== "update" || !previous || event.data.delegateId === previous) {
-		return { ok: true, command: undefined, reason: "not an undelegation" };
-	}
-	return { ok: true, command: { kind: "undelegated", issueId: event.data.id, previousDelegateId: previous } };
+function issueChange(event: IssueEvent): WebhookOutcome {
+	const { data, updatedFrom } = event;
+	if (!data?.id) return { ok: true, command: undefined, reason: "issue event without an issue" };
+	const ended = (why: IssueEnd): WebhookOutcome => ({
+		ok: true,
+		// The previous delegate too: the same update may have unassigned the app.
+		command: { kind: "ended", issueId: data.id, why, delegateIds: [data.delegateId, updatedFrom?.delegateId].filter((id) => !!id) as string[] },
+	});
+	// Deleting moves an issue to the trash (an update); deleting it for good, or straight away, is a `remove`.
+	if (event.action === "remove" || (event.action === "update" && data.trashed && !updatedFrom?.trashed)) return ended("deleted");
+	if (event.action !== "update") return { ok: true, command: undefined, reason: "not an issue update" };
+	const state = data.state?.type;
+	if (updatedFrom?.stateId !== undefined && (state === "completed" || state === "canceled")) return ended(state);
+	const previous = updatedFrom?.delegateId;
+	if (!previous || data.delegateId === previous) return { ok: true, command: undefined, reason: "not an undelegation or an end" };
+	return { ok: true, command: { kind: "undelegated", issueId: data.id, previousDelegateId: previous } };
 }
 
 function comment(event: CommentEvent): WebhookOutcome {

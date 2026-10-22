@@ -69,6 +69,28 @@ describe("readLinearWebhook", () => {
 		expect(await read(issue({ delegateId: "app-user" }, { title: "old" }))).toMatchObject({ ok: true, command: undefined });
 	});
 
+	it("reports an issue marked done, cancelled or deleted, but not one moved to another open state", async () => {
+		const issue = (action: string, data: Record<string, unknown>, updatedFrom?: Record<string, unknown>) => ({
+			type: "Issue",
+			action,
+			webhookTimestamp: NOW,
+			data: { id: "issue-1", delegateId: "app-user", ...data },
+			updatedFrom,
+		});
+		const ended = (why: string) => ({ ok: true, command: { kind: "ended", issueId: "issue-1", why, delegateIds: ["app-user"] } });
+		expect(await read(issue("update", { state: { type: "completed" } }, { stateId: "started" }))).toEqual(ended("completed"));
+		expect(await read(issue("update", { state: { type: "canceled" } }, { stateId: "started" }))).toEqual(ended("canceled"));
+		expect(await read(issue("update", { trashed: true }, { trashed: null }))).toEqual(ended("deleted"));
+		expect(await read(issue("remove", {}))).toEqual(ended("deleted"));
+		// Closed and unassigned in one update: the previous delegate still counts.
+		expect(await read(issue("update", { delegateId: null, state: { type: "canceled" } }, { stateId: "started", delegateId: "app-user" }))).toEqual(
+			ended("canceled"),
+		);
+		expect(await read(issue("update", { state: { type: "started" } }, { stateId: "unstarted" }))).toMatchObject({ command: undefined });
+		// A closed issue edited later isn't closed again.
+		expect(await read(issue("update", { state: { type: "completed" } }, { title: "old" }))).toMatchObject({ command: undefined });
+	});
+
 	it("hands on a person's new comment on an issue, and nothing else about comments", async () => {
 		const comment = (action: string, data: Record<string, unknown>) => ({ type: "Comment", action, webhookTimestamp: NOW, data: { id: "comment-1", ...data } });
 		expect(await read(comment("create", { issueId: "issue-1", userId: "user-1" }))).toEqual({

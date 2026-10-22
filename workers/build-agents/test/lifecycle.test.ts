@@ -1,6 +1,7 @@
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { issueKey } from "../src/config.ts";
 import type { Activity } from "../src/linear.ts";
 import { ISSUE, type Step, type TestIssueAgent } from "./issue-agent.ts";
 
@@ -189,17 +190,23 @@ describe("an issue's agent", () => {
 		expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.modelCalls())).toBe(1);
 	});
 
-	it("ends for good when its PR merges or it's unassigned: storage erased, branch unmapped, later events ignored", async () => {
+	it("ends for good when its PR merges, it's unassigned or its issue closes: storage erased, branch unmapped, later events ignored", async () => {
 		for (const end of [
 			(agent: TestIssueAgent) => agent.closed({ merged: true }),
 			(agent: TestIssueAgent) => agent.undelegated(),
+			(agent: TestIssueAgent) => agent.ended("completed"),
+			(agent: TestIssueAgent) => agent.ended("canceled"),
+			(agent: TestIssueAgent) => agent.ended("deleted"),
 		]) {
 			const stub = await prepared([{ text: "Done." }]);
 			await start(stub);
 			await eventually(stub, (agent) => agent.activities(), (value) => responses(value).length > 0);
 			expect(await env.BRANCHES.get(ISSUE.branchName)).toBe(ISSUE.id);
+			expect(await env.BRANCHES.get(issueKey(ISSUE.id))).toBe(ISSUE.branchName);
 			await runInDurableObject(stub, end);
 			expect(await env.BRANCHES.get(ISSUE.branchName)).toBeNull();
+			expect(await env.BRANCHES.get(issueKey(ISSUE.id))).toBeNull();
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.released())).toBe(true);
 			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).toEqual([]);
 			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.alarmAt())).toBeNull();
 			// A late review, CI failure or Linear message finds nothing to work on.

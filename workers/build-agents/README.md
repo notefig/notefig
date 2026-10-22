@@ -114,7 +114,10 @@ the object's state, and never sees a token.
    - a failed workflow run on the branch arrives with the commit it ran on, a hint to pull first (others may have
      pushed), and the end of each failed job's log, fetched by the object: the container can't reach CI. Each run
      attempt is its own message, so a re-run's failure isn't taken for a repeat;
-   - the PR merging or closing ends it the same way.
+   - the PR merging or closing ends it the same way, and so does the issue being marked done, cancelled or deleted
+     in Linear (an `Issue` update to a completed or canceled state, moved to the trash, or a `remove`). The Worker
+     passes that on only for an issue an agent took (its `issue:<id>` key in `BRANCHES`, or, for one taken before
+     that key existed, the app as its delegate), so closing other issues wakes no object.
 
    GitHub events count only for the repository's own branches: a fork's PR from a same-named branch is ignored.
 10. **Between events the object sleeps.** While the harness has live tasks a heartbeat alarm comes back every 60
@@ -216,8 +219,8 @@ Also used by the workflow: the repo secret `CLOUDFLARE_ACCOUNT_ID` and the envir
 - **App "Notefig Build Agent"** (Settings → API → Applications):
   - **Client credentials** on (the Worker mints its own app-actor token);
   - callback URL `https://agents.notefig.com/v1/linear/installed` (the Worker answers it with a short page);
-  - webhooks on: `https://agents.notefig.com/v1/linear`, events **Agent session events**, **Issues** (so unassigning
-    the agent stops it), **Comments** (so an approver's comment on the issue reaches it) and **Permission changes**;
+  - webhooks on: `https://agents.notefig.com/v1/linear`, events **Agent session events**, **Issues** (so unassigning,
+    closing or deleting the issue stops the agent), **Comments** (so an approver's comment on the issue reaches it) and **Permission changes**;
   - installed as an agent once by an admin, through the link `bootstrap` prints (`actor=app`, scopes
     `read,write,app:assignable,app:mentionable`). Installed agents take no seat.
 - **The "Model" label group** (workspace level), with one label per `MODEL_LABELS` entry.
@@ -379,12 +382,14 @@ What exists for an issue, and when it goes away:
 | Thing | Created | Runs (and bills) | Stopped | Deleted |
 |---|---|---|---|---|
 | **Container** | the run's first tool call | while tools run (each command is capped at 20 minutes unless the model sets its own timeout), and up to 10 idle minutes after (`setInactivityTimeout`) | after 10 idle minutes, on the stop button, on the end | on the stop button and on the end (`container.destroy()`); an idle stop restarts on the next tool call |
-| **Container snapshot** | after every successful push | (stored, not running) | | the record is dropped when a snapshot fails or the agent ends. The container API has no call to delete a snapshot, so the snapshot itself isn't removed by the agent; how long Cloudflare keeps snapshots, and whether they bill, isn't verified yet (check before going live) |
+| **Container snapshot** | after every successful push | (stored, not running) | | the record is dropped when a snapshot fails or the agent ends. The container API has no call to delete a snapshot, so the snapshot itself expires: Cloudflare keeps it 30 days from its creation or last restore, and an ended agent never restores it |
 | **Durable Object** | the first webhook for the issue | only while handling an event or running the harness; it hibernates in between, and an evicted object costs nothing | | its storage (transcript, checkpoints, the issue, the session, the snapshot record) is erased on the end (`deleteAll`), and its alarm cleared |
 | **Heartbeat alarm** | when work is admitted | wakes the object every 60 s while the harness has live tasks | once idle, it clears itself | on the end |
-| **Branch mapping** (`BRANCHES` KV) | when the agent starts | | | on the end, so GitHub events stop reaching it |
+| **Branch mapping** (`BRANCHES` KV) | when the agent starts: branch → issue, and `issue:<id>` → branch | | | on the end, so GitHub and Linear events stop reaching it |
+| **PR preview** (Pages, `pr-<number>` branch) | by `pr-preview.yml` on the agent's PR | (static files) | | every deployment on the branch, when the PR merges or closes (`pr-preview.yml`'s `remove` job) |
 
-**The end** comes when the PR merges or closes, or the agent is unassigned. The agent aborts any run, destroys the
+**The end** comes when the PR merges or closes, the agent is unassigned, or the issue is marked done, cancelled or
+deleted. The agent aborts any run, destroys the
 container, removes the branch mapping, says so on the session, erases its storage and reopens an empty harness; a
 review or CI failure arriving afterwards finds no issue and is ignored. Delegating the issue again starts afresh.
 
