@@ -52,6 +52,7 @@ function inputs(overrides: Partial<AppStatusInputs> = {}): AppStatusInputs {
     host: {
       scratchpads: { createAndOpen: vi.fn() },
       tabs,
+      promptWidgets: { findByTask: () => null },
       openWorkspace: vi.fn(),
       openSettings: vi.fn(),
     },
@@ -170,6 +171,7 @@ describe("deriveAppStatus", () => {
         host: {
               scratchpads: null,
           tabs: null,
+          promptWidgets: { findByTask: () => null },
           openWorkspace: vi.fn(),
           openSettings: vi.fn(),
         },

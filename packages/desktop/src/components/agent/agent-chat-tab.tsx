@@ -1343,7 +1343,7 @@ export function PromptBox({
           });
           // Idle "escape" stays a no-op here — the chat tab has no
           // document editor to hand focus back to.
-          if (action.type !== "send" && action.type !== "cancelRestore")
+          if (action.type !== "send" && action.type !== "cancel")
             return false;
           if (action.type === "send") onSend();
           else onCancelRestore();

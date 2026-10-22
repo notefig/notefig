@@ -295,7 +295,7 @@ function useHarnessList() {
 export function usePromptWidgetHost(): PromptWidgetHost {
   // Stable for the life of the app, so the memo below may close over it.
   const core = useCore();
-  const { tabs, agents, agentStore, sharedSessions, directives } = core;
+  const { tabs, agents, sharedSessions, directives } = core;
   const { defaultHarness, setDefaultHarness } = useDefaultHarness();
 
   const latest = useRef({ defaultHarness, setDefaultHarness, tabs });
@@ -328,11 +328,8 @@ export function usePromptWidgetHost(): PromptWidgetHost {
         return { turnId };
       },
       cancelTask: (taskId) => void agents.task(taskId).cancel(),
-      cancelTurnAndForget: (taskId) =>
-        agents.task(taskId).cancelTurnAndForget(),
       removeQueuedPrompt: (taskId, turnId) =>
         agents.task(taskId).removeQueuedPrompt(turnId),
-      getTurnStatus: (turnId) => agentStore.turns.get(turnId)?.status,
       ensureRuntime: () => agents.ensureRuntime(),
 
       useRound,

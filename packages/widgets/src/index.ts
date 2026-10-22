@@ -101,15 +101,19 @@ export {
   type PageLinkSuggestionOptions,
 } from "./page-link";
 
-/** Widget state the app reaches into. */
+/** Every prompt widget's state: the service the app registers as a core
+ *  module, and the state machine it runs. */
 export {
-  findPromptBlobForTask,
-  getPromptBlob,
-  subscribePromptBlob,
-  updatePromptBlob,
-  type PromptBlobLocation,
-  type PromptBlobRecord,
-} from "./prompt/store";
+  createPromptWidgets,
+  type PromptRoundObserverFactory,
+  type PromptRoundSnapshot,
+  type PromptWidget,
+  type PromptWidgetLocation,
+  type PromptWidgetsApi,
+  type PromptWidgetsDeps,
+  type StopCommands,
+} from "./prompt/widgets-service";
+export { capabilitiesOf, type WidgetState } from "./prompt/machine";
 
 /** Prompt change tracking: the app tags a round's edits, the widget keeps
  *  and shows them. */
@@ -121,18 +125,12 @@ export {
 } from "./prompt/change-store";
 export { isMutatingToolCall } from "./prompt/state";
 
-/** The document minimap (MET-172): the collector the editor registers,
- *  and the live-rows seam the app fills in at setup. */
+/** The document minimap (MET-172): the collector the editor registers. */
 export {
   findWidgetPos,
   revealWidget,
   widgetMinimapExtension,
 } from "./registry";
-export {
-  registerPromptRoundObserver,
-  type PromptRoundObserverFactory,
-  type PromptRoundSnapshot,
-} from "./prompt/minimap";
 export {
   deriveMinimapEntries,
   type MinimapDotState,

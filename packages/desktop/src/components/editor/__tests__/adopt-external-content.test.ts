@@ -389,6 +389,18 @@ describe("adoptExternalContent — re-insertion fidelity", () => {
     expect(findWidgets(editor)).toHaveLength(1);
   });
 
+  it("restores into a cleared file without the keeper adding a composer", () => {
+    // The replace fallback (an oversized document) once dispatched the
+    // replace and the re-assertion apart: in between the document was
+    // empty, and the empty-doc keeper inserted a second widget.
+    editor = makeEditor(`<p>content</p>${WIDGET_HTML("blob_v")}`);
+    const result = adoptExternalContent(editor, docJSON("<p></p>"), {
+      maxDiffNodeSize: 1,
+    });
+    expect(result).toMatchObject({ mode: "replaced", reinsertedWidgets: 1 });
+    expect(findWidgets(editor)).toHaveLength(1);
+  });
+
   it("finds a valid insertion point when the mapped position lands in nested content", () => {
     editor = makeEditor(
       `<p>alpha</p>${WIDGET_HTML("blob_n")}<p>beta</p>`,

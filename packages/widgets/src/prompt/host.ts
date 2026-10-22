@@ -9,8 +9,8 @@
  *
  * What is NOT here is as deliberate as what is. Anything the widget can
  * decide for itself stays in the package: which session a prompt targets
- * when the widget is already bound (`resolvePromptTarget`), what phase the
- * rows add up to (`derivePhase`), what the composer does with a keystroke
+ * when the widget is already bound (`resolvePromptTarget`), what state the
+ * rows add up to (./machine.ts), what the composer does with a keystroke
  * (`deriveComposerKeyAction`). The host answers questions about the app —
  * "is this session still alive?", "what files are in the workspace?" — never
  * questions about the widget.
@@ -116,16 +116,8 @@ export interface PromptWidgetHost {
     target: WidgetPromptTarget;
   }): { turnId: string };
   cancelTask(taskId: string): void;
-  /**
-   * Cancel the running turn and drop it from the transcript when the agent
-   * had not responded yet. Resolves true iff the round was forgotten — which
-   * is what tells the widget it may restore the prompt to the composer.
-   */
-  cancelTurnAndForget(taskId: string): Promise<boolean>;
   /** Withdraw a turn that is still queued behind others. */
   removeQueuedPrompt(taskId: string, turnId: string): void;
-  /** Status of a single turn, read at call time (not a subscription). */
-  getTurnStatus(turnId: string): AgentTurn["status"] | undefined;
   /** False when no agent runtime is available; the host surfaces the reason. */
   ensureRuntime(): boolean;
 

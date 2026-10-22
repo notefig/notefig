@@ -25,15 +25,16 @@
  */
 import type { ToolCallUpdate } from "@notefig/shared/agent";
 import {
-  findPromptBlobForTask,
   isMutatingToolCall,
   type PromptChangeAttribution,
+  type PromptWidgetsApi,
 } from "@notefig/widgets";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { calculateContentHash } from "@/utils/hash";
 import { resolveWorkspacePath } from "@/utils/fs";
 import { defineModule, type CoreHookMap, type Hooks } from "@notefig/core";
 import { platformModule } from "@/core/services";
+import { promptWidgetsModule } from "@/modules/prompt-widgets";
 
 type Writer = { taskId: string; turnId: string };
 type InFlightCall = Writer & { key: string; paths: string[] };
@@ -83,10 +84,13 @@ export interface TurnWritesApi {
 export function createTurnWrites({
   fs,
   hooks,
+  prompts,
 }: {
   fs: Pick<FileSystemSurface, "readFiles">;
   /** Where tool calls and settled turns are announced. */
   hooks: Pick<Hooks, "on">;
+  /** Which widget watches a round (`core.promptWidgets`). */
+  prompts: Pick<PromptWidgetsApi, "findByTask">;
 }): TurnWritesApi {
   /** path → the unsettled mutating calls on it, keyed task:toolCallId. */
   const inFlight = new Map<string, Map<string, InFlightCall>>();
@@ -174,7 +178,7 @@ export function createTurnWrites({
     attribute(path, contentHash) {
       const writer = writerOf(path, contentHash);
       if (!writer) return null;
-      const widget = findPromptBlobForTask(writer.taskId, writer.turnId);
+      const widget = prompts.findByTask(writer.taskId, writer.turnId);
       return widget ? { blobId: widget.blobId, turnId: writer.turnId } : null;
     },
     track() {
@@ -203,8 +207,12 @@ declare module "@notefig/core" {
 /** Attributes agent writes to the turn that made them. */
 export const turnWritesModule = defineModule({
   name: "turnWrites",
-  needs: [platformModule],
+  needs: [platformModule, promptWidgetsModule],
   register: (ctx) =>
-    createTurnWrites({ fs: ctx.use("platform").fs, hooks: ctx.hooks }),
+    createTurnWrites({
+      fs: ctx.use("platform").fs,
+      hooks: ctx.hooks,
+      prompts: ctx.use("promptWidgets"),
+    }),
   boot: (turnWrites) => turnWrites.track(),
 });

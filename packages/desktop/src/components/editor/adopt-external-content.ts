@@ -201,7 +201,9 @@ export function adoptExternalContent(
  * positions — a wholesale replace has no step mapping) and a draft caret
  * is restored. Without this, an oversized document or a diff-engine
  * failure coinciding with a marker-dropping rewrite deleted widgets for
- * good.
+ * good. Replace and re-assertion share one transaction: dispatched apart,
+ * a cleared file is momentarily empty and the empty-doc keeper adds a
+ * fresh composer beside the restored widget.
  */
 function applyReplaceFallback(
   editor: Editor,
@@ -209,18 +211,20 @@ function applyReplaceFallback(
   oldDoc: PMNode,
 ): AdoptionResult {
   const draftCaret = captureDraftCaret(editor);
-  editor.commands.setContent(prepared, { emitUpdate: false });
-  const tr = editor.state.tr;
-  const oldSize = Math.max(oldDoc.content.size, 1);
-  const scale = tr.doc.content.size / oldSize;
-  const reinsertedWidgets = reassertDroppedWidgets(oldDoc, tr, (pos) =>
-    Math.round(pos * scale),
-  );
-  restoreDraftCaret(tr, draftCaret);
-  tr.setMeta(ADOPTION_TRANSACTION_META, true);
-  if (tr.steps.length > 0 || tr.selectionSet) {
-    editor.view.dispatch(tr);
-  }
+  let reinsertedWidgets = 0;
+  editor
+    .chain()
+    .setMeta(ADOPTION_TRANSACTION_META, true)
+    .setContent(prepared, { emitUpdate: false })
+    .command(({ tr }) => {
+      const scale = tr.doc.content.size / Math.max(oldDoc.content.size, 1);
+      reinsertedWidgets = reassertDroppedWidgets(oldDoc, tr, (pos) =>
+        Math.round(pos * scale),
+      );
+      restoreDraftCaret(tr, draftCaret);
+      return true;
+    })
+    .run();
   return { mode: "replaced", reinsertedWidgets };
 }
 

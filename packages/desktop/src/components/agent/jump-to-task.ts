@@ -6,32 +6,18 @@
  * the session's chat tab otherwise (a chat-tab-originated turn, or a
  * document nobody has opened since launch).
  */
-import { findPromptBlobForTask } from "@notefig/widgets";
+import type { PromptWidgetsApi } from "@notefig/widgets";
 import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 import type { PromptRound } from "@/modules/prompt-rounds";
 import type { Core } from "@notefig/core";
 
 export type JumpTarget = "widget" | "chat";
 
-/** What a jump drives: the tabs, which also reveal a widget in its document. */
+/** What a jump drives: the tabs, which also reveal a widget in its
+ *  document, and the prompt widgets, which say where a round's widget is. */
 export interface Jumper {
   tabs: Pick<Core["tabs"], "open" | "openAgent" | "reveal">;
-}
-
-/** Where a jump for the task would land. */
-export function jumpTargetForTask(
-  taskId: string,
-  turnId?: string | null,
-): JumpTarget {
-  return findPromptBlobForTask(taskId, turnId) ? "widget" : "chat";
-}
-
-/** The document a jump would reveal, for labelling the row. */
-export function jumpDocumentForTask(
-  taskId: string,
-  turnId?: string | null,
-): string | null {
-  return findPromptBlobForTask(taskId, turnId)?.documentPath ?? null;
+  promptWidgets: Pick<PromptWidgetsApi, "findByTask">;
 }
 
 export function jumpToTask(
@@ -39,7 +25,7 @@ export function jumpToTask(
   taskId: string,
   options: { turnId?: string | null } = {},
 ): JumpTarget {
-  const widget = findPromptBlobForTask(taskId, options.turnId);
+  const widget = core.promptWidgets.findByTask(taskId, options.turnId);
   if (widget) {
     jumpToBlob(core.tabs, widget.documentPath, widget.blobId);
     return "widget";
@@ -56,7 +42,7 @@ export function jumpToRound(
   core: Jumper,
   round: Pick<PromptRound, "taskId" | "turnId" | "documentPath">,
 ): void {
-  const widget = findPromptBlobForTask(round.taskId, round.turnId);
+  const widget = core.promptWidgets.findByTask(round.taskId, round.turnId);
   if (widget && widget.boundTurnId === round.turnId) {
     jumpToBlob(core.tabs, widget.documentPath, widget.blobId);
   } else {

@@ -21,7 +21,6 @@ import {
   promptChangesOf,
 } from "../change-tracking";
 import { promptChangeMarks } from "../change-gutter";
-import { getPromptBlob, updatePromptBlob } from "../store";
 
 const schema = new Schema({
   nodes: {
@@ -160,23 +159,5 @@ describe("prompt change tracking", () => {
     expect(getPromptReview()).toBe("blob_b");
     discardPromptChanges("blob_b");
     expect(getPromptReview()).toBeNull();
-  });
-
-  it("forgets a widget's changes when it binds a new turn", () => {
-    // Sending binds the turn first; its changes arrive while it is bound.
-    updatePromptBlob(ROUND.blobId, { boundTurnId: ROUND.turnId });
-    setDocumentPromptChanges(DOC_PATH, [
-      { ...ROUND, from: 1, to: 3 },
-      { blobId: "blob_b", turnId: "trn_9", from: 4, to: 5 },
-    ]);
-    // Anything but a new turn leaves them alone.
-    updatePromptBlob(ROUND.blobId, { lastSentPrompt: "again" });
-    expect(getDocumentPromptChanges(DOC_PATH)).toHaveLength(2);
-
-    updatePromptBlob(ROUND.blobId, { boundTurnId: "trn_2" });
-    expect(getDocumentPromptChanges(DOC_PATH)).toEqual([
-      { blobId: "blob_b", turnId: "trn_9", from: 4, to: 5 },
-    ]);
-    expect(getPromptBlob(ROUND.blobId).boundTurnId).toBe("trn_2");
   });
 });

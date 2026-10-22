@@ -5,7 +5,14 @@
  * and their registration ORDER can influence schema construction, so it is
  * worth reading in one place.
  */
-import type { EditorWidgetDefinition } from "./define-widget";
+import type {
+  EditorWidgetDefinition,
+  WidgetRendererOptions,
+} from "./define-widget";
+import {
+  inertPromptWidgets,
+  type PromptWidgetsApi,
+} from "./prompt/widgets-service";
 import { promptWidget } from "./prompt";
 import { WidgetMinimapExtension } from "./minimap/extension";
 import type { MinimapSource } from "./minimap/contract";
@@ -28,17 +35,24 @@ export function widgetSchemaNodes() {
 
 /**
  * The renderer halves, scoped to one document. Every widget takes the same
- * two facts — which file it sits in and which workspace that file belongs to
- * — and nothing else; anything further reaches the app through the host,
- * from React context inside the node view.
+ * facts — which file it sits in, which workspace that file belongs to, and
+ * the services owning widget state — and nothing else; anything further
+ * reaches the app through the host, from React context inside the node
+ * view. Without `prompts` (tests, schema-only editors) the widgets get a
+ * service with no agent behind it.
  */
 export function widgetRendererNodes(options: {
   filePath: string;
   basePath: string;
+  prompts?: PromptWidgetsApi;
 }) {
+  const resolved: WidgetRendererOptions = {
+    ...options,
+    prompts: options.prompts ?? inertPromptWidgets(),
+  };
   return editorWidgets.flatMap((widget) => [
-    ...(widget.support?.views(options) ?? []),
-    widget.view.configure(options),
+    ...(widget.support?.views(resolved) ?? []),
+    widget.view.configure(resolved),
   ]);
 }
 
@@ -74,10 +88,13 @@ export function findWidgetPos(doc: PMNode, id: string): number | null {
  * so adding this to an editor's extensions is the whole installation. A
  * dot's jump ends in `revealWidget`, like every other reveal.
  */
-export function widgetMinimapExtension() {
+export function widgetMinimapExtension(
+  options: { prompts?: PromptWidgetsApi } = {},
+) {
+  const services = { prompts: options.prompts ?? inertPromptWidgets() };
   const sources: Record<string, MinimapSource> = {};
   for (const widget of editorWidgets) {
-    if (widget.minimap) sources[widget.name] = widget.minimap;
+    if (widget.minimap) sources[widget.name] = widget.minimap(services);
   }
   return WidgetMinimapExtension.configure({ sources, reveal: revealWidget });
 }

@@ -1,9 +1,9 @@
 /**
  * What each prompt widget's latest round changed in each document — the
- * review half of the widget's state, beside the binding in ./store.ts and
- * governed by the same rules: in memory only, keyed by ids that never
- * recur, and gone the moment the widget binds a different turn (a new
- * send, a dismiss, an edit — see `updatePromptBlob`).
+ * review half of the widget's state, beside the binding in
+ * ./widgets-service.ts and governed by the same rules: in memory only, keyed
+ * by ids that never recur, and gone the moment the widget binds a different
+ * turn (a new send, a dismiss, an edit — the service discards them).
  *
  * Ranges are document positions, so they are kept per document and only
  * the editor holding that document moves them (./change-tracking.ts maps

@@ -11,7 +11,7 @@ import { deriveMinimapEntries } from "../../minimap/contract";
 import { AiPromptNodeBase, PromptDraftNodeBase } from "../node";
 import { promptMentionNode } from "../composer/mention-node";
 import { describeDotState, promptMinimapSource } from "../minimap";
-import { updatePromptBlob } from "../store";
+import { testPrompts } from "../../testing/test-prompts";
 
 const schema: Schema = getSchema([
   StarterKit,
@@ -20,7 +20,8 @@ const schema: Schema = getSchema([
   promptMentionNode(),
 ]);
 
-const sources = { aiPrompt: promptMinimapSource };
+const prompts = testPrompts();
+const sources = { aiPrompt: promptMinimapSource(prompts) };
 
 function widget(blobId: string, draft = ""): PMNode {
   return schema.nodes.aiPrompt.create(
@@ -65,8 +66,11 @@ describe("deriveMinimapEntries", () => {
     expect(entries[1].ratio).toBeLessThan(0.7);
   });
 
-  it("titles from draft text, then last sent prompt, then a generic label", () => {
-    updatePromptBlob("blob_sent", { lastSentPrompt: "summarize the doc" });
+  it("titles from draft text, then last sent prompt, then a generic label", async () => {
+    await prompts.send("blob_sent", "summarize the doc", {
+      taskId: "task_sent",
+      turnId: "trn_sent",
+    });
     const d = doc(
       widget("blob_draft", "half typed"),
       para("x"),
