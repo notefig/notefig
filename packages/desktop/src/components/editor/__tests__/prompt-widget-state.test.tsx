@@ -377,6 +377,34 @@ describe("deleting and selecting a widget", () => {
     expect(selectionDraft(editor.state)).not.toBeNull();
   });
 
+  it("a key on a selected widget moves into its field before it types", async () => {
+    const { editor, blobId } = await runningWidget();
+    await act(async () => {
+      prompts.setTurn(TURN, TASK, "completed");
+      caretBelowWidget(editor);
+      await tick();
+    });
+    await press(editor, "Backspace");
+    expect(widgetElement()?.hasAttribute("data-widget-selected")).toBe(true);
+    // Not consumed: the key types where every later key will — the draft.
+    expect(await press(editor, "x")).toBe(false);
+    expect(selectionDraft(editor.state)?.blobId).toBe(blobId);
+    expect(editor.state.selection.empty).toBe(true);
+  });
+
+  it("a key on a selected working widget does nothing", async () => {
+    const { editor } = await runningWidget();
+    await act(async () => {
+      caretBelowWidget(editor);
+      await tick();
+    });
+    await press(editor, "Backspace");
+    const before = editor.state.doc;
+    expect(await press(editor, "x")).toBe(true);
+    expect(editor.state.doc.eq(before)).toBe(true);
+    expect(selectionDraft(editor.state)).toBeNull();
+  });
+
   it("Cmd-A in a draft selects the draft, then the document", async () => {
     const { editor } = await composingWidget();
     await act(async () => {
@@ -469,6 +497,18 @@ describe("deleting and selecting a widget", () => {
       expect(widgetTaskId(editor)).toBeNull();
     },
   );
+
+  it("typing over a select-all takes a widget opening the document, as Delete does", async () => {
+    const { editor, blobId } = await topWidgetUnderSelectAll("completed");
+    await act(async () => {
+      expect(typeText(editor, "x")).toBe(true);
+      await tick();
+    });
+    expect(editor.state.doc.textContent).toBe("x");
+    expect(widgetCount(editor)).toBe(0);
+    expect(selectionDraft(editor.state)).toBeNull();
+    expect(prompts.prompts.get(blobId).state.name).toBe("settled");
+  });
 
   it("a working widget opening the document stays under a select-all delete", async () => {
     const { editor, blobId } = await topWidgetUnderSelectAll("running");
