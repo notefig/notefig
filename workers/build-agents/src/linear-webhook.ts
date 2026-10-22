@@ -19,7 +19,7 @@ export type AgentCommand =
 	 * The issue was closed (done or cancelled) or deleted. `index.ts` passes it on only if the issue has an agent, so a
 	 * closed issue doesn't wake an object of its own.
 	 */
-	| { kind: "ended"; issueId: string; why: IssueEnd; delegateId: string | null }
+	| { kind: "ended"; issueId: string; why: IssueEnd; delegateIds: string[] }
 	/** A comment on the issue: whether it's for the agent is decided once it's fetched (`commentForAgent`). */
 	| { kind: "comment"; issueId: string; commentId: string };
 
@@ -118,7 +118,8 @@ function issueChange(event: IssueEvent): WebhookOutcome {
 	if (!data?.id) return { ok: true, command: undefined, reason: "issue event without an issue" };
 	const ended = (why: IssueEnd): WebhookOutcome => ({
 		ok: true,
-		command: { kind: "ended", issueId: data.id, why, delegateId: data.delegateId ?? null },
+		// The previous delegate too: the same update may have unassigned the app.
+		command: { kind: "ended", issueId: data.id, why, delegateIds: [data.delegateId, updatedFrom?.delegateId].filter((id) => !!id) as string[] },
 	});
 	// Deleting moves an issue to the trash (an update); deleting it for good, or straight away, is a `remove`.
 	if (event.action === "remove" || (event.action === "update" && data.trashed && !updatedFrom?.trashed)) return ended("deleted");

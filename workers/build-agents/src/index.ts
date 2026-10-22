@@ -83,7 +83,7 @@ async function runLinear(env: Env, command: AgentCommand): Promise<void> {
 			// Only an issue an agent took: one started before its issue key was kept is found by its delegate.
 			if (!(await env.BRANCHES.get(issueKey(command.issueId)))) {
 				const app = await linearAgentClient({ clientId: env.LINEAR_CLIENT_ID, clientSecret: env.LINEAR_CLIENT_SECRET }).appUser();
-				if (command.delegateId !== app.id) return;
+				if (!command.delegateIds.includes(app.id)) return;
 			}
 			await stub.ended(command.why);
 		} else {

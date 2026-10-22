@@ -28,7 +28,7 @@ jobs:
   build:
     name: Build preview
     if: >-
-      github.event.action != 'closed' &&
+      github.event.action != 'closed' && github.event.pull_request.state == 'open' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       (contains(format(',{0},', vars.PR_PREVIEW_AUTHORS || 'notefig-build-agent[bot]'), format(',{0},', github.event.pull_request.user.login)) ||
       contains(github.event.pull_request.labels.*.name, 'preview'))
