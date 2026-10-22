@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { updatePromptBlob } from "@notefig/widgets";
+import { testPrompts, type TestPrompts } from "@notefig/widgets/testing";
 import type { ToolCallUpdate } from "@notefig/shared/agent";
 import { calculateContentHash } from "@/utils/hash";
 import { createTurnWrites, type TurnWritesApi } from "@/modules/turn-writes";
@@ -28,20 +28,27 @@ function edit(status: ToolCallUpdate["status"], id = "tc_1"): ToolCallUpdate {
 }
 
 let writes: TurnWritesApi;
+let prompts: TestPrompts;
+
+/** A widget that sent `turnId` from DOC, mounted so its document is known. */
+async function widgetWatching(blobId: string, turnId: string) {
+  await prompts.send(blobId, "prompt", { taskId: "task_1", turnId });
+  prompts.prompts.setDocument(blobId, DOC);
+}
 
 const call = (toolCall: ToolCallUpdate, turnId = "trn_1") =>
   writes.recordToolCall({ taskId: "task_1", turnId, workspacePath: "/ws", toolCall });
 
 describe("turn writes", () => {
-  beforeEach(() => {
-    writes = createTurnWrites({ fs, hooks: createHooks() });
-    disk.clear();
-    // A widget that sent is mounted, so its document is known.
-    updatePromptBlob("blob_1", {
-      boundTaskId: "task_1",
-      boundTurnId: "trn_1",
-      documentPath: DOC,
+  beforeEach(async () => {
+    prompts = testPrompts();
+    writes = createTurnWrites({
+      fs,
+      hooks: createHooks(),
+      prompts: prompts.prompts,
     });
+    disk.clear();
+    await widgetWatching("blob_1", "trn_1");
   });
 
   it("credits a write adopted while its edit is in flight (ACP fs writes)", async () => {
@@ -77,11 +84,7 @@ describe("turn writes", () => {
   });
 
   it("prefers the round whose settled write matches over a later call in flight", async () => {
-    updatePromptBlob("blob_2", {
-      boundTaskId: "task_1",
-      boundTurnId: "trn_2",
-      documentPath: DOC,
-    });
+    await widgetWatching("blob_2", "trn_2");
     // Round two starts editing, then round one's edit settles.
     disk.set(DOC, "round one");
     await call(edit("in_progress", "tc_2"), "trn_2");
@@ -91,11 +94,7 @@ describe("turn writes", () => {
   });
 
   it("credits a later round that writes an earlier round's bytes back", async () => {
-    updatePromptBlob("blob_2", {
-      boundTaskId: "task_1",
-      boundTurnId: "trn_2",
-      documentPath: DOC,
-    });
+    await widgetWatching("blob_2", "trn_2");
     disk.set(DOC, "same bytes");
     await call(edit("completed"));
     await call(edit("in_progress", "tc_2"), "trn_2");
@@ -120,7 +119,8 @@ describe("turn writes", () => {
     // The widget moved on to a new turn: the old round's writes are no
     // longer its to show.
     await call(edit("in_progress", "tc_2"));
-    updatePromptBlob("blob_1", { boundTurnId: "trn_2" });
+    prompts.setTurn("trn_1", "task_1", "completed");
+    await prompts.send("blob_1", "again", { taskId: "task_1", turnId: "trn_2" });
     expect(writes.attribute(DOC, "h")).toBeNull();
   });
 });

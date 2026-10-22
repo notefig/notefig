@@ -1,14 +1,13 @@
 /**
- * Pure derivations for the prompt blob's state machine — no React, no
- * collections. The widget feeds these its live-query results; keeping the
- * phase/summary logic here makes the micro-interaction states unit-testable
+ * Pure derivations for what the prompt blob shows — no React, no
+ * collections. The state machine itself is ./machine.ts; these read the
+ * round's transcript for the face, and keep the summary logic unit-testable
  * without mounting Tiptap.
  */
 import {
   WIDGET_RESPOND_TOOL_NAME,
   WidgetRespondInputSchema,
   type AgentEntry,
-  type AgentTaskRow,
   type AgentTurn,
   type ToolCallUpdate,
   type WidgetResponse,
@@ -25,41 +24,6 @@ export type BlobPhase =
   | "needs-auth"
   | "done"
   | "error";
-
-/**
- * The widget's phase, from its bound turn + task rows. `isSending` covers
- * the window between the send click and the turn row existing (session
- * spawn/handshake); a bound turn whose row is missing is stale (app restart,
- * task disposed) and falls back to composing via the caller's reset.
- */
-export function derivePhase({
-  turn,
-  task,
-  hasPendingPermission,
-  isSending,
-}: {
-  turn: AgentTurn | undefined;
-  task: AgentTaskRow | undefined;
-  hasPendingPermission: boolean;
-  isSending: boolean;
-}): BlobPhase {
-  if (isSending) return "sending";
-  if (!turn) return "composing";
-  // Auth-block holds the prompt before/between turns — surface it whether
-  // the turn is queued (held) or errored out on the auth failure.
-  if (task?.authRequired && turn.status !== "completed") return "needs-auth";
-  switch (turn.status) {
-    case "queued":
-      return "queued";
-    case "running":
-      return hasPendingPermission ? "needs-permission" : "running";
-    case "error":
-      return "error";
-    case "completed":
-    case "cancelled":
-      return "done";
-  }
-}
 
 /**
  * The transient status line while running: the latest tool call still in
@@ -304,8 +268,8 @@ export function deriveTouchedFiles(
  * the textarea. Enter (no Shift) always submits — send() itself no-ops on
  * an empty/sending draft, so this never needs to know draft state to decide
  * "send"; while a turn runs, sending queues, so Enter still wins over
- * `inFlight`. Escape with a turn in flight is "cancelRestore" (MET-94):
- * cancel the turn and put the sent prompt back into the composer. Idle
+ * `inFlight`. Escape with a turn in flight is "cancel": the caller stops
+ * the agent (the chat tab also puts the prompt back, MET-94). Idle
  * Escape and "/" only special-case to "revert" (turn back into a literal
  * "/") when the draft is empty and the widget is summoned; a non-empty
  * draft on Escape falls back to "escape" (return focus to the doc, draft
@@ -318,7 +282,7 @@ export function deriveTouchedFiles(
  */
 export type ComposerKeyAction =
   | { type: "send" }
-  | { type: "cancelRestore" }
+  | { type: "cancel" }
   | { type: "revert" }
   | { type: "backspaceDismiss" }
   | { type: "escape" }
@@ -336,7 +300,7 @@ export function deriveComposerKeyAction(params: {
   const canDismiss = params.canDismiss ?? canRevert;
   if (key === "Enter" && !shiftKey) return { type: "send" };
   if (key === "Escape") {
-    if (inFlight) return { type: "cancelRestore" };
+    if (inFlight) return { type: "cancel" };
     return draftEmpty && canRevert ? { type: "revert" } : { type: "escape" };
   }
   // The "//" path: a second "/" right after summoning means the user

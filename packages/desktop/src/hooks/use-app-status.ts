@@ -56,6 +56,8 @@ export interface AppStatusHost {
    *  welcome. */
   scratchpads: Pick<WorkspaceScratchpads, "createAndOpen"> | null;
   tabs: AppStatusTabs | null;
+  /** Where a round's widget is, for an entry's jump. */
+  promptWidgets: Jumper["promptWidgets"];
   openWorkspace: () => void;
   openSettings: () => void;
 }
@@ -211,7 +213,7 @@ export function deriveAppStatus(inputs: AppStatusInputs): AppStatus {
   return {
     attention: overall && attentionGlyphState(overall),
     sections: host.tabs
-      ? sections(inputs, { tabs: host.tabs })
+      ? sections(inputs, { tabs: host.tabs, promptWidgets: host.promptWidgets })
       : [],
     actions: actions(inputs),
   };
@@ -244,6 +246,7 @@ export function usePublishAppStatus(host: {
         host: {
           scratchpads,
           tabs,
+          promptWidgets: core.promptWidgets,
           openSettings,
           openWorkspace,
         },

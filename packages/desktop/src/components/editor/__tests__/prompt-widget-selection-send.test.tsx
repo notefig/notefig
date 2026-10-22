@@ -18,14 +18,14 @@ vi.mock("react-i18next", () => ({
 import { Editor, EditorContent, useEditor } from "@tiptap/react";
 import type { JSONContent } from "@tiptap/core";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
+import { widgetRendererNodes, selectionDraft } from "@notefig/widgets";
 import {
-  widgetRendererNodes,
-  selectionDraft,
-  getPromptBlob,
-} from "@notefig/widgets";
-import { fakePromptWidgetHost, withHost } from "@notefig/widgets/testing";
-import type { PromptWidgetHost, PromptRound } from "@notefig/widgets";
-import type { AgentTurn } from "@notefig/shared/agent";
+  fakePromptWidgetHost,
+  testPrompts,
+  withHost,
+  type TestPrompts,
+} from "@notefig/widgets/testing";
+import type { PromptWidgetHost } from "@notefig/widgets";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getEditorMarkdown } from "@/components/editor/use-editor-file-sync";
 import { adoptExternalContent } from "@/components/editor/adopt-external-content";
@@ -34,6 +34,7 @@ import { adoptExternalContent } from "@/components/editor/adopt-external-content
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
+let prompts: TestPrompts = testPrompts();
 
 afterEach(() => {
   act(() => root?.unmount());
@@ -42,30 +43,16 @@ afterEach(() => {
   root = null;
 });
 
-const EMPTY_ROUND: PromptRound = {
-  turn: undefined,
-  task: undefined,
-  entries: [],
-  taskTurns: [],
-  pendingPermissions: [],
-};
-
-/** A host whose round starts reflecting the dispatched turn — the real
- *  host's collections insert the queued turn row synchronously, and the
- *  widget's stale-turn reset clears any binding whose row never appears. */
+/** A host whose dispatch writes the queued turn row, as the real host's
+ *  collections do. */
 function liveRoundHost(): PromptWidgetHost {
-  let round = EMPTY_ROUND;
-  const host = fakePromptWidgetHost({
-    useRound: vi.fn(() => round),
-    dispatchPrompt: vi.fn(() => {
-      round = {
-        ...EMPTY_ROUND,
-        turn: { turnId: "trn_fake", status: "queued" } as unknown as AgentTurn,
-      };
+  prompts = testPrompts();
+  return fakePromptWidgetHost({
+    dispatchPrompt: vi.fn(({ taskId }) => {
+      prompts.setTurn("trn_fake", taskId, "queued");
       return { turnId: "trn_fake" };
     }),
   });
-  return host;
 }
 
 function Harness({
@@ -78,7 +65,11 @@ function Harness({
   const editor = useEditor({
     extensions: [
       ...editorExtensions.filter((e) => e.name !== "aiPrompt"),
-      ...widgetRendererNodes({ filePath: "/ws/doc.md", basePath: "/ws" }),
+      ...widgetRendererNodes({
+        filePath: "/ws/doc.md",
+        basePath: "/ws",
+        prompts: prompts.prompts,
+      }),
     ],
     content,
   });
@@ -189,7 +180,7 @@ describe("selection-summoned widget send", () => {
     expect(args.text).toBe("make it shorter");
     expect(args.target.reference).toEqual({ text: "there", from: 4, to: 9 });
 
-    expect(getPromptBlob(blobId)).toMatchObject({
+    expect(prompts.prompts.get(blobId)).toMatchObject({
       boundTurnId: "trn_fake",
       boundTaskId: "task_shared",
       lastSentPrompt: "make it shorter",
@@ -232,7 +223,7 @@ describe("selection-summoned widget send", () => {
     await typeAndSend(editor);
     const args = vi.mocked(host.dispatchPrompt).mock.calls[0][0];
     expect(args.target.reference).toBeUndefined();
-    expect(getPromptBlob(blobId).boundTurnId).toBe("trn_fake");
+    expect(prompts.prompts.get(blobId).boundTurnId).toBe("trn_fake");
   });
 
   it("survives the own-save marker round-trip without duplicating", async () => {
@@ -257,7 +248,7 @@ describe("selection-summoned widget send", () => {
     });
 
     expect(findWidgets(editor)).toEqual([{ blobId, taskId: "task_shared" }]);
-    expect(getPromptBlob(blobId)).toMatchObject({
+    expect(prompts.prompts.get(blobId)).toMatchObject({
       boundTurnId: "trn_fake",
       boundTaskId: "task_shared",
     });
@@ -283,7 +274,7 @@ describe("selection-summoned widget send", () => {
     });
 
     expect(findWidgets(editor)).toEqual([{ blobId, taskId: "task_shared" }]);
-    expect(getPromptBlob(blobId)).toMatchObject({
+    expect(prompts.prompts.get(blobId)).toMatchObject({
       boundTurnId: "trn_fake",
       boundTaskId: "task_shared",
     });

@@ -742,13 +742,9 @@ test.describe("agent workflows", () => {
     });
 
     test("Escape while the widget's turn runs stops it", async ({ page }) => {
-      // KNOWN FAILURE (found by this suite, 2026-09-19): with the caret in
-      // the document (where it lands after sending), Escape reverts the
-      // running widget to a literal "/" — the summoned-empty-draft revert
-      // contract fires — and the turn keeps running; the in-flight Escape
-      // hotkey (cancelAndRestore) never gets its say. Desired behavior is
-      // asserted below; flip test.fail() off when the widget is fixed.
-      test.fail();
+      // Found by this suite (2026-09-19) and fixed in MET-248: Escape used
+      // to revert the running widget to a literal "/" while the turn kept
+      // running. Escape now stops a working widget wherever the caret is.
       await setupTestDatabase(page, "workflows-widget-escape");
       const editor = await openDocument(page, "/workspace/workflows-widget-escape", "notes.md", DOC);
       const recording = loadRecording("streaming-slow.json");

@@ -20,6 +20,7 @@ import {
   revealWidget,
   widgetMinimapExtension,
   PageLinkSuggestion,
+  type PromptWidgetsApi,
 } from "@notefig/widgets";
 import {
   closeDocumentSync,
@@ -303,6 +304,7 @@ function createMarkdownInstance(
   content: JSONContent,
   basePath: string | undefined,
   fs: EditorFs,
+  prompts: PromptWidgetsApi | undefined,
 ): MarkdownInstance {
   const workspaceRoot = basePath || getDirectoryPath(filePath);
 
@@ -325,7 +327,7 @@ function createMarkdownInstance(
     // filePath/basePath scope the widgets to this document and its
     // workspace; they also arm the prompt widget's empty-doc keeper
     // (unconfigured schema-only instances never self-insert).
-    ...widgetRendererNodes({ filePath, basePath: workspaceRoot }),
+    ...widgetRendererNodes({ filePath, basePath: workspaceRoot, prompts }),
     // "@" page links (MET-78) in ordinary prose — the complement of the
     // prompt widget's draft-scoped mention suggestion, sharing its popup.
     // The href policy is the app's (tiptap-link-utils), injected whole.
@@ -336,7 +338,7 @@ function createMarkdownInstance(
     }),
     // The document minimap rail (MET-172) — mounts its own UI inside the
     // editor's scroll container; registering it is the installation.
-    widgetMinimapExtension(),
+    widgetMinimapExtension({ prompts }),
   ];
 
   const editor = new Editor({
@@ -508,6 +510,9 @@ interface MarkdownConfig {
   /** Parsed doc JSON; may be omitted only when the editor already exists. */
   content?: JSONContent;
   basePath?: string;
+  /** Every prompt widget's state (`core.promptWidgets`), handed to the
+   *  document's widgets. Editors built without it get an inert one. */
+  prompts?: PromptWidgetsApi;
 }
 
 interface ImageConfig {
@@ -572,6 +577,7 @@ export function getOrCreateEditor(
         config.content,
         config.basePath,
         fs,
+        config.prompts,
       );
       break;
     case "image":

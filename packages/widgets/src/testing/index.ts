@@ -7,3 +7,4 @@ export {
   fakePromptWidgetHost,
   withHost,
 } from "./fake-host";
+export { testPrompts, type TestPrompts } from "./test-prompts";

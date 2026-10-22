@@ -14,7 +14,6 @@ import { agentStoreModule } from "@/modules/agents/agent-collections";
 import { agentDirectivesModule } from "@/modules/agents/agent-directives";
 import { harnessProbeModule } from "@/modules/agents/harness-probe";
 import { mockAgentModule } from "@/modules/agents/mock-harness";
-import { promptRoundObserverModule } from "@/modules/agents/round-observer";
 import { tunnelModule } from "@/modules/agents/tunnel/tunnel-module";
 import { workspaceAgentsModule } from "@/modules/agents/workspace-agents";
 import { treeInlineEditModule } from "@/modules/tree-inline-edit";
@@ -28,6 +27,7 @@ import { gitModule } from "@/modules/git";
 import { layoutModule, type UrlState } from "@/modules/layout";
 import { tabsModule } from "@/modules/tabs";
 import { promptRoundsModule } from "@/modules/prompt-rounds";
+import { promptWidgetsModule } from "@/modules/prompt-widgets";
 import { recentDocumentsModule } from "@/modules/recent-documents";
 import { scratchpadLandingModule } from "@/modules/scratchpads";
 import { scratchpadsModule } from "@/modules/scratchpads";
@@ -73,7 +73,8 @@ export function runtimeModules(): AnyModule[] {
     agentStoreModule,
     // `@model:` and `@skill:` in the composers (`core.directives`).
     agentDirectivesModule,
-    promptRoundObserverModule,
+    // Every prompt widget's state (`core.promptWidgets`).
+    promptWidgetsModule,
     mockAgentModule,
     workspaceAgentsModule,
     sharedSessionsModule,

@@ -34,7 +34,13 @@ import { Plugin } from "@tiptap/pm/state";
 import { Selection, TextSelection } from "@tiptap/pm/state";
 import { GapCursor } from "@tiptap/pm/gapcursor";
 import Suggestion from "@tiptap/suggestion";
-import { useEffect, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import { AiPromptNodeBase, PROMPT_NODE_NAME } from "./node";
 import { UI_ONLY_TRANSACTION_META } from "../define-widget";
@@ -54,11 +60,7 @@ import {
 } from "./doc-helpers";
 import type { PromptReference } from "./doc-helpers";
 import { PromptBlob } from "./ui/prompt-blob";
-import {
-  adoptPersistedPromptBinding,
-  bindPromptBlobDocument,
-  getPromptBlob,
-} from "./store";
+import { inertPromptWidgets, type PromptWidgetsApi } from "./widgets-service";
 import { promptChangeTrackingPlugin } from "./change-tracking";
 import { promptChangeGutterPlugin } from "./change-gutter";
 import {
@@ -71,12 +73,15 @@ import { dispatchComposerKey } from "./composer/key-bridge";
 import { PROMPT_MENTION_NAME } from "./composer/mention-node";
 import { readDraftNode } from "./composer/draft-text";
 import { usePromptWidgetHost } from "./host-context";
+import type { PromptWidgetHost } from "./host";
 
 export interface AiPromptNodeOptions {
   /** Absolute path of the host document (empty in schema-only contexts). */
   filePath: string;
   /** Workspace root the prompt's session is scoped to. */
   basePath: string;
+  /** Every prompt widget's state (./widgets-service.ts). */
+  prompts: PromptWidgetsApi;
 }
 
 /**
@@ -216,23 +221,28 @@ function appendPromptTr(
   return { tr, blobId };
 }
 
-function AiPromptNodeView(props: NodeViewProps) {
-  const { filePath, basePath } = props.extension.options as AiPromptNodeOptions;
-  const host = usePromptWidgetHost();
-  const blobId = (props.node.attrs.blobId as string | null) ?? null;
-  const persistedTaskId = (props.node.attrs.taskId as string | null) ?? null;
-
-  // Repair id-less instances (schema defaults survive clipboard round-trips
-  // — renderHTML doesn't carry attrs). One UI-only-ish attr write; the node
-  // view re-renders with the id and mounts the widget then.
-  const needsId = Boolean(filePath) && blobId === null;
-  useEffect(() => {
-    if (needsId) {
-      props.updateAttributes({ blobId: newPromptBlobInstanceId() });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needsId]);
-
+/**
+ * The widget's binding to its session, between the document node and the
+ * prompt service: the session the file marker carries is adopted, the
+ * widget's document is recorded, and the marker follows the service's
+ * binding from then on.
+ */
+function usePromptBinding({
+  prompts,
+  host,
+  filePath,
+  blobId,
+  persistedTaskId,
+  writeTaskId,
+}: {
+  prompts: PromptWidgetsApi;
+  host: PromptWidgetHost;
+  filePath: string;
+  blobId: string | null;
+  /** The session in the node's marker attr. */
+  persistedTaskId: string | null;
+  writeTaskId: (taskId: string | null) => void;
+}) {
   // A widget restored from the file (MET-163) carries its session in the
   // node; adopting it is what makes the widget prompt that session instead
   // of opening a new one. A session that is gone for good is discarded
@@ -261,12 +271,71 @@ function AiPromptNodeView(props: NodeViewProps) {
     let cancelled = false;
     void hostRef.current.isTaskReachable(persistedTaskId).then((reachable) => {
       if (cancelled || !reachable) return;
-      adoptPersistedPromptBinding(blobId, persistedTaskId);
+      prompts.restore(blobId, persistedTaskId);
     });
     return () => {
       cancelled = true;
     };
-  }, [filePath, blobId, persistedTaskId]);
+  }, [filePath, blobId, persistedTaskId, prompts]);
+
+  // Where this widget lives, for the app's session → widget lookups (the
+  // sidebar's "Jump"). Silent when unchanged.
+  useLayoutEffect(() => {
+    if (filePath && blobId) prompts.setDocument(blobId, filePath);
+  }, [prompts, blobId, filePath]);
+
+  // The file marker follows the widget's session: binding writes it, and
+  // unbinding (Edit, dismiss, a stale turn) takes it out of the file. On
+  // mount a binding the service already holds is written too — a send that
+  // finished while the tab was hidden had no node view to write it. The one
+  // thing a mount never does is erase: an unbound service may simply not
+  // have adopted the persisted session yet.
+  const boundTaskId = useSyncExternalStore(
+    useCallback(
+      (onChange: () => void) =>
+        blobId ? prompts.subscribe(blobId, onChange) : () => {},
+      [prompts, blobId],
+    ),
+    () => (blobId ? prompts.get(blobId).boundTaskId : null),
+  );
+  // Erasing needs an observed unbind (a session, then none) — not "no
+  // session yet" seen on a mount, which StrictMode runs twice.
+  const previous = useRef<string | null>(null);
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = boundTaskId;
+    if (boundTaskId === null && before === null) return;
+    if (persistedTaskId !== boundTaskId) writeTaskId(boundTaskId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boundTaskId]);
+}
+
+function AiPromptNodeView(props: NodeViewProps) {
+  const { filePath, basePath, prompts } = props.extension
+    .options as AiPromptNodeOptions;
+  const host = usePromptWidgetHost();
+  const blobId = (props.node.attrs.blobId as string | null) ?? null;
+  const persistedTaskId = (props.node.attrs.taskId as string | null) ?? null;
+
+  // Repair id-less instances (schema defaults survive clipboard round-trips
+  // — renderHTML doesn't carry attrs). One UI-only-ish attr write; the node
+  // view re-renders with the id and mounts the widget then.
+  const needsId = Boolean(filePath) && blobId === null;
+  useEffect(() => {
+    if (needsId) {
+      props.updateAttributes({ blobId: newPromptBlobInstanceId() });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsId]);
+
+  usePromptBinding({
+    prompts,
+    host,
+    filePath,
+    blobId,
+    persistedTaskId,
+    writeTaskId: (taskId) => props.updateAttributes({ taskId }),
+  });
 
   // The content hole must exist even before the widget is addressable
   // (id-less clipboard instances, schema-only contexts): ProseMirror
@@ -279,10 +348,6 @@ function AiPromptNodeView(props: NodeViewProps) {
       </NodeViewWrapper>
     );
   }
-
-  // Where this widget lives, for the app's session → widget lookups (the
-  // sidebar's "Jump"). Cheap and idempotent, so it simply rides the render.
-  bindPromptBlobDocument(blobId, filePath);
 
   const removeNode = (options?: {
     insertSlash?: boolean;
@@ -327,6 +392,7 @@ function AiPromptNodeView(props: NodeViewProps) {
       className="not-prose my-1"
     >
       <PromptBlob
+        prompts={prompts}
         blobId={blobId}
         workspacePath={basePath}
         documentPath={filePath}
@@ -344,7 +410,6 @@ function AiPromptNodeView(props: NodeViewProps) {
           props.updateAttributes({ reference: null, summoned: false })
         }
         removeNode={removeNode}
-        onSessionBound={(taskId) => props.updateAttributes({ taskId })}
         draft={
           props.node.firstChild ? readDraftNode(props.node.firstChild) : ""
         }
@@ -365,7 +430,7 @@ function AiPromptNodeView(props: NodeViewProps) {
  */
 export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
   addOptions() {
-    return { filePath: "", basePath: "" };
+    return { filePath: "", basePath: "", prompts: inertPromptWidgets() };
   },
 
   addNodeView() {
@@ -652,7 +717,9 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
           // Directives offer what the caret's widget's own session does.
           search: (query) => {
             const draft = selectionDraft(this.editor.state);
-            const taskId = draft ? getPromptBlob(draft.blobId).boundTaskId : null;
+            const taskId = draft
+              ? options.prompts.get(draft.blobId).boundTaskId
+              : null;
             return getMentionService(options.filePath)?.search(query, { taskId }) ?? [];
           },
           render: documentMenu(options.filePath),

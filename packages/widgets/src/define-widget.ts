@@ -33,6 +33,20 @@
  */
 import type { Node } from "@tiptap/core";
 import type { MinimapSource } from "./minimap/contract";
+import type { PromptWidgetsApi } from "./prompt/widgets-service";
+
+/**
+ * What a document's widgets are scoped to: which file they sit in, which
+ * workspace it belongs to, and the services that own their state — handed
+ * to the renderer half and the minimap alike, so the node view, its
+ * plugins and the rail all read the same state.
+ */
+export interface WidgetRendererOptions {
+  filePath: string;
+  basePath: string;
+  /** Every prompt widget's state (./prompt/widgets-service.ts). */
+  prompts: PromptWidgetsApi;
+}
 import type { EditorView } from "@tiptap/pm/view";
 
 /**
@@ -68,7 +82,7 @@ export interface EditorWidgetDefinition<Options = unknown> {
    */
   support?: {
     bases: Node[];
-    views(options: { filePath: string; basePath: string }): Node[];
+    views(options: WidgetRendererOptions): Node[];
   };
   /** Phantom, for `view.configure()`'s option type at the call site. */
   readonly options?: Options;
@@ -76,11 +90,11 @@ export interface EditorWidgetDefinition<Options = unknown> {
   codec?: WidgetMarkerCodec<unknown>;
   /**
    * The widget's presence on the document minimap (MET-172): a static
-   * entry derivation plus an optional live dot-state observer. The rail
-   * itself is generic (./minimap) and learns element types only through
-   * this slot, collected by the registry.
+   * entry derivation plus an optional live dot-state observer, built over
+   * the document's services. The rail itself is generic (./minimap) and
+   * learns element types only through this slot, collected by the registry.
    */
-  minimap?: MinimapSource;
+  minimap?: (services: Pick<WidgetRendererOptions, "prompts">) => MinimapSource;
   /**
    * What revealing an instance does once it is in view, for a widget that
    * is more than something to look at — the prompt takes the caret into its

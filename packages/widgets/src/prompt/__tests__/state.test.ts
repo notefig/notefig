@@ -7,7 +7,6 @@ import type {
   ToolCallUpdate,
 } from "@notefig/shared/agent";
 import {
-  derivePhase,
   deriveActiveToolLine,
   deriveLatestAssistantLine,
   deriveTouchedFiles,
@@ -54,64 +53,6 @@ function toolEntry(id: string, toolCall: Partial<ToolCallUpdate>): AgentEntry {
     createdAt: 0,
   };
 }
-
-describe("derivePhase", () => {
-  const base = { task: task(), hasPendingPermission: false, isSending: false };
-
-  it("covers the lifecycle", () => {
-    expect(derivePhase({ ...base, turn: undefined })).toBe("composing");
-    expect(derivePhase({ ...base, turn: undefined, isSending: true })).toBe(
-      "sending",
-    );
-    expect(derivePhase({ ...base, turn: turn({ status: "queued" }) })).toBe(
-      "queued",
-    );
-    expect(derivePhase({ ...base, turn: turn() })).toBe("running");
-    expect(derivePhase({ ...base, turn: turn({ status: "completed" }) })).toBe(
-      "done",
-    );
-    expect(derivePhase({ ...base, turn: turn({ status: "cancelled" }) })).toBe(
-      "done",
-    );
-    expect(
-      derivePhase({ ...base, turn: turn({ status: "error", error: "x" }) }),
-    ).toBe("error");
-  });
-
-  it("permission only surfaces while running", () => {
-    expect(
-      derivePhase({ ...base, turn: turn(), hasPendingPermission: true }),
-    ).toBe("needs-permission");
-    expect(
-      derivePhase({
-        ...base,
-        turn: turn({ status: "queued" }),
-        hasPendingPermission: true,
-      }),
-    ).toBe("queued");
-  });
-
-  it("auth block outranks queued/running/error but not completed", () => {
-    const authTask = task({ authRequired: true });
-    expect(
-      derivePhase({
-        ...base,
-        task: authTask,
-        turn: turn({ status: "queued" }),
-      }),
-    ).toBe("needs-auth");
-    expect(
-      derivePhase({ ...base, task: authTask, turn: turn({ status: "error" }) }),
-    ).toBe("needs-auth");
-    expect(
-      derivePhase({
-        ...base,
-        task: authTask,
-        turn: turn({ status: "completed" }),
-      }),
-    ).toBe("done");
-  });
-});
 
 describe("deriveActiveToolLine", () => {
   it("picks the latest in-flight call, labeling title and file", () => {
@@ -307,7 +248,7 @@ describe("deriveComposerKeyAction", () => {
     ).toEqual({ type: "escape" });
   });
 
-  it("Escape with a turn in flight is cancelRestore, beating revert/escape (MET-94)", () => {
+  it("Escape with a turn in flight is cancel, beating revert/escape (MET-94)", () => {
     for (const draftEmpty of [false, true]) {
       for (const canRevert of [false, true]) {
         expect(
@@ -318,7 +259,7 @@ describe("deriveComposerKeyAction", () => {
             canRevert,
             inFlight: true,
           }),
-        ).toEqual({ type: "cancelRestore" });
+        ).toEqual({ type: "cancel" });
       }
     }
   });

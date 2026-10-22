@@ -61,15 +61,13 @@ import {
 } from "../doc-helpers";
 import type { PromptReference } from "../doc-helpers";
 import { basename } from "../basename";
+import type { PromptWidget, PromptWidgetsApi } from "../widgets-service";
 import {
-  getPromptBlob,
-  updatePromptBlob,
-  clearPromptBlobTurn,
-  type PromptBlobRecord,
-  subscribePromptBlob,
-} from "../store";
+  capabilitiesOf,
+  phaseOf,
+  type WidgetCapabilities,
+} from "../machine";
 import {
-  derivePhase,
   deriveActiveToolLine,
   deriveLatestAssistantLine,
   deriveTouchedFiles,
@@ -82,30 +80,8 @@ import {
   type BlobPhase,
 } from "../state";
 
-/**
- * Which mounted widgets currently have a turn in flight, blobId → bound
- * turnId. Several widgets in one document can be in flight at once, and
- * each registers the same global Escape hotkey — the one bound to the
- * newest turn (ids are ascending, same ordering deriveQueuePosition
- * relies on) is the one Escape acts on.
- */
-const inFlightEscapeClaims = new Map<string, string>();
-
-function claimInFlightEscape(blobId: string, turnId: string): () => void {
-  inFlightEscapeClaims.set(blobId, turnId);
-  return () => {
-    inFlightEscapeClaims.delete(blobId);
-  };
-}
-
-function holdsLatestInFlightEscape(blobId: string): boolean {
-  const mine = inFlightEscapeClaims.get(blobId);
-  if (!mine) return false;
-  for (const turnId of inFlightEscapeClaims.values()) {
-    if (turnId > mine) return false;
-  }
-  return true;
-}
+/** What the face reads off a widget's record: the prompt it last sent. */
+export type PromptBlobRecord = Pick<PromptWidget, "lastSentPrompt">;
 
 /**
  * Where this widget instance sits in the document, and the three ways it may
@@ -113,8 +89,11 @@ function holdsLatestInFlightEscape(blobId: string): boolean {
  * PromptWidgetHost, which is how the widget reaches the application.
  */
 interface PromptBlobPlacement {
-  /** This widget instance's identity (the node's blobId attr) — the store
-   *  key. Documents can hold several widgets; the path is not identity. */
+  /** Every prompt widget's state; this one is `blobId`'s. */
+  prompts: PromptWidgetsApi;
+  /** This widget instance's identity (the node's blobId attr) — the
+   *  service key. Documents can hold several widgets; the path is not
+   *  identity. */
   blobId: string;
   workspacePath: string;
   documentPath: string;
@@ -145,10 +124,6 @@ interface PromptBlobPlacement {
     restoreParagraph?: boolean;
     restoreCaret?: boolean;
   }) => void;
-  /** Record which agent session this widget's round belongs to on the
-   *  document node, so it survives a re-parse and app restarts (MET-163).
-   *  Provided by the node view, which owns the node's attributes. */
-  onSessionBound?: (taskId: string) => void;
   /** The draft's current text, read off the node by the view. */
   draft?: string;
   /** The widget's content hole — the draft the user types, as document
@@ -169,7 +144,12 @@ interface PromptBlobPlacement {
  * discipline the rest of these actions already follow — a widget can be
  * moved, adopted, or re-parsed between a render and a callback firing.
  */
-function useDraftIO(editor: Editor, blobId: string, workspacePath: string) {
+function useDraftIO(
+  prompts: PromptWidgetsApi,
+  editor: Editor,
+  blobId: string,
+  workspacePath: string,
+) {
   const host = usePromptWidgetHost();
   return useMemo(() => {
     const range = () => promptDraftRange(editor.state.doc, blobId);
@@ -183,7 +163,7 @@ function useDraftIO(editor: Editor, blobId: string, workspacePath: string) {
     const write = (text: string) => {
       const found = range();
       if (!found) return;
-      const taskId = getPromptBlob(blobId).boundTaskId;
+      const taskId = prompts.get(blobId).boundTaskId;
       const isPath = hostIsMention(host, { workspacePath, taskId });
       const tr = editor.state.tr.replaceWith(
         found.from,
@@ -209,7 +189,7 @@ function useDraftIO(editor: Editor, blobId: string, workspacePath: string) {
         .run();
     };
     return { read, write, holdsCaret, focus };
-  }, [editor, blobId, host, workspacePath]);
+  }, [prompts, editor, blobId, host, workspacePath]);
 }
 
 export type DraftIO = ReturnType<typeof useDraftIO>;
@@ -229,30 +209,28 @@ export type DraftIO = ReturnType<typeof useDraftIO>;
  */
 export async function resolvePromptTarget(
   host: PromptWidgetHost,
-  blobId: string,
+  bound: string | null,
   workspacePath: string,
 ): Promise<string> {
-  const bound = getPromptBlob(blobId).boundTaskId;
   if (bound && (await host.isTaskReachable(bound))) return bound;
   return host.startOrGetSharedSession(workspacePath);
 }
 
 /**
- * The live rows behind one widget's bound round, and the phase they add up
- * to. Sentinel ids keep the queries unconditional: an unbound widget still
- * runs them, matching nothing.
+ * The live rows behind one widget's bound round, for what the card shows
+ * from the transcript. Sentinel ids keep the queries unconditional: an
+ * unbound widget still runs them, matching nothing. The phase is not
+ * derived here — it is the service's state.
  */
 function usePromptBlobRound({
   boundTurnId,
   boundTaskId,
-  isSending,
 }: {
   boundTurnId: string | null;
   boundTaskId: string | null;
-  isSending: boolean;
 }) {
   const host = usePromptWidgetHost();
-  const { turn, task, entries, taskTurns, pendingPermissions } = host.useRound({
+  const { turn, task, entries, taskTurns } = host.useRound({
     turnId: boundTurnId,
     taskId: boundTaskId,
   });
@@ -260,19 +238,7 @@ function usePromptBlobRound({
     () => sortEntriesChronologically(entries),
     [entries],
   );
-
-  return {
-    turn,
-    task,
-    sortedEntries,
-    taskTurns,
-    phase: derivePhase({
-      turn,
-      task,
-      hasPendingPermission: pendingPermissions.length > 0,
-      isSending,
-    }) as BlobPhase,
-  };
+  return { turn, task, sortedEntries, taskTurns };
 }
 
 /**
@@ -336,67 +302,41 @@ function usePromptBlobDisplay({
 }
 
 /**
- * Escape anywhere cancels this widget's in-flight turn and restores the
- * prompt into the composer (MET-94). A global hotkey, not a card-level
- * keydown: after send the composer unmounts and focus returns to the
- * document, so no element inside the widget could hear the key. The dock
- * unmounting unselected tabs scopes it to the visible document for free;
- * "sending" is excluded (nothing to cancel yet — the dispatch is still
- * racing the session spawn, a sub-second window).
+ * Escape anywhere stops this widget's agent (MET-248). A global hotkey, not
+ * a card-level keydown: once a prompt is sent the caret is usually back in
+ * the document, where no element inside the widget hears the key. Among the
+ * mounted widgets (the dock unmounts unselected tabs; split panes each
+ * mount theirs) the one holding the newest turn acts.
  */
 function useInFlightEscape({
+  prompts,
   blobId,
-  phase,
-  boundTurnId,
-  cancelAndRestore,
+  stoppable,
+  stop,
 }: {
+  prompts: PromptWidgetsApi;
   blobId: string;
-  phase: BlobPhase;
-  boundTurnId: string | null;
-  cancelAndRestore: () => void;
+  stoppable: boolean;
+  stop: () => void;
 }) {
-  const inFlight =
-    phase === "queued" ||
-    phase === "running" ||
-    phase === "needs-permission" ||
-    phase === "needs-auth";
-  useEffect(() => {
-    if (!inFlight || !boundTurnId) return;
-    return claimInFlightEscape(blobId, boundTurnId);
-  }, [inFlight, boundTurnId, blobId]);
+  useEffect(() => prompts.claimEscape(blobId), [prompts, blobId]);
   useHotkey(
     "Escape",
     (event) => {
       // A layer that consumed the key (dialog/menu dismissal) wins.
       if (event.defaultPrevented) return;
-      if (!holdsLatestInFlightEscape(blobId)) return;
-      cancelAndRestore();
+      if (!prompts.isNewestStoppable(blobId)) return;
+      stop();
+      // Consumed: the key did its one job, nothing behind it acts too.
+      event.preventDefault();
     },
     // 'allow': several widgets can legitimately hold this registration;
-    // the latest-sent claim decides which one acts.
-    { enabled: inFlight, conflictBehavior: "allow" },
+    // the newest turn decides which one acts. preventDefault: false — the
+    // library's default calls preventDefault() BEFORE this callback, which
+    // the defaultPrevented check above would then read as another layer
+    // having consumed the key, and the widget would never stop.
+    { enabled: stoppable, conflictBehavior: "allow", preventDefault: false },
   );
-}
-
-/**
- * Stale bound turn (app restart / task disposed): rows are gone — unbind and
- * fall back to composing instead of rendering a dead shell.
- */
-function useStaleTurnReset({
-  blobId,
-  boundTurnId,
-  isSending,
-  hasTurn,
-}: {
-  blobId: string;
-  boundTurnId: string | null;
-  isSending: boolean;
-  hasTurn: boolean;
-}) {
-  const isStale = boundTurnId !== null && !isSending && !hasTurn;
-  useEffect(() => {
-    if (isStale) clearPromptBlobTurn(blobId);
-  }, [isStale, blobId]);
 }
 
 /**
@@ -485,37 +425,36 @@ function usePromptBlobFocus({
 function useComposerKeys({
   blobId,
   documentPath,
-  draft,
   draftIO,
-  canRevert,
+  capabilities,
+  composing,
   actions,
 }: {
   blobId: string;
   documentPath: string;
-  draft: string;
   draftIO: DraftIO;
-  canRevert: boolean;
+  capabilities: WidgetCapabilities;
+  /** A fresh prompt, as opposed to a reply under a settled round. */
+  composing: boolean;
   actions: Pick<
     PromptBlobFaceActions,
     | "send"
     | "sendFollowUp"
+    | "stop"
     | "escapeToEditor"
     | "revertToSlash"
     | "backspaceDismiss"
-  > & { replying: boolean };
+  >;
 }) {
-  const latest = useRef({ draftIO, canRevert, actions });
-  latest.current = { draftIO, canRevert, actions };
+  const latest = useRef({ draftIO, capabilities, composing, actions });
+  latest.current = { draftIO, capabilities, composing, actions };
 
   useEffect(
     () =>
       registerComposerKeyHandler(blobId, (input) => {
         if (mentionPopupHasResults(documentPath)) return false;
-        const {
-          draftIO: io,
-          canRevert: revertable,
-          actions: live,
-        } = latest.current;
+        const { draftIO: io, capabilities: can, composing: fresh, actions: live } =
+          latest.current;
         // Read the draft off the live document, per useDraftIO's own
         // discipline — the render snapshot can trail the document, and a
         // stale "empty" here would dismiss the widget on the very keypress
@@ -526,19 +465,18 @@ function useComposerKeys({
           shiftKey: input.shiftKey,
           draftEmpty: text.trim().length === 0,
           // Reverting to "/" belongs to a summoned widget that has never
-          // been sent; dismissal to any removable one. A reply row (a
-          // widget showing its round) gets neither.
-          canRevert: revertable && !live.replying,
-          canDismiss: live.backspaceDismiss !== undefined && !live.replying,
-          // Escape mid-turn is a global hotkey with its own claim map
-          // (useInFlightEscape) — it must not be resolved twice.
-          inFlight: false,
+          // been sent; Backspace-dismiss to a fresh composer. A reply row
+          // (a widget showing its round) gets neither, and nothing while
+          // the agent works.
+          canRevert: can.escape === "revert" && live.revertToSlash !== undefined,
+          canDismiss: fresh && live.backspaceDismiss !== undefined,
+          inFlight: can.escape === "stop",
         });
         if (action.type === "none") return false;
         if (action.type === "send") {
-          if (live.replying) void live.sendFollowUp();
-          else void live.send();
-        } else if (action.type === "revert") live.revertToSlash?.();
+          if (can.fieldEditable) void (fresh ? live.send() : live.sendFollowUp());
+        } else if (action.type === "cancel") live.stop();
+        else if (action.type === "revert") live.revertToSlash?.();
         else if (action.type === "backspaceDismiss") live.backspaceDismiss?.();
         else live.escapeToEditor();
         return true;
@@ -886,10 +824,10 @@ function SettledState({
  * auth and permission prompts, and the touched-documents summary — so the
  * chat tab is optional, opened only from the done-state affordance.
  *
- * State lives in prompt-blob-store (module-level, per document path): the
- * dock unmounts unselected tabs, and a running turn must survive that.
- * Turns queue into the shared per-workspace session (blob-session-store);
- * each widget watches only its own bound turnId.
+ * State lives in the prompt service (../widgets-service.ts), keyed by the
+ * widget's blobId: the dock unmounts unselected tabs, and a running turn
+ * must survive that. Turns queue into the shared per-workspace session;
+ * each widget watches only its own bound turn.
  */
 /** One click from any bound phase to the session's full transcript
  *  (MET-104) — the done face has its own copy of this in DoneState. */
@@ -902,49 +840,56 @@ function openBoundChatAction(
 }
 
 /**
- * Everything the face needs, assembled from the store, the collections and
- * the action hooks. Splitting it out keeps the component itself a container
- * in the literal sense — one hook call and one element — and gives the
- * widget's wiring a name of its own.
+ * Everything the face needs, assembled from the widget's state, the
+ * collections and the action hooks. Splitting it out keeps the component
+ * itself a container in the literal sense — one hook call and one element —
+ * and gives the widget's wiring a name of its own.
  */
 function usePromptBlobModel(placement: PromptBlobPlacement) {
-  const { blobId, workspacePath, documentPath, editor, getPos } = placement;
+  const { prompts, blobId, workspacePath, documentPath, editor, getPos } =
+    placement;
   const host = usePromptWidgetHost();
-  const record = useSyncExternalStore(
-    useCallback((cb) => subscribePromptBlob(blobId, cb), [blobId]),
-    () => getPromptBlob(blobId),
+  const widget = useSyncExternalStore(
+    useCallback((cb) => prompts.subscribe(blobId, cb), [prompts, blobId]),
+    () => prompts.get(blobId),
   );
-  const { boundTurnId, boundTaskId } = record;
-  // The draft is document content now, so it arrives as a prop from the
-  // node view (which re-renders on every document change) rather than from
-  // the store. `draftIO` is how the actions write it back.
+  const { boundTurnId, boundTaskId, state } = widget;
+  const phase = phaseOf(state);
+  const capabilities = capabilitiesOf(state, {
+    summoned: placement.summoned === true,
+  });
+  // The draft is document content, so it arrives as a prop from the node
+  // view (which re-renders on every document change) rather than from the
+  // service. `draftIO` is how the actions write it back.
   const draft = placement.draft ?? "";
   const reference = placement.reference ?? null;
-  const draftIO = useDraftIO(editor, blobId, workspacePath);
+  const draftIO = useDraftIO(prompts, editor, blobId, workspacePath);
 
   const { label: harnessLabel } = host.useDefaultHarness();
-  const { isSending, confirmTrust, cancelAndRestore, ...actions } =
-    usePromptBlobActions({
-      blobId,
-      workspacePath,
-      documentPath,
-      editor,
-      getPos,
-      summoned: placement.summoned === true,
-      reference,
-      removeNode: placement.removeNode,
-      onSessionBound: placement.onSessionBound,
-      draftIO,
-    });
-
-  const { turn, task, sortedEntries, taskTurns, phase } = usePromptBlobRound({
-    boundTurnId,
-    boundTaskId,
-    isSending,
+  const actions = usePromptBlobActions({
+    prompts,
+    blobId,
+    workspacePath,
+    documentPath,
+    editor,
+    getPos,
+    summoned: placement.summoned === true,
+    reference,
+    removeNode: placement.removeNode,
+    draftIO,
   });
 
-  useInFlightEscape({ blobId, phase, boundTurnId, cancelAndRestore });
-  useStaleTurnReset({ blobId, boundTurnId, isSending, hasTurn: Boolean(turn) });
+  const { turn, task, sortedEntries, taskTurns } = usePromptBlobRound({
+    boundTurnId,
+    boundTaskId,
+  });
+
+  useInFlightEscape({
+    prompts,
+    blobId,
+    stoppable: capabilities.escape === "stop",
+    stop: actions.stop,
+  });
   const escapeToEditor = usePromptBlobFocus({
     blobId,
     editor,
@@ -966,28 +911,24 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
   useComposerKeys({
     blobId,
     documentPath,
-    draft,
     draftIO,
-    canRevert: actions.revertToSlash !== undefined,
-    actions: {
-      ...actions,
-      escapeToEditor,
-      replying: phase === "done" || phase === "error",
-    },
+    capabilities,
+    composing: state.name === "composing",
+    actions: { ...actions, escapeToEditor },
   });
 
   const openBoundChat = openBoundChatAction(host, boundTaskId);
 
   return {
     phase,
-    record,
+    record: widget,
     turn,
     task,
     boundTaskId,
     workspacePath,
     trustName: harnessLabel,
-    confirmTrust,
-    isSending,
+    confirmTrust: state.name === "composing" && state.confirmingTrust,
+    isSending: state.name === "sending",
     display,
     draft,
     draftIO,
@@ -1012,60 +953,36 @@ export const PromptBlob = memo(function PromptBlob(
 });
 
 /**
- * The shared first half of Stop and Escape-cancel: resolve the widget's
- * bound round, and when it's still queued withdraw it (which returns the
- * prompt text to the composing face — not an empty box, MET-94). Returns
- * the bound task for the caller's running-turn handling, or null when
- * there was nothing left to act on (unbound, or withdrawn here).
- */
-function withdrawIfQueued(
-  host: PromptWidgetHost,
-  blobId: string,
-  restorePromptToDraft: () => void,
-): { taskId: string } | null {
-  const { boundTaskId, boundTurnId } = getPromptBlob(blobId);
-  if (!boundTaskId || !boundTurnId) return null;
-  if (host.getTurnStatus(boundTurnId) === "queued") {
-    host.removeQueuedPrompt(boundTaskId, boundTurnId);
-    restorePromptToDraft();
-    return null;
-  }
-  return { taskId: boundTaskId };
-}
-
-/**
- * The widget's send paths (round one + reply), split out of
- * usePromptBlobActions so each hook stays readable: this one owns the
- * trust gate, the in-flight flag, and the prompt dispatch; the parent
- * composes it with the withdraw/restore/dismiss actions.
+ * The widget's send paths (round one + reply). The service runs the state
+ * machine through `sending` and binds what the dispatch returns; this hook
+ * owns what only the face knows — the trust gate, the draft, and where in
+ * the document the prompt was sent from.
  */
 function usePromptSendActions({
+  prompts,
   blobId,
   workspacePath,
   documentPath,
   editor,
   getPos,
-  onSessionBound,
   draftIO,
 }: {
+  prompts: PromptWidgetsApi;
   blobId: string;
   workspacePath: string;
   documentPath: string;
   editor: Editor;
   getPos?: () => number | undefined;
-  onSessionBound?: (taskId: string) => void;
   draftIO: DraftIO;
 }) {
   const { t } = useTranslation();
   const host = usePromptWidgetHost();
   const trust = host.useTrust(workspacePath);
-  const [isSending, setIsSending] = useState(false);
-  const [confirmTrust, setConfirmTrust] = useState(false);
 
   // The one prompt dispatch both send paths share: they differ only in
-  // which task they target and whether the rebind captures it. The
-  // widget-context facts are read fresh on every call — a reply may follow
-  // a round that filled the doc or moved the node.
+  // which task they target. The widget-context facts are read fresh on
+  // every call — a reply may follow a round that filled the doc or moved
+  // the node.
   const dispatchPrompt = useCallback(
     (taskId: string, text: string) => {
       const doc = editor.state.doc;
@@ -1098,90 +1015,67 @@ function usePromptSendActions({
 
   const send = useCallback(async () => {
     const text = draftIO.read().trim();
-    if (!text || isSending) return;
+    if (!text) return;
     if (!host.ensureRuntime()) return;
-    if (!trust.isTrusted && !confirmTrust) {
-      setConfirmTrust(true);
+    const { state } = prompts.get(blobId);
+    const confirming = state.name === "composing" && state.confirmingTrust;
+    if (!trust.isTrusted && !confirming) {
+      prompts.askTrust(blobId);
       return;
     }
-    if (confirmTrust) {
+    if (confirming) {
       trust.grant();
-      setConfirmTrust(false);
+      prompts.answerTrust(blobId);
     }
-    setIsSending(true);
-    try {
-      const taskId = await resolvePromptTarget(host, blobId, workspacePath);
-      const turnId = dispatchPrompt(taskId, text);
-      updatePromptBlob(blobId, {
-        boundTurnId: turnId,
-        boundTaskId: taskId,
-        lastSentPrompt: text,
-      });
-      draftIO.write("");
-      // The widget is now part of the document's meaning, not just its UI:
-      // record the session on the node so the next save writes its marker
-      // (MET-163) and an agent write mid-round can't take it away.
-      onSessionBound?.(taskId);
-    } catch (error) {
-      console.error("Prompt blob send failed:", error);
-    } finally {
-      setIsSending(false);
-    }
-  }, [
-    host,
-    blobId,
-    isSending,
-    trust,
-    confirmTrust,
-    workspacePath,
-    dispatchPrompt,
-    onSessionBound,
-    draftIO,
-  ]);
+    const sent = await prompts.send(blobId, text, async () => {
+      const taskId = await resolvePromptTarget(
+        host,
+        prompts.get(blobId).boundTaskId,
+        workspacePath,
+      );
+      return { taskId, turnId: dispatchPrompt(taskId, text) };
+    });
+    if (sent) draftIO.write("");
+  }, [prompts, host, blobId, trust, workspacePath, dispatchPrompt, draftIO]);
 
   // Reply (MET-92): continue the conversation on the BOUND task — never the
   // shared session, which the picker may have re-targeted since this
-  // widget's first round. A new FIFO turn on the same ACP session; the
-  // rebind below is the whole "replace the round behind the scenes". No
+  // widget's first round. A new FIFO turn on the same ACP session. No
   // trust gate: round one already required it for this workspace.
   const sendFollowUp = useCallback(async () => {
     const text = draftIO.read().trim();
-    const taskId = getPromptBlob(blobId).boundTaskId;
-    if (!text || isSending || !taskId) return;
+    const taskId = prompts.get(blobId).boundTaskId;
+    if (!text || !taskId) return;
     if (!host.ensureRuntime()) return;
     // dispatchPrompt is infallible by contract: a missing task mints a
-    // turnId with no row, and binding to it would trip the stale-turn reset
-    // — silently wiping this reply. Check first; on a dead task keep the
+    // turnId whose row never appears. Check first; on a dead task keep the
     // draft and fall back to composing (re-send starts a fresh session).
     // Reachable covers a session that is merely asleep: a widget restored
     // from the document (MET-163) has no runtime until this prompt revives
     // it via session/load, which is exactly the point of persisting it.
     if (!(await host.isTaskReachable(taskId))) {
       toast(t("promptBlobSessionGone"));
-      clearPromptBlobTurn(blobId);
+      prompts.unbind(blobId);
       return;
     }
-    setIsSending(true);
-    try {
-      const turnId = dispatchPrompt(taskId, text);
-      updatePromptBlob(blobId, { boundTurnId: turnId, lastSentPrompt: text });
-      draftIO.write("");
-    } finally {
-      setIsSending(false);
-    }
-  }, [host, blobId, isSending, dispatchPrompt, t, draftIO]);
+    const sent = await prompts.send(blobId, text, async () => ({
+      taskId,
+      turnId: dispatchPrompt(taskId, text),
+    }));
+    if (sent) draftIO.write("");
+  }, [prompts, host, blobId, dispatchPrompt, t, draftIO]);
 
-  return { isSending, confirmTrust, send, sendFollowUp };
+  return { send, sendFollowUp };
 }
 
 /**
  * The widget's imperative actions, extracted from PromptBlob so the
- * component body stays layout + phase branching (the callbacks were the
- * bulk of its size). Every callback reads the module store / collections at
- * call time rather than closing over live-query rows, so the hook needs no
- * reactive inputs and its callbacks stay stable across phase changes.
+ * component body stays layout + phase branching. Every callback reads the
+ * service and the document at call time rather than closing over render
+ * values, so the callbacks stay stable across state changes.
  */
 function usePromptBlobActions({
+  prompts,
   blobId,
   workspacePath,
   documentPath,
@@ -1190,7 +1084,6 @@ function usePromptBlobActions({
   summoned,
   reference,
   removeNode,
-  onSessionBound,
   draftIO,
 }: PromptBlobPlacement & {
   summoned: boolean;
@@ -1198,79 +1091,53 @@ function usePromptBlobActions({
   draftIO: DraftIO;
 }) {
   const host = usePromptWidgetHost();
-  const { isSending, confirmTrust, send, sendFollowUp } = usePromptSendActions({
+  const { send, sendFollowUp } = usePromptSendActions({
+    prompts,
     blobId,
     workspacePath,
     documentPath,
     editor,
     getPos,
-    onSessionBound,
     draftIO,
   });
 
-  // Unbind and pull the sent prompt back into the composer, then focus it.
-  // A draft already being typed (a half-written reply) always wins over the
-  // restored prompt. Shared by Edit, Escape-cancel, and queued-Stop.
+  // Unbind and pull the sent prompt back into the composer, caret at its
+  // end. A draft already being typed (a half-written reply) always wins
+  // over the restored prompt. Shared by Edit and a withdrawn queued turn.
   const restorePromptToDraft = useCallback(() => {
-    const current = getPromptBlob(blobId);
-    updatePromptBlob(blobId, { boundTurnId: null, boundTaskId: null });
-    // The write puts the caret at the end of the restored prompt, so the
-    // old rAF-and-focus-the-composer dance is gone with it.
-    draftIO.write(draftIO.read() || current.lastSentPrompt);
-  }, [blobId, draftIO]);
+    const { lastSentPrompt } = prompts.get(blobId);
+    prompts.unbind(blobId);
+    draftIO.write(draftIO.read() || lastSentPrompt);
+  }, [prompts, blobId, draftIO]);
 
   // Edit: pull the sent prompt back into the composer. A queued turn is
   // withdrawn; a running/finished one keeps going — re-send is a new turn.
   const editPrompt = useCallback(() => {
-    const { boundTaskId, boundTurnId } = getPromptBlob(blobId);
-    if (
-      boundTaskId &&
-      boundTurnId &&
-      host.getTurnStatus(boundTurnId) === "queued"
-    ) {
-      host.removeQueuedPrompt(boundTaskId, boundTurnId);
-    }
+    prompts.withdraw(blobId, host);
     restorePromptToDraft();
-  }, [host, blobId, restorePromptToDraft]);
+  }, [prompts, host, blobId, restorePromptToDraft]);
 
   // Retry: pull the failed prompt back into the composer and immediately
-  // re-send it, no re-typing required. editPrompt writes the restored draft
-  // into the module-level store synchronously, so send() (which reads the
-  // draft at call time) sees it right away.
+  // re-send it, no re-typing required.
   const retry = useCallback(() => {
     editPrompt();
     void send();
   }, [editPrompt, send]);
 
+  // Stop (the button, and Escape while the agent works): a queued turn is
+  // withdrawn and its prompt comes back to the composer; a running one is
+  // cancelled and the widget stays on its round, which settles as Stopped.
   const stop = useCallback(() => {
-    const running = withdrawIfQueued(host, blobId, restorePromptToDraft);
-    if (running) host.cancelTask(running.taskId);
-  }, [host, blobId, restorePromptToDraft]);
-
-  // Escape while in flight (MET-94): cancel the turn and — when the agent
-  // hadn't responded yet — return to the composing face with the prompt
-  // restored, its round forgotten (the restored prompt must not also
-  // linger in the history it was pulled out of). Once a response exists
-  // the round is real: forgetting it would hide context the session still
-  // holds, so Escape then degrades to Stop (stay bound, "Stopped" done
-  // face, no restore — the prompt is right there in the round). A queued
-  // turn is withdrawn, which already deletes its rows.
-  const cancelAndRestore = useCallback(() => {
-    const running = withdrawIfQueued(host, blobId, restorePromptToDraft);
-    if (running) {
-      void host.cancelTurnAndForget(running.taskId).then((forgot) => {
-        if (forgot) restorePromptToDraft();
-      });
-    }
-  }, [host, blobId, restorePromptToDraft]);
+    if (prompts.stop(blobId, host) === "withdrawn") restorePromptToDraft();
+  }, [prompts, host, blobId, restorePromptToDraft]);
 
   // In a doc with real content the widget is transient — ✕ removes the
   // node outright. In an empty doc removal is pointless (the keeper would
   // reinsert), so just reset to composing.
   const dismiss = useCallback(() => {
-    clearPromptBlobTurn(blobId);
+    prompts.unbind(blobId);
     if (removeNode && docHasRealContent(editor.state.doc)) removeNode();
-  }, [blobId, removeNode, editor]);
+  }, [prompts, blobId, removeNode, editor]);
 
   // The revert half of the "/" summon: Esc or a second "/" while the
   // composer is still empty turns the widget back into a literal "/". A
@@ -1314,21 +1181,17 @@ function usePromptBlobActions({
   const rebindSession = useCallback(
     (taskId: string) => {
       host.adoptSession(workspacePath, taskId);
-      updatePromptBlob(blobId, { boundTaskId: taskId, boundTurnId: null });
-      onSessionBound?.(taskId);
+      prompts.rebind(blobId, taskId);
     },
-    [host, blobId, workspacePath, onSessionBound],
+    [prompts, host, blobId, workspacePath],
   );
 
   return {
-    isSending,
-    confirmTrust,
     send,
     sendFollowUp,
     editPrompt,
     retry,
     stop,
-    cancelAndRestore,
     dismiss,
     revertToSlash,
     backspaceDismiss,

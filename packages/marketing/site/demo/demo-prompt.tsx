@@ -426,12 +426,7 @@ function PromptFace({
     <div className="relative">
       <PromptBlobFace
         phase={state.phase}
-        record={{
-          boundTurnId: binding.turnId,
-          boundTaskId: binding.taskId,
-          lastSentPrompt: prompt,
-          documentPath: DOC_PATH,
-        }}
+        record={{ lastSentPrompt: prompt }}
         turn={binding.turn}
         task={undefined}
         boundTaskId={binding.taskId}
