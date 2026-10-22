@@ -510,6 +510,46 @@ describe("deleting and selecting a widget", () => {
     expect(prompts.prompts.get(blobId).state.name).toBe("settled");
   });
 
+  it("typing over widgets puts the text in the document, never in the next widget", async () => {
+    prompts = testPrompts();
+    host = fakePromptWidgetHost();
+    const editor = await mount(
+      ["blob_a", "blob_b", "blob_c"]
+        .map((id) => `<div data-type="ai-prompt" data-blob-id="${id}"></div>`)
+        .join("") + "<p>after</p>",
+    );
+    const { TextSelection } = await import("@tiptap/pm/state");
+    const positions: number[] = [];
+    editor.state.doc.forEach((node, offset) => {
+      if (node.type.name === "aiPrompt") positions.push(offset);
+    });
+    const second = editor.state.doc.nodeAt(positions[1])!;
+    await act(async () => {
+      // From the first widget's draft start to the second's draft end.
+      editor.view.dispatch(
+        editor.state.tr.setSelection(
+          TextSelection.create(
+            editor.state.doc,
+            positions[0] + 2,
+            positions[1] + second.nodeSize - 2,
+          ),
+        ),
+      );
+      expect(typeText(editor, "x")).toBe(true);
+      await tick();
+    });
+    const blocks: string[] = [];
+    editor.state.doc.forEach((node) =>
+      blocks.push(
+        node.type.name === "aiPrompt"
+          ? `[${node.attrs.blobId}:${node.textContent}]`
+          : node.textContent,
+      ),
+    );
+    expect(blocks).toEqual(["x", "[blob_c:]", "after"]);
+    expect(selectionDraft(editor.state)).toBeNull();
+  });
+
   it("a working widget opening the document stays under a select-all delete", async () => {
     const { editor, blobId } = await topWidgetUnderSelectAll("running");
     await press(editor, "Delete");

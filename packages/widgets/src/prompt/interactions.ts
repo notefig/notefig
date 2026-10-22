@@ -177,15 +177,49 @@ function rangeOverWidgets(
   return from === selection.from && to === selection.to ? null : { from, to };
 }
 
-/** Typing over such a range: the same widening, the text in its place. */
+/** Typing over such a range: the same widening, the text in its place —
+ *  in the document, never in a widget the delete left next to it. */
 function typeOverWidgets(view: EditorView, text: string): boolean {
   const range = rangeOverWidgets(view.state);
   if (!range) return false;
   const tr = view.state.tr.delete(range.from, range.to);
-  const $at = tr.doc.resolve(tr.mapping.map(range.from));
-  tr.setSelection(TextSelection.near($at)).insertText(text);
+  const caret = insertDocumentText(tr, tr.mapping.map(range.from), text);
+  tr.setSelection(TextSelection.create(tr.doc, caret));
   view.dispatch(tr.scrollIntoView());
   return true;
+}
+
+/** Insert `text` at `pos` in a document text block: the one `pos` is in,
+ *  or a new paragraph there when it's between blocks. Returns the
+ *  position after the text. */
+function insertDocumentText(tr: Transaction, pos: number, text: string): number {
+  const $at = tr.doc.resolve(pos);
+  let depth = 0;
+  while (depth < $at.depth && $at.node(depth + 1).type.name !== PROMPT_NODE_NAME) {
+    depth++;
+  }
+  if (depth === $at.depth && $at.parent.inlineContent) {
+    tr.insertText(text, pos);
+    return pos + text.length;
+  }
+  // Between blocks at `depth` — before the widget `pos` was inside, if any.
+  const at = depth === $at.depth ? pos : $at.before(depth + 1);
+  const $between = tr.doc.resolve(at);
+  // Into a text block right there (the one a delete left behind, say)...
+  const after = $between.nodeAfter;
+  if (after?.isTextblock) {
+    tr.insertText(text, at + 1);
+    return at + 1 + text.length;
+  }
+  const before = $between.nodeBefore;
+  if (before?.isTextblock) {
+    tr.insertText(text, at - 1);
+    return at - 1 + text.length;
+  }
+  // ...or a paragraph of its own.
+  const { schema } = tr.doc.type;
+  tr.insert(at, schema.nodes.paragraph.create(null, schema.text(text)));
+  return at + 1 + text.length;
 }
 
 /**
