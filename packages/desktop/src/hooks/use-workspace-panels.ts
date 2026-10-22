@@ -66,6 +66,8 @@ export interface WorkspacePanels {
   }) => void;
   /** Mod+Shift+A — the agent sessions menu in the left sidebar. */
   openSessionsSidebar: () => void;
+  /** Mod+Shift+U — open the settings modal scrolled to Usage. */
+  openUsageSettings: () => void;
 }
 
 /** Open the settings modal — a URL param, so it works with or without a
@@ -159,6 +161,17 @@ export function useWorkspacePanels({
 
   const openSettings = useOpenSettings();
 
+  const openUsageSettings = useCallback(() => {
+    setUrlSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("settings", "usage");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setUrlSearchParams]);
+
   const openSearchPanel = useCallback(
     (options?: { filePattern?: string; initialQuery?: string }) => {
       showSidebarView("search");
@@ -197,5 +210,6 @@ export function useWorkspacePanels({
     showWorkspaceTools,
     openSearchPanel,
     openSessionsSidebar,
+    openUsageSettings,
   };
 }

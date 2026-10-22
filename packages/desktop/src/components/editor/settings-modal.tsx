@@ -123,6 +123,10 @@ export function SettingsModal({
     setSectionParam(isSettingsOpen ? null : DEFAULT_SETTINGS_SECTION);
   });
 
+  useHotkey({ key: "u", mod: true, shift: true }, () => {
+    setSectionParam("usage");
+  });
+
   // URL -> scroll, on entry only: opening the modal, or a section arriving in
   // the URL from outside, jumps there. Deliberately not re-run on `activeId`:
   // a smooth scroll reports every section it passes, and re-scrolling to the

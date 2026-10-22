@@ -30,6 +30,7 @@ let feedback: FeedbackApi;
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 const openFile = vi.fn().mockReturnValue(true);
+const openUsageSettings = vi.fn();
 
 function renderPalette() {
   container = document.createElement("div");
@@ -49,6 +50,7 @@ function renderPalette() {
               open: true,
               workspacePath: WS,
               onOpenChange: vi.fn(),
+              onOpenUsageSettings: openUsageSettings,
             }),
           }),
         }),
@@ -83,18 +85,16 @@ beforeEach(async () => {
   vi.clearAllMocks();
   openFile.mockReturnValue(true);
   adapter.getMetadata.mockResolvedValue({ succeeded: [], failed: [] });
-  adapter.readDirectory.mockImplementation(
-    async () => ({
-      ok: true,
-      value: [
-        { path: `${WS}/archive`, type: "directory" as const },
-        { path: `${WS}/notes.md`, type: "file" as const },
-        { path: `${WS}/archive/old-notes.md`, type: "file" as const },
-        { path: `${WS}/theme.md`, type: "file" as const },
-        { path: `${WS}/binary.bin`, type: "file" as const },
-      ],
-    }),
-  );
+  adapter.readDirectory.mockImplementation(async () => ({
+    ok: true,
+    value: [
+      { path: `${WS}/archive`, type: "directory" as const },
+      { path: `${WS}/notes.md`, type: "file" as const },
+      { path: `${WS}/archive/old-notes.md`, type: "file" as const },
+      { path: `${WS}/theme.md`, type: "file" as const },
+      { path: `${WS}/binary.bin`, type: "file" as const },
+    ],
+  }));
 
   files = testWorkspaceFiles(WS, adapter);
   // The settings the palette reads persist through the kv store over the
@@ -188,5 +188,21 @@ describe("CommandPalette help commands", () => {
       item.click();
     });
     expect(feedback.isOpen()).toBe(true);
+  });
+});
+
+describe("CommandPalette settings commands", () => {
+  it("opens usage settings from the Open Usage command", async () => {
+    renderPalette();
+    await act(async () => {});
+    await typeQuery("usage");
+    const item = [...document.querySelectorAll("[cmdk-item]")].find((el) =>
+      (el.textContent ?? "").includes("Open Usage"),
+    ) as HTMLElement;
+    expect(item).toBeTruthy();
+    await act(async () => {
+      item.click();
+    });
+    expect(openUsageSettings).toHaveBeenCalled();
   });
 });

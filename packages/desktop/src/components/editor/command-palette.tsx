@@ -20,6 +20,7 @@ import {
   X,
   Home,
   MessageSquare,
+  BarChart3,
 } from "lucide-react";
 import {
   Command,
@@ -63,6 +64,7 @@ interface CommandPaletteProps {
   onUndo?: () => void;
   onRedo?: () => void;
   onOpenSettings?: () => void;
+  onOpenUsageSettings?: () => void;
   onToggleSidebar?: () => void;
   onToggleFullscreen?: () => void | Promise<void>;
   onSearchInFile?: () => void;
@@ -179,6 +181,7 @@ export function CommandPalette({
   onUndo,
   onRedo,
   onOpenSettings,
+  onOpenUsageSettings,
   onToggleSidebar,
   onToggleFullscreen,
   onSearchInFile,
@@ -349,6 +352,15 @@ export function CommandPalette({
       icon: Settings,
       shortcut: formatForDisplay("Mod+Shift+,"),
       action: onOpenSettings,
+    },
+    {
+      id: "open-usage",
+      labelKey: "openUsage",
+      groupKey: "settings",
+      keywordKey: "commandKeywords.openUsage",
+      icon: BarChart3,
+      shortcut: formatForDisplay("Mod+Shift+U"),
+      action: onOpenUsageSettings,
     },
     {
       id: "toggle-theme",
