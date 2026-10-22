@@ -336,7 +336,7 @@ describe("deleting and selecting a widget", () => {
       editor.commands.selectAll();
       await tick();
     });
-    expect(widgetElement()?.hasAttribute("data-widget-in-range")).toBe(true);
+    expect(widgetElement()?.hasAttribute("data-widget-selected")).toBe(true);
     await press(editor, "Delete");
     expect(editor.state.doc.textContent).not.toContain("Hi there");
     expect(widgetCount(editor)).toBe(1);
@@ -420,6 +420,66 @@ describe("deleting and selecting a widget", () => {
     expect(editor.state.selection.to).toBe(editor.state.doc.content.size);
   });
 
+  /** A running widget moved to the top of the document, under what the
+   *  browser hands back for a select-all there: a range from inside its
+   *  draft to the end — nothing before it to start on. */
+  async function topWidgetUnderSelectAll(
+    status: "running" | "completed",
+  ): Promise<{ editor: Editor; blobId: string }> {
+    const { editor, blobId } = await runningWidget();
+    const { TextSelection } = await import("@tiptap/pm/state");
+    await act(async () => {
+      prompts.setTurn(TURN, TASK, status);
+      await tick();
+    });
+    await act(async () => {
+      const pos = widgetPos(editor);
+      const node = editor.state.doc.nodeAt(pos)!;
+      editor.view.dispatch(
+        editor.state.tr.delete(pos, pos + node.nodeSize).insert(0, node),
+      );
+      await tick();
+    });
+    expect(widgetPos(editor)).toBe(0);
+    await act(async () => {
+      const size = editor.state.doc.content.size;
+      editor.view.dispatch(
+        editor.state.tr.setSelection(
+          TextSelection.create(editor.state.doc, 2, size - 1),
+        ),
+      );
+      await tick();
+    });
+    return { editor, blobId };
+  }
+
+  it.each(["Delete", "Backspace"])(
+    "a widget opening the document looks selected under a select-all, and %s takes it",
+    async (key) => {
+      const { editor, blobId } = await topWidgetUnderSelectAll("completed");
+      expect(widgetElement()?.hasAttribute("data-widget-selected")).toBe(true);
+      await press(editor, key);
+      expect(editor.state.doc.textContent).not.toContain("Hi there");
+      // The keeper's fresh composer, not the settled widget with its
+      // draft cleared.
+      expect(widgetCount(editor)).toBe(1);
+      expect(editor.state.doc.nodeAt(widgetPos(editor))?.attrs.blobId).not.toBe(
+        blobId,
+      );
+      expect(widgetTaskId(editor)).toBeNull();
+    },
+  );
+
+  it("a working widget opening the document stays under a select-all delete", async () => {
+    const { editor, blobId } = await topWidgetUnderSelectAll("running");
+    await press(editor, "Delete");
+    expect(editor.state.doc.textContent).not.toContain("Hi there");
+    expect(widgetCount(editor)).toBe(1);
+    const kept = editor.state.doc.nodeAt(widgetPos(editor))!;
+    expect(kept.attrs.blobId).toBe(blobId);
+    expect(kept.attrs.taskId).toBe(TASK);
+  });
+
   it("working widgets keep their order when everything around them is deleted", async () => {
     prompts = testPrompts();
     host = fakePromptWidgetHost();
@@ -471,5 +531,75 @@ describe("deleting and selecting a widget", () => {
     const copy = pasted.content.firstChild!;
     expect(copy.attrs.taskId).toBeNull();
     expect(copy.attrs.blobId).not.toBe(node.attrs.blobId);
+  });
+
+  /** Drop the widget's node through the editor's drop transform, as the
+   *  drag grip does: `view.dragging` holds it, the drop event goes first. */
+  async function dropWidget(
+    editor: Editor,
+    { copy }: { copy: boolean },
+  ): Promise<void> {
+    const { Slice, Fragment } = await import("@tiptap/pm/model");
+    const { NodeSelection } = await import("@tiptap/pm/state");
+    const pos = widgetPos(editor);
+    const node = editor.state.doc.nodeAt(pos)!;
+    const slice = new Slice(Fragment.from(node), 0, 0);
+    const { view } = editor;
+    view.dragging = {
+      slice,
+      move: true,
+      node: NodeSelection.create(editor.state.doc, pos),
+    } as typeof view.dragging;
+    const drop = new Event("drop") as DragEvent;
+    Object.assign(drop, { altKey: copy, ctrlKey: copy });
+    view.someProp("handleDOMEvents", (handlers) => {
+      handlers.drop?.(view, drop);
+    });
+    const dropped = view.someProp("transformPasted", (transform) =>
+      transform(slice, view, false),
+    )!;
+    view.dragging = null;
+    await act(async () => {
+      const tr = editor.state.tr;
+      if (!copy) tr.delete(pos, pos + node.nodeSize);
+      // Above "Hi there".
+      tr.insert(0, dropped.content);
+      view.dispatch(tr);
+      await tick();
+    });
+  }
+
+  it("a widget dragged elsewhere keeps its round and its answer", async () => {
+    const { editor, blobId } = await runningWidget();
+    await act(async () => {
+      prompts.setTurn(TURN, TASK, "completed");
+      await tick();
+    });
+    await dropWidget(editor, { copy: false });
+    expect(widgetCount(editor)).toBe(1);
+    expect(widgetPos(editor)).toBe(0);
+    const moved = editor.state.doc.nodeAt(0)!;
+    expect(moved.attrs.blobId).toBe(blobId);
+    expect(moved.attrs.taskId).toBe(TASK);
+    expect(prompts.prompts.get(blobId).state).toEqual({
+      name: "settled",
+      outcome: "done",
+    });
+    expect(
+      widgetElement()?.querySelector('[data-blob-phase="done"]'),
+    ).not.toBeNull();
+  });
+
+  it("a widget drag-copied is a fresh one", async () => {
+    const { editor, blobId } = await runningWidget();
+    await act(async () => {
+      prompts.setTurn(TURN, TASK, "completed");
+      await tick();
+    });
+    await dropWidget(editor, { copy: true });
+    expect(widgetCount(editor)).toBe(2);
+    const copy = editor.state.doc.nodeAt(0)!;
+    expect(copy.attrs.blobId).not.toBe(blobId);
+    expect(copy.attrs.taskId).toBeNull();
   });
 });
