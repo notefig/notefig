@@ -10,9 +10,9 @@
  * 3. Selection: only the keyboard selects a widget (Backspace/Delete from
  *    the neighbouring line, arrows onto a read-only field), never a click.
  *    A widget looks selected the same way whichever way it got there —
- *    picked by the keyboard or inside a text range: the selection's tint,
- *    plus a lock when it can't be removed. A delete on a selected widget
- *    that can't be removed is refused out loud.
+ *    picked by the keyboard or inside a text range: the selection's tint.
+ *    A delete on a selected widget that can't be removed is refused out
+ *    loud.
  * 4. Escape: what `escape` says (the composer key map and the face's
  *    global hotkey own it).
  *
@@ -101,6 +101,43 @@ function enterDraft(editor: Editor, blobId: string): boolean {
     ),
   );
   return true;
+}
+
+/**
+ * Catch the editor's selection up with the browser's caret before a
+ * delete key decides anything. The browser moves the caret itself for
+ * Home, End and the arrows, and ProseMirror reads it on the
+ * selectionchange that follows — which, under load, can arrive after the
+ * next key. A Backspace read against the stale caret misses "start of the
+ * line below a widget" and falls through to the browser's own delete,
+ * which merges the line into the widget's draft and parses back as a
+ * second copy of the widget holding that line.
+ */
+export function syncSelectionFromDOM(editor: Editor): void {
+  const { view } = editor;
+  const { selection } = view.state;
+  if (!(selection instanceof TextSelection) || !view.hasFocus()) return;
+  const root = view.root as Document;
+  const dom = root.getSelection?.() ?? document.getSelection();
+  const { anchorNode, focusNode } = dom ?? {};
+  if (!dom || !anchorNode || !focusNode) return;
+  if (!view.dom.contains(anchorNode) || !view.dom.contains(focusNode)) return;
+  let anchor: number;
+  let head: number;
+  try {
+    anchor = view.posAtDOM(anchorNode, dom.anchorOffset);
+    head = view.posAtDOM(focusNode, dom.focusOffset);
+  } catch {
+    return;
+  }
+  if (anchor === selection.anchor && head === selection.head) return;
+  const { doc } = view.state;
+  const $anchor = doc.resolve(anchor);
+  const $head = doc.resolve(head);
+  if (!$anchor.parent.inlineContent || !$head.parent.inlineContent) return;
+  view.dispatch(
+    view.state.tr.setSelection(TextSelection.between($anchor, $head)),
+  );
 }
 
 /**

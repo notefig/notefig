@@ -300,6 +300,39 @@ describe("deleting and selecting a widget", () => {
     expect(editor.state.doc.textContent).toContain("below");
   });
 
+  it("Backspace reads the browser's caret when the editor hasn't caught up", async () => {
+    const { editor } = await composingWidget();
+    await act(async () => {
+      caretBelowWidget(editor);
+      editor.commands.insertContent("below");
+      editor.view.focus();
+      await tick();
+    });
+    // The editor still has the caret at the end of "below"; the browser
+    // moved it to the line's start (Home) and hasn't said so yet.
+    const line = editor.view.domAtPos(editor.state.selection.from).node;
+    const text = line.nodeType === Node.TEXT_NODE ? line : line.firstChild!;
+    // Let the setup's own selection events land first.
+    await act(async () => {
+      await tick();
+      await tick();
+    });
+    const holdBack = (event: Event) => event.stopPropagation();
+    window.addEventListener("selectionchange", holdBack, true);
+    try {
+      document.getSelection()!.collapse(text, 0);
+      await tick();
+      expect(editor.state.selection.$from.parentOffset).toBe(5);
+      await press(editor, "Backspace");
+    } finally {
+      window.removeEventListener("selectionchange", holdBack, true);
+    }
+    expect(editor.state.selection.from).toBe(widgetPos(editor));
+    expect(widgetElement()?.hasAttribute("data-widget-selected")).toBe(true);
+    expect(widgetCount(editor)).toBe(1);
+    expect(editor.state.doc.textContent).toContain("below");
+  });
+
   it("refuses to delete a selected working widget, and says why", async () => {
     const { editor, blobId } = await runningWidget();
     await act(async () => {
@@ -308,9 +341,6 @@ describe("deleting and selecting a widget", () => {
     });
     await press(editor, "Backspace");
     expect(widgetElement()?.hasAttribute("data-widget-selected")).toBe(true);
-    expect(
-      widgetElement()?.querySelector(".prompt-widget-lock"),
-    ).not.toBeNull();
     for (const key of ["Backspace", "Delete"]) {
       expect(await press(editor, key)).toBe(true);
       expect(widgetCount(editor)).toBe(1);

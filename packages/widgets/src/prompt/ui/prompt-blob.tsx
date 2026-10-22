@@ -14,7 +14,6 @@ import { useTranslation } from "react-i18next";
 import {
   Check,
   FileText,
-  Lock,
   MessageSquare,
   Pencil,
   RotateCw,
@@ -724,7 +723,6 @@ export function PromptBlobFace({
     <FaceFrame
       phase={phase}
       response={response}
-      locked={rules?.locked === true}
       refused={rules?.removalRefused === true}
     >
       <AnimatedHeight>
@@ -790,9 +788,6 @@ export function PromptBlobFace({
 interface FaceRules {
   /** The draft takes typing (the widget's `fieldEditable`). */
   fieldEditable: boolean;
-  /** The widget can't be removed now; shown as a lock while it is
-   *  selected or inside a selection (tiptap.css). */
-  locked: boolean;
   /** A delete was just refused: shake, and say how to remove it. */
   removalRefused: boolean;
 }
@@ -811,18 +806,16 @@ function ReferenceLine({
   return <ReferenceChip text={reference.text} phase={phase} onRemove={onRemove} />;
 }
 
-/** The face's outer element: pointer ownership, the inspection hooks, the
- *  lock, and the refusal's shake (tiptap.css). */
+/** The face's outer element: pointer ownership, the inspection hooks, and
+ *  the refusal's shake (tiptap.css). */
 function FaceFrame({
   phase,
   response,
-  locked,
   refused,
   children,
 }: {
   phase: BlobPhase;
   response: string | undefined;
-  locked: boolean;
   refused: boolean;
   children: React.ReactNode;
 }) {
@@ -833,10 +826,8 @@ function FaceFrame({
       // Test/inspection hook: the widget's phase-machine state.
       data-blob-phase={phase}
       data-blob-response={response}
-      data-widget-locked={dataFlag(locked)}
       data-widget-refused={dataFlag(refused)}
     >
-      <LockBadge shown={locked} />
       {children}
     </div>
   );
@@ -851,21 +842,6 @@ function dataFlag(on: boolean): "" | undefined {
  *  widget behind them (the marketing demo, tests). */
 function takesTyping(phase: BlobPhase): boolean {
   return phase === "composing" || phase === "done" || phase === "error";
-}
-
-/** Shown while the widget is selected or inside a selection (tiptap.css):
- *  this one can't be removed until its agent stops. */
-function LockBadge({ shown }: { shown: boolean }) {
-  if (!shown) return null;
-  return (
-    <span
-      contentEditable={false}
-      className="prompt-widget-lock absolute right-2 top-2 z-10 text-muted-foreground"
-      aria-hidden
-    >
-      <Lock className="size-3" />
-    </span>
-  );
 }
 
 /** Why a delete just did nothing. */
@@ -1037,7 +1013,6 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     phase,
     rules: {
       fieldEditable: capabilities.fieldEditable,
-      locked: !capabilities.removable,
       removalRefused,
     },
     record: widget,

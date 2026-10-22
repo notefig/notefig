@@ -68,6 +68,7 @@ import {
   deleteRangeOverWidgets,
   deleteSelectedWidget,
   enterSelectedWidget,
+  syncSelectionFromDOM,
   promptInteractionsPlugin,
   restoreKeptWidgetsTr,
   selectAllInDraft,
@@ -512,10 +513,14 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
         enterSelectedWidget(this.editor, this.options.prompts),
       // A selected widget: refused when it can't be removed. Beside one:
       // selects it — the counterpart of Backspace from the line below.
-      Delete: () =>
-        deleteRangeOverWidgets(this.editor) ||
-        deleteSelectedWidget(this.editor, this.options.prompts) ||
-        deleteIntoWidget(this.editor),
+      Delete: () => {
+        syncSelectionFromDOM(this.editor);
+        return (
+          deleteRangeOverWidgets(this.editor) ||
+          deleteSelectedWidget(this.editor, this.options.prompts) ||
+          deleteIntoWidget(this.editor)
+        );
+      },
       // In a draft: the draft first, the whole document on a second press.
       "Mod-a": () => selectAllInDraft(this.editor),
       // Multi-line input: StarterKit's HardBreak binds these two combos
@@ -541,6 +546,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // runs, and dispatching that stale tr afterwards reverts the
       // removal).
       Backspace: () => {
+        syncSelectionFromDOM(this.editor);
         if (deleteRangeOverWidgets(this.editor)) return true;
         if (forward("Backspace")()) return true;
         if (deleteSelectedWidget(this.editor, this.options.prompts)) return true;
@@ -598,6 +604,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // mangles the widget's DOM badly enough that the re-parse drops the
       // whole node.
       "Mod-Backspace": () => {
+        syncSelectionFromDOM(this.editor);
         if (deleteRangeOverWidgets(this.editor)) return true;
         if (forward("Backspace")()) return true;
         return this.editor.commands.command(({ state, tr }) => {
@@ -616,6 +623,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // the boundary just like the soft-line variant). Empty summoned draft:
       // same dismiss as plain Backspace.
       "Alt-Backspace": () => {
+        syncSelectionFromDOM(this.editor);
         if (deleteRangeOverWidgets(this.editor)) return true;
         if (forward("Backspace")()) return true;
         return this.editor.commands.command(({ state, tr }) => {
