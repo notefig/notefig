@@ -10,9 +10,9 @@
  * 3. Selection: only the keyboard selects a widget (Backspace/Delete from
  *    the neighbouring line, arrows onto a read-only field), never a click.
  *    A widget looks selected the same way whichever way it got there —
- *    picked by the keyboard or inside a text range: the selection's tint,
- *    plus a lock when it can't be removed. A delete on a selected widget
- *    that can't be removed is refused out loud.
+ *    picked by the keyboard or inside a text range: the selection's tint.
+ *    A delete on a selected widget that can't be removed is refused out
+ *    loud.
  * 4. Escape: what `escape` says (the composer key map and the face's
  *    global hotkey own it).
  *
@@ -104,6 +104,43 @@ function enterDraft(editor: Editor, blobId: string): boolean {
 }
 
 /**
+ * Catch the editor's selection up with the browser's caret before a
+ * delete key decides anything. The browser moves the caret itself for
+ * Home, End and the arrows, and ProseMirror reads it on the
+ * selectionchange that follows — which, under load, can arrive after the
+ * next key. A Backspace read against the stale caret misses "start of the
+ * line below a widget" and falls through to the browser's own delete,
+ * which merges the line into the widget's draft and parses back as a
+ * second copy of the widget holding that line.
+ */
+export function syncSelectionFromDOM(editor: Editor): void {
+  const { view } = editor;
+  const { selection } = view.state;
+  if (!(selection instanceof TextSelection) || !view.hasFocus()) return;
+  const root = view.root as Document;
+  const dom = root.getSelection?.() ?? document.getSelection();
+  const { anchorNode, focusNode } = dom ?? {};
+  if (!dom || !anchorNode || !focusNode) return;
+  if (!view.dom.contains(anchorNode) || !view.dom.contains(focusNode)) return;
+  let anchor: number;
+  let head: number;
+  try {
+    anchor = view.posAtDOM(anchorNode, dom.anchorOffset);
+    head = view.posAtDOM(focusNode, dom.focusOffset);
+  } catch {
+    return;
+  }
+  if (anchor === selection.anchor && head === selection.head) return;
+  const { doc } = view.state;
+  const $anchor = doc.resolve(anchor);
+  const $head = doc.resolve(head);
+  if (!$anchor.parent.inlineContent || !$head.parent.inlineContent) return;
+  view.dispatch(
+    view.state.tr.setSelection(TextSelection.between($anchor, $head)),
+  );
+}
+
+/**
  * Backspace with the caret at the start of the line right after a widget:
  * select the widget (an empty line goes, as it would have). Never lands the
  * caret inside the draft, and never deletes the widget in one press.
@@ -177,15 +214,49 @@ function rangeOverWidgets(
   return from === selection.from && to === selection.to ? null : { from, to };
 }
 
-/** Typing over such a range: the same widening, the text in its place. */
+/** Typing over such a range: the same widening, the text in its place —
+ *  in the document, never in a widget the delete left next to it. */
 function typeOverWidgets(view: EditorView, text: string): boolean {
   const range = rangeOverWidgets(view.state);
   if (!range) return false;
   const tr = view.state.tr.delete(range.from, range.to);
-  const $at = tr.doc.resolve(tr.mapping.map(range.from));
-  tr.setSelection(TextSelection.near($at)).insertText(text);
+  const caret = insertDocumentText(tr, tr.mapping.map(range.from), text);
+  tr.setSelection(TextSelection.create(tr.doc, caret));
   view.dispatch(tr.scrollIntoView());
   return true;
+}
+
+/** Insert `text` at `pos` in a document text block: the one `pos` is in,
+ *  or a new paragraph there when it's between blocks. Returns the
+ *  position after the text. */
+function insertDocumentText(tr: Transaction, pos: number, text: string): number {
+  const $at = tr.doc.resolve(pos);
+  let depth = 0;
+  while (depth < $at.depth && $at.node(depth + 1).type.name !== PROMPT_NODE_NAME) {
+    depth++;
+  }
+  if (depth === $at.depth && $at.parent.inlineContent) {
+    tr.insertText(text, pos);
+    return pos + text.length;
+  }
+  // Between blocks at `depth` — before the widget `pos` was inside, if any.
+  const at = depth === $at.depth ? pos : $at.before(depth + 1);
+  const $between = tr.doc.resolve(at);
+  // Into a text block right there (the one a delete left behind, say)...
+  const after = $between.nodeAfter;
+  if (after?.isTextblock) {
+    tr.insertText(text, at + 1);
+    return at + 1 + text.length;
+  }
+  const before = $between.nodeBefore;
+  if (before?.isTextblock) {
+    tr.insertText(text, at - 1);
+    return at - 1 + text.length;
+  }
+  // ...or a paragraph of its own.
+  const { schema } = tr.doc.type;
+  tr.insert(at, schema.nodes.paragraph.create(null, schema.text(text)));
+  return at + 1 + text.length;
 }
 
 /**

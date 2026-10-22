@@ -14,7 +14,6 @@ import { useTranslation } from "react-i18next";
 import {
   Check,
   FileText,
-  Lock,
   MessageSquare,
   Pencil,
   RotateCw,
@@ -728,8 +727,7 @@ export function PromptBlobFace({
     <FaceFrame
       phase={phase}
       response={response}
-      locked={rules?.locked === true}
-      refused={rules?.removalRefused === true}
+      refusedAt={rules?.removalRefusedAt ?? null}
     >
       <AnimatedHeight>
         <div
@@ -794,11 +792,10 @@ export function PromptBlobFace({
 interface FaceRules {
   /** The draft takes typing (the widget's `fieldEditable`). */
   fieldEditable: boolean;
-  /** The widget can't be removed now; shown as a lock while it is
-   *  selected or inside a selection (tiptap.css). */
-  locked: boolean;
-  /** A delete was just refused: shake, and say how to remove it. */
+  /** A delete was just refused: say how to remove it. */
   removalRefused: boolean;
+  /** When the last delete was refused: each one shakes the face. */
+  removalRefusedAt: number | null;
 }
 
 /** The quoted selection a widget was summoned over, when there is one. */
@@ -815,61 +812,65 @@ function ReferenceLine({
   return <ReferenceChip text={reference.text} phase={phase} onRemove={onRemove} />;
 }
 
-/** The face's outer element: pointer ownership, the inspection hooks, the
- *  lock, and the refusal's shake (tiptap.css). */
+/** The face's outer element: pointer ownership, the inspection hooks, and
+ *  the refusal's shake. */
 function FaceFrame({
   phase,
   response,
-  locked,
-  refused,
+  refusedAt,
   children,
 }: {
   phase: BlobPhase;
   response: string | undefined;
-  locked: boolean;
-  refused: boolean;
+  refusedAt: number | null;
   children: React.ReactNode;
 }) {
+  const frame = useRef<HTMLDivElement>(null);
+  useShakeOn(frame, refusedAt);
   return (
     <div
+      ref={frame}
       onMouseDown={claimWidgetPointerEvents}
       className="relative w-full"
       // Test/inspection hook: the widget's phase-machine state.
       data-blob-phase={phase}
       data-blob-response={response}
-      data-widget-locked={dataFlag(locked)}
-      data-widget-refused={dataFlag(refused)}
     >
-      <LockBadge shown={locked} />
       {children}
     </div>
   );
 }
 
-/** A boolean data attribute: present (empty) or absent. */
-function dataFlag(on: boolean): "" | undefined {
-  return on ? "" : undefined;
+/** A quick shake each time `at` moves on — every refused attempt, not
+ *  just the first in a row (a CSS animation keyed to an attribute that's
+ *  already set wouldn't replay). Still under reduced motion. */
+function useShakeOn(
+  element: React.RefObject<HTMLElement | null>,
+  at: number | null,
+): void {
+  useEffect(() => {
+    const node = element.current;
+    // A refusal from before this mount isn't news.
+    if (at === null || !node || Date.now() - at > 500) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (typeof node.animate !== "function") return;
+    const shake = node.animate(
+      [
+        { transform: "translateX(0)" },
+        { transform: "translateX(-3px)" },
+        { transform: "translateX(3px)" },
+        { transform: "translateX(0)" },
+      ],
+      { duration: 150, easing: "ease-in-out" },
+    );
+    return () => shake.cancel();
+  }, [element, at]);
 }
 
 /** The draft takes typing in these phases, for faces rendered without a
  *  widget behind them (the marketing demo, tests). */
 function takesTyping(phase: BlobPhase): boolean {
   return phase === "composing" || phase === "done" || phase === "error";
-}
-
-/** Shown while the widget is selected or inside a selection (tiptap.css):
- *  this one can't be removed until its agent stops. */
-function LockBadge({ shown }: { shown: boolean }) {
-  if (!shown) return null;
-  return (
-    <span
-      contentEditable={false}
-      className="prompt-widget-lock absolute right-2 top-2 z-10 text-muted-foreground"
-      aria-hidden
-    >
-      <Lock className="size-3" />
-    </span>
-  );
 }
 
 /** Why a delete just did nothing. */
@@ -1040,8 +1041,8 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     phase,
     rules: {
       fieldEditable: capabilities.fieldEditable,
-      locked: !capabilities.removable,
       removalRefused,
+      removalRefusedAt: widget.removalRefusedAt,
     },
     record: widget,
     turn,

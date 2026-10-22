@@ -71,8 +71,23 @@ async function settledWidget(page: Page, name: string) {
   await expect(page.locator('[data-blob-phase="done"]').first()).toBeVisible({
     timeout: 30000,
   });
-  await editor.locator("p", { hasText: "Para above." }).click();
+  // The card grows as it settles; click once the paragraph holds still,
+  // and until the caret is in it.
+  await expect(async () => {
+    await editor.locator("p", { hasText: "Para above." }).click();
+    expect(await caretBlockText(page)).toBe("Para above.");
+  }).toPass({ timeout: 10000 });
   return editor;
+}
+
+/** The text of the block the caret is in. */
+function caretBlockText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const view = document.querySelector(".ProseMirror") as unknown as {
+      editor: { state: { selection: { $from: { parent: { textContent: string } } } } };
+    };
+    return view.editor.state.selection.$from.parent.textContent;
+  });
 }
 
 test.describe("typing on a selected prompt widget", () => {

@@ -300,6 +300,39 @@ describe("deleting and selecting a widget", () => {
     expect(editor.state.doc.textContent).toContain("below");
   });
 
+  it("Backspace reads the browser's caret when the editor hasn't caught up", async () => {
+    const { editor } = await composingWidget();
+    await act(async () => {
+      caretBelowWidget(editor);
+      editor.commands.insertContent("below");
+      editor.view.focus();
+      await tick();
+    });
+    // The editor still has the caret at the end of "below"; the browser
+    // moved it to the line's start (Home) and hasn't said so yet.
+    const line = editor.view.domAtPos(editor.state.selection.from).node;
+    const text = line.nodeType === Node.TEXT_NODE ? line : line.firstChild!;
+    // Let the setup's own selection events land first.
+    await act(async () => {
+      await tick();
+      await tick();
+    });
+    const holdBack = (event: Event) => event.stopPropagation();
+    window.addEventListener("selectionchange", holdBack, true);
+    try {
+      document.getSelection()!.collapse(text, 0);
+      await tick();
+      expect(editor.state.selection.$from.parentOffset).toBe(5);
+      await press(editor, "Backspace");
+    } finally {
+      window.removeEventListener("selectionchange", holdBack, true);
+    }
+    expect(editor.state.selection.from).toBe(widgetPos(editor));
+    expect(widgetElement()?.hasAttribute("data-widget-selected")).toBe(true);
+    expect(widgetCount(editor)).toBe(1);
+    expect(editor.state.doc.textContent).toContain("below");
+  });
+
   it("refuses to delete a selected working widget, and says why", async () => {
     const { editor, blobId } = await runningWidget();
     await act(async () => {
@@ -308,15 +341,34 @@ describe("deleting and selecting a widget", () => {
     });
     await press(editor, "Backspace");
     expect(widgetElement()?.hasAttribute("data-widget-selected")).toBe(true);
-    expect(
-      widgetElement()?.querySelector(".prompt-widget-lock"),
-    ).not.toBeNull();
     for (const key of ["Backspace", "Delete"]) {
       expect(await press(editor, key)).toBe(true);
       expect(widgetCount(editor)).toBe(1);
     }
     expect(prompts.prompts.get(blobId).removalRefusedAt).not.toBeNull();
     expect(document.body.textContent).toContain("promptBlobStopToRemove");
+  });
+
+  it("shakes on every refused attempt, not just the first", async () => {
+    const animate = vi.fn(() => ({ cancel: () => {} }));
+    const original = HTMLElement.prototype.animate;
+    HTMLElement.prototype.animate = animate as unknown as typeof original;
+    try {
+      const { editor } = await runningWidget();
+      await act(async () => {
+        caretBelowWidget(editor);
+        await tick();
+      });
+      await press(editor, "Backspace");
+      for (const key of ["Backspace", "Delete", "Backspace"]) {
+        // Attempts a moment apart, each one news.
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        await press(editor, key);
+      }
+      expect(animate).toHaveBeenCalledTimes(3);
+    } finally {
+      HTMLElement.prototype.animate = original;
+    }
   });
 
   it("Delete at the end of the line above selects the widget", async () => {
@@ -508,6 +560,46 @@ describe("deleting and selecting a widget", () => {
     expect(widgetCount(editor)).toBe(0);
     expect(selectionDraft(editor.state)).toBeNull();
     expect(prompts.prompts.get(blobId).state.name).toBe("settled");
+  });
+
+  it("typing over widgets puts the text in the document, never in the next widget", async () => {
+    prompts = testPrompts();
+    host = fakePromptWidgetHost();
+    const editor = await mount(
+      ["blob_a", "blob_b", "blob_c"]
+        .map((id) => `<div data-type="ai-prompt" data-blob-id="${id}"></div>`)
+        .join("") + "<p>after</p>",
+    );
+    const { TextSelection } = await import("@tiptap/pm/state");
+    const positions: number[] = [];
+    editor.state.doc.forEach((node, offset) => {
+      if (node.type.name === "aiPrompt") positions.push(offset);
+    });
+    const second = editor.state.doc.nodeAt(positions[1])!;
+    await act(async () => {
+      // From the first widget's draft start to the second's draft end.
+      editor.view.dispatch(
+        editor.state.tr.setSelection(
+          TextSelection.create(
+            editor.state.doc,
+            positions[0] + 2,
+            positions[1] + second.nodeSize - 2,
+          ),
+        ),
+      );
+      expect(typeText(editor, "x")).toBe(true);
+      await tick();
+    });
+    const blocks: string[] = [];
+    editor.state.doc.forEach((node) =>
+      blocks.push(
+        node.type.name === "aiPrompt"
+          ? `[${node.attrs.blobId}:${node.textContent}]`
+          : node.textContent,
+      ),
+    );
+    expect(blocks).toEqual(["x", "[blob_c:]", "after"]);
+    expect(selectionDraft(editor.state)).toBeNull();
   });
 
   it("a working widget opening the document stays under a select-all delete", async () => {
