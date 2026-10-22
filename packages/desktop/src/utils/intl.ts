@@ -598,6 +598,7 @@ i18n
           promptBlobRetry: "Retry",
           promptChangesHighlight: "Highlight changes",
           promptBlobDismiss: "Dismiss",
+          promptBlobStopToRemove: "Stop the agent to remove this prompt",
           promptBlobOpenChat: "Open chat",
           promptBlobReply: "Reply…",
           promptBlobShowMore: "Show more",

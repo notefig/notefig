@@ -97,7 +97,8 @@ async function mount(content?: string): Promise<Editor> {
 
 /** A document with a widget summoned on its second line, prompt sent and
  *  its turn running. Returns the editor and the widget's id. */
-async function runningWidget(): Promise<{ editor: Editor; blobId: string }> {
+/** A widget summoned on the second line of "Hi there", caret in its draft. */
+async function composingWidget(): Promise<{ editor: Editor; blobId: string }> {
   prompts = testPrompts();
   host = fakePromptWidgetHost({
     dispatchPrompt: vi.fn(({ taskId }) => {
@@ -108,13 +109,25 @@ async function runningWidget(): Promise<{ editor: Editor; blobId: string }> {
   const ed = await mount();
   await act(async () => {
     ed.commands.setTextSelection(11);
-    const { from, to } = ed.state.selection;
-    ed.view.someProp("handleTextInput", (handler) =>
-      handler(ed.view, from, to, "/", () => ed.state.tr.insertText("/", from, to)),
-    );
+    typeText(ed, "/");
     await tick();
   });
-  const blobId = selectionDraft(ed.state)!.blobId;
+  return { editor: ed, blobId: selectionDraft(ed.state)!.blobId };
+}
+
+function typeText(editor: Editor, text: string): boolean {
+  const { from, to } = editor.state.selection;
+  return Boolean(
+    editor.view.someProp("handleTextInput", (handler) =>
+      handler(editor.view, from, to, text, () =>
+        editor.state.tr.insertText(text, from, to),
+      ),
+    ),
+  );
+}
+
+async function runningWidget(): Promise<{ editor: Editor; blobId: string }> {
+  const { editor: ed, blobId } = await composingWidget();
   await act(async () => {
     ed.commands.insertContent("make it shorter");
     await tick();
@@ -145,6 +158,50 @@ function pressKey(target: EventTarget, key: string): boolean {
   return event.defaultPrevented;
 }
 
+function widgetPos(editor: Editor): number {
+  let found = -1;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === "aiPrompt") found = pos;
+    return found < 0;
+  });
+  return found;
+}
+
+function widgetCount(editor: Editor): number {
+  let count = 0;
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === "aiPrompt") count++;
+    return true;
+  });
+  return count;
+}
+
+function draftText(editor: Editor): string {
+  const node = editor.state.doc.nodeAt(widgetPos(editor));
+  return node?.firstChild?.textContent ?? "";
+}
+
+/** The widget's node view element — where its decorations land. */
+function widgetElement(): HTMLElement | null {
+  return document.querySelector(".node-aiPrompt");
+}
+
+/** Caret at the start of the line right after the widget. */
+function caretBelowWidget(editor: Editor): void {
+  const pos = widgetPos(editor);
+  const node = editor.state.doc.nodeAt(pos)!;
+  editor.commands.setTextSelection(pos + node.nodeSize + 1);
+}
+
+async function press(editor: Editor, key: string): Promise<boolean> {
+  let handled = false;
+  await act(async () => {
+    handled = pressKey(editor.view.dom, key);
+    await tick();
+  });
+  return handled;
+}
+
 function widgetTaskId(editor: Editor): string | null | undefined {
   let taskId: string | null | undefined;
   editor.state.doc.descendants((node) => {
@@ -156,7 +213,7 @@ function widgetTaskId(editor: Editor): string | null | undefined {
 
 describe("a running widget", () => {
   it.each([
-    ["with the caret in its draft", (editor: Editor) => editor.view.dom],
+    ["pressed in the editor", (editor: Editor) => editor.view.dom],
     ["with the caret elsewhere", () => document.body],
   ])("stops on Escape %s, staying on its session", async (_, target) => {
     const { editor, blobId } = await runningWidget();
@@ -169,14 +226,17 @@ describe("a running widget", () => {
     expect(widgetTaskId(editor)).toBe(TASK);
   });
 
-  it("Backspace in its emptied draft doesn't dismiss it", async () => {
+  it("closes its field: the caret leaves it and nothing types into it", async () => {
     const { editor, blobId } = await runningWidget();
-    expect(selectionDraft(editor.state)?.blobId).toBe(blobId);
-    await act(async () => {
-      pressKey(editor.view.dom, "Backspace");
-      await tick();
-    });
-    expect(widgetTaskId(editor)).toBe(TASK);
+    expect(selectionDraft(editor.state)).toBeNull();
+    const draft = document.querySelector(
+      `[data-blob-id="${blobId}"] [data-prompt-draft]`,
+    );
+    expect(draft?.getAttribute("contenteditable")).toBe("false");
+    // Even with the caret forced back in, typing is refused.
+    editor.commands.setTextSelection(widgetPos(editor) + 2);
+    expect(typeText(editor, "x")).toBe(true);
+    expect(draftText(editor)).toBe("");
   });
 
   it("writes its session into the file marker, and Edit takes it out", async () => {
@@ -218,5 +278,149 @@ describe("the file marker", () => {
     const editor = await mount(WIDGET("task_saved"));
     expect(prompts.prompts.get("blob_m").boundTaskId).toBeNull();
     expect(widgetTaskId(editor)).toBe("task_saved");
+  });
+});
+
+describe("deleting and selecting a widget", () => {
+  it("Backspace from the line below selects the widget, and a second one deletes a composer", async () => {
+    const { editor } = await composingWidget();
+    await act(async () => {
+      editor.commands.insertContent("draft");
+      caretBelowWidget(editor);
+      editor.commands.insertContent("below");
+      editor.commands.setTextSelection(widgetPos(editor) + editor.state.doc.nodeAt(widgetPos(editor))!.nodeSize + 1);
+      await tick();
+    });
+    await press(editor, "Backspace");
+    expect(editor.state.selection.from).toBe(widgetPos(editor));
+    expect(widgetElement()?.hasAttribute("data-widget-selected")).toBe(true);
+    expect(draftText(editor)).toBe("draft");
+    await press(editor, "Backspace");
+    expect(widgetCount(editor)).toBe(0);
+    expect(editor.state.doc.textContent).toContain("below");
+  });
+
+  it("refuses to delete a selected working widget, and says why", async () => {
+    const { editor, blobId } = await runningWidget();
+    await act(async () => {
+      caretBelowWidget(editor);
+      await tick();
+    });
+    await press(editor, "Backspace");
+    expect(widgetElement()?.hasAttribute("data-widget-selected")).toBe(true);
+    expect(
+      widgetElement()?.querySelector(".prompt-widget-lock"),
+    ).not.toBeNull();
+    for (const key of ["Backspace", "Delete"]) {
+      expect(await press(editor, key)).toBe(true);
+      expect(widgetCount(editor)).toBe(1);
+    }
+    expect(prompts.prompts.get(blobId).removalRefusedAt).not.toBeNull();
+    expect(document.body.textContent).toContain("promptBlobStopToRemove");
+  });
+
+  it("Delete at the end of the line above selects the widget", async () => {
+    const { editor } = await runningWidget();
+    await act(async () => {
+      editor.commands.setTextSelection(9); // end of "Hi there"
+      await tick();
+    });
+    await press(editor, "Delete");
+    expect(editor.state.selection.from).toBe(widgetPos(editor));
+    expect(widgetElement()?.hasAttribute("data-widget-selected")).toBe(true);
+  });
+
+  it("Cmd-A and Delete clear the document around a working widget", async () => {
+    const { editor, blobId } = await runningWidget();
+    await act(async () => {
+      editor.commands.selectAll();
+      await tick();
+    });
+    expect(widgetElement()?.hasAttribute("data-widget-in-range")).toBe(true);
+    await press(editor, "Delete");
+    expect(editor.state.doc.textContent).not.toContain("Hi there");
+    expect(widgetCount(editor)).toBe(1);
+    expect(editor.state.doc.nodeAt(widgetPos(editor))?.attrs.blobId).toBe(blobId);
+  });
+
+  it("a range delete takes a settled widget with it", async () => {
+    const { editor } = await runningWidget();
+    await act(async () => {
+      prompts.setTurn(TURN, TASK, "completed");
+      await tick();
+    });
+    await act(async () => {
+      editor.commands.selectAll();
+      editor.commands.deleteSelection();
+      await tick();
+    });
+    // The keeper's fresh composer, not the settled widget.
+    expect(widgetCount(editor)).toBe(1);
+    expect(widgetTaskId(editor)).toBeNull();
+  });
+
+  it("typing on a selected composer goes into its field", async () => {
+    const { editor } = await composingWidget();
+    await act(async () => {
+      caretBelowWidget(editor);
+      editor.commands.insertContent("below");
+      editor.commands.setTextSelection(widgetPos(editor) + editor.state.doc.nodeAt(widgetPos(editor))!.nodeSize + 1);
+      await tick();
+    });
+    await press(editor, "Backspace");
+    await act(async () => {
+      expect(typeText(editor, "x")).toBe(true);
+      await tick();
+    });
+    expect(widgetCount(editor)).toBe(1);
+    expect(draftText(editor)).toBe("x");
+    expect(selectionDraft(editor.state)).not.toBeNull();
+  });
+
+  it("Cmd-A in a draft selects the draft, then the document", async () => {
+    const { editor } = await composingWidget();
+    await act(async () => {
+      editor.commands.insertContent("draft");
+      await tick();
+    });
+    await act(async () => {
+      const event = new KeyboardEvent("keydown", {
+        key: "a",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      editor.view.dom.dispatchEvent(event);
+      await tick();
+    });
+    const draft = selectionDraft(editor.state)!;
+    expect(editor.state.selection.from).toBe(draft.from);
+    expect(editor.state.selection.to).toBe(draft.to);
+  });
+
+  it("a click on the card never selects it", async () => {
+    const { editor } = await composingWidget();
+    const pos = widgetPos(editor);
+    const node = editor.state.doc.nodeAt(pos)!;
+    const event = new MouseEvent("mousedown", { metaKey: true });
+    for (const prop of ["handleClickOn", "handleTripleClickOn"] as const) {
+      expect(
+        editor.view.someProp(prop, (handler) =>
+          handler(editor.view, pos + 1, node, pos, event, true),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("a pasted widget is a fresh one, never a second widget on a session", async () => {
+    const { editor } = await runningWidget();
+    const node = editor.state.doc.nodeAt(widgetPos(editor))!;
+    const { Slice, Fragment } = await import("@tiptap/pm/model");
+    const pasted = editor.view.someProp("transformPasted", (transform) =>
+      transform(new Slice(Fragment.from(node), 0, 0), editor.view, false),
+    )!;
+    const copy = pasted.content.firstChild!;
+    expect(copy.attrs.taskId).toBeNull();
+    expect(copy.attrs.blobId).not.toBe(node.attrs.blobId);
   });
 });

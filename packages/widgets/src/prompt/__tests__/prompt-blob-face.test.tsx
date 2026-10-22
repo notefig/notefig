@@ -111,6 +111,7 @@ function render(
             write: noop,
             holdsCaret: () => false,
             focus: noop,
+            leave: noop,
           },
           // The draft is document content, so the face is handed a content
           // hole rather than rendering a composer of its own.

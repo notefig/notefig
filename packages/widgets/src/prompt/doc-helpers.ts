@@ -404,3 +404,79 @@ export function trailingParagraphTr(state: EditorState): Transaction | null {
   if (!paragraph) return null;
   return state.tr.insert(state.doc.content.size, paragraph);
 }
+
+/** Every widget in `doc`, with its position. */
+function collectWidgets(doc: PMNode): Array<{ pos: number; node: PMNode }> {
+  const found: Array<{ pos: number; node: PMNode }> = [];
+  doc.descendants((node, pos) => {
+    if (node.type.name !== PROMPT_NODE_NAME) return true;
+    found.push({ pos, node });
+    return false;
+  });
+  return found;
+}
+
+function widgetBlobIds(doc: PMNode): Set<string> {
+  const ids = new Set<string>();
+  for (const { node } of collectWidgets(doc)) {
+    const blobId = node.attrs.blobId as string | null;
+    if (blobId) ids.add(blobId);
+  }
+  return ids;
+}
+
+/** Nearest position at or above `rawPos` where `nodeType` may be inserted:
+ *  walk outward from the resolved position until a parent accepts it. */
+function findInsertPos(
+  doc: PMNode,
+  rawPos: number,
+  nodeType: NodeType,
+): number | null {
+  const pos = Math.max(0, Math.min(rawPos, doc.content.size));
+  const $pos = doc.resolve(pos);
+  for (let depth = $pos.depth; depth >= 0; depth--) {
+    const parent = $pos.node(depth);
+    const index = $pos.index(depth);
+    if (parent.canReplaceWith(index, index, nodeType)) {
+      return depth === $pos.depth ? pos : $pos.posAtIndex(index, depth);
+    }
+  }
+  return null;
+}
+
+/**
+ * Put back the widgets an edit dropped: every widget of `oldDoc` that
+ * `tr.doc` no longer holds (by blobId; an id-less widget is always
+ * dropped) and `keep` accepts goes back in as the same node, at its old
+ * position mapped through the edit. The one implementation behind both
+ * external adoption (an agent rewriting the file) and the editor's own
+ * rule that a widget whose agent is working can't be deleted.
+ *
+ * @returns how many widgets went back in.
+ */
+export function restoreDroppedWidgets(
+  oldDoc: PMNode,
+  tr: { doc: PMNode; insert: (pos: number, node: PMNode) => unknown },
+  mapPos: (pos: number) => number,
+  options: {
+    keep: (node: PMNode) => boolean;
+    /** A kept widget with no valid place to go back to. */
+    onNoRoom?: (node: PMNode) => void;
+  },
+): number {
+  let restored = 0;
+  const survivors = widgetBlobIds(tr.doc);
+  for (const { pos, node } of collectWidgets(oldDoc)) {
+    const blobId = node.attrs.blobId as string | null;
+    if (blobId && survivors.has(blobId)) continue;
+    if (!options.keep(node)) continue;
+    const insertAt = findInsertPos(tr.doc, mapPos(pos), node.type);
+    if (insertAt === null) {
+      options.onNoRoom?.(node);
+      continue;
+    }
+    tr.insert(insertAt, node);
+    restored++;
+  }
+  return restored;
+}

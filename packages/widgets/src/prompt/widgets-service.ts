@@ -78,6 +78,9 @@ export type PromptWidget = {
    *  app can find its way from a session back to the widget. Null until
    *  the widget has mounted this run. */
   documentPath: string | null;
+  /** When an edit last tried and failed to delete this widget (it can't be
+   *  removed while the agent works), for the face's "stop it first" hint. */
+  removalRefusedAt: number | null;
 };
 
 /** A widget bound to a session, located in its document. */
@@ -105,6 +108,9 @@ export interface PromptWidgetsApi {
   /** Stop watching any round and drop the session (Edit, dismiss). The last
    *  sent prompt stays, for the Edit affordance. */
   unbind(blobId: string): void;
+
+  /** A delete was refused: the widget can't be removed now. */
+  refuseRemoval(blobId: string): void;
 
   /** The workspace trust warning, armed by a first Send. */
   askTrust(blobId: string): void;
@@ -154,6 +160,7 @@ const EMPTY: PromptWidget = {
   boundTurnId: null,
   lastSentPrompt: "",
   documentPath: null,
+  removalRefusedAt: null,
 };
 
 type Watch = {
@@ -360,6 +367,7 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
     },
     unbind,
 
+    refuseRemoval: (blobId) => write(blobId, { removalRefusedAt: Date.now() }),
     askTrust: (blobId) => fire(blobId, { type: "trustAsked" }),
     answerTrust: (blobId) => fire(blobId, { type: "trustAnswered" }),
 

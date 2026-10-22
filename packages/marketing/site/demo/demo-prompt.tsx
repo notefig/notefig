@@ -442,6 +442,7 @@ function PromptFace({
           write: noop,
           holdsCaret: () => false,
           focus: noop,
+          leave: noop,
         }}
         draftSlot={<DraftText text={state.draft} />}
         reference={referenceFor(reference)}
