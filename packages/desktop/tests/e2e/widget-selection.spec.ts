@@ -82,34 +82,35 @@ test.describe("prompt widget selection", () => {
       .first();
     await expect(widget).toBeVisible();
 
-    const selection = await page.evaluate(() => {
-      const widgetEl = document.querySelector<HTMLElement>(
-        '.ProseMirror [data-type="ai-prompt"]',
-      );
-      if (!widgetEl) return null;
-      const read = (el: Element | null) =>
-        el ? getComputedStyle(el).userSelect : null;
+    // Polled: the new scratchpad's widget can remount right after it first
+    // appears, and a detached element reads an empty cascade.
+    const read = () =>
+      page.evaluate(() => {
+        const widgetEl = document.querySelector<HTMLElement>(
+          '.ProseMirror [data-type="ai-prompt"]',
+        );
+        if (!widgetEl?.isConnected) return null;
+        const style = (el: Element | null) =>
+          el ? getComputedStyle(el).userSelect : null;
+        // The draft is document content; the caret has to land in it.
+        const composer = widgetEl.querySelector("[data-prompt-draft]");
+        return {
+          chrome: style(widgetEl),
+          // A plain chrome descendant — the status/reply row wrappers.
+          chromeChild: style(widgetEl.querySelector("div")),
+          composer: style(composer),
+          composerChild: style(composer?.querySelector("*") ?? null),
+        };
+      });
 
-      // The draft is document content; the caret has to land in it.
-      const composer = widgetEl.querySelector("[data-prompt-draft]");
-
-      return {
-        chrome: read(widgetEl),
-        // A plain chrome descendant — the status/reply row wrappers.
-        chromeChild: read(widgetEl.querySelector("div")),
-        composer: read(composer),
-        composerChild: read(composer?.querySelector("*") ?? null),
-      };
-    });
-
-    expect(selection).not.toBeNull();
-    // The card and its chrome: never selectable.
-    expect(selection!.chrome).toBe("none");
-    expect(selection!.chromeChild).toBe("none");
-    // The draft and its contents: still fully editable/selectable.
-    expect(selection!.composer).toBe("text");
-    if (selection!.composerChild) {
-      expect(selection!.composerChild).toBe("text");
+    // The card and its chrome: never selectable. The draft: still fully
+    // editable/selectable.
+    await expect
+      .poll(read)
+      .toMatchObject({ chrome: "none", chromeChild: "none", composer: "text" });
+    const selection = await read();
+    if (selection?.composerChild) {
+      expect(selection.composerChild).toBe("text");
     }
   });
 
