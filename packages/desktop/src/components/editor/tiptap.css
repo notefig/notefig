@@ -60,11 +60,37 @@
   vertical-align: top;
 }
 
-/* The widget owns its own focus/selection UI (PromptBlob) — a ProseMirror
-   NodeSelection can still land on it (clicking its chrome), but it must
-   never show the generic node-selection outline. */
+/* A widget's selected look (MET-248) — one look, however it got
+   selected: the keyboard picking it, or a text selection (a drag,
+   Shift+arrows, ⌘A) covering it. The widget plugin marks it
+   (interactions.ts), so a NodeSelection from anywhere else (the drag
+   grip, an undo) shows nothing, and the generic node-selection outline
+   never does. A refused delete shakes it (prompt-blob.tsx). */
 .ProseMirror [data-type="ai-prompt"].ProseMirror-selectednode {
   outline: none;
+}
+.ProseMirror [data-type="ai-prompt"] {
+  border-radius: var(--radius);
+}
+/* The decoration lands on the node view's outer element. The card's tint
+   is the whole look: its draft paints no text selection of its own on
+   top (styles.css's draft ::selection), which would otherwise show only
+   under a range, and color the text under a keyboard selection. */
+.ProseMirror .node-aiPrompt[data-widget-selected] > [data-type="ai-prompt"] {
+  position: relative;
+}
+.ProseMirror .node-aiPrompt[data-widget-selected] > [data-type="ai-prompt"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-color: Highlight;
+  opacity: 0.25;
+  pointer-events: none;
+}
+.ProseMirror .node-aiPrompt[data-widget-selected] [data-prompt-draft] ::selection {
+  background-color: transparent;
+  color: inherit;
 }
 
 /* The draft is document content, so the editor's own outline rules would

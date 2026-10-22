@@ -26,11 +26,12 @@
  */
 import type { Editor } from "@tiptap/core";
 import type { JSONContent } from "@tiptap/core";
-import type { Node as PMNode, NodeType } from "@tiptap/pm/model";
+import type { Node as PMNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import {
   PROMPT_CHANGE_META,
   PROMPT_NODE_NAME,
+  restoreDroppedWidgets,
   type PromptChangeAttribution,
 } from "@notefig/widgets";
 import { recreateTransform } from "@/vendor/prosemirror-recreate-transform/recreateTransform";
@@ -74,46 +75,6 @@ function orphanDroppedWidget(node: PMNode): void {
     "[adoption] prompt widget left the document with no re-insertion point",
     { blobId: node.attrs.blobId, taskId: node.attrs.taskId },
   );
-}
-
-function collectWidgets(doc: PMNode): Array<{ pos: number; node: PMNode }> {
-  const found: Array<{ pos: number; node: PMNode }> = [];
-  doc.descendants((node, pos) => {
-    if (node.type.name !== PROMPT_NODE_NAME) return true;
-    found.push({ pos, node });
-    return false;
-  });
-  return found;
-}
-
-function widgetBlobIds(doc: PMNode): Set<string> {
-  const ids = new Set<string>();
-  doc.descendants((node) => {
-    if (node.type.name !== PROMPT_NODE_NAME) return true;
-    const blobId = node.attrs.blobId as string | null;
-    if (blobId) ids.add(blobId);
-    return false;
-  });
-  return ids;
-}
-
-/** Nearest position at or above `rawPos` where `nodeType` may be inserted:
- *  walk outward from the resolved position until a parent accepts it. */
-function findInsertPos(
-  doc: PMNode,
-  rawPos: number,
-  nodeType: NodeType,
-): number | null {
-  const pos = Math.max(0, Math.min(rawPos, doc.content.size));
-  const $pos = doc.resolve(pos);
-  for (let depth = $pos.depth; depth >= 0; depth--) {
-    const parent = $pos.node(depth);
-    const index = $pos.index(depth);
-    if (parent.canReplaceWith(index, index, nodeType)) {
-      return depth === $pos.depth ? pos : $pos.posAtIndex(index, depth);
-    }
-  }
-  return null;
 }
 
 /** The file bytes an adoption brings in, by path and content hash, and
@@ -279,32 +240,23 @@ function restoreDraftCaret(
   tr.setSelection(TextSelection.create(tr.doc, target));
 }
 
-/** Re-insert widgets the diff removed, at their mapped positions. Runs on
- *  the open transaction so each insertion participates in the mapping. */
+/** Re-insert widgets the diff removed, at their mapped positions, per the
+ *  MET-174 policy above. Runs on the open transaction so each insertion
+ *  participates in the mapping. */
 function reassertDroppedWidgets(
   oldDoc: PMNode,
   tr: { doc: PMNode; insert: (pos: number, node: PMNode) => unknown },
   mapPos: (pos: number) => number,
 ): number {
-  let reinserted = 0;
-  const survivors = widgetBlobIds(tr.doc);
-  for (const { pos, node } of collectWidgets(oldDoc)) {
-    const blobId = node.attrs.blobId as string | null;
-    // Bound widgets survive when the incoming content kept their marker;
-    // unbound widgets (a summoned/queued composer) are never in the file,
-    // so an adoption always drops them and they are always re-asserted.
-    if (blobId && survivors.has(blobId)) continue;
-    if (resolveDroppedWidget(node) !== "reinsert") {
+  // Bound widgets survive when the incoming content kept their marker;
+  // unbound widgets (a summoned/queued composer) are never in the file,
+  // so an adoption always drops them and they are always re-asserted.
+  return restoreDroppedWidgets(oldDoc, tr, mapPos, {
+    keep: (node) => {
+      if (resolveDroppedWidget(node) === "reinsert") return true;
       orphanDroppedWidget(node);
-      continue;
-    }
-    const insertAt = findInsertPos(tr.doc, mapPos(pos), node.type);
-    if (insertAt === null) {
-      orphanDroppedWidget(node);
-      continue;
-    }
-    tr.insert(insertAt, node);
-    reinserted++;
-  }
-  return reinserted;
+      return false;
+    },
+    onNoRoom: orphanDroppedWidget,
+  });
 }

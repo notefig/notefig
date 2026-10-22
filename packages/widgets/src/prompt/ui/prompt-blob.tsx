@@ -188,7 +188,19 @@ function useDraftIO(
         .setTextSelection(found.to)
         .run();
     };
-    return { read, write, holdsCaret, focus };
+    /** Caret out of the draft, to the text after the widget, when it is
+     *  there — focus is left where it is. */
+    const leave = () => {
+      if (!holdsCaret()) return;
+      const pos = findPromptNodePos(editor.state.doc, blobId);
+      const node = pos === null ? null : editor.state.doc.nodeAt(pos);
+      if (pos === null || !node) return;
+      const $after = editor.state.doc.resolve(pos + node.nodeSize);
+      editor.view.dispatch(
+        editor.state.tr.setSelection(TextSelection.near($after, 1)),
+      );
+    };
+    return { read, write, holdsCaret, focus, leave };
   }, [prompts, editor, blobId, host, workspacePath]);
 }
 
@@ -683,6 +695,7 @@ export function PromptBlobFace({
   reference,
   clearReference,
   actions,
+  rules,
 }: {
   phase: BlobPhase;
   record: PromptBlobRecord;
@@ -701,20 +714,22 @@ export function PromptBlobFace({
   reference?: PromptReference | null;
   clearReference?: () => void;
   actions: PromptBlobFaceActions;
+  /** What the widget allows now. Absent for a face with no widget behind
+   *  it (the marketing demo, tests): read off the phase. */
+  rules?: FaceRules;
 }) {
+  const response = display.widgetResponse?.kind;
   return (
-    <div
-      onMouseDown={claimWidgetPointerEvents}
-      className="w-full"
-      // Test/inspection hook: the widget's phase-machine state.
-      data-blob-phase={phase}
-      data-blob-response={display.widgetResponse?.kind}
+    <FaceFrame
+      phase={phase}
+      response={response}
+      refusedAt={rules?.removalRefusedAt ?? null}
     >
       <AnimatedHeight>
         <div
           className={cn(
             "rounded-lg border",
-            blobCardClass(phase, display.widgetResponse?.kind === "issue"),
+            blobCardClass(phase, response === "issue"),
           )}
         >
           {/* Everything above the draft row is chrome, and chrome inside a
@@ -725,13 +740,11 @@ export function PromptBlobFace({
               through every button, and will happily park a caret in a
               status line. The draft below is the one editable island. */}
           <div contentEditable={false}>
-            {reference && (
-              <ReferenceChip
-                text={reference.text}
-                phase={phase}
-                onRemove={clearReference}
-              />
-            )}
+            <ReferenceLine
+              reference={reference}
+              phase={phase}
+              onRemove={clearReference}
+            />
             <SentFace
               phase={phase}
               record={record}
@@ -750,10 +763,12 @@ export function PromptBlobFace({
               documentPath={documentPath}
               actions={actions}
             />
+            <RemovalRefusedHint shown={rules?.removalRefused === true} />
           </div>
 
           <DraftRow
             phase={phase}
+            editable={rules?.fieldEditable}
             draftSlot={draftSlot}
             empty={draft.trim().length === 0}
             confirmTrust={confirmTrust}
@@ -765,7 +780,106 @@ export function PromptBlobFace({
           />
         </div>
       </AnimatedHeight>
+    </FaceFrame>
+  );
+}
+
+/** What a face's widget allows now. */
+interface FaceRules {
+  /** The draft takes typing (the widget's `fieldEditable`). */
+  fieldEditable: boolean;
+  /** A delete was just refused: say how to remove it. */
+  removalRefused: boolean;
+  /** When the last delete was refused: each one shakes the face. */
+  removalRefusedAt: number | null;
+}
+
+/** The quoted selection a widget was summoned over, when there is one. */
+function ReferenceLine({
+  reference,
+  phase,
+  onRemove,
+}: {
+  reference: PromptReference | null | undefined;
+  phase: BlobPhase;
+  onRemove?: () => void;
+}) {
+  if (!reference) return null;
+  return <ReferenceChip text={reference.text} phase={phase} onRemove={onRemove} />;
+}
+
+/** The face's outer element: pointer ownership, the inspection hooks, and
+ *  the refusal's shake. */
+function FaceFrame({
+  phase,
+  response,
+  refusedAt,
+  children,
+}: {
+  phase: BlobPhase;
+  response: string | undefined;
+  refusedAt: number | null;
+  children: React.ReactNode;
+}) {
+  const frame = useRef<HTMLDivElement>(null);
+  useShakeOn(frame, refusedAt);
+  return (
+    <div
+      ref={frame}
+      onMouseDown={claimWidgetPointerEvents}
+      className="relative w-full"
+      // Test/inspection hook: the widget's phase-machine state.
+      data-blob-phase={phase}
+      data-blob-response={response}
+    >
+      {children}
     </div>
+  );
+}
+
+/** A quick shake each time `at` moves on — every refused attempt, not
+ *  just the first in a row (a CSS animation keyed to an attribute that's
+ *  already set wouldn't replay). Still under reduced motion. */
+function useShakeOn(
+  element: React.RefObject<HTMLElement | null>,
+  at: number | null,
+): void {
+  useEffect(() => {
+    const node = element.current;
+    // A refusal from before this mount isn't news.
+    if (at === null || !node || Date.now() - at > 500) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (typeof node.animate !== "function") return;
+    const shake = node.animate(
+      [
+        { transform: "translateX(0)" },
+        { transform: "translateX(-3px)" },
+        { transform: "translateX(3px)" },
+        { transform: "translateX(0)" },
+      ],
+      { duration: 150, easing: "ease-in-out" },
+    );
+    return () => shake.cancel();
+  }, [element, at]);
+}
+
+/** The draft takes typing in these phases, for faces rendered without a
+ *  widget behind them (the marketing demo, tests). */
+function takesTyping(phase: BlobPhase): boolean {
+  return phase === "composing" || phase === "done" || phase === "error";
+}
+
+/** Why a delete just did nothing. */
+function RemovalRefusedHint({ shown }: { shown: boolean }) {
+  const { t } = useTranslation();
+  if (!shown) return null;
+  return (
+    <p
+      role="status"
+      className="px-2.5 pb-1.5 text-[0.6875rem] text-muted-foreground"
+    >
+      {t("promptBlobStopToRemove")}
+    </p>
   );
 }
 
@@ -918,9 +1032,15 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
   });
 
   const openBoundChat = openBoundChatAction(host, boundTaskId);
+  const removalRefused = useRecently(widget.removalRefusedAt, 1500);
 
   return {
     phase,
+    rules: {
+      fieldEditable: capabilities.fieldEditable,
+      removalRefused,
+      removalRefusedAt: widget.removalRefusedAt,
+    },
     record: widget,
     turn,
     task,
@@ -1035,7 +1155,11 @@ function usePromptSendActions({
       );
       return { taskId, turnId: dispatchPrompt(taskId, text) };
     });
-    if (sent) draftIO.write("");
+    if (!sent) return;
+    draftIO.write("");
+    // The field closes while the agent works: the caret goes back to
+    // the document rather than staying in a draft that takes no typing.
+    draftIO.leave();
   }, [prompts, host, blobId, trust, workspacePath, dispatchPrompt, draftIO]);
 
   // Reply (MET-92): continue the conversation on the BOUND task — never the
@@ -1062,7 +1186,11 @@ function usePromptSendActions({
       taskId,
       turnId: dispatchPrompt(taskId, text),
     }));
-    if (sent) draftIO.write("");
+    if (!sent) return;
+    draftIO.write("");
+    // The field closes while the agent works: the caret goes back to
+    // the document rather than staying in a draft that takes no typing.
+    draftIO.leave();
   }, [prompts, host, blobId, dispatchPrompt, t, draftIO]);
 
   return { send, sendFollowUp };
@@ -1199,6 +1327,19 @@ function usePromptBlobActions({
   };
 }
 
+/** True for `ms` after `at` — a moment the face shows briefly. */
+function useRecently(at: number | null, ms: number): boolean {
+  const [now, setNow] = useState(() => Date.now());
+  const recent = at !== null && now - at < ms;
+  useEffect(() => {
+    if (at === null) return;
+    setNow(Date.now());
+    const timeout = setTimeout(() => setNow(Date.now()), ms);
+    return () => clearTimeout(timeout);
+  }, [at, ms]);
+  return recent;
+}
+
 /**
  * Debounces the tool-activity label the same way the editor status bar
  * debounces "saved" (status-bar.tsx's useDebouncedSyncState): a new label
@@ -1261,6 +1402,7 @@ function AnimatedHeight({ children }: { children: React.ReactNode }) {
  */
 function DraftRow({
   phase,
+  editable,
   draftSlot,
   empty,
   confirmTrust,
@@ -1271,6 +1413,9 @@ function DraftRow({
   focusComposer,
 }: {
   phase: BlobPhase;
+  /** Takes typing; otherwise hidden and closed to the caret. Unset (a
+   *  face with no widget behind it): read off the phase. */
+  editable?: boolean;
   draftSlot: React.ReactNode;
   empty: boolean;
   confirmTrust: boolean;
@@ -1283,9 +1428,9 @@ function DraftRow({
 }) {
   const { t } = useTranslation();
   const composing = phase === "composing";
-  const replying = phase === "done" || phase === "error";
+  const open = editable ?? takesTyping(phase);
   return (
-    <div className="flex flex-col" hidden={!composing && !replying}>
+    <div className="flex flex-col" hidden={!open}>
       <div
         className={cn(
           "flex items-start",
@@ -1310,6 +1455,9 @@ function DraftRow({
             for. */}
         <div
           data-prompt-draft=""
+          // A field that doesn't take typing is outside the editing host:
+          // nothing — keys, IME, spellcheck, a stray click — edits it.
+          contentEditable={open ? undefined : false}
           data-empty={empty ? "true" : "false"}
           data-placeholder={
             composing ? t("promptBlobPlaceholder") : t("promptBlobReply")

@@ -60,6 +60,7 @@ export {
   promptDraftRange,
   registerContentlessNodeName,
   removeToParagraphTr,
+  restoreDroppedWidgets,
   revertToSlashTr,
   selectionDraft,
   selectionSummonTr,

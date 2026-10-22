@@ -28,6 +28,7 @@ export const PROMPT_WIDGET_I18N_KEYS = [
   "promptBlobDismiss",
   "promptBlobDone",
   "promptBlobEdit",
+  "promptBlobStopToRemove",
   "promptBlobFailed",
   "promptBlobIssue",
   "promptBlobNewSessionWith",

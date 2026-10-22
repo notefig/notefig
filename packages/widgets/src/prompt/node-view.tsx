@@ -61,6 +61,18 @@ import {
 import type { PromptReference } from "./doc-helpers";
 import { PromptBlob } from "./ui/prompt-blob";
 import { inertPromptWidgets, type PromptWidgetsApi } from "./widgets-service";
+import {
+  arrowOntoReadOnlyWidget,
+  backspaceIntoWidget,
+  deleteIntoWidget,
+  deleteRangeOverWidgets,
+  deleteSelectedWidget,
+  enterSelectedWidget,
+  syncSelectionFromDOM,
+  promptInteractionsPlugin,
+  restoreKeptWidgetsTr,
+  selectAllInDraft,
+} from "./interactions";
 import { promptChangeTrackingPlugin } from "./change-tracking";
 import { promptChangeGutterPlugin } from "./change-gutter";
 import {
@@ -93,17 +105,27 @@ export interface AiPromptNodeOptions {
  */
 function arrowAcrossWidget(
   editor: NodeViewProps["editor"],
+  prompts: PromptWidgetsApi,
   dir: -1 | 1,
 ): boolean {
   const { state, view } = editor;
   const { selection } = state;
   if (!(selection instanceof TextSelection) || !selection.empty) return false;
   if (!view.endOfTextblock(dir < 0 ? "up" : "down")) return false;
-  const target = selectionDraft(state)
-    ? draftExitTarget(state, dir)
-    : draftEntryTarget(state, dir);
-  if (!target) return false;
-  view.dispatch(state.tr.setSelection(target).scrollIntoView());
+  if (selectionDraft(state)) {
+    const target = draftExitTarget(state, dir);
+    if (!target) return false;
+    view.dispatch(state.tr.setSelection(target).scrollIntoView());
+    return true;
+  }
+  const entry = draftEntryTarget(state, dir);
+  if (!entry) return false;
+  // A field that doesn't take typing is never entered: the widget is
+  // selected instead.
+  const onto = arrowOntoReadOnlyWidget(state, prompts, entry.widgetPos);
+  view.dispatch(
+    (onto ?? state.tr.setSelection(entry.target)).scrollIntoView(),
+  );
   return true;
 }
 
@@ -186,13 +208,18 @@ function gapBesideWidgetTr(
 
 /** Entering a draft: only when the top-level sibling in that direction is a
  *  widget (nested contexts keep native movement). */
-function draftEntryTarget(state: EditorState, dir: -1 | 1): Selection | null {
+function draftEntryTarget(
+  state: EditorState,
+  dir: -1 | 1,
+): { target: Selection; widgetPos: number } | null {
   const { $from } = state.selection;
   const $edge = state.doc.resolve(dir < 0 ? $from.before(1) : $from.after(1));
   const neighbour = dir < 0 ? $edge.nodeBefore : $edge.nodeAfter;
   if (neighbour?.type.name !== PROMPT_NODE_NAME) return null;
   const target = Selection.near($edge, dir);
-  return selectionDraft({ selection: target }) ? target : null;
+  if (!selectionDraft({ selection: target })) return null;
+  const widgetPos = dir < 0 ? $edge.pos - neighbour.nodeSize : $edge.pos;
+  return { target, widgetPos };
 }
 
 /** The keeper's insertion, or null when the doc doesn't need one. */
@@ -481,7 +508,21 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       Boolean(selectionDraft(this.editor.state)) &&
       mentionPopupHasResults(this.options.filePath);
     return {
-      Enter: forward("Enter"),
+      Enter: () =>
+        forward("Enter")() ||
+        enterSelectedWidget(this.editor, this.options.prompts),
+      // A selected widget: refused when it can't be removed. Beside one:
+      // selects it — the counterpart of Backspace from the line below.
+      Delete: () => {
+        syncSelectionFromDOM(this.editor);
+        return (
+          deleteRangeOverWidgets(this.editor) ||
+          deleteSelectedWidget(this.editor, this.options.prompts) ||
+          deleteIntoWidget(this.editor)
+        );
+      },
+      // In a draft: the draft first, the whole document on a second press.
+      "Mod-a": () => selectAllInDraft(this.editor),
       // Multi-line input: StarterKit's HardBreak binds these two combos
       // itself, but its command bails inside the draft's isolating node (see
       // insertDraftHardBreak) — so the draft handles them directly instead
@@ -505,7 +546,11 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // runs, and dispatching that stale tr afterwards reverts the
       // removal).
       Backspace: () => {
+        syncSelectionFromDOM(this.editor);
+        if (deleteRangeOverWidgets(this.editor)) return true;
         if (forward("Backspace")()) return true;
+        if (deleteSelectedWidget(this.editor, this.options.prompts)) return true;
+        if (backspaceIntoWidget(this.editor)) return true;
         return this.editor.commands.command(({ state, tr }) => {
           const draft = selectionDraft(state);
           if (!draft) return false;
@@ -545,9 +590,11 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // own onKeyDown (it runs after this keymap) so they step through the
       // list instead of carrying the caret out of the widget.
       ArrowUp: () =>
-        !suggestionOwnsArrows() && arrowAcrossWidget(this.editor, -1),
+        !suggestionOwnsArrows() &&
+        arrowAcrossWidget(this.editor, this.options.prompts, -1),
       ArrowDown: () =>
-        !suggestionOwnsArrows() && arrowAcrossWidget(this.editor, 1),
+        !suggestionOwnsArrows() &&
+        arrowAcrossWidget(this.editor, this.options.prompts, 1),
       // Delete-to-line-start. Inside a draft the composer map gets its
       // dismiss chance first (empty summoned draft), then the delete is
       // clamped to the draft's own start — and the key is ALWAYS consumed
@@ -557,6 +604,8 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // mangles the widget's DOM badly enough that the re-parse drops the
       // whole node.
       "Mod-Backspace": () => {
+        syncSelectionFromDOM(this.editor);
+        if (deleteRangeOverWidgets(this.editor)) return true;
         if (forward("Backspace")()) return true;
         return this.editor.commands.command(({ state, tr }) => {
           const draft = selectionDraft(state);
@@ -574,6 +623,8 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // the boundary just like the soft-line variant). Empty summoned draft:
       // same dismiss as plain Backspace.
       "Alt-Backspace": () => {
+        syncSelectionFromDOM(this.editor);
+        if (deleteRangeOverWidgets(this.editor)) return true;
         if (forward("Backspace")()) return true;
         return this.editor.commands.command(({ state, tr }) => {
           const draft = selectionDraft(state);
@@ -637,6 +688,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
         ? [
             promptChangeTrackingPlugin(options.filePath),
             promptChangeGutterPlugin(),
+            promptInteractionsPlugin(options.prompts),
           ]
         : []),
       new Plugin({
@@ -686,6 +738,16 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
           if (gap) return gap;
           if (!options.filePath) return null;
           if (!transactions.some((tr) => tr.docChanged)) return null;
+          // A widget that can't be removed goes back in first — before the
+          // keeper, which would otherwise see a cleared document and add a
+          // fresh composer beside it.
+          const kept = restoreKeptWidgetsTr(
+            transactions,
+            oldState,
+            newState,
+            options.prompts,
+          );
+          if (kept) return kept;
           // Became-empty reinsert: no caret move — the user's cursor is in
           // the editor and must stay there.
           const keeper = appendPromptTr(newState)?.tr;
