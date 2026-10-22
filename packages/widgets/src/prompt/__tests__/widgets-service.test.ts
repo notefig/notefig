@@ -36,6 +36,8 @@ describe("createPromptWidgets", () => {
   });
 
   it("treats a turn row that hasn't appeared yet as queued, and a vanished one as stale", async () => {
+    // Stale drops the turn, never the session: a revived session replays
+    // its turns away, and the widget still belongs to it.
     const t = testPrompts();
     await t.prompts.send("blob", "hi", async () => ROUND);
     expect(t.prompts.get("blob").state).toEqual({ name: "working", turn: "queued" });
@@ -43,7 +45,7 @@ describe("createPromptWidgets", () => {
     t.removeTurn("trn_1");
     expect(t.prompts.get("blob")).toMatchObject({
       state: { name: "composing" },
-      boundTaskId: null,
+      boundTaskId: "task_1",
       boundTurnId: null,
       lastSentPrompt: "hi",
     });
@@ -125,19 +127,40 @@ describe("createPromptWidgets", () => {
     expect(t.prompts.get("blob")).toBe(t.prompts.get("blob"));
   });
 
-  it("Escape belongs to the newest stoppable turn in each document", async () => {
+  it("withdraws a queued turn waiting behind a sign-in instead of cancelling the session", async () => {
     const t = testPrompts();
+    await t.send("blob", "hi", ROUND);
+    t.setAuthRequired("task_1", true);
+    expect(t.prompts.get("blob").state).toEqual({
+      name: "asking",
+      ask: { kind: "auth" },
+    });
+    expect(t.prompts.stop("blob", t.commands)).toBe("withdrawn");
+    expect(t.commands.removeQueuedPrompt).toHaveBeenCalledWith("task_1", "trn_1");
+    expect(t.commands.cancelTask).not.toHaveBeenCalled();
+    expect(t.prompts.withdraw("blob", t.commands)).toBe(false);
+  });
+
+  it("Escape belongs to the newest stoppable turn among mounted widgets", async () => {
+    const t = testPrompts();
+    const releases: Record<string, () => void> = {};
     for (const [blobId, turnId, doc] of [
       ["blob_old", "trn_1", "/ws/a.md"],
       ["blob_new", "trn_2", "/ws/a.md"],
-      ["blob_elsewhere", "trn_3", "/ws/b.md"],
+      // Another document open in a split pane: one owner across both.
+      ["blob_other_pane", "trn_3", "/ws/b.md"],
     ] as const) {
       t.prompts.setDocument(blobId, doc);
+      releases[blobId] = t.prompts.claimEscape(blobId);
       await t.send(blobId, "hi", { taskId: "task_1", turnId });
     }
+    expect(t.prompts.isNewestStoppable("blob_other_pane")).toBe(true);
+    expect(t.prompts.isNewestStoppable("blob_new")).toBe(false);
     expect(t.prompts.isNewestStoppable("blob_old")).toBe(false);
+    // Its tab unmounted: it no longer takes the key.
+    releases.blob_other_pane();
+    expect(t.prompts.isNewestStoppable("blob_other_pane")).toBe(false);
     expect(t.prompts.isNewestStoppable("blob_new")).toBe(true);
-    expect(t.prompts.isNewestStoppable("blob_elsewhere")).toBe(true);
     t.prompts.unbind("blob_new");
     expect(t.prompts.isNewestStoppable("blob_old")).toBe(true);
   });

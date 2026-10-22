@@ -120,8 +120,15 @@ export interface PromptWidgetsApi {
     dispatch: () => Promise<{ taskId: string; turnId: string }>,
   ): Promise<boolean>;
   /**
-   * Stop the bound round: a queued turn is withdrawn (the widget unbinds, so
-   * the caller can put the prompt back in the draft), a live one cancelled.
+   * Withdraw the bound turn if it is still queued — read off the turn's own
+   * row, since a queued turn can sit behind a sign-in (`asking`). The widget
+   * unbinds, so the caller can put the prompt back in the draft. False when
+   * there was no queued turn to withdraw.
+   */
+  withdraw(blobId: string, commands: StopCommands): boolean;
+  /**
+   * Stop the bound round: a queued turn is withdrawn (see `withdraw`), a
+   * live one cancelled.
    */
   stop(
     blobId: string,
@@ -133,8 +140,11 @@ export interface PromptWidgetsApi {
     taskId: string,
     preferTurnId?: string | null,
   ): PromptWidgetLocation | null;
+  /** A mounted widget takes part in Escape; returns the release. */
+  claimEscape(blobId: string): () => void;
   /** True when this widget holds the newest turn Escape can stop among the
-   *  widgets in its document — the one Escape acts on. */
+   *  mounted widgets — the one Escape acts on. One owner across every
+   *  visible document, so a keypress never stops two rounds. */
   isNewestStoppable(blobId: string): boolean;
 }
 
@@ -165,6 +175,8 @@ function factsOf(snapshot: PromptRoundSnapshot): RoundFacts {
 
 export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
   const widgets = new Map<string, PromptWidget>();
+  /** Mounted widgets taking part in Escape, by blobId → mount count. */
+  const escapeClaims = new Map<string, number>();
   const listeners = new Map<string, Set<() => void>>();
   const watches = new Map<string, Watch>();
 
@@ -203,8 +215,12 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
   };
 
   /** Fold the watched round's current rows into the machine. A bound turn
-   *  whose row is gone is stale (withdrawn, forgotten, its task disposed):
-   *  the widget unbinds instead of rendering a dead round. */
+   *  whose row is gone is stale (withdrawn, forgotten, replayed away when
+   *  the session is revived): the widget drops the turn instead of
+   *  rendering a dead round. It keeps the session — a missing turn row says
+   *  nothing about the session, and the file marker follows the session, so
+   *  dropping it here would strip markers from every widget on a revived
+   *  session. */
   const fold = (blobId: string, watch: Watch) => {
     const widget = get(blobId);
     if (widget.state.name === "sending") return;
@@ -215,7 +231,6 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
       write(blobId, {
         state: transition(widget.state, { type: "unbound" }),
         boundTurnId: null,
-        boundTaskId: null,
       });
       return;
     }
@@ -286,6 +301,25 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
       boundTaskId: null,
       boundTurnId: null,
     });
+  };
+
+  /** The bound turn's status as its row says, else as the machine last
+   *  saw it (a just-dispatched turn whose row isn't written yet). */
+  const turnStatus = (blobId: string) => {
+    const row = watches.get(blobId)?.observation.get().turn;
+    if (row) return row.status;
+    const { state } = get(blobId);
+    return state.name === "working" ? state.turn : undefined;
+  };
+
+  const withdraw = (blobId: string, commands: StopCommands) => {
+    const { boundTaskId, boundTurnId } = get(blobId);
+    if (!boundTaskId || !boundTurnId || turnStatus(blobId) !== "queued") {
+      return false;
+    }
+    commands.removeQueuedPrompt(boundTaskId, boundTurnId);
+    unbind(blobId);
+    return true;
   };
 
   const stoppable = (widget: PromptWidget) =>
@@ -360,26 +394,30 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
       }
     },
 
+    withdraw,
     stop(blobId, commands) {
-      const widget = get(blobId);
-      const { boundTaskId, boundTurnId } = widget;
+      const { boundTaskId, boundTurnId } = get(blobId);
       if (!boundTaskId || !boundTurnId) return "none";
-      if (widget.state.name === "working" && widget.state.turn === "queued") {
-        commands.removeQueuedPrompt(boundTaskId, boundTurnId);
-        unbind(blobId);
-        return "withdrawn";
-      }
+      if (withdraw(blobId, commands)) return "withdrawn";
       commands.cancelTask(boundTaskId);
       return "cancelled";
     },
 
     findByTask,
+    claimEscape(blobId) {
+      escapeClaims.set(blobId, (escapeClaims.get(blobId) ?? 0) + 1);
+      return () => {
+        const count = (escapeClaims.get(blobId) ?? 1) - 1;
+        if (count > 0) escapeClaims.set(blobId, count);
+        else escapeClaims.delete(blobId);
+      };
+    },
     isNewestStoppable(blobId) {
       const mine = get(blobId);
-      if (!stoppable(mine)) return false;
-      for (const other of widgets.values()) {
+      if (!escapeClaims.has(blobId) || !stoppable(mine)) return false;
+      for (const otherId of escapeClaims.keys()) {
+        const other = get(otherId);
         if (other === mine || !stoppable(other)) continue;
-        if (other.documentPath !== mine.documentPath) continue;
         if (other.boundTurnId! > mine.boundTurnId!) return false;
       }
       return true;

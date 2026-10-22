@@ -304,9 +304,9 @@ function usePromptBlobDisplay({
 /**
  * Escape anywhere stops this widget's agent (MET-248). A global hotkey, not
  * a card-level keydown: once a prompt is sent the caret is usually back in
- * the document, where no element inside the widget hears the key. The dock
- * unmounting unselected tabs scopes it to the visible document; among the
- * widgets in it, the one holding the newest turn acts.
+ * the document, where no element inside the widget hears the key. Among the
+ * mounted widgets (the dock unmounts unselected tabs; split panes each
+ * mount theirs) the one holding the newest turn acts.
  */
 function useInFlightEscape({
   prompts,
@@ -319,6 +319,7 @@ function useInFlightEscape({
   stoppable: boolean;
   stop: () => void;
 }) {
+  useEffect(() => prompts.claimEscape(blobId), [prompts, blobId]);
   useHotkey(
     "Escape",
     (event) => {
@@ -326,6 +327,8 @@ function useInFlightEscape({
       if (event.defaultPrevented) return;
       if (!prompts.isNewestStoppable(blobId)) return;
       stop();
+      // Consumed: the key did its one job, nothing behind it acts too.
+      event.preventDefault();
     },
     // 'allow': several widgets can legitimately hold this registration;
     // the newest turn decides which one acts. preventDefault: false — the
@@ -1110,10 +1113,7 @@ function usePromptBlobActions({
   // Edit: pull the sent prompt back into the composer. A queued turn is
   // withdrawn; a running/finished one keeps going — re-send is a new turn.
   const editPrompt = useCallback(() => {
-    const { state } = prompts.get(blobId);
-    if (state.name === "working" && state.turn === "queued") {
-      prompts.stop(blobId, host);
-    }
+    prompts.withdraw(blobId, host);
     restorePromptToDraft();
   }, [prompts, host, blobId, restorePromptToDraft]);
 

@@ -285,9 +285,11 @@ function usePromptBinding({
   }, [prompts, blobId, filePath]);
 
   // The file marker follows the widget's session: binding writes it, and
-  // unbinding (Edit, dismiss, a stale turn) takes it out of the file. Only
-  // CHANGES are mirrored — on mount the service may not have adopted the
-  // persisted session yet, and that must not erase the marker.
+  // unbinding (Edit, dismiss, a stale turn) takes it out of the file. On
+  // mount a binding the service already holds is written too — a send that
+  // finished while the tab was hidden had no node view to write it. The one
+  // thing a mount never does is erase: an unbound service may simply not
+  // have adopted the persisted session yet.
   const boundTaskId = useSyncExternalStore(
     useCallback(
       (onChange: () => void) =>
@@ -296,10 +298,11 @@ function usePromptBinding({
     ),
     () => (blobId ? prompts.get(blobId).boundTaskId : null),
   );
-  const mirrored = useRef(boundTaskId);
+  const mounted = useRef(false);
   useEffect(() => {
-    if (mirrored.current === boundTaskId) return;
-    mirrored.current = boundTaskId;
+    const first = !mounted.current;
+    mounted.current = true;
+    if (first && boundTaskId === null) return;
     if (persistedTaskId !== boundTaskId) writeTaskId(boundTaskId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boundTaskId]);

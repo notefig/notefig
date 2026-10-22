@@ -60,13 +60,14 @@ describe("promptWidgets over the agent store", () => {
     expect(prompts.get("blob").state).toEqual({ name: "settled", outcome: "done" });
   });
 
-  it("unbinds when the turn's row is deleted", async () => {
+  it("drops the turn, keeping the session, when the turn's row is deleted", async () => {
+    // What a session revival's replay does to every earlier turn.
     const { store, prompts } = await sentWidget();
     store.turns.delete("trn_1");
     expect(prompts.get("blob")).toMatchObject({
       state: { name: "composing" },
       boundTurnId: null,
-      boundTaskId: null,
+      boundTaskId: "task_1",
     });
   });
 });

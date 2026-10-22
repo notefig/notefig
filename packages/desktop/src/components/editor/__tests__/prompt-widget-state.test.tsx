@@ -43,7 +43,13 @@ afterEach(() => {
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-function Harness({ onEditor }: { onEditor: (editor: Editor) => void }) {
+function Harness({
+  content = "<p>Hi there</p><p></p>",
+  onEditor,
+}: {
+  content?: string;
+  onEditor: (editor: Editor) => void;
+}) {
   const editor = useEditor({
     extensions: [
       ...editorExtensions.filter((e) => e.name !== "aiPrompt"),
@@ -53,12 +59,35 @@ function Harness({ onEditor }: { onEditor: (editor: Editor) => void }) {
         prompts: prompts.prompts,
       }),
     ],
-    content: "<p>Hi there</p><p></p>",
+    content,
   });
   useEffect(() => {
     if (editor) onEditor(editor);
   }, [editor, onEditor]);
   return editor ? createElement(EditorContent, { editor }) : null;
+}
+
+/** Mount a document over the current `prompts` and `host`. */
+async function mount(content?: string): Promise<Editor> {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  let editor: Editor | null = null;
+  await act(async () => {
+    root!.render(
+      withHost(
+        host,
+        createElement(Harness, {
+          content,
+          onEditor: (instance) => {
+            editor = instance;
+          },
+        }),
+      ),
+    );
+    await tick();
+  });
+  return editor!;
 }
 
 /** A document with a widget summoned on its second line, prompt sent and
@@ -71,24 +100,7 @@ async function runningWidget(): Promise<{ editor: Editor; blobId: string }> {
       return { turnId: TURN };
     }),
   });
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  let editor: Editor | null = null;
-  await act(async () => {
-    root!.render(
-      withHost(
-        host,
-        createElement(Harness, {
-          onEditor: (instance) => {
-            editor = instance;
-          },
-        }),
-      ),
-    );
-    await tick();
-  });
-  const ed = editor!;
+  const ed = await mount();
   await act(async () => {
     ed.commands.setTextSelection(11);
     const { from, to } = ed.state.selection;
@@ -175,5 +187,31 @@ describe("a running widget", () => {
     });
     expect(prompts.prompts.get(blobId).boundTaskId).toBeNull();
     expect(widgetTaskId(editor)).toBeNull();
+  });
+});
+
+describe("the file marker", () => {
+  const WIDGET = (taskId?: string) =>
+    `<p>Hi</p><div data-type="ai-prompt" data-blob-id="blob_m"${
+      taskId ? ` data-task-id="${taskId}"` : ""
+    }></div><p></p>`;
+
+  it("takes a session bound while the widget wasn't mounted", async () => {
+    // A send that finished while its tab was hidden: no node view was
+    // there to write the marker.
+    prompts = testPrompts();
+    host = fakePromptWidgetHost();
+    await prompts.send("blob_m", "hi", { taskId: TASK, turnId: TURN });
+    const editor = await mount(WIDGET());
+    expect(widgetTaskId(editor)).toBe(TASK);
+  });
+
+  it("keeps a persisted session the service hasn't adopted yet", async () => {
+    prompts = testPrompts();
+    // Reachability still pending: the service is unbound for now.
+    host = fakePromptWidgetHost({ isTaskReachable: () => new Promise(() => {}) });
+    const editor = await mount(WIDGET("task_saved"));
+    expect(prompts.prompts.get("blob_m").boundTaskId).toBeNull();
+    expect(widgetTaskId(editor)).toBe("task_saved");
   });
 });
