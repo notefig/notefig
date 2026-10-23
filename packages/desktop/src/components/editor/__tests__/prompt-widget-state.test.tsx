@@ -15,7 +15,7 @@ vi.mock("react-i18next", () => ({
 
 import { Editor, EditorContent, useEditor } from "@tiptap/react";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
-import { widgetRendererNodes, selectionDraft } from "@notefig/widgets";
+import { widgetRendererNodes, selectionDraft, promptDraftRange } from "@notefig/widgets";
 import type { PromptWidgetHost } from "@notefig/widgets";
 import {
   fakePromptWidgetHost,
@@ -663,6 +663,41 @@ describe("deleting and selecting a widget", () => {
     const copy = pasted.content.firstChild!;
     expect(copy.attrs.taskId).toBeNull();
     expect(copy.attrs.blobId).not.toBe(node.attrs.blobId);
+  });
+
+  it("multi-line paste stays inside the prompt draft", async () => {
+    const { editor, blobId } = await composingWidget();
+    const range = promptDraftRange(editor.state.doc, blobId);
+    expect(range).not.toBeNull();
+    await act(async () => {
+      editor.commands.setTextSelection(range!.to);
+      await tick();
+    });
+
+    const dt = new DataTransfer();
+    dt.setData("text/plain", "line2\nline3");
+    const pasteEvent = new ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: dt,
+    });
+    const { Slice, Fragment } = await import("@tiptap/pm/model");
+    await act(async () => {
+      editor.view.someProp("handlePaste", (handler) =>
+        handler(editor.view, pasteEvent, new Slice(Fragment.empty, 0, 0)),
+      );
+      await tick();
+    });
+
+    expect(selectionDraft(editor.state)?.blobId).toBe(blobId);
+    const draft = promptDraftRange(editor.state.doc, blobId)!;
+    expect(
+      editor.state.doc.textBetween(draft.from, draft.to, "\n", (leaf) =>
+        leaf.type.name === "hardBreak" ? "\n" : "",
+      ),
+    ).toBe("line2\nline3");
+    expect(draft.node.childCount).toBe(3);
+    expect(editor.state.doc.childCount).toBe(3);
   });
 
   /** Drop the widget's node through the editor's drop transform, as the

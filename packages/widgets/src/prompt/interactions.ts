@@ -392,6 +392,54 @@ export function restoreKeptWidgetsTr(
   return restored > 0 ? tr : null;
 }
 
+/**
+ * Convert pasted text into promptDraft-compatible inline content: each
+ * newline becomes a hardBreak, so multi-line pastes stay INSIDE the widget
+ * (MET-257). ProseMirror's default fit would turn paragraphs after the
+ * first one into sibling document blocks.
+ */
+function sliceFromPastedText(
+  schema: PMNode["type"]["schema"],
+  text: string,
+): Fragment {
+  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const hardBreak = schema.nodes.hardBreak;
+  const nodes: PMNode[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (i > 0 && hardBreak) nodes.push(hardBreak.create());
+    const line = lines[i];
+    if (line) nodes.push(schema.text(line));
+  }
+  return Fragment.from(nodes);
+}
+
+/**
+ * Paste into a prompt draft: keep every line inside the draft by turning
+ * newlines into hardBreaks. Returning true hands the event and stops the
+ * default paste.
+ */
+function pasteIntoDraft(
+  view: EditorView,
+  event: ClipboardEvent,
+  _slice: Slice,
+  prompts: PromptWidgetsApi,
+): boolean {
+  const draft = selectionDraft(view.state);
+  if (!draft) return false;
+  const { state } = prompts.get(draft.blobId);
+  if (!capabilitiesOf(state, { summoned: false }).fieldEditable) return true;
+  const text = event.clipboardData?.getData("text/plain");
+  if (typeof text !== "string") return false;
+  view.dispatch(
+    view.state.tr
+      .replaceSelection(
+        new PMSlice(sliceFromPastedText(view.state.schema, text), 0, 0),
+      )
+      .scrollIntoView(),
+  );
+  return true;
+}
+
 /** The modifier that turns a drag-move into a copy (ProseMirror's own). */
 const COPY_KEY =
   typeof navigator !== "undefined" && /Mac|iP(hone|[oa]d)/.test(navigator.platform)
@@ -490,6 +538,9 @@ export function promptInteractionsPlugin(prompts: PromptWidgetsApi): Plugin {
         direct && node.type.name === PROMPT_NODE_NAME,
       handleKeyDown: (view, event) =>
         typeIntoSelectedWidget(view, event, prompts),
+      handlePaste(view, event, slice) {
+        return pasteIntoDraft(view, event, slice, prompts);
+      },
       handleTextInput(view, _from, _to, text) {
         // Over a widget the range covers through its draft: replaced from
         // the widget's edge, as Delete does.
