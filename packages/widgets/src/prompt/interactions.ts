@@ -426,10 +426,15 @@ function pasteIntoDraft(
 ): boolean {
   const draft = selectionDraft(view.state);
   if (!draft) return false;
+  const { selection } = view.state;
+  if (selection.from < draft.from || selection.to > draft.to) return false;
   const { state } = prompts.get(draft.blobId);
   if (!capabilitiesOf(state, { summoned: false }).fieldEditable) return true;
   const text = event.clipboardData?.getData("text/plain");
-  if (typeof text !== "string") return false;
+  // No plain text (e.g. HTML-only clipboard) leaves the parsed slice to
+  // ProseMirror's default handling instead of replacing the draft with
+  // nothing (MET-257).
+  if (!text) return false;
   view.dispatch(
     view.state.tr
       .replaceSelection(
