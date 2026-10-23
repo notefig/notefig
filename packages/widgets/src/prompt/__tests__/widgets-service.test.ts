@@ -5,6 +5,7 @@ import {
   getDocumentPromptChanges,
   setDocumentPromptChanges,
 } from "../change-store";
+import { capabilitiesOf } from "../machine";
 
 const ROUND = { taskId: "task_1", turnId: "trn_1" };
 
@@ -292,6 +293,19 @@ describe("stored rounds (MET-251)", () => {
       name: "asking",
       ask: { kind: "auth" },
     });
+  });
+
+  it("runs a retried round again before its record reopens", async () => {
+    const t = testPrompts();
+    await t.send("blob", "make it shorter", ROUND);
+    t.setAuthRequired("task_1", true);
+    t.setTurn("trn_1", "task_1", "error");
+    // Signed in: the same turn goes back to the queue, its record still
+    // saying how the first attempt ended.
+    t.setAuthRequired("task_1", false);
+    t.setTurn("trn_1", "task_1", "queued");
+    expect(t.prompts.get("blob").state).toEqual({ name: "working", turn: "queued" });
+    expect(capabilitiesOf(t.prompts.get("blob").state, { summoned: false }).escape).toBe("stop");
   });
 
   it("counts the bound round's saved review ranges", async () => {

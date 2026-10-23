@@ -259,8 +259,9 @@ function factsOf(snapshot: PromptRoundSnapshot): RoundFacts {
  * Where the round stands. Whether it has ended, and how, is the record's to
  * say — the same record the face reads the outcome from. A turn row that
  * has ended while its record hasn't yet (or before the record is even
- * written) holds as running for that moment. Only in an app that keeps no
- * records does the turn row say it alone.
+ * written) holds as running for that moment. A live turn whose record
+ * has ended is a retry the record hasn't reopened for yet: the turn says.
+ * Only in an app that keeps no records does the turn row say it alone.
  */
 function roundStatus(
   turn: RoundFacts["turn"],
@@ -269,7 +270,9 @@ function roundStatus(
 ): RoundFacts["turn"] {
   const status = record?.status ?? (keepsRecords ? "live" : undefined);
   if (status === undefined) return turn;
-  if (status !== "live") return status;
+  if (status !== "live") {
+    return turn === "queued" || turn === "running" ? turn : status;
+  }
   return turn === undefined || turn === "queued" ? turn : "running";
 }
 

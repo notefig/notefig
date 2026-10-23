@@ -237,19 +237,27 @@ describe("saved review ranges", () => {
     view.destroy();
   });
 
-  it("counts a document's saved ranges until an editor holds it, then its live ones", () => {
-    const saved = { [DOC_PATH]: 3, "/ws/closed.md": 2 };
+  // The store outlives each test, so these open documents no other test has.
+  const openedAt = (documentPath: string) =>
+    new EditorView(document.createElement("div"), {
+      state: EditorState.create({
+        doc: schema.node("doc", null, [schema.node("paragraph", null, [schema.text("hello world")])]),
+        plugins: [promptChangeTrackingPlugin(documentPath, prompts)],
+      }),
+    });
+
+  it("counts a document's saved ranges until an editor opens it, then its live ones", () => {
+    const opened = "/ws/counted.md";
+    const saved = { [opened]: 3, "/ws/closed.md": 2 };
     expect(countPromptChanges(ROUND.blobId, saved)).toEqual(
       new Map([
-        [DOC_PATH, 3],
+        [opened, 3],
         ["/ws/closed.md", 2],
       ]),
     );
     // Opened: the editor restored nothing (the file changed while closed),
     // so its saved count no longer stands for anything shown.
-    const view = new EditorView(document.createElement("div"), {
-      state: stateOf("hello world"),
-    });
+    const view = openedAt(opened);
     expect(countPromptChanges(ROUND.blobId, saved)).toEqual(
       new Map([["/ws/closed.md", 2]]),
     );
@@ -257,11 +265,18 @@ describe("saved review ranges", () => {
     expect(countPromptChanges(ROUND.blobId, saved)).toEqual(
       new Map([
         ["/ws/closed.md", 2],
-        [DOC_PATH, 1],
+        [opened, 1],
       ]),
     );
     // Closed again, this run's ranges are still newer than the saved ones.
     view.destroy();
-    expect(countPromptChanges(ROUND.blobId, saved).get(DOC_PATH)).toBe(1);
+    expect(countPromptChanges(ROUND.blobId, saved).get(opened)).toBe(1);
+  });
+
+  it("doesn't count saved ranges an editor rejected once it closes", () => {
+    const rejected = "/ws/rejected.md";
+    const saved = { [rejected]: 3 };
+    openedAt(rejected).destroy();
+    expect(countPromptChanges(ROUND.blobId, saved)).toEqual(new Map());
   });
 });

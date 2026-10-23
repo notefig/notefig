@@ -29,7 +29,6 @@ import type { PromptWidgetsApi } from "./widgets-service";
 import {
   PROMPT_CHANGE_META,
   getDocumentPromptChanges,
-  holdPromptChanges,
   setDocumentPromptChanges,
   subscribePromptChanges,
   type PromptChange,
@@ -278,7 +277,6 @@ export function promptChangeTrackingPlugin(
       },
     },
     view(view) {
-      const release = holdPromptChanges(documentPath);
       // The store follows what this editor restored: the saved ranges, or
       // none when the document isn't the one they were mapped onto — so
       // the widget's face never counts highlights no document shows.
@@ -325,7 +323,6 @@ export function promptChangeTrackingPlugin(
           }
         },
         destroy() {
-          release();
           unsubscribe();
           unsubscribeSaved();
           if (pending) {

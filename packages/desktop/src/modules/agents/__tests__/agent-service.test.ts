@@ -1389,7 +1389,15 @@ describe("Stage 4: auth flows", () => {
     expect(turnFor(task.taskId)).toHaveLength(1);
     expect(turnFor(task.taskId)[0].status).toBe("error");
 
+    const requeued: unknown[] = [];
+    hooks.on("agent:turn-requeued", (detail) => {
+      requeued.push(detail);
+    });
     task.retryHeldPrompt();
+    // Announced, so whatever recorded the turn as ended reopens it.
+    expect(requeued).toEqual([
+      { taskId: task.taskId, turnId: turnFor(task.taskId)[0].turnId },
+    ]);
     await vi.waitFor(() => {
       expect(turnFor(task.taskId)[0].status).toBe("completed");
     });

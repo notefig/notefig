@@ -61,25 +61,11 @@ export function setDocumentPromptChanges(
   changes: readonly PromptChange[],
 ): void {
   if (getDocumentPromptChanges(documentPath) === changes) return;
-  if (changes.length === 0) byDocument.delete(documentPath);
-  else byDocument.set(documentPath, changes);
+  // Kept even when empty: an editor has said what this document's changes
+  // are — none, when it rejected the saved ones — and that outranks the
+  // saved copy for the rest of the run (MET-251).
+  byDocument.set(documentPath, changes);
   emit();
-}
-
-/** Documents an editor holds, by hold count. Their changes here are the
- *  live ones; any other document's are only what was saved (MET-251). */
-const held = new Map<string, number>();
-
-/** An editor holds `documentPath` until the returned release. */
-export function holdPromptChanges(documentPath: string): () => void {
-  held.set(documentPath, (held.get(documentPath) ?? 0) + 1);
-  emit();
-  return () => {
-    const count = (held.get(documentPath) ?? 1) - 1;
-    if (count > 0) held.set(documentPath, count);
-    else held.delete(documentPath);
-    emit();
-  };
 }
 
 /**
@@ -109,8 +95,7 @@ export function discardPromptChanges(blobId: string): void {
     const kept = changes.filter((change) => change.blobId !== blobId);
     if (kept.length === changes.length) continue;
     changed = true;
-    if (kept.length === 0) byDocument.delete(documentPath);
-    else byDocument.set(documentPath, kept);
+    byDocument.set(documentPath, kept);
   }
   if (changed) emit();
 }
@@ -124,18 +109,17 @@ export function subscribePromptChanges(listener: () => void): () => void {
 
 /**
  * Changed spans per document for one widget. Pure, for the hook below.
- * `saved` counts what was kept of a document no editor holds: there,
- * nothing live stands in for it.
+ * `saved` counts what was kept of a document no editor has opened this
+ * run: there, nothing live stands in for it.
  */
 export function countPromptChanges(
   blobId: string,
   saved: Readonly<Record<string, number>> = {},
   documents: ReadonlyMap<string, readonly PromptChange[]> = byDocument,
-  holders: ReadonlyMap<string, number> = held,
 ): Map<string, number> {
   const counts = new Map<string, number>();
   for (const [documentPath, count] of Object.entries(saved)) {
-    if (!holders.has(documentPath) && count > 0) counts.set(documentPath, count);
+    if (!documents.has(documentPath) && count > 0) counts.set(documentPath, count);
   }
   for (const [documentPath, changes] of documents) {
     const count = changes.filter((change) => change.blobId === blobId).length;

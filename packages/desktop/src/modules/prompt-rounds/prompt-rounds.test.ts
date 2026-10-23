@@ -81,6 +81,21 @@ describe("prompt rounds", () => {
     });
   });
 
+  it("reopens a round whose turn runs again, and settles it anew", async () => {
+    // A sign-in interrupted the turn; the retry re-queues the same turn.
+    await rounds.recordStarted({ ...started("t1"), blobId: "blob_1" }, 10);
+    endedTurns.set("t1", { status: "error", error: "Authentication required" });
+    await rounds.recordSettled({ taskId: "task_1", turnId: "t1", status: "error", at: 11 });
+    endedTurns.delete("t1");
+    await rounds.recordRequeued({ taskId: "task_1", turnId: "t1" });
+    const reopened = rounds.collection.get("t1");
+    expect(reopened?.status).toBe("live");
+    expect(reopened?.settledAt).toBeUndefined();
+    expect(reopened?.outcome).toBeUndefined();
+    await rounds.recordSettled({ taskId: "task_1", turnId: "t1", status: "completed", at: 12 });
+    expect(rounds.collection.get("t1")).toMatchObject({ status: "completed", settledAt: 12 });
+  });
+
   it("keeps the prompt as typed, directives and all, beside the one sent", async () => {
     await rounds.recordStarted(
       {

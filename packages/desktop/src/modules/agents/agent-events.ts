@@ -51,6 +51,13 @@ declare module "@notefig/core" {
       prompt: string;
       harnessId: string;
     };
+    /** A settled turn went back to the queue to run again — the retry of a
+     *  prompt a sign-in interrupted. Whatever recorded it as ended reopens
+     *  it; it settles again like any other turn. */
+    "agent:turn-requeued": {
+      taskId: string;
+      turnId: string;
+    };
     /** A turn reached a terminal status. */
     "agent:turn-settled": {
       taskId: string;

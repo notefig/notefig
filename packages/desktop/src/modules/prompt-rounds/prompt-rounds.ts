@@ -149,6 +149,8 @@ export interface PromptRoundsApi {
   ): Promise<void>;
   /** The listener's settle half: only rounds we know are widget rounds. */
   recordSettled(detail: CoreHookMap["agent:turn-settled"]): Promise<void>;
+  /** The round's turn runs again: back to live, its old outcome gone. */
+  recordRequeued(detail: CoreHookMap["agent:turn-requeued"]): Promise<void>;
   /** A round still "live" from a previous run never finished: settle it. */
   settleOrphaned(): Promise<void>;
   /** Boot: the one global listener. Returns the unsubscribe. */
@@ -289,6 +291,16 @@ export function createPromptRounds({
         draft.outcome = outcome;
       }).isPersisted.promise;
     },
+    async recordRequeued(detail) {
+      await rounds.preload();
+      const row = rounds.get(detail.turnId);
+      if (!row || row.status === "live") return;
+      await rounds.update(detail.turnId, (draft) => {
+        draft.status = "live";
+        draft.settledAt = undefined;
+        draft.outcome = undefined;
+      }).isPersisted.promise;
+    },
     async settleOrphaned() {
       await rounds.preload();
       await prune(Date.now());
@@ -312,6 +324,11 @@ export function createPromptRounds({
         hooks.on("widget:round-started", (detail) => {
           void api.recordStarted(detail).catch((error) => {
             console.error("Failed to record a prompt round:", error);
+          });
+        }),
+        hooks.on("agent:turn-requeued", (detail) => {
+          void api.recordRequeued(detail).catch((error) => {
+            console.error("Failed to reopen a prompt round:", error);
           });
         }),
         hooks.on("agent:turn-settled", (detail) => {
