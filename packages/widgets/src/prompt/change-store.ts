@@ -1,9 +1,11 @@
 /**
  * What each prompt widget's latest round changed in each document — the
  * review half of the widget's state, beside the binding in
- * ./widgets-service.ts and governed by the same rules: in memory only, keyed
- * by ids that never recur, and gone the moment the widget binds a different
- * turn (a new send, a dismiss, an edit — the service discards them).
+ * ./widgets-service.ts and governed by the same rules: keyed by ids that
+ * never recur, and gone the moment the widget binds a different turn (a new
+ * send, a dismiss, an edit — the service discards them). This is the live
+ * copy, in memory; what outlives a run is saved on the rounds that made
+ * the changes (the service's review ranges, MET-251).
  *
  * Ranges are document positions, so they are kept per document and only
  * the editor holding that document moves them (./change-tracking.ts maps
@@ -64,6 +66,22 @@ export function setDocumentPromptChanges(
   emit();
 }
 
+/** Documents an editor holds, by hold count. Their changes here are the
+ *  live ones; any other document's are only what was saved (MET-251). */
+const held = new Map<string, number>();
+
+/** An editor holds `documentPath` until the returned release. */
+export function holdPromptChanges(documentPath: string): () => void {
+  held.set(documentPath, (held.get(documentPath) ?? 0) + 1);
+  emit();
+  return () => {
+    const count = (held.get(documentPath) ?? 1) - 1;
+    if (count > 0) held.set(documentPath, count);
+    else held.delete(documentPath);
+    emit();
+  };
+}
+
 /**
  * The one widget under review, or null. Review is a mode, not a filter:
  * only that widget's changes are marked in the documents, and starting a
@@ -104,12 +122,21 @@ export function subscribePromptChanges(listener: () => void): () => void {
   };
 }
 
-/** Changed spans per document for one widget. Pure, for the hook below. */
+/**
+ * Changed spans per document for one widget. Pure, for the hook below.
+ * `saved` counts what was kept of a document no editor holds: there,
+ * nothing live stands in for it.
+ */
 export function countPromptChanges(
   blobId: string,
+  saved: Readonly<Record<string, number>> = {},
   documents: ReadonlyMap<string, readonly PromptChange[]> = byDocument,
+  holders: ReadonlyMap<string, number> = held,
 ): Map<string, number> {
   const counts = new Map<string, number>();
+  for (const [documentPath, count] of Object.entries(saved)) {
+    if (!holders.has(documentPath) && count > 0) counts.set(documentPath, count);
+  }
   for (const [documentPath, changes] of documents) {
     const count = changes.filter((change) => change.blobId === blobId).length;
     if (count > 0) counts.set(documentPath, count);
@@ -118,11 +145,14 @@ export function countPromptChanges(
 }
 
 /** Live `countPromptChanges` for a widget's face. */
-export function usePromptChangeCounts(blobId: string): Map<string, number> {
+export function usePromptChangeCounts(
+  blobId: string,
+  saved?: Readonly<Record<string, number>>,
+): Map<string, number> {
   // The snapshot is a string so useSyncExternalStore can compare it by
   // value — a fresh Map per read would re-render forever.
   const key = useSyncExternalStore(subscribePromptChanges, () =>
-    JSON.stringify([...countPromptChanges(blobId)]),
+    JSON.stringify([...countPromptChanges(blobId, saved)]),
   );
   return useMemo(
     () => new Map(JSON.parse(key) as Array<[string, number]>),

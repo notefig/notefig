@@ -9,7 +9,7 @@ import {
   type PromptRoundRow,
   type PromptRoundsApi,
 } from "@/modules/prompt-rounds";
-import type { AgentEntry } from "@notefig/shared/agent";
+import type { AgentEntry, AgentTurn } from "@notefig/shared/agent";
 import { createNodeTestDb } from "@/testing/node-db";
 import { createHooks, type Hooks } from "@notefig/core";
 import { workspaceKey } from "@/utils/path";
@@ -27,16 +27,26 @@ describe("prompt rounds", () => {
   let rounds: PromptRoundsApi;
   /** The turn rows this run holds; a live round without one is an orphan. */
   let liveTurns: Set<string>;
+  /** Turn rows that have already ended, by id. */
+  let endedTurns: Map<string, Pick<AgentTurn, "status" | "error">>;
   let transcripts: Map<string, AgentEntry[]>;
   let hooks: Hooks;
 
   beforeEach(() => {
     liveTurns = new Set();
+    endedTurns = new Map();
     transcripts = new Map();
     hooks = createHooks();
     rounds = createPromptRounds({
       persistence: createNodeTestDb().get(),
-      turns: { get: (turnId) => (liveTurns.has(turnId) ? ({ turnId } as never) : undefined) },
+      turns: {
+        get: (turnId) =>
+          endedTurns.has(turnId)
+            ? ({ turnId, ...endedTurns.get(turnId) } as never)
+            : liveTurns.has(turnId)
+              ? ({ turnId, status: "running" } as never)
+              : undefined,
+      },
       transcript: (turnId) => transcripts.get(turnId) ?? [],
       hooks,
     });
@@ -58,12 +68,41 @@ describe("prompt rounds", () => {
     expect(rounds.collection.size).toBe(1);
   });
 
+  it("ends a round whose turn ended before its start was announced", async () => {
+    // A dead session settles the turn inside the send: the settle comes
+    // first and finds no round.
+    endedTurns.set("t1", { status: "error", error: "agent task is not started" });
+    await rounds.recordSettled({ taskId: "task_1", turnId: "t1", status: "error", at: 9 });
+    await rounds.recordStarted({ ...started("t1"), blobId: "blob_1" }, 10);
+    expect(rounds.collection.get("t1")).toMatchObject({
+      status: "error",
+      settledAt: 10,
+      outcome: { error: "agent task is not started" },
+    });
+  });
+
+  it("keeps the prompt as typed, directives and all, beside the one sent", async () => {
+    await rounds.recordStarted(
+      {
+        ...started("t1"),
+        blobId: "blob_1",
+        prompt: "Review this",
+        typedPrompt: "@skill:review Review this",
+      },
+      10,
+    );
+    expect(rounds.collection.get("t1")).toMatchObject({
+      prompt: "Review this",
+      typedPrompt: "@skill:review Review this",
+    });
+  });
+
   it("records the widget and the whole prompt, and snapshots the outcome when it settles", async () => {
     await rounds.recordStarted({ ...started("t1"), blobId: "blob_1" }, 10);
     expect(rounds.collection.get("t1")).toMatchObject({
       blobId: "blob_1",
       workspacePath: "/ws/a",
-      fullPrompt: "Do the thing\nsecond line",
+      typedPrompt: "Do the thing\nsecond line",
     });
     transcripts.set("t1", [
       { id: "evt_1", turnId: "t1", taskId: "task_1", type: "assistant", text: "Shortened it." },

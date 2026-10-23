@@ -95,9 +95,10 @@ describe("promptWidgets over stored rounds (MET-251)", () => {
     return { db, store, hooks, rounds, prompts };
   }
 
-  /** Send from "blob", answer, and settle — as the agent service would. */
-  async function settledRound(a: ReturnType<typeof app>) {
-    await a.prompts.send("blob", "make it shorter", async () => {
+  /** Send from "blob" and answer, the turn row ending — as the agent
+   *  service would — but the round not yet recorded as ended. */
+  async function endedTurn(a: ReturnType<typeof app>) {
+    await a.prompts.send("blob", "@skill:edit make it shorter", async () => {
       a.store.turns.insert(turn("queued"));
       a.hooks.emit("widget:round-started", {
         taskId: "task_1",
@@ -106,6 +107,7 @@ describe("promptWidgets over stored rounds (MET-251)", () => {
         workspacePath: "/ws",
         documentPath: "/ws/doc.md",
         prompt: "make it shorter",
+        typedPrompt: "@skill:edit make it shorter",
       });
       return { taskId: "task_1", turnId: "trn_1" };
     });
@@ -119,6 +121,11 @@ describe("promptWidgets over stored rounds (MET-251)", () => {
     a.store.turns.update("trn_1", (draft) => {
       draft.status = "completed";
     });
+  }
+
+  /** …and the round recorded as ended, with what it left. */
+  async function settledRound(a: ReturnType<typeof app>) {
+    await endedTurn(a);
     await a.rounds.recordSettled({
       taskId: "task_1",
       turnId: "trn_1",
@@ -149,8 +156,45 @@ describe("promptWidgets over stored rounds (MET-251)", () => {
     expect(after.prompts.get("blob")).toMatchObject({
       state: { name: "settled", outcome: "done" },
       boundTurnId: "trn_1",
-      lastSentPrompt: "make it shorter",
+      // As typed: Edit and Retry put the directive back.
+      lastSentPrompt: "@skill:edit make it shorter",
     });
     expect(after.prompts.get("blob").outcome?.summary).toBe("Shortened it.");
+  });
+
+  it("never shows an ended round before what it left is recorded", async () => {
+    const a = app();
+    await endedTurn(a);
+    expect(a.prompts.get("blob")).toMatchObject({
+      state: { name: "working", turn: "running" },
+      outcome: null,
+    });
+    await a.rounds.recordSettled({
+      taskId: "task_1",
+      turnId: "trn_1",
+      status: "completed",
+      at: Date.now(),
+    });
+    expect(a.prompts.get("blob").state).toEqual({ name: "settled", outcome: "done" });
+    expect(a.prompts.get("blob").outcome?.summary).toBe("Shortened it.");
+  });
+
+  it("counts the round's saved review ranges, and reads the same record until it changes", async () => {
+    const a = app();
+    await settledRound(a);
+    const observation = storedRoundObserverFor(a.rounds.collection)("blob", () => {});
+    const first = observation.get();
+    expect(observation.get()).toBe(first);
+    a.rounds.reviewRanges.save("/ws/other.md", {
+      fingerprint: "f",
+      changes: [
+        { blobId: "blob", turnId: "trn_1", from: 1, to: 3 },
+        { blobId: "blob", turnId: "trn_1", from: 5, to: 8 },
+      ],
+    });
+    expect(observation.get()).not.toBe(first);
+    expect(observation.get()?.changeCounts).toEqual({ "/ws/other.md": 2 });
+    expect(a.prompts.get("blob").savedChangeCounts).toEqual({ "/ws/other.md": 2 });
+    observation.destroy();
   });
 });

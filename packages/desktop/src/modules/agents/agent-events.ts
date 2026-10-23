@@ -26,6 +26,10 @@ declare module "@notefig/core" {
       documentPath: string;
       /** The prompt as sent. */
       prompt: string;
+      /** The prompt as the user typed it, before directives (`@skill:…`)
+       *  were taken out of it — what the widget puts back on Edit or Retry.
+       *  Absent when the sender has no such text. */
+      typedPrompt?: string;
     };
     /** A live turn's tool call was reported or moved on (pending →
      *  in_progress → completed/failed); `toolCall` is the merged state so

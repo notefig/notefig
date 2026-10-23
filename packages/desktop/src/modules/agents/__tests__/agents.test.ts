@@ -315,10 +315,12 @@ describe("the widget's send path", () => {
     const { turnId, completed } = agents
       .task(task.taskId)
       .promptFromWidget("expand this", {
+        blobId: "blob_1",
         workspacePath: "/ws",
         path: "notes/a.md",
         pos: 3,
         isDocEmpty: false,
+        typedPrompt: "@skill:expand expand this",
       });
     await completed;
     stop();
@@ -327,9 +329,12 @@ describe("the widget's send path", () => {
       {
         taskId: task.taskId,
         turnId,
+        blobId: "blob_1",
         workspacePath: "/ws",
         documentPath: "/ws/notes/a.md",
         prompt: "expand this",
+        // As typed, directives and all: what the widget puts back.
+        typedPrompt: "@skill:expand expand this",
       },
     ]);
   });

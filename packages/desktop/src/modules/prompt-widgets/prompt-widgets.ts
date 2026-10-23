@@ -22,6 +22,7 @@ import {
   type PromptRoundSnapshot,
   type PromptWidgetsApi,
   type PromptWidgetsDeps,
+  type StoredRound,
 } from "@notefig/widgets";
 import { defineModule } from "@notefig/core";
 import type { AgentStore } from "@/modules/agents/agent-collections";
@@ -83,7 +84,8 @@ export const roundObserverFor =
     };
   };
 
-/** A widget's newest stored round, subscription-based. */
+/** A widget's newest stored round, subscription-based. The same object
+ *  comes back until that row changes, so the service can tell. */
 export const storedRoundObserverFor =
   (
     rounds: PromptRoundsCollection,
@@ -92,6 +94,7 @@ export const storedRoundObserverFor =
     const subscription = rounds.subscribeChanges(onChange, {
       where: (row) => eq(row.blobId, blobId),
     });
+    let last: { row: PromptRoundRow; round: StoredRound } | undefined;
     return {
       get() {
         let newest: PromptRoundRow | undefined;
@@ -99,19 +102,28 @@ export const storedRoundObserverFor =
           if (row.blobId !== blobId) continue;
           if (!newest || row.startedAt > newest.startedAt) newest = row;
         }
-        return newest
-          ? {
-              turnId: newest.turnId,
-              taskId: newest.taskId,
-              status: newest.status,
-              prompt: newest.fullPrompt ?? newest.prompt,
-              outcome: newest.outcome ?? null,
-            }
-          : undefined;
+        if (!newest) return undefined;
+        if (last?.row !== newest) last = { row: newest, round: storedRound(newest) };
+        return last.round;
       },
       destroy: () => subscription.unsubscribe(),
     };
   };
+
+function storedRound(row: PromptRoundRow): StoredRound {
+  const changeCounts: Record<string, number> = {};
+  for (const { documentPath, ranges } of row.changes ?? []) {
+    if (ranges.length > 0) changeCounts[documentPath] = ranges.length;
+  }
+  return {
+    turnId: row.turnId,
+    taskId: row.taskId,
+    status: row.status,
+    prompt: row.typedPrompt ?? row.prompt,
+    outcome: row.outcome ?? null,
+    changeCounts,
+  };
+}
 
 export const promptWidgetsModule = defineModule({
   name: "promptWidgets",

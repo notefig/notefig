@@ -52,6 +52,8 @@ export interface AgentTaskHandle {
     widget: {
       /** The widget sending (its blobId). */
       blobId?: string;
+      /** The prompt as the user typed it, directives and all. */
+      typedPrompt?: string;
       /** The workspace the widget's document is in. */
       workspacePath: string;
       /** The document, absolute or relative to `workspacePath`. */
@@ -313,6 +315,7 @@ export function createAgents({
             ? widget.path
             : pathutil.join(widget.workspacePath, widget.path),
           prompt: text,
+          ...(widget.typedPrompt ? { typedPrompt: widget.typedPrompt } : {}),
         });
         return sent;
       },

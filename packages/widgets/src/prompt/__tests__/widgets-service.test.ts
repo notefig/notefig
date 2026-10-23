@@ -219,16 +219,29 @@ describe("stored rounds (MET-251)", () => {
     expect(t.prompts.get("blob").state).toEqual({ name: "settled", outcome: "done" });
   });
 
-  it("doesn't adopt a live round, another session's, or once the user moved on", () => {
+  it("a restored round the last run never finished settles when its record does", () => {
     const t = testPrompts();
-    t.storeRound("live", { ...settled(), status: "live" });
-    t.prompts.restore("live", "task_1");
+    t.storeRound("blob", { ...settled(), status: "live", outcome: null });
+    t.prompts.restore("blob", "task_1");
+    expect(t.prompts.get("blob")).toMatchObject({
+      state: { name: "composing" },
+      boundTurnId: "trn_1",
+    });
+    t.storeRound("blob", { ...settled(), status: "cancelled", outcome: null });
+    expect(t.prompts.get("blob").state).toEqual({
+      name: "settled",
+      outcome: "cancelled",
+    });
+  });
+
+  it("doesn't adopt another session's round, or once the user moved on", () => {
+    const t = testPrompts();
     t.storeRound("other", settled("trn_2", "task_other"));
     t.prompts.restore("other", "task_1");
     t.prompts.restore("moved", "task_1");
     t.prompts.rebind("moved", "task_1");
     t.storeRound("moved", settled());
-    for (const blobId of ["live", "other", "moved"]) {
+    for (const blobId of ["other", "moved"]) {
       expect(t.prompts.get(blobId)).toMatchObject({
         state: { name: "composing" },
         boundTurnId: null,
@@ -249,6 +262,45 @@ describe("stored rounds (MET-251)", () => {
       boundTurnId: "trn_1",
       outcome: OUTCOME,
     });
+  });
+
+  it("a live round ends when its record does, never before what it left is written", async () => {
+    const t = testPrompts();
+    await t.send("blob", "make it shorter", ROUND);
+    t.storeRound("blob", { ...settled(), status: "live", outcome: null });
+    t.setTurn("trn_1", "task_1", "running");
+    // The turn row ends first; the record of what it left comes after.
+    t.setTurn("trn_1", "task_1", "completed", { unrecorded: true });
+    expect(t.prompts.get("blob")).toMatchObject({
+      state: { name: "working", turn: "running" },
+      outcome: null,
+    });
+    t.storeRound("blob", settled());
+    expect(t.prompts.get("blob")).toMatchObject({
+      state: { name: "settled", outcome: "done" },
+      outcome: OUTCOME,
+    });
+  });
+
+  it("an errored turn waiting on a sign-in still asks for it while its record catches up", async () => {
+    const t = testPrompts();
+    await t.send("blob", "make it shorter", ROUND);
+    t.storeRound("blob", { ...settled(), status: "live", outcome: null });
+    t.setAuthRequired("task_1", true);
+    t.setTurn("trn_1", "task_1", "error");
+    expect(t.prompts.get("blob").state).toEqual({
+      name: "asking",
+      ask: { kind: "auth" },
+    });
+  });
+
+  it("counts the bound round's saved review ranges", async () => {
+    const t = testPrompts();
+    await t.send("blob", "make it shorter", ROUND);
+    t.storeRound("blob", { ...settled(), changeCounts: { "/ws/other.md": 2 } });
+    expect(t.prompts.get("blob").savedChangeCounts).toEqual({ "/ws/other.md": 2 });
+    t.prompts.unbind("blob");
+    expect(t.prompts.get("blob").savedChangeCounts).toEqual({});
   });
 
   it("shows only the outcome of the round it is bound to", async () => {

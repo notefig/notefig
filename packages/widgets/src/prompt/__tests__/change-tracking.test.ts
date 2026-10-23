@@ -10,6 +10,7 @@ import { EditorView } from "@tiptap/pm/view";
 import { PROMPT_NODE_NAME } from "../node";
 import {
   PROMPT_CHANGE_META,
+  countPromptChanges,
   discardPromptChanges,
   getDocumentPromptChanges,
   getPromptReview,
@@ -234,5 +235,33 @@ describe("saved review ranges", () => {
     for (const listener of listeners) listener();
     expect(spans(view.state)).toEqual([[1, 6]]);
     view.destroy();
+  });
+
+  it("counts a document's saved ranges until an editor holds it, then its live ones", () => {
+    const saved = { [DOC_PATH]: 3, "/ws/closed.md": 2 };
+    expect(countPromptChanges(ROUND.blobId, saved)).toEqual(
+      new Map([
+        [DOC_PATH, 3],
+        ["/ws/closed.md", 2],
+      ]),
+    );
+    // Opened: the editor restored nothing (the file changed while closed),
+    // so its saved count no longer stands for anything shown.
+    const view = new EditorView(document.createElement("div"), {
+      state: stateOf("hello world"),
+    });
+    expect(countPromptChanges(ROUND.blobId, saved)).toEqual(
+      new Map([["/ws/closed.md", 2]]),
+    );
+    view.dispatch(asRound(view.state.tr.insertText("X", 1)));
+    expect(countPromptChanges(ROUND.blobId, saved)).toEqual(
+      new Map([
+        ["/ws/closed.md", 2],
+        [DOC_PATH, 1],
+      ]),
+    );
+    // Closed again, this run's ranges are still newer than the saved ones.
+    view.destroy();
+    expect(countPromptChanges(ROUND.blobId, saved).get(DOC_PATH)).toBe(1);
   });
 });

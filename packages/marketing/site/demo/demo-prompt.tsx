@@ -1,16 +1,18 @@
 import { useRef } from "react";
 import { PromptEditor } from "@notefig/widgets";
-import { PromptBlobFace } from "@notefig/widgets/prompt/ui/prompt-blob";
+import {
+  PromptBlobFace,
+  outcomeDisplay,
+} from "@notefig/widgets/prompt/ui/prompt-blob";
 import type { PromptChangeNavigation } from "@notefig/widgets/prompt/change-navigator";
 import { SuggestionList } from "@notefig/widgets/prompt/composer/mention-menu";
 import {
   deriveActiveToolLine,
   deriveLatestAssistantLine,
-  deriveTouchedFiles,
-  deriveWidgetResponse,
+  deriveRoundOutcome,
   type BlobPhase,
 } from "@notefig/widgets/prompt/state";
-import type { AgentEntry, AgentTurn } from "@notefig/shared/agent";
+import type { AgentEntry } from "@notefig/shared/agent";
 import { HarnessLogo } from "@/components/agent/harness-logo";
 import { AppEmbed } from "./app-embed";
 import { DEMO_FILES, DEMO_ROOT } from "./demo-fixtures";
@@ -232,21 +234,6 @@ const COLLAB_TOTAL =
 /** The card: summoned over a selection, the prompt written with a mention. */
 const SUMMON = timeline<PromptState>(WRITING);
 
-const RUNNING_TURN: AgentTurn = {
-  turnId: "trn_demo",
-  taskId: "task_demo",
-  sessionId: "ses_demo",
-  status: "running",
-  startedAt: 0,
-};
-
-const TURN_STATUS: Partial<Record<BlobPhase, AgentTurn["status"]>> = {
-  queued: "queued",
-  running: "running",
-  done: "completed",
-};
-
-/** The widget's own derivations, run over the state's transcript. */
 /** The demo's turn writes nothing for real, so it has no changes to
  *  review: each touched file's chip just opens it. */
 const NO_CHANGES: PromptChangeNavigation = {
@@ -259,14 +246,18 @@ const NO_CHANGES: PromptChangeNavigation = {
   step: noop,
 };
 
+/** The widget's own derivations, run over the state's transcript: a done
+ *  round's face from its outcome, as the app records it. */
 function displayFor({ phase, entries, queueAhead }: PromptState) {
-  const done = phase === "done";
+  const running = phase === "running";
+  const outcome =
+    phase === "done"
+      ? deriveRoundOutcome({ entries, error: undefined, workspacePath: DEMO_ROOT })
+      : null;
   return {
-    touchedFiles: done ? deriveTouchedFiles(entries, DEMO_ROOT) : [],
-    widgetResponse: done ? deriveWidgetResponse(entries) : null,
-    activeToolLine: phase === "running" ? deriveActiveToolLine(entries) : null,
-    assistantTeaser:
-      phase === "running" || done ? deriveLatestAssistantLine(entries) : null,
+    ...outcomeDisplay(outcome, false),
+    activeToolLine: running ? deriveActiveToolLine(entries) : null,
+    assistantTeaser: running ? deriveLatestAssistantLine(entries) : null,
     queueAhead,
     changeCounts: new Map<string, number>(),
     changes: NO_CHANGES,
@@ -421,15 +412,13 @@ function PromptFace({
   prompt: string;
   reference?: string;
 }) {
-  const binding = bindingFor(state.phase);
   return (
     <div className="relative">
       <PromptBlobFace
         phase={state.phase}
         record={{ lastSentPrompt: prompt }}
-        turn={binding.turn}
         task={undefined}
-        boundTaskId={binding.taskId}
+        boundTaskId={state.phase === "composing" ? null : "task_demo"}
         workspacePath={DEMO_ROOT}
         documentPath={DOC_PATH}
         trustName="Claude Code"
@@ -456,20 +445,6 @@ function PromptFace({
 /** The sending row shows the prompt it is sending. */
 function sendingDraft(state: PromptState, prompt: string): string {
   return state.phase === "sending" ? prompt : state.draft;
-}
-
-/** The widget's binding for a phase: none while composing, the demo turn
- *  (in the phase's status) from the send on. */
-function bindingFor(phase: BlobPhase) {
-  if (phase === "composing") {
-    return { taskId: null, turnId: null, turn: undefined };
-  }
-  const status = TURN_STATUS[phase];
-  return {
-    taskId: "task_demo",
-    turnId: "trn_demo",
-    turn: status ? { ...RUNNING_TURN, status } : undefined,
-  };
 }
 
 function referenceFor(text: string | undefined) {

@@ -76,6 +76,7 @@ import {
   blobCardClass,
   referenceRemovalArmed,
   type BlobPhase,
+  type RoundOutcome,
 } from "../state";
 
 /** What the face reads off a widget's record: the prompt it last sent. */
@@ -276,31 +277,49 @@ function usePromptBlobDisplay({
   const running = phase === "running";
   const rawActiveToolLine = running ? deriveActiveToolLine(sortedEntries) : null;
   const activeToolLine = useDebouncedActiveToolLine(rawActiveToolLine);
-  const settled = settledDisplay(widget);
   return {
-    ...settled,
+    ...outcomeDisplay(
+      widget.outcome,
+      widget.state.name === "settled" && widget.state.outcome === "cancelled",
+    ),
     activeToolLine,
-    // Running: live teaser under the status line. Done: the stored summary,
-    // the fallback line when the turn has no widget_respond response.
-    assistantTeaser: running
-      ? deriveLatestAssistantLine(sortedEntries)
-      : settled.summary,
+    // The live teaser under the status line.
+    assistantTeaser: running ? deriveLatestAssistantLine(sortedEntries) : null,
     queueAhead: queuePosition(phase, taskTurns, widget.boundTurnId),
-    changeCounts: usePromptChangeCounts(blobId),
+    // Saved counts stand in for documents no editor holds.
+    changeCounts: usePromptChangeCounts(blobId, widget.savedChangeCounts),
     changes: usePromptChangeNavigation(blobId, editor),
   };
 }
 
-/** A settled round's face, from its stored outcome. */
-function settledDisplay({ outcome, state }: PromptWidget) {
+/** A settled round's face: what the round left behind. */
+export type OutcomeDisplay = {
+  touchedFiles: string[];
+  widgetResponse: WidgetResponse | null;
+  /** The last assistant line: the fallback when there is no answer. */
+  summary: string | null;
+  /** The round was stopped. */
+  cancelled: boolean;
+  /** Why the round failed. */
+  errorMessage: string | null;
+};
+
+/** The one way an outcome becomes the settled face — the app's widgets
+ *  from their recorded rounds, the site's demo from its scripted one. */
+export function outcomeDisplay(
+  outcome: RoundOutcome | null,
+  cancelled: boolean,
+): OutcomeDisplay {
   return {
     touchedFiles: outcome?.touchedFiles ?? [],
     widgetResponse: outcome?.response ?? null,
     summary: outcome?.summary ?? null,
-    cancelled: state.name === "settled" && state.outcome === "cancelled",
-    errorMessage: outcome?.error ?? undefined,
+    cancelled,
+    errorMessage: outcome?.error ?? null,
   };
 }
+
+
 
 function queuePosition(
   phase: BlobPhase,
@@ -496,15 +515,8 @@ function useComposerKeys({
   );
 }
 
-/** What the face renders from the transcript, per phase. */
-interface PromptBlobDisplay {
-  touchedFiles: string[];
-  widgetResponse: WidgetResponse | null;
-  /** The round was stopped. Absent for a face with no widget behind it
-   *  (the demo): read off the turn. */
-  cancelled?: boolean;
-  /** Why the round failed, as stored with it. */
-  errorMessage?: string;
+/** What the face renders besides its state. */
+interface PromptBlobDisplay extends OutcomeDisplay {
   activeToolLine: string | null;
   assistantTeaser: string | null;
   queueAhead: number;
@@ -684,7 +696,6 @@ function claimWidgetPointerEvents(event: React.MouseEvent): void {
 export function PromptBlobFace({
   phase,
   record,
-  turn,
   task,
   boundTaskId,
   workspacePath,
@@ -703,7 +714,6 @@ export function PromptBlobFace({
 }: {
   phase: BlobPhase;
   record: PromptBlobRecord;
-  turn: AgentTurn | undefined;
   task: AgentTaskRow | undefined;
   boundTaskId: string | null;
   workspacePath: string;
@@ -761,7 +771,6 @@ export function PromptBlobFace({
 
             <SettledState
               phase={phase}
-              turn={turn}
               display={display}
               boundTaskId={boundTaskId}
               documentPath={documentPath}
@@ -891,14 +900,12 @@ function RemovalRefusedHint({ shown }: { shown: boolean }) {
  *  chosen here so the face itself stays phase-agnostic layout. */
 function SettledState({
   phase,
-  turn,
   display,
   boundTaskId,
   documentPath,
   actions,
 }: {
   phase: BlobPhase;
-  turn: AgentTurn | undefined;
   display: PromptBlobDisplay;
   boundTaskId: string | null;
   documentPath: string;
@@ -907,9 +914,9 @@ function SettledState({
   if (phase === "done") {
     return (
       <DoneState
-        cancelled={display.cancelled ?? turn?.status === "cancelled"}
+        cancelled={display.cancelled}
         response={display.widgetResponse}
-        fallbackText={display.assistantTeaser}
+        fallbackText={display.summary}
         touchedFiles={display.touchedFiles}
         documentPath={documentPath}
         changeCounts={display.changeCounts}
@@ -923,7 +930,7 @@ function SettledState({
   if (phase === "error") {
     return (
       <ErrorState
-        message={display.errorMessage ?? turn?.error}
+        message={display.errorMessage ?? undefined}
         onRetry={actions.retry}
         onEdit={actions.editPrompt}
         onDismiss={actions.dismiss}
@@ -1045,7 +1052,6 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
       removalRefusedAt: widget.removalRefusedAt,
     },
     record: widget,
-    turn,
     task,
     boundTaskId,
     workspacePath,

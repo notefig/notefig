@@ -13,8 +13,14 @@
  * machine, so a reload, a turn settled from the chat tab or a sign-in
  * finished elsewhere all land the same way.
  *
- * Ephemeral by design, like the agent collections: nothing persists across
- * app runs. A widget restored from the file comes back through `restore`.
+ * What a round left behind is the app's record of it (`observeStoredRound`,
+ * MET-251): written when the round starts, finished when it ends. Whether a
+ * round has ended, and what it left — the answer, the files, the review
+ * ranges — is read from that record alone, live or after a restart, so the
+ * face can't show an ended round without what it left. The turn's rows say
+ * only how a live round is going. The rest of the service's state is for
+ * this run: a widget restored from the file comes back through `restore`,
+ * which takes up its last recorded round.
  */
 import type {
   AgentEntry,
@@ -25,7 +31,6 @@ import { discardPromptChanges, type PromptChange } from "./change-store";
 import type { RoundOutcome } from "./state";
 import {
   COMPOSING,
-  stateFromRound,
   transition,
   type RoundFacts,
   type WidgetEvent,
@@ -92,14 +97,19 @@ export interface ReviewRangeStore {
 export type StoredRound = {
   turnId: string;
   taskId: string;
+  /** "live" until the round ends; then how it ended. */
   status: "live" | "completed" | "cancelled" | "error";
-  /** The prompt as sent, whole. */
+  /** The prompt as the user typed it, directives and all — what Edit and
+   *  Retry put back. */
   prompt: string;
   /** Written when the round settles. */
   outcome: RoundOutcome | null;
+  /** Saved review ranges per document, counted. */
+  changeCounts: Readonly<Record<string, number>>;
 };
 
 export type StoredRoundObservation = {
+  /** Stable: the same object until the record changes. */
   get(): StoredRound | undefined;
   destroy(): void;
 };
@@ -126,9 +136,12 @@ export type PromptWidget = {
   /** When an edit last tried and failed to delete this widget (it can't be
    *  removed while the agent works), for the face's "stop it first" hint. */
   removalRefusedAt: number | null;
-  /** What the bound round left behind once it settled, as stored with it —
-   *  the settled face reads this, live or restored. */
+  /** What the bound round left behind once it settled, as recorded — the
+   *  settled face reads this, live or restored. */
   outcome: RoundOutcome | null;
+  /** The bound round's saved review ranges per document, counted — what
+   *  the face counts for documents no editor holds. */
+  savedChangeCounts: Readonly<Record<string, number>>;
 };
 
 /** A widget bound to a session, located in its document. */
@@ -209,6 +222,11 @@ export interface PromptWidgetsApi {
   isNewestStoppable(blobId: string): boolean;
 }
 
+const NO_COUNTS: Readonly<Record<string, number>> = Object.freeze({});
+
+/** Nothing recorded for the bound round: no outcome, no saved ranges. */
+const NO_RECORD = { outcome: null, savedChangeCounts: NO_COUNTS } as const;
+
 const EMPTY: PromptWidget = {
   state: COMPOSING,
   boundTaskId: null,
@@ -217,6 +235,7 @@ const EMPTY: PromptWidget = {
   documentPath: null,
   removalRefusedAt: null,
   outcome: null,
+  savedChangeCounts: NO_COUNTS,
 };
 
 type Watch = {
@@ -236,6 +255,24 @@ function factsOf(snapshot: PromptRoundSnapshot): RoundFacts {
   };
 }
 
+/**
+ * Where the round stands. Whether it has ended, and how, is the record's to
+ * say — the same record the face reads the outcome from. A turn row that
+ * has ended while its record hasn't yet (or before the record is even
+ * written) holds as running for that moment. Only in an app that keeps no
+ * records does the turn row say it alone.
+ */
+function roundStatus(
+  turn: RoundFacts["turn"],
+  record: StoredRound | undefined,
+  keepsRecords: boolean,
+): RoundFacts["turn"] {
+  const status = record?.status ?? (keepsRecords ? "live" : undefined);
+  if (status === undefined) return turn;
+  if (status !== "live") return status;
+  return turn === undefined || turn === "queued" ? turn : "running";
+}
+
 export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
   const widgets = new Map<string, PromptWidget>();
   /** Mounted widgets taking part in Escape, by blobId → mount count. */
@@ -244,19 +281,18 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
   const watches = new Map<string, Watch>();
   /** Each widget's newest stored round, watched once it is touched. */
   const storedRounds = new Map<string, StoredRoundObservation>();
-  /** Widgets restored from a file marker whose stored round may still be
-   *  loading: adopted when it arrives, unless the user acts first. */
+  /** Widgets restored from a file marker that haven't taken up their last
+   *  recorded round yet — its record may still be loading. */
   const pendingRestore = new Set<string>();
 
   const get = (blobId: string) => widgets.get(blobId) ?? EMPTY;
   /** Kept by the app, or for this run only when it keeps none. */
   const reviewRanges = deps.reviewRanges ?? inMemoryReviewRanges();
 
-  /** The stored round of the turn the widget is bound to, once settled. */
-  const settledOnRecord = (blobId: string): StoredRound | undefined => {
+  /** The record of the round the widget is bound to. */
+  const recordOf = (blobId: string): StoredRound | undefined => {
     const stored = storedRounds.get(blobId)?.get();
-    const { boundTurnId } = get(blobId);
-    return stored && stored.turnId === boundTurnId && stored.status !== "live"
+    return stored && stored.turnId === get(blobId).boundTurnId
       ? stored
       : undefined;
   };
@@ -276,12 +312,6 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
       return;
     }
     widgets.set(blobId, next);
-    if (next.boundTurnId !== previous.boundTurnId) {
-      widgets.set(blobId, {
-        ...next,
-        outcome: settledOnRecord(blobId)?.outcome ?? null,
-      });
-    }
     // Review state belongs to the watched round: a new send, a dismiss or an
     // edit moves the widget off its round, and what that round changed
     // stops being this widget's to show — in open documents and saved
@@ -314,21 +344,29 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
   const fold = (blobId: string, watch: Watch) => {
     const widget = get(blobId);
     if (widget.state.name === "sending") return;
-    const facts: RoundFacts = {
-      ...factsOf(watch.observation.get()),
-      settled: settledOnRecord(blobId)?.status as RoundFacts["settled"],
+    const live = factsOf(watch.observation.get());
+    if (live.turn !== undefined) watch.seenTurn = true;
+    const record = recordOf(blobId);
+    const facts = {
+      ...live,
+      turn: roundStatus(live.turn, record, Boolean(deps.observeStoredRound)),
     };
-    if (facts.turn !== undefined) watch.seenTurn = true;
-    // Settled on record: the round stands even with its turn row gone.
-    if (widget.boundTurnId && facts.turn === undefined && !facts.settled) {
+    // An ended round stands on its record even with its turn row gone.
+    if (widget.boundTurnId && facts.turn === undefined) {
       if (!watch.seenTurn) return;
       write(blobId, {
         state: transition(widget.state, { type: "unbound" }),
         boundTurnId: null,
+        ...NO_RECORD,
       });
       return;
     }
-    fire(blobId, { type: "roundChanged", facts });
+    const ended = record && record.status !== "live";
+    write(blobId, {
+      state: transition(widget.state, { type: "roundChanged", facts }),
+      outcome: ended ? record.outcome : null,
+      savedChangeCounts: record?.changeCounts ?? NO_COUNTS,
+    });
   };
 
   /** A change to the watched round's rows. Subscribers hear every one, not
@@ -398,34 +436,23 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
     );
   };
 
-  /** A widget restored from its file marker takes up its last round when
-   *  that round settled on the same session: it comes back as it was left,
-   *  not as a blank composer. */
+  /** A widget restored from its file marker binds its last recorded round
+   *  when that round was on the same session — a binding like any other,
+   *  so it reads the record the way a live round does and comes back as it
+   *  was left, not as a blank composer. */
   const adoptStored = (blobId: string) => {
     if (!pendingRestore.has(blobId)) return;
     const stored = storedRounds.get(blobId)?.get();
-    const widget = get(blobId);
-    if (!stored || stored.status === "live") return;
+    if (!stored) return;
     pendingRestore.delete(blobId);
+    const widget = get(blobId);
     if (widget.boundTurnId || widget.boundTaskId !== stored.taskId) return;
-    write(blobId, {
-      boundTurnId: stored.turnId,
-      lastSentPrompt: stored.prompt,
-      state: stateFromRound({
-        turn: undefined,
-        authRequired: false,
-        pendingPermission: false,
-        settled: stored.status,
-      }),
-    });
+    write(blobId, { boundTurnId: stored.turnId, lastSentPrompt: stored.prompt });
   };
 
   function onStored(blobId: string) {
     adoptStored(blobId);
-    write(blobId, { outcome: settledOnRecord(blobId)?.outcome ?? null });
-    const watch = watches.get(blobId);
-    if (watch) fold(blobId, watch);
-    emit(blobId);
+    reconcile(blobId);
   }
 
   const unbind = (blobId: string) => {
@@ -434,6 +461,7 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
       state: transition(get(blobId).state, { type: "unbound" }),
       boundTaskId: null,
       boundTurnId: null,
+      ...NO_RECORD,
     });
   };
 
@@ -488,6 +516,7 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
       watchStored(blobId);
       write(blobId, { boundTaskId: taskId });
       adoptStored(blobId);
+      reconcile(blobId);
     },
     rebind(blobId, taskId) {
       pendingRestore.delete(blobId);
@@ -495,6 +524,7 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
         state: transition(get(blobId).state, { type: "unbound" }),
         boundTaskId: taskId,
         boundTurnId: null,
+        ...NO_RECORD,
       });
     },
     unbind,
@@ -521,6 +551,7 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
           boundTaskId: taskId,
           boundTurnId: turnId,
           lastSentPrompt: prompt,
+          ...NO_RECORD,
         });
         // The turn row may not be written yet (a session still reviving
         // records the prompt first); until it is, the turn is queued.

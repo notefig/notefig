@@ -9,6 +9,7 @@ import type { AgentTaskRow, AgentTurn } from "@notefig/shared/agent";
 import {
   createPromptWidgets,
   type PromptRoundObserverFactory,
+  type PromptWidgetsApi,
   type PromptWidgetsDeps,
   type StoredRound,
 } from "../prompt/widgets-service";
@@ -57,17 +58,40 @@ export function testPrompts() {
     };
   };
 
-  const prompts = createPromptWidgets({ observeRound, observeStoredRound });
+  /** Store (or overwrite) a widget's newest round, as the app does. */
+  const storeRound = (
+    blobId: string,
+    round: Omit<StoredRound, "changeCounts"> & Partial<StoredRound>,
+  ): void => {
+    stored.set(blobId, { changeCounts: {}, ...round });
+    for (const listener of [...storedListeners]) listener();
+  };
+
+  const service = createPromptWidgets({ observeRound, observeStoredRound });
+  /** Every send is recorded as the round's start, as the app's one send
+   *  path does. */
+  const prompts: PromptWidgetsApi = {
+    ...service,
+    send: (blobId, prompt, dispatch) =>
+      service.send(blobId, prompt, async () => {
+        const round = await dispatch();
+        storeRound(blobId, { ...round, status: "live", prompt, outcome: null });
+        return round;
+      }),
+  };
 
   return {
     prompts,
     /** Stop commands that record their calls. */
     commands: { cancelTask: vi.fn(), removeQueuedPrompt: vi.fn() },
-    /** Write (or overwrite) a turn row. */
+    /** Write (or overwrite) a turn row. A turn that ends is recorded as
+     *  ended too, as the app does when it settles — unless `unrecorded`,
+     *  for the moment between the two. */
     setTurn(
       turnId: string,
       taskId: string,
       status: AgentTurn["status"],
+      { unrecorded = false }: { unrecorded?: boolean } = {},
     ): void {
       turns.set(turnId, {
         turnId,
@@ -77,12 +101,12 @@ export function testPrompts() {
         startedAt: 0,
       });
       notify();
+      if (unrecorded || status === "queued" || status === "running") return;
+      for (const [blobId, round] of stored) {
+        if (round.turnId === turnId) storeRound(blobId, { ...round, status });
+      }
     },
-    /** Store (or overwrite) a widget's newest round, as the app does. */
-    storeRound(blobId: string, round: StoredRound): void {
-      stored.set(blobId, round);
-      for (const listener of [...storedListeners]) listener();
-    },
+    storeRound,
     /** Drop a turn row (a withdrawn or forgotten turn). */
     removeTurn(turnId: string): void {
       turns.delete(turnId);

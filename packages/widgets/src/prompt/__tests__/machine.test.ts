@@ -187,18 +187,3 @@ describe("phaseOf", () => {
     });
   });
 });
-
-describe("a round settled on record", () => {
-  it("stands in for a turn row that is gone", () => {
-    expect(
-      stateFromRound(facts({ turn: undefined, settled: "completed" })),
-    ).toEqual(STATES.done);
-    expect(
-      stateFromRound(facts({ turn: undefined, settled: "error" })),
-    ).toEqual(STATES.error);
-    // A live turn row still wins.
-    expect(stateFromRound(facts({ turn: "running", settled: "completed" }))).toEqual(
-      STATES.running,
-    );
-  });
-});

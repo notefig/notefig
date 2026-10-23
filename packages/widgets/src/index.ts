@@ -115,6 +115,7 @@ export {
   type ReviewRangeStore,
   type SavedReviewRanges,
   type StopCommands,
+  type StoredRound,
 } from "./prompt/widgets-service";
 export { capabilitiesOf, type WidgetState } from "./prompt/machine";
 

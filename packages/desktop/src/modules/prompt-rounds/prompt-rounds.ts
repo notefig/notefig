@@ -70,8 +70,9 @@ export interface PromptRoundRow {
   blobId?: string;
   /** The workspace as the round's own paths spell it. */
   workspacePath?: string;
-  /** The prompt as sent, whole — for Edit and Retry after a restart. */
-  fullPrompt?: string;
+  /** The prompt as the user typed it, whole and with its directives — what
+   *  Edit and Retry put back after a restart. */
+  typedPrompt?: string;
   /** What the round left behind, written once when it settles. */
   outcome?: RoundOutcome;
   /** The ranges this round changed, per document, with the fingerprint of
@@ -255,8 +256,20 @@ export function createPromptRounds({
         startedAt: now,
         ...(detail.blobId ? { blobId: detail.blobId } : {}),
         workspacePath: detail.workspacePath,
-        fullPrompt: detail.prompt,
+        typedPrompt: detail.typedPrompt ?? detail.prompt,
       }).isPersisted.promise;
+      // A turn can end before its start is announced — a dead session
+      // settles it inside the send — and that settle found no round to
+      // end. The turn row still says how it ended.
+      const turn = turns.get(detail.turnId);
+      if (turn && isEnded(turn.status)) {
+        await api.recordSettled({
+          taskId: detail.taskId,
+          turnId: detail.turnId,
+          status: turn.status,
+          at: now,
+        });
+      }
       await prune(now);
     },
     async recordSettled(detail) {
@@ -311,6 +324,12 @@ export function createPromptRounds({
     },
   };
   return api;
+}
+
+function isEnded(
+  status: AgentTurnStatus,
+): status is "completed" | "cancelled" | "error" {
+  return status === "completed" || status === "cancelled" || status === "error";
 }
 
 /**

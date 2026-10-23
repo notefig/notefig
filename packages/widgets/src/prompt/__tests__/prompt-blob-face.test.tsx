@@ -17,7 +17,7 @@ vi.mock("react-i18next", () => ({
 
 import { PromptBlobFace } from "../ui/prompt-blob";
 import type { BlobPhase } from "../state";
-import type { AgentTaskRow, AgentTurn } from "@notefig/shared/agent";
+import type { AgentTaskRow } from "@notefig/shared/agent";
 import { fakePromptWidgetHost, withHost } from "../../testing/fake-host";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -55,11 +55,12 @@ function render(
     display?: Partial<{
       touchedFiles: string[];
       widgetResponse: { kind: "answer" | "issue"; markdown: string } | null;
+      summary: string | null;
+      errorMessage: string | null;
       activeToolLine: string | null;
       assistantTeaser: string | null;
       queueAhead: number;
     }>;
-    turn?: Partial<AgentTurn>;
     task?: Partial<AgentTaskRow>;
     draft?: string;
     reference?: { text: string; from: number; to: number } | null;
@@ -76,7 +77,6 @@ function render(
         createElement(PromptBlobFace, {
           phase,
           record,
-          turn: overrides.turn as AgentTurn | undefined,
           task: overrides.task as AgentTaskRow | undefined,
           boundTaskId: "task_1",
           workspacePath: "/ws",
@@ -86,6 +86,9 @@ function render(
           display: {
             touchedFiles: [],
             widgetResponse: null,
+            summary: null,
+            cancelled: false,
+            errorMessage: null,
             activeToolLine: null,
             assistantTeaser: null,
             queueAhead: 0,
@@ -236,11 +239,11 @@ describe("PromptBlobFace", () => {
 
   it("falls back to the assistant teaser when the turn had no answer", () => {
     expect(
-      render("done", { display: { assistantTeaser: "wrote three files" } }),
+      render("done", { display: { summary: "wrote three files" } }),
     ).toContain("wrote three files");
   });
 
   it("shows the failure reason on error", () => {
-    expect(render("error", { turn: { error: "boom" } })).toContain("boom");
+    expect(render("error", { display: { errorMessage: "boom" } })).toContain("boom");
   });
 });
