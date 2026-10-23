@@ -260,6 +260,7 @@ export function promptChangeTrackingPlugin(documentPath: string): Plugin {
         update(updated, previous) {
           const changes = promptChangesOf(updated.state);
           if (changes.length > 0) anchors.set(documentPath, updated.state.doc);
+          else anchors.delete(documentPath);
           if (changes !== promptChangesOf(previous)) {
             setDocumentPromptChanges(documentPath, changes);
           }

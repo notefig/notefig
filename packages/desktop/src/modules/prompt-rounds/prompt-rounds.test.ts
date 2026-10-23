@@ -51,6 +51,14 @@ describe("prompt rounds", () => {
     expect(rounds.collection.size).toBe(1);
   });
 
+  it("reopens a settled round when its turn is requeued", async () => {
+    await rounds.recordStarted(started("t1"), 10);
+    await rounds.recordSettled({ taskId: "task_1", turnId: "t1", status: "error", at: 42 });
+    await rounds.recordRequeued({ taskId: "task_1", turnId: "t1" });
+    expect(rounds.collection.get("t1")).toMatchObject({ status: "live" });
+    expect(rounds.collection.get("t1")?.settledAt).toBeUndefined();
+  });
+
   it("settles rounds left live by a previous run, keeps live ones with a turn row", async () => {
     await rounds.recordStarted(started("t_orphan"), 1);
     await rounds.recordStarted(started("t_kept"), 2);
