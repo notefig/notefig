@@ -15,8 +15,9 @@
  *   adoption guarantee); that round trip is not a change to the document.
  *
  * The plugin state is the truth while the editor lives; the view mirrors it
- * into ./change-store.ts and reloads from there when the store changes
- * underneath it (a widget binding a new turn discards its changes).
+ * into the service's review store (./change-store.ts) and reloads from
+ * there when the store changes underneath it (a widget binding a new turn
+ * discards its changes, saved changes finish loading).
  */
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
@@ -27,11 +28,9 @@ import { UI_ONLY_TRANSACTION_META } from "../define-widget";
 import { PROMPT_NODE_NAME } from "./node";
 import {
   PROMPT_CHANGE_META,
-  getDocumentPromptChanges,
-  setDocumentPromptChanges,
-  subscribePromptChanges,
   type PromptChange,
   type PromptChangeAttribution,
+  type PromptReview,
 } from "./change-store";
 
 export const promptChangesKey = new PluginKey<readonly PromptChange[]>(
@@ -176,18 +175,54 @@ function recordRound(
 }
 
 /**
- * The document each path's stored changes were last mapped onto. A
- * recreated editor (tab replace) restores them only onto that same
- * document: if the file changed while no editor held it, the positions
- * point at other text, and nothing can map them — they are dropped.
+ * A document's text and shape — everything positions depend on: every
+ * node's open and close (so a paragraph inside a blockquote differs from
+ * one after it), every text run, and widget drafts too, whose length
+ * shifts every position after them. Saved with the review ranges and
+ * compared on restore: ranges are positions, and they only mean something
+ * against the document they were mapped onto. If the file changed while no
+ * editor held it — or a draft held text that a restart dropped — nothing
+ * can map them, and they are dropped.
  */
-const anchors = new Map<string, PMNode>();
-
-function restore(documentPath: string, doc: PMNode): readonly PromptChange[] {
-  const stored = getDocumentPromptChanges(documentPath);
-  if (stored.length === 0) return stored;
-  return anchors.get(documentPath)?.eq(doc) ? stored : [];
+export function documentFingerprint(doc: PMNode): string {
+  let hash = 0x811c9dc5;
+  const feed = (text: string) => {
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+  };
+  const walk = (node: PMNode) => {
+    if (node.isText) {
+      feed(`\u0002${node.text ?? ""}`);
+      return;
+    }
+    feed(`\u0000${node.type.name}`);
+    node.forEach(walk);
+    feed("\u0001");
+  };
+  walk(doc);
+  return (hash >>> 0).toString(16);
 }
+
+/** The document's changes as the store has them — saved ones only when
+ *  the document is the one they were mapped onto. */
+function checked(
+  documentPath: string,
+  doc: PMNode,
+  review: PromptReview,
+): readonly PromptChange[] {
+  const changes = review.changes(documentPath);
+  const fingerprint = review.unchecked(documentPath);
+  if (fingerprint === null) return changes;
+  return changes.length > 0 && fingerprint === documentFingerprint(doc)
+    ? changes
+    : [];
+}
+
+/** How long the ranges settle before they are saved: they move on every
+ *  keystroke, and fingerprinting the document isn't free. */
+const SAVE_DELAY_MS = 500;
 
 /** Stored changes that still fit the document (a live editor's reload). */
 function fitToDoc(
@@ -224,31 +259,46 @@ export function applyPromptChanges(
   return round && tr.docChanged ? recordRound(next, tr, round) : next;
 }
 
-export function promptChangeTrackingPlugin(documentPath: string): Plugin {
+export function promptChangeTrackingPlugin(
+  documentPath: string,
+  review: PromptReview,
+): Plugin {
   return new Plugin<readonly PromptChange[]>({
     key: promptChangesKey,
     state: {
-      init: (_config, state) => restore(documentPath, state.doc),
+      init: (_config, state) =>
+        fitToDoc(checked(documentPath, state.doc, review), state.doc),
       apply(tr, changes, _oldState, newState) {
         if (tr.getMeta(promptChangesKey) === RELOAD_META) {
-          return fitToDoc(getDocumentPromptChanges(documentPath), newState.doc);
+          return fitToDoc(review.changes(documentPath), newState.doc);
         }
         return applyPromptChanges(changes, tr);
       },
     },
     view(view) {
-      // Restore rejected what was stored (the file changed while closed):
-      // clear it, so the widget's face stops counting highlights no
-      // document shows.
-      if (
-        promptChangesOf(view.state).length === 0 &&
-        getDocumentPromptChanges(documentPath).length > 0
-      ) {
-        setDocumentPromptChanges(documentPath, []);
-      }
-      const unsubscribe = subscribePromptChanges(() => {
-        const stored = getDocumentPromptChanges(documentPath);
-        if (stored === promptChangesOf(view.state) || view.isDestroyed) return;
+      // The store follows what this editor holds: saved changes it took
+      // up, or none when the document isn't the one they were mapped onto —
+      // so the widget's face never counts highlights no document shows.
+      review.set(documentPath, promptChangesOf(view.state));
+      let pending: ReturnType<typeof setTimeout> | null = null;
+      const save = () => {
+        pending = null;
+        if (view.isDestroyed && !destroying) return;
+        review.save(documentPath, {
+          fingerprint: documentFingerprint(view.state.doc),
+          changes: [...promptChangesOf(view.state)],
+        });
+      };
+      let destroying = false;
+      const unsubscribe = review.subscribe(() => {
+        if (view.isDestroyed) return;
+        // Saved changes that finished loading after the editor opened:
+        // checked against this document like any it opened with.
+        if (review.unchecked(documentPath) !== null) {
+          review.set(documentPath, checked(documentPath, view.state.doc, review));
+          return;
+        }
+        if (review.changes(documentPath) === promptChangesOf(view.state)) return;
         view.dispatch(
           view.state.tr
             .setMeta(promptChangesKey, RELOAD_META)
@@ -259,12 +309,24 @@ export function promptChangeTrackingPlugin(documentPath: string): Plugin {
       return {
         update(updated, previous) {
           const changes = promptChangesOf(updated.state);
-          if (changes.length > 0) anchors.set(documentPath, updated.state.doc);
-          if (changes !== promptChangesOf(previous)) {
-            setDocumentPromptChanges(documentPath, changes);
+          const changed = changes !== promptChangesOf(previous);
+          if (changed) review.set(documentPath, changes);
+          // Ranges move with every edit: keep the saved copy in step.
+          if (changed || (changes.length > 0 && !updated.state.doc.eq(previous.doc))) {
+            if (pending) clearTimeout(pending);
+            pending = setTimeout(save, SAVE_DELAY_MS);
           }
         },
-        destroy: unsubscribe,
+        destroy() {
+          unsubscribe();
+          if (pending) {
+            clearTimeout(pending);
+            destroying = true;
+            save();
+          }
+          // The file can change before an editor holds it again.
+          review.release(documentPath, documentFingerprint(view.state.doc));
+        },
       };
     },
   });

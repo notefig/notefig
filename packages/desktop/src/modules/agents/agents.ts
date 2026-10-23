@@ -19,8 +19,7 @@ import type { AgentStore, AgentTurn } from "./agent-collections";
 import type { AgentRuntime } from "./agent-service";
 import { encodeWidgetContextUri } from "@notefig/agent";
 import type { KvApi } from "@/modules/kv";
-import { path as pathutil, workspaceKey } from "@/utils/path";
-import { type Hooks } from "@notefig/core";
+import { workspaceKey } from "@/utils/path";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -204,8 +203,6 @@ export interface AgentsDeps {
   openAgentTab(taskId: string): void;
   isOpen(workspacePath: string): boolean;
   ensureRuntime(): boolean;
-  /** Where the widget's round start is announced (core's hook bus). */
-  hooks: Pick<Hooks, "emit">;
 }
 
 export function createAgents({
@@ -215,7 +212,6 @@ export function createAgents({
   openAgentTab,
   isOpen,
   ensureRuntime,
-  hooks,
 }: AgentsDeps): AgentsApi {
   /**
    * Trust granted in this run. The KV write is durable only after it
@@ -298,21 +294,8 @@ export function createAgents({
     return {
       taskId,
       prompt: promptImpl,
-      promptFromWidget(text, widget, extras = {}) {
-        const sent = sendFromWidget(text, widget, extras);
-        // The round begins in the widget's document — announced here, by
-        // the one send path, so no caller can send without it.
-        hooks.emit("widget:round-started", {
-          taskId,
-          turnId: sent.turnId,
-          workspacePath: widget.workspacePath,
-          documentPath: pathutil.isAbsolute(widget.path)
-            ? widget.path
-            : pathutil.join(widget.workspacePath, widget.path),
-          prompt: text,
-        });
-        return sent;
-      },
+      promptFromWidget: (text, widget, extras = {}) =>
+        sendFromWidget(text, widget, extras),
       removeQueuedPrompt(turnId) {
         runtime.removeQueuedPrompt(taskId, turnId);
       },

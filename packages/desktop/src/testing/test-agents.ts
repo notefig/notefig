@@ -113,7 +113,6 @@ export function testAgents(
     openAgentTab: () => {},
     isOpen: () => true,
     ensureRuntime: () => true,
-    hooks,
     ...facade,
   });
   return { deps, hooks, store, runtime, agents };

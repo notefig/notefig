@@ -107,14 +107,15 @@ export interface PromptWidgetHost {
    * Send a prompt from this widget. The host resolves the text's "@" mentions
    * itself — files into context parts, directives into what the prompt is
    * sent with — so the widget hands over the finished string.
-   * Infallible by contract: it returns the id of the turn to watch.
+   * Infallible by contract: it returns the id of the turn to watch, and
+   * the prompt as it went out (directives taken out).
    */
   dispatchPrompt(args: {
     taskId: string;
     text: string;
     workspacePath: string;
     target: WidgetPromptTarget;
-  }): { turnId: string };
+  }): { turnId: string; sentPrompt: string };
   cancelTask(taskId: string): void;
   /** Withdraw a turn that is still queued behind others. */
   removeQueuedPrompt(taskId: string, turnId: string): void;

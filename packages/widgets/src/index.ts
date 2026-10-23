@@ -106,13 +106,16 @@ export {
  *  module, and the state machine it runs. */
 export {
   createPromptWidgets,
+  roundStatus,
   type PromptRoundObserverFactory,
   type PromptRoundSnapshot,
   type PromptWidget,
   type PromptWidgetLocation,
   type PromptWidgetsApi,
-  type PromptWidgetsDeps,
+  type RoundStart,
   type StopCommands,
+  type StoredRound,
+  type StoredRoundObservation,
 } from "./prompt/widgets-service";
 export { capabilitiesOf, type WidgetState } from "./prompt/machine";
 
@@ -120,11 +123,16 @@ export { capabilitiesOf, type WidgetState } from "./prompt/machine";
  *  and shows them. */
 export {
   PROMPT_CHANGE_META,
-  getDocumentPromptChanges,
   type PromptChange,
   type PromptChangeAttribution,
+  type ReviewRangeStore,
+  type SavedReviewRanges,
 } from "./prompt/change-store";
-export { isMutatingToolCall } from "./prompt/state";
+export {
+  deriveRoundOutcome,
+  isMutatingToolCall,
+  type RoundOutcome,
+} from "./prompt/state";
 
 /** The document minimap (MET-172): the collector the editor registers. */
 export {

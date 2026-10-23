@@ -46,7 +46,7 @@ import { mentionPopupHasResults } from "../composer/mention-bridge";
 import { hostIsMention } from "../composer/mention-suggestion";
 import { registerComposerKeyHandler } from "../composer/key-bridge";
 import { WidgetResponseView } from "./widget-response-view";
-import { usePromptChangeCounts } from "../change-store";
+import { usePromptChangeCounts, type PromptReview } from "../change-store";
 import {
   usePromptChangeNavigation,
   type PromptChangeNavigation,
@@ -70,14 +70,13 @@ import {
 import {
   deriveActiveToolLine,
   deriveLatestAssistantLine,
-  deriveTouchedFiles,
   deriveQueuePosition,
   deriveComposerKeyAction,
-  deriveWidgetResponse,
   widgetPromptTarget,
   blobCardClass,
   referenceRemovalArmed,
   type BlobPhase,
+  type RoundOutcome,
 } from "../state";
 
 /** What the face reads off a widget's record: the prompt it last sent. */
@@ -254,63 +253,83 @@ function usePromptBlobRound({
 }
 
 /**
- * Everything the card shows that is derived from the transcript rather than
- * stored: which files the turn touched, the agent's widget_respond answer,
- * the live tool line, the assistant teaser, and the queue position. Each is
- * scoped to the phases that display it, so a running turn does no done-state
- * work and vice versa.
+ * Everything the card shows besides its state. A settled round's face — the
+ * answer, the summary, the error, the files it touched — is its stored
+ * outcome (MET-251), the same live or after a restart. Only what a working
+ * agent is doing right now comes from the transcript: the live tool line,
+ * the assistant teaser, the queue position.
  */
 function usePromptBlobDisplay({
+  review,
   blobId,
   editor,
   phase,
+  widget,
   sortedEntries,
   taskTurns,
-  boundTurnId,
-  workspacePath,
 }: {
+  review: PromptReview;
   blobId: string;
   editor: Editor;
   phase: BlobPhase;
+  widget: PromptWidget;
   sortedEntries: AgentEntry[];
   taskTurns: AgentTurn[];
-  boundTurnId: string | null;
-  workspacePath: string;
 }): PromptBlobDisplay {
-  const touchedFiles = useMemo(
-    () =>
-      phase === "done" ? deriveTouchedFiles(sortedEntries, workspacePath) : [],
-    [phase, sortedEntries, workspacePath],
-  );
-  const widgetResponse = useMemo(
-    () => (phase === "done" ? deriveWidgetResponse(sortedEntries) : null),
-    [phase, sortedEntries],
-  );
-  const rawActiveToolLine =
-    phase === "running" ? deriveActiveToolLine(sortedEntries) : null;
+  const running = phase === "running";
+  const rawActiveToolLine = running ? deriveActiveToolLine(sortedEntries) : null;
   const activeToolLine = useDebouncedActiveToolLine(rawActiveToolLine);
-  // Running: live teaser under the status line. Done: the fallback summary
-  // line when the turn has no widget_respond response.
-  const assistantTeaser =
-    phase === "running" || phase === "done"
-      ? deriveLatestAssistantLine(sortedEntries)
-      : null;
-  const queueAhead =
-    phase === "queued" && boundTurnId
-      ? deriveQueuePosition(taskTurns, boundTurnId)
-      : 0;
-
-  const changeCounts = usePromptChangeCounts(blobId);
-
   return {
-    touchedFiles,
-    widgetResponse,
+    ...outcomeDisplay(
+      widget.outcome,
+      widget.state.name === "settled" && widget.state.outcome === "cancelled",
+    ),
     activeToolLine,
-    assistantTeaser,
-    queueAhead,
-    changeCounts,
-    changes: usePromptChangeNavigation(blobId, editor),
+    // The live teaser under the status line.
+    assistantTeaser: running ? deriveLatestAssistantLine(sortedEntries) : null,
+    queueAhead: queuePosition(phase, taskTurns, widget.boundTurnId),
+    changeCounts: usePromptChangeCounts(review, blobId),
+    changes: usePromptChangeNavigation(review, blobId, editor),
   };
+}
+
+/** A settled round's face: what the round left behind. */
+export type OutcomeDisplay = {
+  touchedFiles: string[];
+  widgetResponse: WidgetResponse | null;
+  /** The last assistant line: the fallback when there is no answer. */
+  summary: string | null;
+  /** The round was stopped. */
+  cancelled: boolean;
+  /** Why the round failed. */
+  errorMessage: string | null;
+};
+
+/** The one way an outcome becomes the settled face — the app's widgets
+ *  from their recorded rounds, the site's demo from its scripted one. */
+export function outcomeDisplay(
+  outcome: RoundOutcome | null,
+  cancelled: boolean,
+): OutcomeDisplay {
+  return {
+    touchedFiles: outcome?.touchedFiles ?? [],
+    widgetResponse: outcome?.response ?? null,
+    summary: outcome?.summary ?? null,
+    cancelled,
+    errorMessage: outcome?.error ?? null,
+  };
+}
+
+
+
+function queuePosition(
+  phase: BlobPhase,
+  taskTurns: AgentTurn[],
+  boundTurnId: string | null,
+): number {
+  return phase === "queued" && boundTurnId
+    ? deriveQueuePosition(taskTurns, boundTurnId)
+    : 0;
 }
 
 /**
@@ -497,10 +516,8 @@ function useComposerKeys({
   );
 }
 
-/** What the face renders from the transcript, per phase. */
-interface PromptBlobDisplay {
-  touchedFiles: string[];
-  widgetResponse: ReturnType<typeof deriveWidgetResponse>;
+/** What the face renders besides its state. */
+interface PromptBlobDisplay extends OutcomeDisplay {
   activeToolLine: string | null;
   assistantTeaser: string | null;
   queueAhead: number;
@@ -680,7 +697,6 @@ function claimWidgetPointerEvents(event: React.MouseEvent): void {
 export function PromptBlobFace({
   phase,
   record,
-  turn,
   task,
   boundTaskId,
   workspacePath,
@@ -699,7 +715,6 @@ export function PromptBlobFace({
 }: {
   phase: BlobPhase;
   record: PromptBlobRecord;
-  turn: AgentTurn | undefined;
   task: AgentTaskRow | undefined;
   boundTaskId: string | null;
   workspacePath: string;
@@ -757,7 +772,6 @@ export function PromptBlobFace({
 
             <SettledState
               phase={phase}
-              turn={turn}
               display={display}
               boundTaskId={boundTaskId}
               documentPath={documentPath}
@@ -887,14 +901,12 @@ function RemovalRefusedHint({ shown }: { shown: boolean }) {
  *  chosen here so the face itself stays phase-agnostic layout. */
 function SettledState({
   phase,
-  turn,
   display,
   boundTaskId,
   documentPath,
   actions,
 }: {
   phase: BlobPhase;
-  turn: AgentTurn | undefined;
   display: PromptBlobDisplay;
   boundTaskId: string | null;
   documentPath: string;
@@ -903,9 +915,9 @@ function SettledState({
   if (phase === "done") {
     return (
       <DoneState
-        cancelled={turn?.status === "cancelled"}
+        cancelled={display.cancelled}
         response={display.widgetResponse}
-        fallbackText={display.assistantTeaser}
+        fallbackText={display.summary}
         touchedFiles={display.touchedFiles}
         documentPath={documentPath}
         changeCounts={display.changeCounts}
@@ -919,7 +931,7 @@ function SettledState({
   if (phase === "error") {
     return (
       <ErrorState
-        message={turn?.error}
+        message={display.errorMessage ?? undefined}
         onRetry={actions.retry}
         onEdit={actions.editPrompt}
         onDismiss={actions.dismiss}
@@ -1013,13 +1025,13 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
   });
 
   const display = usePromptBlobDisplay({
+    review: prompts.review,
     blobId,
     editor,
     phase,
+    widget,
     sortedEntries,
     taskTurns,
-    boundTurnId,
-    workspacePath,
   });
 
   useComposerKeys({
@@ -1042,7 +1054,6 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
       removalRefusedAt: widget.removalRefusedAt,
     },
     record: widget,
-    turn,
     task,
     boundTaskId,
     workspacePath,
@@ -1115,7 +1126,7 @@ function usePromptSendActions({
           ? ((doc.nodeAt(nodePos)?.attrs.reference ??
               null) as PromptReference | null)
           : null;
-      return host.dispatchPrompt({
+      const { turnId, sentPrompt } = host.dispatchPrompt({
         taskId,
         text,
         workspacePath,
@@ -1128,7 +1139,8 @@ function usePromptSendActions({
           reference,
           toRelativePath: host.toRelativePath,
         }),
-      }).turnId;
+      });
+      return { taskId, turnId, workspacePath, documentPath, sentPrompt };
     },
     [host, blobId, documentPath, workspacePath, editor, getPos],
   );
@@ -1153,7 +1165,7 @@ function usePromptSendActions({
         prompts.get(blobId).boundTaskId,
         workspacePath,
       );
-      return { taskId, turnId: dispatchPrompt(taskId, text) };
+      return dispatchPrompt(taskId, text);
     });
     if (!sent) return;
     draftIO.write("");
@@ -1182,10 +1194,9 @@ function usePromptSendActions({
       prompts.unbind(blobId);
       return;
     }
-    const sent = await prompts.send(blobId, text, async () => ({
-      taskId,
-      turnId: dispatchPrompt(taskId, text),
-    }));
+    const sent = await prompts.send(blobId, text, async () =>
+      dispatchPrompt(taskId, text),
+    );
     if (!sent) return;
     draftIO.write("");
     // The field closes while the agent works: the caret goes back to
