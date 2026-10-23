@@ -393,30 +393,11 @@ export function restoreKeptWidgetsTr(
 }
 
 /**
- * Convert pasted text into promptDraft-compatible inline content: each
- * newline becomes a hardBreak, so multi-line pastes stay INSIDE the widget
- * (MET-257). ProseMirror's default fit would turn paragraphs after the
- * first one into sibling document blocks.
- */
-function sliceFromPastedText(
-  schema: PMNode["type"]["schema"],
-  text: string,
-): Fragment {
-  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  const hardBreak = schema.nodes.hardBreak;
-  const nodes: PMNode[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (i > 0 && hardBreak) nodes.push(hardBreak.create());
-    const line = lines[i];
-    if (line) nodes.push(schema.text(line));
-  }
-  return Fragment.from(nodes);
-}
-
-/**
- * Paste into a prompt draft: keep every line inside the draft by turning
- * newlines into hardBreaks. Returning true hands the event and stops the
- * default paste.
+ * Paste into a prompt draft. ProseMirror's default fit would turn pasted
+ * paragraphs after the first one into sibling document blocks; by inserting
+ * the clipboard's plain text as-is, multi-line content stays INSIDE the
+ * widget (MET-257). Newline characters are the same line breaks the draft
+ * already reads back via textBetween, so no extra node building is needed.
  */
 function pasteIntoDraft(
   view: EditorView,
@@ -430,18 +411,12 @@ function pasteIntoDraft(
   if (selection.from < draft.from || selection.to > draft.to) return false;
   const { state } = prompts.get(draft.blobId);
   if (!capabilitiesOf(state, { summoned: false }).fieldEditable) return true;
-  const text = event.clipboardData?.getData("text/plain");
+  const text = event.clipboardData?.getData("text/plain").replace(/\r\n?/g, "\n");
   // No plain text (e.g. HTML-only clipboard) leaves the parsed slice to
   // ProseMirror's default handling instead of replacing the draft with
   // nothing (MET-257).
   if (!text) return false;
-  view.dispatch(
-    view.state.tr
-      .replaceSelection(
-        new PMSlice(sliceFromPastedText(view.state.schema, text), 0, 0),
-      )
-      .scrollIntoView(),
-  );
+  view.dispatch(view.state.tr.insertText(text).scrollIntoView());
   return true;
 }
 

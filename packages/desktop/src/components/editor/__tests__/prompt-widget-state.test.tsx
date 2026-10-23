@@ -691,12 +691,10 @@ describe("deleting and selecting a widget", () => {
 
     expect(selectionDraft(editor.state)?.blobId).toBe(blobId);
     const draft = promptDraftRange(editor.state.doc, blobId)!;
-    expect(
-      editor.state.doc.textBetween(draft.from, draft.to, "\n", (leaf) =>
-        leaf.type.name === "hardBreak" ? "\n" : "",
-      ),
-    ).toBe("line2\nline3");
-    expect(draft.node.childCount).toBe(3);
+    expect(editor.state.doc.textBetween(draft.from, draft.to)).toBe(
+      "line2\nline3",
+    );
+    expect(draft.node.childCount).toBe(1);
     expect(editor.state.doc.childCount).toBe(3);
   });
 
