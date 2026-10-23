@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { type WorkspaceFiles } from "@/modules/files";
 import {
   rankFileRows,
@@ -24,12 +24,25 @@ function normalizeWorkspaceSource(
 
 type MetadataCollection = WorkspaceFiles["collections"]["metadata"];
 
+function openWorkspacePaths(
+  core: ReturnType<typeof useCore>,
+  workspacePaths: string[] | null,
+): string[] {
+  const paths = workspacePaths
+    ? [...workspacePaths]
+    : core.workspaces.list().map((ref) => ref.path);
+  // Process deepest workspaces first so nested paths are kept from the
+  // innermost workspace and the outer workspace's copy is treated as a
+  // duplicate.
+  paths.sort((a, b) => b.length - a.length);
+  return paths;
+}
+
 function* openWorkspaceMetadatas(
   core: ReturnType<typeof useCore>,
   workspacePaths: string[] | null,
 ): Generator<MetadataCollection> {
-  const paths = workspacePaths ?? core.workspaces.list().map((ref) => ref.path);
-  for (const path of paths) {
+  for (const path of openWorkspacePaths(core, workspacePaths)) {
     if (!core.workspaces.isOpen(path)) continue;
     const metadata = core.workspace(path).files?.collections?.metadata;
     if (!metadata) continue;
@@ -42,9 +55,12 @@ function computeFileRows(
   workspacePaths: string[] | null,
 ): FileRow[] {
   const rows: FileRow[] = [];
+  const seen = new Set<string>();
   for (const metadata of openWorkspaceMetadatas(core, workspacePaths)) {
     for (const row of metadata.values()) {
       if (row.type !== "file") continue;
+      if (seen.has(row.path)) continue;
+      seen.add(row.path);
       rows.push({
         path: row.path,
         relativePath: row.relativePath,
@@ -72,7 +88,8 @@ function rowsEqual(a: FileRow[], b: FileRow[]): boolean {
 /**
  * Reactive file metadata rows from one or more open workspaces. Passing
  * `null` / `undefined` reads every workspace that is currently open. The
- * subscription is rebuilt as workspaces open or close.
+ * store starts and stops its subscriptions with its first and last
+ * listener, so it survives React StrictMode effect replay.
  */
 function useFileRows(workspacePaths: string[] | null): FileRow[] {
   const core = useCore();
@@ -81,6 +98,7 @@ function useFileRows(workspacePaths: string[] | null): FileRow[] {
     let rows = computeFileRows(core, workspacePaths);
     const listeners = new Set<() => void>();
     let metadataStops: (() => void)[] = [];
+    let stopWorkspaces: (() => void) | null = null;
 
     const notify = () => {
       const nextRows = computeFileRows(core, workspacePaths);
@@ -102,29 +120,32 @@ function useFileRows(workspacePaths: string[] | null): FileRow[] {
       }
     };
 
-    subscribeMetadata();
-    const stopWorkspaces = core.workspaces.subscribe(() => {
+    const startSubscriptions = () => {
       subscribeMetadata();
-      notify();
-    });
+      stopWorkspaces = core.workspaces.subscribe(() => {
+        subscribeMetadata();
+        notify();
+      });
+    };
+
+    const stopSubscriptions = () => {
+      stopMetadataSubscriptions();
+      stopWorkspaces?.();
+      stopWorkspaces = null;
+    };
 
     return {
       getRows: () => rows,
       subscribe: (listener: () => void) => {
         listeners.add(listener);
+        if (listeners.size === 1) startSubscriptions();
         return () => {
           listeners.delete(listener);
+          if (listeners.size === 0) stopSubscriptions();
         };
-      },
-      dispose: () => {
-        stopMetadataSubscriptions();
-        stopWorkspaces();
-        listeners.clear();
       },
     };
   }, [core, workspacePaths]);
-
-  useEffect(() => store.dispose, [store]);
 
   return useSyncExternalStore(store.subscribe, store.getRows, store.getRows);
 }

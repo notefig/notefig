@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, createElement } from "react";
+import { StrictMode, act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { Core } from "@notefig/core";
 import { CoreProvider } from "@notefig/core/react";
@@ -24,6 +24,7 @@ const adapter = {
 
 const WS = "/ws-file-search";
 const WS2 = "/ws-file-search-2";
+const WSNested = `${WS}/nested`;
 
 const WORKSPACE_FILES = [
   "notes.md",
@@ -41,8 +42,14 @@ const adapter2 = {
   readDirectory: vi.fn(),
 };
 
+const adapterNested = {
+  getMetadata: vi.fn(),
+  readDirectory: vi.fn(),
+};
+
 let files: WorkspaceFiles;
 let files2: WorkspaceFiles;
+let filesNested: WorkspaceFiles;
 let core: Core;
 
 let container: HTMLDivElement | null = null;
@@ -72,17 +79,19 @@ async function renderSearch(
   query: string,
   options?: FileSearchOptions,
   source: FileSearchSource = WS,
+  strict = false,
 ) {
   if (!root) {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
   }
+  const child = createElement(Probe, { source, query, options });
   await act(async () => {
     root!.render(
       createElement(CoreProvider, {
         core,
-        children: createElement(Probe, { source, query, options }),
+        children: strict ? createElement(StrictMode, null, child) : child,
       }),
     );
   });
@@ -111,10 +120,24 @@ beforeEach(async () => {
       type: "file" as const,
     })),
   }));
+  adapterNested.getMetadata.mockResolvedValue({
+    succeeded: [],
+    failed: [],
+  });
+  adapterNested.readDirectory.mockImplementation(async () => ({
+    ok: true,
+    value: [
+      { path: `${WSNested}/shared.md`, type: "file" as const },
+      { path: `${WSNested}/deep.md`, type: "file" as const },
+    ],
+  }));
 
   files = testWorkspaceFiles(WS, adapter);
   files2 = testWorkspaceFiles(WS2, adapter2);
-  core = createTestCore({ modules: [filesModuleOf([files, files2])] });
+  filesNested = testWorkspaceFiles(WSNested, adapterNested);
+  core = createTestCore({
+    modules: [filesModuleOf([files, files2, filesNested])],
+  });
   await core.workspace(WS).open();
   await files.collections.metadata.preload();
 });
@@ -126,6 +149,7 @@ afterEach(() => {
   root = null;
   files.dispose();
   files2.dispose();
+  filesNested.dispose();
 });
 
 describe("useFileSearch", () => {
@@ -248,5 +272,50 @@ describe("useFileSearch across open workspaces", () => {
       }
     });
     expect(await renderSearch("file-", undefined, null)).toHaveLength(10);
+  });
+});
+
+describe("useFileSearch with nested workspaces", () => {
+  beforeEach(async () => {
+    await core.workspace(WSNested).open();
+    await filesNested.collections.metadata.preload();
+  });
+
+  it("deduplicates files that appear in both the parent and child workspaces, keeping the deeper relative path", async () => {
+    // The parent workspace also lists the nested workspace's directory,
+    // so its metadata will include a row for the nested file.
+    await act(async () => {
+      files.collections.metadata.utils.writeInsert({
+        path: `${WSNested}/shared.md`,
+        relativePath: "nested/shared.md",
+        type: "file",
+        contentHash: "",
+      });
+    });
+
+    const results = await renderSearch("shared", undefined, null);
+    expect(results).toHaveLength(1);
+    expect(results[0].path).toBe(`${WSNested}/shared.md`);
+    // The inner workspace's relative path wins.
+    expect(results[0].relativePath).toBe("shared.md");
+  });
+});
+
+describe("useFileSearch under React StrictMode", () => {
+  it("keeps updating after StrictMode effect replay", async () => {
+    await renderSearch("strict-test", undefined, null, true);
+    expect(latest).toEqual([]);
+
+    await act(async () => {
+      files.collections.metadata.utils.writeInsert({
+        path: `${WS}/strict-test.md`,
+        relativePath: "strict-test.md",
+        type: "file",
+        contentHash: "",
+      });
+    });
+
+    expect(latest).toHaveLength(1);
+    expect(latest[0].path).toBe(`${WS}/strict-test.md`);
   });
 });
