@@ -31,8 +31,6 @@ import type { DirectiveSource } from "./composer/mention-suggestion";
 
 /** Where in the document a widget's prompt was sent from. */
 export interface WidgetPromptTarget {
-  /** The widget sending, so its round can be found again by widget. */
-  blobId?: string;
   /** Workspace-relative document path (absolute if outside the workspace). */
   path: string;
   /** Document position the widget sat at when the prompt was sent. */
@@ -109,14 +107,15 @@ export interface PromptWidgetHost {
    * Send a prompt from this widget. The host resolves the text's "@" mentions
    * itself — files into context parts, directives into what the prompt is
    * sent with — so the widget hands over the finished string.
-   * Infallible by contract: it returns the id of the turn to watch.
+   * Infallible by contract: it returns the id of the turn to watch, and
+   * the prompt as it went out (directives taken out).
    */
   dispatchPrompt(args: {
     taskId: string;
     text: string;
     workspacePath: string;
     target: WidgetPromptTarget;
-  }): { turnId: string };
+  }): { turnId: string; sentPrompt: string };
   cancelTask(taskId: string): void;
   /** Withdraw a turn that is still queued behind others. */
   removeQueuedPrompt(taskId: string, turnId: string): void;

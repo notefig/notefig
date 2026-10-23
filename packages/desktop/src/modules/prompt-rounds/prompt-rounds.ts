@@ -2,9 +2,9 @@
  * Prompt rounds — every prompt-widget turn across the open workspaces, for
  * the sidebar's Everything view.
  *
- * A persisted row per round, written by one global listener: the widget
- * host announces `widget:round-started` when a prompt is sent (the turn,
- * the document, the prompt text) and the agent service announces
+ * A persisted row per round, written by one global listener: the prompt
+ * widgets service announces `widget:round-started` when a widget sends (the
+ * turn, the document, the prompt text) and the agent service announces
  * `agent:turn-settled` when the turn ends; nothing on the widget store or
  * the turn rows changes for this. A row that is still "live" when the app
  * comes back up belongs to a turn the previous run never finished — it is
@@ -16,10 +16,11 @@
  * (`RoundOutcome`: the answer, the summary, the error, the files it
  * changed). The widget reads its settled face from here, so it reads the
  * same whether the turn ended a second ago or before a restart, and
- * whether or not a session revival has replayed its transcript away.
- * Settled rounds are kept for a week.
+ * whether or not a session revival has replayed its transcript away —
+ * and every list of rounds reads where one stands the way the widget does
+ * (`roundStatus`). Settled rounds are kept for a week.
  */
-import { createCollection } from "@tanstack/react-db";
+import { createCollection, eq } from "@tanstack/react-db";
 import {
   persistedCollectionOptions,
   type PersistedCollectionPersistence,
@@ -28,8 +29,12 @@ import { type AgentTurn, type AgentTurnStatus } from "@/modules/agents/react";
 import type { AgentEntry } from "@notefig/shared/agent";
 import {
   deriveRoundOutcome,
+  roundStatus,
   type ReviewRangeStore,
   type RoundOutcome,
+  type SavedReviewRanges,
+  type StoredRound,
+  type StoredRoundObservation,
 } from "@notefig/widgets";
 import type { AgentStore } from "@/modules/agents/agent-collections";
 import { type OpenWorkspaceRow } from "@/modules/workspaces";
@@ -155,6 +160,8 @@ export interface PromptRoundsApi {
   settleOrphaned(): Promise<void>;
   /** Boot: the one global listener. Returns the unsubscribe. */
   track(): () => void;
+  /** Watch a widget's newest round, as the widget reads it. */
+  observeNewest(blobId: string, onChange: () => void): StoredRoundObservation;
   /** Where the prompt widgets keep each document's review ranges: on the
    *  rounds that made them. */
   readonly reviewRanges: ReviewRangeStore;
@@ -169,7 +176,7 @@ export function createPromptRounds({
   persistence: PersistedCollectionPersistence;
   turns: Pick<AgentStore["turns"], "get">;
   /** A turn's entries, read when it settles. */
-  transcript: (turnId: string) => AgentEntry[];
+  transcript: (taskId: string, turnId: string) => AgentEntry[];
   /** Where round starts and settled turns are announced. */
   hooks: Pick<Hooks, "on">;
 }): PromptRoundsApi {
@@ -184,24 +191,55 @@ export function createPromptRounds({
 
   const api: PromptRoundsApi = {
     collection: rounds,
+    observeNewest(blobId, onChange) {
+      // The newest row is kept until one of the widget's rows changes, and
+      // the round read from it until that row does.
+      let newest: PromptRoundRow | undefined | null = null;
+      let last: { row: PromptRoundRow; round: StoredRound } | undefined;
+      const subscription = rounds.subscribeChanges(
+        () => {
+          newest = null;
+          onChange();
+        },
+        { where: (row) => eq(row.blobId, blobId) },
+      );
+      return {
+        get() {
+          if (newest === null) {
+            newest = undefined;
+            for (const row of rounds.values()) {
+              if (row.blobId !== blobId) continue;
+              if (!newest || row.startedAt > newest.startedAt) newest = row;
+            }
+          }
+          if (!newest) return undefined;
+          if (last?.row !== newest) last = { row: newest, round: storedRound(newest) };
+          return last.round;
+        },
+        destroy: () => subscription.unsubscribe(),
+      };
+    },
     reviewRanges: {
-      load(documentPath) {
-        const changes = [];
-        let fingerprint: string | null = null;
+      async loadAll() {
+        await rounds.preload();
+        const byDocument = new Map<string, SavedReviewRanges>();
         for (const row of rounds.values()) {
-          const saved = row.changes?.find((c) => c.documentPath === documentPath);
-          if (!saved) continue;
-          fingerprint ??= saved.fingerprint;
-          for (const range of saved.ranges) {
-            changes.push({ blobId: row.blobId ?? "", turnId: row.turnId, ...range });
+          for (const { documentPath, fingerprint, ranges } of row.changes ?? []) {
+            const saved = byDocument.get(documentPath) ?? { fingerprint, changes: [] };
+            for (const range of ranges) {
+              saved.changes.push({ blobId: row.blobId ?? "", turnId: row.turnId, ...range });
+            }
+            byDocument.set(documentPath, saved);
           }
         }
-        return fingerprint === null ? null : { fingerprint, changes };
+        return byDocument;
       },
       save(documentPath, { fingerprint, changes }) {
         const byTurn = new Map<string, { from: number; to: number }[]>();
         for (const { turnId, from, to } of changes) {
-          byTurn.set(turnId, [...(byTurn.get(turnId) ?? []), { from, to }]);
+          const ranges = byTurn.get(turnId);
+          if (ranges) ranges.push({ from, to });
+          else byTurn.set(turnId, [{ from, to }]);
         }
         const touched = [...rounds.values()]
           .filter(
@@ -240,10 +278,6 @@ export function createPromptRounds({
             console.error("Failed to forget review ranges:", error);
           });
       },
-      subscribe(listener) {
-        const subscription = rounds.subscribeChanges(listener);
-        return () => subscription.unsubscribe();
-      },
     },
     async recordStarted(detail, now = Date.now()) {
       await rounds.preload();
@@ -256,9 +290,9 @@ export function createPromptRounds({
         prompt: firstLine(detail.prompt),
         status: "live",
         startedAt: now,
-        ...(detail.blobId ? { blobId: detail.blobId } : {}),
+        blobId: detail.blobId,
         workspacePath: detail.workspacePath,
-        typedPrompt: detail.typedPrompt ?? detail.prompt,
+        typedPrompt: detail.typedPrompt,
       }).isPersisted.promise;
       // A turn can end before its start is announced — a dead session
       // settles it inside the send — and that settle found no round to
@@ -281,7 +315,7 @@ export function createPromptRounds({
       // Snapshotted now: the transcript is in memory only, and a revival
       // replays it away.
       const outcome = deriveRoundOutcome({
-        entries: transcript(detail.turnId),
+        entries: transcript(detail.taskId, detail.turnId),
         error: turns.get(detail.turnId)?.error,
         workspacePath: row.workspacePath ?? "",
       });
@@ -343,6 +377,17 @@ export function createPromptRounds({
   return api;
 }
 
+/** A row as the widget reads it. */
+function storedRound(row: PromptRoundRow): StoredRound {
+  return {
+    turnId: row.turnId,
+    taskId: row.taskId,
+    status: row.status,
+    prompt: row.typedPrompt ?? row.prompt,
+    outcome: row.outcome ?? null,
+  };
+}
+
 function isEnded(
   status: AgentTurnStatus,
 ): status is "completed" | "cancelled" | "error" {
@@ -389,8 +434,9 @@ function byActivity(a: PromptRound, b: PromptRound): number {
 }
 
 /**
- * The stored rows joined to the open set and, while live, to the turn row
- * for queued-vs-running — pure, exported for tests.
+ * The stored rows joined to the open set and to their turn rows, each
+ * round standing where its widget says it does (`roundStatus`) — pure,
+ * exported for tests.
  *
  * A live row whose turn row is gone reads as cancelled, the same answer
  * `settleOrphaned` writes at boot (MET-208). The turn row is the only
@@ -410,10 +456,10 @@ export function derivePromptRounds(
   for (const row of rows) {
     const workspacePath = pathByKey.get(row.workspaceKey);
     if (workspacePath === undefined) continue;
-    const status: AgentTurnStatus =
-      row.status === "live"
-        ? (turnById.get(row.turnId)?.status ?? "cancelled")
-        : row.status;
+    // A listed round's turn row, when it has none, is gone for good.
+    const status =
+      roundStatus(row.status, turnById.get(row.turnId)?.status, true) ??
+      "cancelled";
     rounds.push({
       turnId: row.turnId,
       taskId: row.taskId,
@@ -442,8 +488,8 @@ export const promptRoundsModule = defineModule({
     return createPromptRounds({
       persistence: ctx.use("platform").db.get(),
       turns: store.turns,
-      transcript: (turnId) =>
-        store.entries.toArray.filter((entry) => entry.turnId === turnId),
+      transcript: (taskId, turnId) =>
+        store.entriesForTask(taskId).filter((entry) => entry.turnId === turnId),
       hooks: ctx.hooks,
     });
   },

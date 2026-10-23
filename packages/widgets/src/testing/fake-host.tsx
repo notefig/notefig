@@ -43,7 +43,7 @@ export function fakePromptWidgetHost(
     peekSession: vi.fn(() => null),
     isTaskReachable: vi.fn(async () => true),
 
-    dispatchPrompt: vi.fn(() => ({ turnId: "trn_fake" })),
+    dispatchPrompt: vi.fn(({ text }) => ({ turnId: "trn_fake", sentPrompt: text })),
     cancelTask: vi.fn(),
     removeQueuedPrompt: vi.fn(),
     ensureRuntime: vi.fn(() => true),

@@ -8,9 +8,11 @@
  * card shows. The service only keeps state: sending and stopping are the
  * widget's, through its host.
  *
- * What outlives a run is the widget's stored rounds (`core.promptRounds`,
- * MET-251): the service reads each widget's newest one, so a widget comes
- * back as it was left and its settled face survives a session revival.
+ * What outlives a run is the widget's recorded rounds (`core.promptRounds`,
+ * MET-251): the service announces each round it starts
+ * (`widget:round-started`), and reads each widget's newest record back, so
+ * a widget comes back as it was left and its settled face survives a
+ * session revival.
  *
  * The editor hands the service to its widgets (editor-store.ts); the app
  * reads it for session → widget lookups (jump-to-task, change attribution).
@@ -21,119 +23,83 @@ import {
   type PromptRoundObserverFactory,
   type PromptRoundSnapshot,
   type PromptWidgetsApi,
-  type PromptWidgetsDeps,
-  type StoredRound,
+  type RoundStart,
 } from "@notefig/widgets";
 import { defineModule } from "@notefig/core";
 import type { AgentStore } from "@/modules/agents/agent-collections";
 import { agentStoreModule } from "@/modules/agents/agent-collections";
-import {
-  promptRoundsModule,
-  type PromptRoundRow,
-  type PromptRoundsCollection,
-} from "@/modules/prompt-rounds";
+import { promptRoundsModule } from "@/modules/prompt-rounds";
 
 declare module "@notefig/core" {
   interface CoreModules {
     promptWidgets: PromptWidgetsApi;
   }
+  interface CoreHookMap {
+    /** A prompt widget sent a prompt: a round began in a document. */
+    "widget:round-started": RoundStart;
+  }
 }
 
-/** One bound round's live rows, subscription-based. */
+/**
+ * One bound round's live rows, subscription-based. Only the bound task's
+ * rows are watched, and read by key or by the store's task index; the
+ * snapshot is kept until one of them changes.
+ */
 export const roundObserverFor =
   (store: AgentStore): PromptRoundObserverFactory =>
   ({ turnId, taskId }, onChange) => {
     // Sentinel ids keep the subscriptions unconditional, matching nothing —
     // the same idiom as useRound.
-    const turnKey = turnId ?? " none";
     const taskKey = taskId ?? " none";
+    let snapshot: PromptRoundSnapshot | null = null;
+    const changed = () => {
+      snapshot = null;
+      onChange();
+    };
     const subscriptions = [
-      store.turns.subscribeChanges(onChange, {
+      store.turns.subscribeChanges(changed, {
         where: (row) => eq(row.taskId, taskKey),
       }),
-      store.tasks.subscribeChanges(onChange, {
+      store.tasks.subscribeChanges(changed, {
         where: (row) => eq(row.taskId, taskKey),
       }),
-      store.permissionRequests.subscribeChanges(onChange, {
+      store.permissionRequests.subscribeChanges(changed, {
         where: (row) => eq(row.taskId, taskKey),
-      }),
-      store.entries.subscribeChanges(onChange, {
-        where: (row) => eq(row.turnId, turnKey),
       }),
     ];
+    const read = (): PromptRoundSnapshot => {
+      let hasPendingPermission = false;
+      for (const request of store.permissionRequests.values()) {
+        if (request.taskId === taskKey && request.status === "pending") {
+          hasPendingPermission = true;
+          break;
+        }
+      }
+      return {
+        turn: turnId ? store.turns.get(turnId) : undefined,
+        task: store.tasks.get(taskKey),
+        taskTurns: store.turnsForTask(taskKey),
+        hasPendingPermission,
+      };
+    };
     return {
-      get(): PromptRoundSnapshot {
-        const taskTurns = store.turns.toArray.filter(
-          (turn) => turn.taskId === taskKey,
-        );
-        return {
-          turn: taskTurns.find((turn) => turn.turnId === turnKey),
-          task: store.tasks.toArray.find((task) => task.taskId === taskKey),
-          taskTurns,
-          hasPendingPermission: store.permissionRequests.toArray.some(
-            (req) => req.taskId === taskKey && req.status === "pending",
-          ),
-          entries: store.entries.toArray.filter(
-            (entry) => entry.turnId === turnKey,
-          ),
-        };
-      },
+      get: () => (snapshot ??= read()),
       destroy() {
         for (const subscription of subscriptions) subscription.unsubscribe();
       },
     };
   };
 
-/** A widget's newest stored round, subscription-based. The same object
- *  comes back until that row changes, so the service can tell. */
-export const storedRoundObserverFor =
-  (
-    rounds: PromptRoundsCollection,
-  ): NonNullable<PromptWidgetsDeps["observeStoredRound"]> =>
-  (blobId, onChange) => {
-    const subscription = rounds.subscribeChanges(onChange, {
-      where: (row) => eq(row.blobId, blobId),
-    });
-    let last: { row: PromptRoundRow; round: StoredRound } | undefined;
-    return {
-      get() {
-        let newest: PromptRoundRow | undefined;
-        for (const row of rounds.values()) {
-          if (row.blobId !== blobId) continue;
-          if (!newest || row.startedAt > newest.startedAt) newest = row;
-        }
-        if (!newest) return undefined;
-        if (last?.row !== newest) last = { row: newest, round: storedRound(newest) };
-        return last.round;
-      },
-      destroy: () => subscription.unsubscribe(),
-    };
-  };
-
-function storedRound(row: PromptRoundRow): StoredRound {
-  const changeCounts: Record<string, number> = {};
-  for (const { documentPath, ranges } of row.changes ?? []) {
-    if (ranges.length > 0) changeCounts[documentPath] = ranges.length;
-  }
-  return {
-    turnId: row.turnId,
-    taskId: row.taskId,
-    status: row.status,
-    prompt: row.typedPrompt ?? row.prompt,
-    outcome: row.outcome ?? null,
-    changeCounts,
-  };
-}
-
 export const promptWidgetsModule = defineModule({
   name: "promptWidgets",
   needs: [agentStoreModule, promptRoundsModule],
-  register: (ctx) =>
-    createPromptWidgets({
+  register: (ctx) => {
+    const rounds = ctx.use("promptRounds");
+    return createPromptWidgets({
       observeRound: roundObserverFor(ctx.use("agentStore")),
-      observeStoredRound: storedRoundObserverFor(
-        ctx.use("promptRounds").collection,
-      ),
-      reviewRanges: ctx.use("promptRounds").reviewRanges,
-    }),
+      observeStoredRound: rounds.observeNewest,
+      announceRound: (round) => ctx.hooks.emit("widget:round-started", round),
+      reviewRanges: rounds.reviewRanges,
+    });
+  },
 });

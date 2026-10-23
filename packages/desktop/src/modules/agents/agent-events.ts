@@ -15,22 +15,6 @@ import type {
 
 declare module "@notefig/core" {
   interface CoreHookMap {
-    /** A prompt widget sent a prompt: a round began in a document. */
-    "widget:round-started": {
-      taskId: string;
-      turnId: string;
-      /** The widget that sent it, when the sender named one. */
-      blobId?: string;
-      workspacePath: string;
-      /** Absolute path of the document the widget lives in. */
-      documentPath: string;
-      /** The prompt as sent. */
-      prompt: string;
-      /** The prompt as the user typed it, before directives (`@skill:…`)
-       *  were taken out of it — what the widget puts back on Edit or Retry.
-       *  Absent when the sender has no such text. */
-      typedPrompt?: string;
-    };
     /** A live turn's tool call was reported or moved on (pending →
      *  in_progress → completed/failed); `toolCall` is the merged state so
      *  far. Never raised for a session/load replay. */

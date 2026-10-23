@@ -45,6 +45,8 @@ function sendRound(task: AgentTask, text: string): string {
     workspacePath: "/ws",
     documentPath: "/ws/doc.md",
     prompt: text,
+    blobId: "blob_1",
+    typedPrompt: text,
   });
   return turnId;
 }

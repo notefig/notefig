@@ -158,7 +158,6 @@ export function blobCardClass(phase: BlobPhase, hasIssue: boolean): string {
  * keeps this function testable without one.
  */
 export function widgetPromptTarget(params: {
-  blobId?: string;
   documentPath: string;
   workspacePath: string;
   pos: number | undefined;
@@ -171,7 +170,6 @@ export function widgetPromptTarget(params: {
   ) => string | undefined;
 }): WidgetPromptTarget {
   const {
-    blobId,
     documentPath,
     workspacePath,
     pos,
@@ -182,7 +180,6 @@ export function widgetPromptTarget(params: {
   } = params;
   const path = toRelativePath(workspacePath, documentPath) || documentPath;
   return {
-    ...(blobId ? { blobId } : {}),
     path,
     pos: pos ?? docContentSize,
     isDocEmpty,

@@ -46,7 +46,7 @@ import { mentionPopupHasResults } from "../composer/mention-bridge";
 import { hostIsMention } from "../composer/mention-suggestion";
 import { registerComposerKeyHandler } from "../composer/key-bridge";
 import { WidgetResponseView } from "./widget-response-view";
-import { usePromptChangeCounts } from "../change-store";
+import { usePromptChangeCounts, type PromptReview } from "../change-store";
 import {
   usePromptChangeNavigation,
   type PromptChangeNavigation,
@@ -260,6 +260,7 @@ function usePromptBlobRound({
  * the assistant teaser, the queue position.
  */
 function usePromptBlobDisplay({
+  review,
   blobId,
   editor,
   phase,
@@ -267,6 +268,7 @@ function usePromptBlobDisplay({
   sortedEntries,
   taskTurns,
 }: {
+  review: PromptReview;
   blobId: string;
   editor: Editor;
   phase: BlobPhase;
@@ -286,9 +288,8 @@ function usePromptBlobDisplay({
     // The live teaser under the status line.
     assistantTeaser: running ? deriveLatestAssistantLine(sortedEntries) : null,
     queueAhead: queuePosition(phase, taskTurns, widget.boundTurnId),
-    // Saved counts stand in for documents no editor holds.
-    changeCounts: usePromptChangeCounts(blobId, widget.savedChangeCounts),
-    changes: usePromptChangeNavigation(blobId, editor),
+    changeCounts: usePromptChangeCounts(review, blobId),
+    changes: usePromptChangeNavigation(review, blobId, editor),
   };
 }
 
@@ -1024,6 +1025,7 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
   });
 
   const display = usePromptBlobDisplay({
+    review: prompts.review,
     blobId,
     editor,
     phase,
@@ -1124,12 +1126,11 @@ function usePromptSendActions({
           ? ((doc.nodeAt(nodePos)?.attrs.reference ??
               null) as PromptReference | null)
           : null;
-      return host.dispatchPrompt({
+      const { turnId, sentPrompt } = host.dispatchPrompt({
         taskId,
         text,
         workspacePath,
         target: widgetPromptTarget({
-          blobId,
           documentPath,
           workspacePath,
           pos: getPos?.(),
@@ -1138,7 +1139,8 @@ function usePromptSendActions({
           reference,
           toRelativePath: host.toRelativePath,
         }),
-      }).turnId;
+      });
+      return { taskId, turnId, workspacePath, documentPath, sentPrompt };
     },
     [host, blobId, documentPath, workspacePath, editor, getPos],
   );
@@ -1163,7 +1165,7 @@ function usePromptSendActions({
         prompts.get(blobId).boundTaskId,
         workspacePath,
       );
-      return { taskId, turnId: dispatchPrompt(taskId, text) };
+      return dispatchPrompt(taskId, text);
     });
     if (!sent) return;
     draftIO.write("");
@@ -1192,10 +1194,9 @@ function usePromptSendActions({
       prompts.unbind(blobId);
       return;
     }
-    const sent = await prompts.send(blobId, text, async () => ({
-      taskId,
-      turnId: dispatchPrompt(taskId, text),
-    }));
+    const sent = await prompts.send(blobId, text, async () =>
+      dispatchPrompt(taskId, text),
+    );
     if (!sent) return;
     draftIO.write("");
     // The field closes while the agent works: the caret goes back to

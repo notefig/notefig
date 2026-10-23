@@ -4,7 +4,7 @@
  * the dirty-diff gutter of a code editor. The text itself is never styled.
  *
  * Only the widget under review is drawn (review is one widget at a time,
- * started from the widget — see `setPromptReview`). The marks are passive:
+ * started from the widget — see `PromptReview.setReviewing`). The marks are passive:
  * they show state, nothing more. Moving between changes is the widget's
  * job (./change-navigator.ts), which asks this module to reveal a block —
  * scroll it into view and pulse its bar so the eye lands on it. A block the round only removed has no
@@ -24,11 +24,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { EditorState, PluginView } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import { promptChangesOf } from "./change-tracking";
-import {
-  getPromptReview,
-  promptChangeColor,
-  subscribePromptChanges,
-} from "./change-store";
+import { promptChangeColor, type PromptReview } from "./change-store";
 
 const gutterKey = new PluginKey("promptChangeGutter");
 
@@ -92,7 +88,10 @@ class PromptChangeGutter implements PluginView {
   private pulseTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly unsubscribe: () => void;
 
-  constructor(private readonly view: EditorView) {
+  constructor(
+    private readonly view: EditorView,
+    private readonly review: PromptReview,
+  ) {
     // A zero-height layer just before the editor: it scrolls with the
     // document, so marks placed once stay put until layout changes.
     this.layer = document.createElement("div");
@@ -113,7 +112,7 @@ class PromptChangeGutter implements PluginView {
     gutters.set(view, this);
     // A review starting or ending changes what is drawn without touching
     // the document.
-    this.unsubscribe = subscribePromptChanges(() => this.render(false));
+    this.unsubscribe = review.subscribe(() => this.render(false));
     this.render(true);
   }
 
@@ -163,7 +162,7 @@ class PromptChangeGutter implements PluginView {
   }
 
   private render(force: boolean): void {
-    const reviewing = getPromptReview();
+    const reviewing = this.review.reviewing();
     const marks = promptChangeMarks(this.view.state).filter(
       (mark) => mark.blobId === reviewing,
     );
@@ -220,9 +219,9 @@ function sameMarks(a: PromptChangeMark[], b: PromptChangeMark[]): boolean {
   return a.length === b.length && a.every((mark, i) => sameMark(mark, b[i]));
 }
 
-export function promptChangeGutterPlugin(): Plugin {
+export function promptChangeGutterPlugin(review: PromptReview): Plugin {
   return new Plugin({
     key: gutterKey,
-    view: (view) => new PromptChangeGutter(view),
+    view: (view) => new PromptChangeGutter(view, review),
   });
 }

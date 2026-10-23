@@ -1,21 +1,23 @@
 /**
- * What each prompt widget's latest round changed in each document — the
- * review half of the widget's state, beside the binding in
- * ./widgets-service.ts and governed by the same rules: keyed by ids that
- * never recur, and gone the moment the widget binds a different turn (a new
- * send, a dismiss, an edit — the service discards them). This is the live
- * copy, in memory; what outlives a run is saved on the rounds that made
- * the changes (the service's review ranges, MET-251).
+ * What each prompt widget's rounds changed in each document — the review
+ * half of the widget's state, owned by the prompt service
+ * (./widgets-service.ts, `prompts.review`) and governed by its rules: keyed
+ * by ids that never recur, and gone the moment the widget binds a different
+ * turn (a new send, a dismiss, an edit — the service discards them).
  *
- * Ranges are document positions, so they are kept per document and only
- * the editor holding that document moves them (./change-tracking.ts maps
- * them through every transaction and writes them back here). Keeping them
- * here rather than only in the editor is what lets a recreated editor pick
- * them up again, and what lets UI outside the document — the widget's own
- * face — read them without reaching into ProseMirror.
+ * One copy, read one way. At startup it takes up what the app saved
+ * (MET-251); from then on the editor holding a document maps its changes
+ * through every transaction (./change-tracking.ts) and writes them back
+ * here, and the app keeps the saved copy in step. Changes are positions in
+ * the document they were mapped onto, so those of a document no editor
+ * holds — saved by an earlier run, or left by an editor that closed — wait
+ * `unchecked` until an editor opens it and checks its fingerprint: the
+ * same document takes them up, a changed one drops them. Until then they
+ * count as they are — the widget's face reads the same counts whether a
+ * document is open or not.
  *
- * This module knows nothing about who decides a change belongs to a round
- * (the app, via PROMPT_CHANGE_META on the transaction) or how changes look
+ * This knows nothing about who decides a change belongs to a round (the
+ * app, via PROMPT_CHANGE_META on the transaction) or how changes look
  * (./change-gutter.ts): it is the contract between those two.
  */
 import { useMemo, useSyncExternalStore } from "react";
@@ -39,104 +41,140 @@ export type PromptChange = PromptChangeAttribution & {
   to: number;
 };
 
+/** A document's review ranges, with the fingerprint of the document they
+ *  were mapped onto — they only mean something against that document. */
+export type SavedReviewRanges = {
+  fingerprint: string;
+  changes: PromptChange[];
+};
+
+/** Where review ranges are kept between runs. */
+export interface ReviewRangeStore {
+  /** Every document's saved ranges, once what was stored has loaded. */
+  loadAll(): Promise<ReadonlyMap<string, SavedReviewRanges>>;
+  save(documentPath: string, saved: SavedReviewRanges): void;
+  /** Drop every range a widget's rounds made, in every document. */
+  forget(blobId: string): void;
+}
+
+/** Keeps nothing: for a service with no app behind it. */
+export const NO_SAVED_REVIEW_RANGES: ReviewRangeStore = {
+  loadAll: async () => new Map(),
+  save() {},
+  forget() {},
+};
+
+export type PromptReview = ReturnType<typeof createPromptReview>;
+
 const EMPTY: readonly PromptChange[] = Object.freeze([]);
 
-const byDocument = new Map<string, readonly PromptChange[]>();
-const listeners = new Set<() => void>();
+type Entry = { changes: readonly PromptChange[]; unchecked: string | null };
 
-function emit(): void {
-  for (const listener of listeners) listener();
-}
+export function createPromptReview(saved: ReviewRangeStore) {
+  const byDocument = new Map<string, Entry>();
+  const listeners = new Set<() => void>();
+  /** What was last saved per document, so an unchanged save is skipped. */
+  const lastSaved = new Map<string, string>();
+  let reviewing: string | null = null;
 
-/** Stable snapshot — the same array until the document's changes change. */
-export function getDocumentPromptChanges(
-  documentPath: string,
-): readonly PromptChange[] {
-  return byDocument.get(documentPath) ?? EMPTY;
-}
+  const emit = () => {
+    for (const listener of [...listeners]) listener();
+  };
 
-/** Written by the editor holding the document, after mapping. */
-export function setDocumentPromptChanges(
-  documentPath: string,
-  changes: readonly PromptChange[],
-): void {
-  if (getDocumentPromptChanges(documentPath) === changes) return;
-  // Kept even when empty: an editor has said what this document's changes
-  // are — none, when it rejected the saved ones — and that outranks the
-  // saved copy for the rest of the run (MET-251).
-  byDocument.set(documentPath, changes);
-  emit();
-}
+  void saved
+    .loadAll()
+    .then((documents) => {
+      for (const [documentPath, { fingerprint, changes }] of documents) {
+        // An editor that already tracks changes of its own keeps them.
+        if (byDocument.get(documentPath)?.changes.length) continue;
+        byDocument.set(documentPath, { changes, unchecked: fingerprint });
+      }
+      if (documents.size > 0) emit();
+    })
+    .catch((error) => {
+      console.error("Failed to load review ranges:", error);
+    });
 
-/**
- * The one widget under review, or null. Review is a mode, not a filter:
- * only that widget's changes are marked in the documents, and starting a
- * review on another widget ends this one.
- */
-let reviewing: string | null = null;
-
-export function getPromptReview(): string | null {
-  return reviewing;
-}
-
-/** Start reviewing `blobId`, or end the review with null. */
-export function setPromptReview(blobId: string | null): void {
-  if (reviewing === blobId) return;
-  reviewing = blobId;
-  emit();
-}
-
-/** Forget every change a widget's rounds made, in every document. */
-export function discardPromptChanges(blobId: string): void {
-  // Nothing left to review once the changes are gone.
-  let changed = reviewing === blobId;
-  if (changed) reviewing = null;
-  for (const [documentPath, changes] of byDocument) {
-    const kept = changes.filter((change) => change.blobId !== blobId);
-    if (kept.length === changes.length) continue;
-    changed = true;
-    byDocument.set(documentPath, kept);
-  }
-  if (changed) emit();
-}
-
-export function subscribePromptChanges(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
+  return {
+    /** A document's changes. Stable: the same array until they change. */
+    changes: (documentPath: string): readonly PromptChange[] =>
+      byDocument.get(documentPath)?.changes ?? EMPTY,
+    /** The fingerprint of the document saved changes were mapped onto,
+     *  while no editor has checked them; null once one has. */
+    unchecked: (documentPath: string): string | null =>
+      byDocument.get(documentPath)?.unchecked ?? null,
+    /** The editor holding the document wrote its changes: checked. */
+    set(documentPath: string, changes: readonly PromptChange[]): void {
+      const current = byDocument.get(documentPath);
+      if (current?.changes === changes && current.unchecked === null) return;
+      // Kept even when empty: an editor has said what this document's
+      // changes are, and that outranks anything saved for it.
+      byDocument.set(documentPath, { changes, unchecked: null });
+      emit();
+    },
+    /** No editor holds the document any more: its changes wait unchecked
+     *  against `fingerprint` until one does. */
+    release(documentPath: string, fingerprint: string): void {
+      const current = byDocument.get(documentPath);
+      if (current) byDocument.set(documentPath, { ...current, unchecked: fingerprint });
+    },
+    /** Keep a document's changes past this run. */
+    save(documentPath: string, ranges: SavedReviewRanges): void {
+      const key = JSON.stringify(ranges);
+      if (lastSaved.get(documentPath) === key) return;
+      lastSaved.set(documentPath, key);
+      saved.save(documentPath, ranges);
+    },
+    /** Forget every change a widget's rounds made, in every document. */
+    discard(blobId: string): void {
+      // Nothing left to review once the changes are gone.
+      let changed = reviewing === blobId;
+      if (changed) reviewing = null;
+      for (const [documentPath, entry] of byDocument) {
+        const kept = entry.changes.filter((change) => change.blobId !== blobId);
+        if (kept.length === entry.changes.length) continue;
+        changed = true;
+        byDocument.set(documentPath, { ...entry, changes: kept });
+      }
+      saved.forget(blobId);
+      if (changed) emit();
+    },
+    /** A widget's changed spans, per document. */
+    counts(blobId: string): Map<string, number> {
+      const counts = new Map<string, number>();
+      for (const [documentPath, { changes }] of byDocument) {
+        const count = changes.filter((change) => change.blobId === blobId).length;
+        if (count > 0) counts.set(documentPath, count);
+      }
+      return counts;
+    },
+    /** The one widget under review, or null. Review is a mode, not a
+     *  filter: only that widget's changes are marked in the documents, and
+     *  starting a review on another widget ends this one. */
+    reviewing: (): string | null => reviewing,
+    setReviewing(blobId: string | null): void {
+      if (reviewing === blobId) return;
+      reviewing = blobId;
+      emit();
+    },
+    subscribe(listener: () => void): () => void {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
   };
 }
 
-/**
- * Changed spans per document for one widget. Pure, for the hook below.
- * `saved` counts what was kept of a document no editor has opened this
- * run: there, nothing live stands in for it.
- */
-export function countPromptChanges(
-  blobId: string,
-  saved: Readonly<Record<string, number>> = {},
-  documents: ReadonlyMap<string, readonly PromptChange[]> = byDocument,
-): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const [documentPath, count] of Object.entries(saved)) {
-    if (!documents.has(documentPath) && count > 0) counts.set(documentPath, count);
-  }
-  for (const [documentPath, changes] of documents) {
-    const count = changes.filter((change) => change.blobId === blobId).length;
-    if (count > 0) counts.set(documentPath, count);
-  }
-  return counts;
-}
-
-/** Live `countPromptChanges` for a widget's face. */
+/** Live `review.counts` for a widget's face. */
 export function usePromptChangeCounts(
+  review: PromptReview,
   blobId: string,
-  saved?: Readonly<Record<string, number>>,
 ): Map<string, number> {
   // The snapshot is a string so useSyncExternalStore can compare it by
   // value — a fresh Map per read would re-render forever.
-  const key = useSyncExternalStore(subscribePromptChanges, () =>
-    JSON.stringify([...countPromptChanges(blobId, saved)]),
+  const key = useSyncExternalStore(review.subscribe, () =>
+    JSON.stringify([...review.counts(blobId)]),
   );
   return useMemo(
     () => new Map(JSON.parse(key) as Array<[string, number]>),

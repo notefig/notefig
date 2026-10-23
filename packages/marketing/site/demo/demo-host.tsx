@@ -41,7 +41,7 @@ const demoHost: PromptWidgetHost = {
   peekSession: () => "task_demo",
   isTaskReachable: async () => true,
 
-  dispatchPrompt: () => ({ turnId: "trn_demo" }),
+  dispatchPrompt: ({ text }) => ({ turnId: "trn_demo", sentPrompt: text }),
   cancelTask: noop,
   removeQueuedPrompt: noop,
   ensureRuntime: () => true,

@@ -103,7 +103,7 @@ async function composingWidget(): Promise<{ editor: Editor; blobId: string }> {
   host = fakePromptWidgetHost({
     dispatchPrompt: vi.fn(({ taskId }) => {
       prompts.setTurn(TURN, taskId, "queued");
-      return { turnId: TURN };
+      return { turnId: TURN, sentPrompt: "" };
     }),
   });
   const ed = await mount();

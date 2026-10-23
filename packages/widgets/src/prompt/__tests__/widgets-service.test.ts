@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { testPrompts } from "../../testing/test-prompts";
 import {
-  discardPromptChanges,
-  getDocumentPromptChanges,
-  setDocumentPromptChanges,
-} from "../change-store";
+  dispatched,
+  testPrompts,
+  testReviewRanges,
+} from "../../testing/test-prompts";
 import { capabilitiesOf } from "../machine";
+import { roundStatus } from "../widgets-service";
 
 const ROUND = { taskId: "task_1", turnId: "trn_1" };
 
@@ -36,18 +36,19 @@ describe("createPromptWidgets", () => {
     expect(t.prompts.get("blob").state).toEqual({ name: "settled", outcome: "done" });
   });
 
-  it("treats a turn row that hasn't appeared yet as queued, and a vanished one as stale", async () => {
-    // Stale drops the turn, never the session: a revived session replays
-    // its turns away, and the widget still belongs to it.
+  it("treats a turn row that hasn't appeared yet as queued, and a vanished one as cancelled", async () => {
+    // The round is over, as its list of rounds says too — but the session
+    // stays: a revived session replays its turns away, and the widget
+    // still belongs to it.
     const t = testPrompts();
-    await t.prompts.send("blob", "hi", async () => ROUND);
+    await t.prompts.send("blob", "hi", async () => dispatched(ROUND, "hi"));
     expect(t.prompts.get("blob").state).toEqual({ name: "working", turn: "queued" });
     t.setTurn("trn_1", "task_1", "running");
     t.removeTurn("trn_1");
     expect(t.prompts.get("blob")).toMatchObject({
-      state: { name: "composing" },
+      state: { name: "settled", outcome: "cancelled" },
       boundTaskId: "task_1",
-      boundTurnId: null,
+      boundTurnId: "trn_1",
       lastSentPrompt: "hi",
     });
   });
@@ -67,7 +68,9 @@ describe("createPromptWidgets", () => {
   it("won't send while a round is live", async () => {
     const t = testPrompts();
     await t.send("blob", "first", ROUND);
-    const dispatch = vi.fn(async () => ({ taskId: "task_1", turnId: "trn_2" }));
+    const dispatch = vi.fn(async () =>
+      dispatched({ taskId: "task_1", turnId: "trn_2" }),
+    );
     expect(await t.prompts.send("blob", "second", dispatch)).toBe(false);
     expect(dispatch).not.toHaveBeenCalled();
   });
@@ -170,18 +173,17 @@ describe("createPromptWidgets", () => {
     const t = testPrompts();
     await t.send("blob_r", "one", { taskId: "task_1", turnId: "trn_1" });
     t.setTurn("trn_1", "task_1", "completed");
-    setDocumentPromptChanges("/ws/r.md", [
+    t.prompts.review.set("/ws/r.md", [
       { blobId: "blob_r", turnId: "trn_1", from: 1, to: 3 },
       { blobId: "blob_s", turnId: "trn_9", from: 4, to: 5 },
     ]);
     t.prompts.setDocument("blob_r", "/ws/r.md");
-    expect(getDocumentPromptChanges("/ws/r.md")).toHaveLength(2);
     await t.send("blob_r", "two", { taskId: "task_1", turnId: "trn_2" });
-    expect(getDocumentPromptChanges("/ws/r.md")).toEqual([
+    expect(t.prompts.review.changes("/ws/r.md")).toEqual([
       { blobId: "blob_s", turnId: "trn_9", from: 4, to: 5 },
     ]);
-    discardPromptChanges("blob_s");
   });
+
 });
 
 describe("stored rounds (MET-251)", () => {
@@ -308,13 +310,17 @@ describe("stored rounds (MET-251)", () => {
     expect(capabilitiesOf(t.prompts.get("blob").state, { summoned: false }).escape).toBe("stop");
   });
 
-  it("counts the bound round's saved review ranges", async () => {
+  it("a restored round was seen; one that ends this run is new until marked seen", async () => {
     const t = testPrompts();
+    t.storeRound("restored", settled());
+    t.prompts.restore("restored", "task_1");
+    expect(t.prompts.get("restored").seenTurnId).toBe("trn_1");
+
     await t.send("blob", "make it shorter", ROUND);
-    t.storeRound("blob", { ...settled(), changeCounts: { "/ws/other.md": 2 } });
-    expect(t.prompts.get("blob").savedChangeCounts).toEqual({ "/ws/other.md": 2 });
-    t.prompts.unbind("blob");
-    expect(t.prompts.get("blob").savedChangeCounts).toEqual({});
+    t.setTurn("trn_1", "task_1", "completed");
+    expect(t.prompts.get("blob").seenTurnId).toBeNull();
+    t.prompts.markSeen("blob");
+    expect(t.prompts.get("blob").seenTurnId).toBe("trn_1");
   });
 
   it("shows only the outcome of the round it is bound to", async () => {
@@ -337,17 +343,19 @@ describe("review ranges (MET-251)", () => {
   });
 
   it("forgets a widget's saved ranges when it moves to a new round, open document or not", async () => {
-    const t = testPrompts();
+    const reviewRanges = testReviewRanges({ [DOC]: ranges("blob", "trn_1") });
+    const t = testPrompts({ reviewRanges });
     await t.send("blob", "one", ROUND);
-    t.prompts.saveReviewRanges(DOC, ranges("blob", "trn_1"));
     t.setTurn("trn_1", "task_1", "completed");
     await t.send("blob", "two", { taskId: "task_1", turnId: "trn_2" });
-    expect(t.prompts.loadReviewRanges(DOC)?.changes).toEqual([]);
+    expect(reviewRanges.saved.get(DOC)?.changes).toEqual([]);
+    expect(t.prompts.review.counts("blob")).toEqual(new Map());
   });
 
-  it("keeps them when a restore takes up the round that made them", () => {
-    const t = testPrompts();
-    t.prompts.saveReviewRanges(DOC, ranges("blob", "trn_1"));
+  it("keeps them when a restore takes up the round that made them", async () => {
+    const reviewRanges = testReviewRanges({ [DOC]: ranges("blob", "trn_1") });
+    const t = testPrompts({ reviewRanges });
+    await Promise.resolve();
     t.storeRound("blob", {
       turnId: "trn_1",
       taskId: "task_1",
@@ -357,6 +365,27 @@ describe("review ranges (MET-251)", () => {
     });
     t.prompts.restore("blob", "task_1");
     expect(t.prompts.get("blob").boundTurnId).toBe("trn_1");
-    expect(t.prompts.loadReviewRanges(DOC)?.changes).toHaveLength(1);
+    expect(reviewRanges.saved.get(DOC)?.changes).toHaveLength(1);
+    expect(t.prompts.review.counts("blob")).toEqual(new Map([[DOC, 1]]));
+  });
+});
+
+describe("roundStatus", () => {
+  it.each([
+    // record, turn row, row gone → where the round stands
+    ["live", "queued", false, "queued"],
+    ["live", "running", false, "running"],
+    // Ended on its turn row, not yet on record: still running.
+    ["live", "completed", false, "running"],
+    [undefined, "error", false, "running"],
+    // Not written yet, or gone for good.
+    ["live", undefined, false, undefined],
+    ["live", undefined, true, "cancelled"],
+    // Ended on record: the record says, unless the turn runs again.
+    ["completed", undefined, true, "completed"],
+    ["error", "error", false, "error"],
+    ["error", "queued", false, "queued"],
+  ] as const)("%s record, %s turn, gone %s → %s", (record, turn, gone, expected) => {
+    expect(roundStatus(record, turn, gone)).toBe(expected);
   });
 });

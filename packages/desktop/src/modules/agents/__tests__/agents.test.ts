@@ -299,47 +299,6 @@ describe("splitLeadingQuote", () => {
   });
 });
 
-describe("the widget's send path", () => {
-  it("announces the round in the widget's document, by absolute path", async () => {
-    const [client, agentSide] = createLoopbackPair();
-    new FakeAgent(agentSide).onPrompt = async () => ({
-      stopReason: "end_turn",
-    });
-    const task = runtime.managerFor("/ws").createTask(harness);
-    await task.start(() => client);
-    const rounds: unknown[] = [];
-    const stop = hooks.on("widget:round-started", (detail) => {
-      rounds.push(detail);
-    });
-
-    const { turnId, completed } = agents
-      .task(task.taskId)
-      .promptFromWidget("expand this", {
-        blobId: "blob_1",
-        workspacePath: "/ws",
-        path: "notes/a.md",
-        pos: 3,
-        isDocEmpty: false,
-        typedPrompt: "@skill:expand expand this",
-      });
-    await completed;
-    stop();
-
-    expect(rounds).toEqual([
-      {
-        taskId: task.taskId,
-        turnId,
-        blobId: "blob_1",
-        workspacePath: "/ws",
-        documentPath: "/ws/notes/a.md",
-        prompt: "expand this",
-        // As typed, directives and all: what the widget puts back.
-        typedPrompt: "@skill:expand expand this",
-      },
-    ]);
-  });
-});
-
 describe("starting a session from the UI", () => {
   const openAgent = vi.fn();
   // Whether a session has somewhere to run (the web needs a paired machine).

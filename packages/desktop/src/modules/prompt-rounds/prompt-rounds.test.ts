@@ -20,6 +20,8 @@ const started = (turnId: string, prompt = "Do the thing\nsecond line") => ({
   workspacePath: "/ws/a",
   documentPath: "/ws/a/doc.md",
   prompt,
+  blobId: "blob_1",
+  typedPrompt: prompt,
 });
 const open = [{ key: workspaceKey("/ws/a"), path: "/ws/a" }];
 
@@ -47,7 +49,7 @@ describe("prompt rounds", () => {
               ? ({ turnId, status: "running" } as never)
               : undefined,
       },
-      transcript: (turnId) => transcripts.get(turnId) ?? [],
+      transcript: (_taskId, turnId) => transcripts.get(turnId) ?? [],
       hooks,
     });
   });
@@ -146,25 +148,21 @@ describe("prompt rounds", () => {
   it("keeps a document's review ranges on the rounds that made them", async () => {
     await rounds.recordStarted({ ...started("t1"), blobId: "blob_1" }, 10);
     await rounds.recordStarted({ ...started("t2"), blobId: "blob_2" }, 11);
-    expect(rounds.reviewRanges.load("/ws/a/doc.md")).toBeNull();
+    const saved = async () =>
+      (await rounds.reviewRanges.loadAll()).get("/ws/a/doc.md");
+    expect(await saved()).toBeUndefined();
     const changes = [
       { blobId: "blob_1", turnId: "t1", from: 1, to: 4 },
       { blobId: "blob_2", turnId: "t2", from: 9, to: 12 },
     ];
     rounds.reviewRanges.save("/ws/a/doc.md", { fingerprint: "f1", changes });
-    await vi.waitFor(() =>
-      expect(rounds.reviewRanges.load("/ws/a/doc.md")).toEqual({
-        fingerprint: "f1",
-        changes,
-      }),
+    await vi.waitFor(async () =>
+      expect(await saved()).toEqual({ fingerprint: "f1", changes }),
     );
     // A later save replaces the document's ranges; others stay.
     rounds.reviewRanges.save("/ws/a/doc.md", { fingerprint: "f2", changes: [changes[1]] });
-    await vi.waitFor(() =>
-      expect(rounds.reviewRanges.load("/ws/a/doc.md")).toEqual({
-        fingerprint: "f2",
-        changes: [changes[1]],
-      }),
+    await vi.waitFor(async () =>
+      expect(await saved()).toEqual({ fingerprint: "f2", changes: [changes[1]] }),
     );
     expect(rounds.collection.get("t1")?.changes).toEqual([]);
   });
@@ -179,12 +177,12 @@ describe("prompt rounds", () => {
         { blobId: "blob_2", turnId: "t2", from: 9, to: 12 },
       ],
     });
-    await vi.waitFor(() =>
-      expect(rounds.reviewRanges.load("/ws/a/doc.md")?.changes).toHaveLength(2),
-    );
+    const saved = async () =>
+      (await rounds.reviewRanges.loadAll()).get("/ws/a/doc.md")?.changes;
+    await vi.waitFor(async () => expect(await saved()).toHaveLength(2));
     rounds.reviewRanges.forget("blob_1");
-    await vi.waitFor(() =>
-      expect(rounds.reviewRanges.load("/ws/a/doc.md")?.changes).toEqual([
+    await vi.waitFor(async () =>
+      expect(await saved()).toEqual([
         { blobId: "blob_2", turnId: "t2", from: 9, to: 12 },
       ]),
     );

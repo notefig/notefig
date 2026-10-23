@@ -324,12 +324,8 @@ export function usePromptWidgetHost(): PromptWidgetHost {
         );
         const { turnId } = agents
           .task(taskId)
-          .promptFromWidget(
-            sent.text,
-            { ...target, workspacePath: path, typedPrompt: text },
-            sent.extras,
-          );
-        return { turnId };
+          .promptFromWidget(sent.text, { ...target, workspacePath: path }, sent.extras);
+        return { turnId, sentPrompt: sent.text };
       },
       cancelTask: (taskId) => void agents.task(taskId).cancel(),
       removeQueuedPrompt: (taskId, turnId) =>

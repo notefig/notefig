@@ -2,14 +2,14 @@
  * The prompt widgets over the app's agent store: each widget's state
  * follows its round's rows as the agent service writes them.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createPromptWidgets } from "@notefig/widgets";
 import { createHooks } from "@notefig/core";
 import type { AgentEntry, AgentTurn } from "@/modules/agents/agent-collections";
 import { createPromptRounds } from "@/modules/prompt-rounds";
 import { createNodeTestDb } from "@/testing/node-db";
 import { testAgentStore } from "@/testing/test-agents";
-import { roundObserverFor, storedRoundObserverFor } from "./prompt-widgets";
+import { roundObserverFor } from "./prompt-widgets";
 
 function turn(status: AgentTurn["status"]): AgentTurn {
   return {
@@ -21,19 +21,45 @@ function turn(status: AgentTurn["status"]): AgentTurn {
   };
 }
 
-async function sentWidget() {
+/** The app's pieces as the modules wire them, over one database. */
+function app(db = createNodeTestDb()) {
   const store = testAgentStore();
-  const prompts = createPromptWidgets({ observeRound: roundObserverFor(store) });
-  await prompts.send("blob", "summarize", async () => {
-    store.turns.insert(turn("queued"));
-    return { taskId: "task_1", turnId: "trn_1" };
+  const hooks = createHooks();
+  const rounds = createPromptRounds({
+    persistence: db.get(),
+    turns: store.turns,
+    transcript: (taskId, turnId) =>
+      store.entriesForTask(taskId).filter((entry) => entry.turnId === turnId),
+    hooks,
   });
-  return { store, prompts };
+  rounds.track();
+  const prompts = createPromptWidgets({
+    observeRound: roundObserverFor(store),
+    observeStoredRound: rounds.observeNewest,
+    announceRound: (round) => hooks.emit("widget:round-started", round),
+    reviewRanges: rounds.reviewRanges,
+  });
+  return { db, store, hooks, rounds, prompts };
+}
+
+/** Send from "blob", the dispatch writing the queued turn row. */
+async function sent(a = app()) {
+  await a.prompts.send("blob", "@skill:edit make it shorter", async () => {
+    a.store.turns.insert(turn("queued"));
+    return {
+      taskId: "task_1",
+      turnId: "trn_1",
+      workspacePath: "/ws",
+      documentPath: "/ws/doc.md",
+      sentPrompt: "make it shorter",
+    };
+  });
+  return a;
 }
 
 describe("promptWidgets over the agent store", () => {
   it("follows the bound turn through its statuses", async () => {
-    const { store, prompts } = await sentWidget();
+    const { store, prompts, rounds } = await sent();
     expect(prompts.get("blob").state).toEqual({ name: "working", turn: "queued" });
 
     store.turns.update("trn_1", (draft) => {
@@ -60,57 +86,44 @@ describe("promptWidgets over the agent store", () => {
     store.turns.update("trn_1", (draft) => {
       draft.status = "completed";
     });
+    await rounds.recordSettled({
+      taskId: "task_1",
+      turnId: "trn_1",
+      status: "completed",
+      at: Date.now(),
+    });
     expect(prompts.get("blob").state).toEqual({ name: "settled", outcome: "done" });
   });
 
-  it("drops the turn, keeping the session, when the turn's row is deleted", async () => {
-    // What a session revival's replay does to every earlier turn.
-    const { store, prompts } = await sentWidget();
+  it("ends the round cancelled, keeping the session, when the turn's row is deleted", async () => {
+    // What a session revival's replay does to a turn it never finished.
+    const { store, prompts } = await sent();
     store.turns.delete("trn_1");
     expect(prompts.get("blob")).toMatchObject({
-      state: { name: "composing" },
-      boundTurnId: null,
+      state: { name: "settled", outcome: "cancelled" },
       boundTaskId: "task_1",
     });
+  });
+
+  it("announces the round it starts, recorded with the prompt as sent and as typed", async () => {
+    const { rounds } = await sent();
+    await vi.waitFor(() =>
+      expect(rounds.collection.get("trn_1")).toMatchObject({
+        blobId: "blob",
+        documentPath: "/ws/doc.md",
+        prompt: "make it shorter",
+        typedPrompt: "@skill:edit make it shorter",
+      }),
+    );
   });
 });
 
 describe("promptWidgets over stored rounds (MET-251)", () => {
-  /** The app's pieces as the modules wire them, over one database. */
-  function app(db = createNodeTestDb()) {
-    const store = testAgentStore();
-    const hooks = createHooks();
-    const rounds = createPromptRounds({
-      persistence: db.get(),
-      turns: store.turns,
-      transcript: (turnId) =>
-        store.entries.toArray.filter((entry) => entry.turnId === turnId),
-      hooks,
-    });
-    rounds.track();
-    const prompts = createPromptWidgets({
-      observeRound: roundObserverFor(store),
-      observeStoredRound: storedRoundObserverFor(rounds.collection),
-    });
-    return { db, store, hooks, rounds, prompts };
-  }
-
-  /** Send from "blob" and answer, the turn row ending — as the agent
-   *  service would — but the round not yet recorded as ended. */
-  async function endedTurn(a: ReturnType<typeof app>) {
-    await a.prompts.send("blob", "@skill:edit make it shorter", async () => {
-      a.store.turns.insert(turn("queued"));
-      a.hooks.emit("widget:round-started", {
-        taskId: "task_1",
-        turnId: "trn_1",
-        blobId: "blob",
-        workspacePath: "/ws",
-        documentPath: "/ws/doc.md",
-        prompt: "make it shorter",
-        typedPrompt: "@skill:edit make it shorter",
-      });
-      return { taskId: "task_1", turnId: "trn_1" };
-    });
+  /** Send and answer, the turn row ending — as the agent service would —
+   *  but the round not yet recorded as ended. */
+  async function endedTurn(a = app()) {
+    await sent(a);
+    await vi.waitFor(() => expect(a.rounds.collection.get("trn_1")).toBeDefined());
     a.store.entries.insert({
       id: "evt_1",
       turnId: "trn_1",
@@ -121,10 +134,11 @@ describe("promptWidgets over stored rounds (MET-251)", () => {
     a.store.turns.update("trn_1", (draft) => {
       draft.status = "completed";
     });
+    return a;
   }
 
   /** …and the round recorded as ended, with what it left. */
-  async function settledRound(a: ReturnType<typeof app>) {
+  async function settledRound(a = app()) {
     await endedTurn(a);
     await a.rounds.recordSettled({
       taskId: "task_1",
@@ -132,11 +146,11 @@ describe("promptWidgets over stored rounds (MET-251)", () => {
       status: "completed",
       at: Date.now(),
     });
+    return a;
   }
 
   it("keeps a settled widget's face when a revival replays its turn away", async () => {
-    const a = app();
-    await settledRound(a);
+    const a = await settledRound();
     expect(a.prompts.get("blob").outcome?.summary).toBe("Shortened it.");
     a.store.turns.delete("trn_1");
     expect(a.prompts.get("blob")).toMatchObject({
@@ -146,9 +160,18 @@ describe("promptWidgets over stored rounds (MET-251)", () => {
     expect(a.prompts.get("blob").outcome?.summary).toBe("Shortened it.");
   });
 
-  it("brings a widget back as it was left after a restart", async () => {
-    const before = app();
-    await settledRound(before);
+  it("brings a widget back as it was left after a restart, its review ranges too", async () => {
+    const before = await settledRound();
+    before.rounds.reviewRanges.save("/ws/other.md", {
+      fingerprint: "f",
+      changes: [
+        { blobId: "blob", turnId: "trn_1", from: 1, to: 3 },
+        { blobId: "blob", turnId: "trn_1", from: 5, to: 8 },
+      ],
+    });
+    await vi.waitFor(() =>
+      expect(before.rounds.collection.get("trn_1")?.changes).toHaveLength(1),
+    );
     // A new run over the same database: no turn rows, no widget state.
     const after = app(before.db);
     await after.rounds.collection.preload();
@@ -158,13 +181,17 @@ describe("promptWidgets over stored rounds (MET-251)", () => {
       boundTurnId: "trn_1",
       // As typed: Edit and Retry put the directive back.
       lastSentPrompt: "@skill:edit make it shorter",
+      // Over before this run: nothing new to see.
+      seenTurnId: "trn_1",
     });
     expect(after.prompts.get("blob").outcome?.summary).toBe("Shortened it.");
+    await vi.waitFor(() =>
+      expect(after.prompts.review.counts("blob")).toEqual(new Map([["/ws/other.md", 2]])),
+    );
   });
 
   it("never shows an ended round before what it left is recorded", async () => {
-    const a = app();
-    await endedTurn(a);
+    const a = await endedTurn();
     expect(a.prompts.get("blob")).toMatchObject({
       state: { name: "working", turn: "running" },
       outcome: null,
@@ -179,22 +206,14 @@ describe("promptWidgets over stored rounds (MET-251)", () => {
     expect(a.prompts.get("blob").outcome?.summary).toBe("Shortened it.");
   });
 
-  it("counts the round's saved review ranges, and reads the same record until it changes", async () => {
-    const a = app();
-    await settledRound(a);
-    const observation = storedRoundObserverFor(a.rounds.collection)("blob", () => {});
+  it("reads the same record until it changes", async () => {
+    const a = await settledRound();
+    const observation = a.rounds.observeNewest("blob", () => {});
     const first = observation.get();
     expect(observation.get()).toBe(first);
-    a.rounds.reviewRanges.save("/ws/other.md", {
-      fingerprint: "f",
-      changes: [
-        { blobId: "blob", turnId: "trn_1", from: 1, to: 3 },
-        { blobId: "blob", turnId: "trn_1", from: 5, to: 8 },
-      ],
-    });
+    await a.rounds.recordRequeued({ taskId: "task_1", turnId: "trn_1" });
     expect(observation.get()).not.toBe(first);
-    expect(observation.get()?.changeCounts).toEqual({ "/ws/other.md": 2 });
-    expect(a.prompts.get("blob").savedChangeCounts).toEqual({ "/ws/other.md": 2 });
+    expect(observation.get()?.status).toBe("live");
     observation.destroy();
   });
 });
