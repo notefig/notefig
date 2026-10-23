@@ -1,11 +1,9 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ElementType,
-  type MutableRefObject,
 } from "react";
 import {
   FileText,
@@ -22,7 +20,6 @@ import {
   X,
   Home,
   MessageSquare,
-  BarChart3,
 } from "lucide-react";
 import {
   Command,
@@ -66,7 +63,6 @@ interface CommandPaletteProps {
   onUndo?: () => void;
   onRedo?: () => void;
   onOpenSettings?: () => void;
-  onOpenUsageSettings?: () => void;
   onToggleSidebar?: () => void;
   onToggleFullscreen?: () => void | Promise<void>;
   onSearchInFile?: () => void;
@@ -172,327 +168,34 @@ function FileQuickResults({
   );
 }
 
-type PaletteCommandProps = Omit<
-  CommandPaletteProps,
-  "open" | "onOpenChange" | "onFocusTab" | "direction"
->;
-
-function usePaletteCommands(props: PaletteCommandProps): CommandType[] {
-  const {
-    workspacePath,
-    onNewScratchpad,
-    onNewFile,
-    onNewDirectory,
-    onCloseFile,
-    onUndo,
-    onRedo,
-    onOpenSettings,
-    onOpenUsageSettings,
-    onToggleSidebar,
-    onToggleFullscreen,
-    onSearchInFile,
-    onSearchInFiles,
-  } = props;
-
-  const { t } = useTranslation();
+export function CommandPalette({
+  open,
+  workspacePath,
+  onOpenChange,
+  onNewScratchpad,
+  onNewFile,
+  onNewDirectory,
+  onCloseFile,
+  onUndo,
+  onRedo,
+  onOpenSettings,
+  onToggleSidebar,
+  onToggleFullscreen,
+  onSearchInFile,
+  onSearchInFiles,
+  onFocusTab,
+  direction = "ltr",
+}: CommandPaletteProps) {
   const core = useCore();
   const { setTheme, theme } = useTheme();
   const { setTheme: persistTheme } = useAppSettings();
-  const handleOpenFolder = useOpenProjectFromPicker();
-
-  const swapTheme = useCallback(() => {
-    const next = theme === "system" || theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    persistTheme(next);
-  }, [theme, setTheme, persistTheme]);
-
-  return useMemo(() => {
-    const commands: CommandType[] = [
-      {
-        id: "new-scratchpad",
-        labelKey: "newScratchpad",
-        groupKey: "file",
-        keywordKey: "commandKeywords.newScratchpad",
-        icon: ScratchpadIcon,
-        shortcut: formatForDisplay("Mod+N"),
-        action: () => {
-          onNewScratchpad?.();
-        },
-      },
-      {
-        id: "new-file",
-        labelKey: "newFile",
-        groupKey: "file",
-        keywordKey: "commandKeywords.newFile",
-        icon: FilePlus,
-        action: () => onNewFile?.(),
-      },
-      {
-        id: "close-file",
-        labelKey: "closeFile",
-        groupKey: "file",
-        keywordKey: "commandKeywords.closeFile",
-        icon: FileText,
-        shortcut: formatForDisplay("Mod+W"),
-        action: onCloseFile,
-      },
-      {
-        id: "new-directory",
-        labelKey: "newFolder",
-        groupKey: "file",
-        keywordKey: "commandKeywords.newFolder",
-        icon: FolderPlus,
-        action: () => onNewDirectory?.(),
-      },
-      {
-        id: "open-folder",
-        labelKey: "openFolder",
-        groupKey: "file",
-        keywordKey: "commandKeywords.openFolder",
-        icon: FolderOpen,
-        action: handleOpenFolder,
-      },
-      {
-        id: "close-workspace",
-        labelKey: "closeWorkspace",
-        groupKey: "file",
-        keywordKey: "commandKeywords.closeWorkspace",
-        icon: Home,
-        action: () => {
-          void core.workspace(workspacePath).close();
-        },
-      },
-      {
-        id: "undo",
-        labelKey: "undo",
-        groupKey: "edit",
-        keywordKey: "commandKeywords.undo",
-        icon: Undo,
-        shortcut: formatForDisplay("Mod+Z"),
-        action: onUndo,
-      },
-      {
-        id: "redo",
-        labelKey: "redo",
-        groupKey: "edit",
-        keywordKey: "commandKeywords.redo",
-        icon: Redo,
-        shortcut: formatForDisplay("Mod+Shift+Z"),
-        action: onRedo,
-      },
-      {
-        id: "search-in-file",
-        labelKey: "searchInFile",
-        groupKey: "edit",
-        keywordKey: "commandKeywords.searchInFile",
-        icon: Search,
-        shortcut: formatForDisplay("Mod+F"),
-        action: onSearchInFile,
-      },
-      {
-        id: "search-in-files",
-        labelKey: "searchInAllFiles",
-        groupKey: "edit",
-        keywordKey: "commandKeywords.searchInAllFiles",
-        icon: Search,
-        shortcut: formatForDisplay("Mod+Shift+F"),
-        action: onSearchInFiles,
-      },
-      {
-        id: "toggle-sidebar",
-        labelKey: "toggleSidebar",
-        groupKey: "view",
-        keywordKey: "commandKeywords.toggleSidebar",
-        icon: LayoutGrid,
-        shortcut: formatForDisplay("Mod+\\"),
-        action: onToggleSidebar,
-      },
-      {
-        id: "toggle-fullscreen",
-        labelKey: "toggleFullscreen",
-        groupKey: "view",
-        keywordKey: "commandKeywords.toggleFullscreen",
-        icon: Maximize,
-        shortcut: "F11",
-        action: onToggleFullscreen,
-      },
-      {
-        id: "open-settings",
-        labelKey: "openSettings",
-        groupKey: "settings",
-        keywordKey: "commandKeywords.openSettings",
-        icon: Settings,
-        shortcut: formatForDisplay("Mod+Shift+,"),
-        action: onOpenSettings,
-      },
-      {
-        id: "open-usage",
-        labelKey: "openUsage",
-        groupKey: "settings",
-        keywordKey: "commandKeywords.openUsage",
-        icon: BarChart3,
-        shortcut: formatForDisplay("Mod+Shift+U"),
-        action: onOpenUsageSettings,
-      },
-      {
-        id: "toggle-theme",
-        labelKey: "toggleTheme",
-        groupKey: "settings",
-        keywordKey: "commandKeywords.toggleTheme",
-        icon: Moon,
-        action: swapTheme,
-      },
-      ...helpCommands(core.feedback),
-    ];
-    return commands;
-  }, [
-    workspacePath,
-    onNewScratchpad,
-    onNewFile,
-    onNewDirectory,
-    onCloseFile,
-    onUndo,
-    onRedo,
-    onOpenSettings,
-    onOpenUsageSettings,
-    onToggleSidebar,
-    onToggleFullscreen,
-    onSearchInFile,
-    onSearchInFiles,
-    swapTheme,
-    handleOpenFolder,
-    core.feedback,
-    core.workspace,
-  ]);
-}
-
-interface CommandPaletteGroupsProps {
-  commands: CommandType[];
-  workspacePath: string;
-  query: string;
-  skipFocusRestoreRef: MutableRefObject<boolean>;
-  onOpenChange: (open: boolean) => void;
-}
-
-function CommandPaletteGroups({
-  commands,
-  workspacePath,
-  query,
-  skipFocusRestoreRef,
-  onOpenChange,
-}: CommandPaletteGroupsProps) {
-  const { t } = useTranslation();
-  const trimmedQuery = query.trim();
-
-  const handleSelect = useCallback(
-    (command: CommandType) => {
-      if (
-        command.id === "new-scratchpad" ||
-        command.id === "new-file" ||
-        command.id === "new-directory" ||
-        command.id === "search-in-file" ||
-        command.id === "search-in-files"
-      ) {
-        skipFocusRestoreRef.current = true;
-      }
-      if (command.action) {
-        Promise.resolve(command.action()).catch((error: unknown) => {
-          console.error(`Failed to run command: ${command.id}`, error);
-        });
-      }
-      onOpenChange(false);
-    },
-    [onOpenChange, skipFocusRestoreRef],
-  );
-
-  const groupedCommands = useMemo(() => {
-    return commands.reduce<Record<string, CommandType[]>>((acc, command) => {
-      if (!acc[command.groupKey]) {
-        acc[command.groupKey] = [];
-      }
-      acc[command.groupKey].push(command);
-      return acc;
-    }, {});
-  }, [commands]);
-
-  // "navigation" (file results) renders LAST, Linear-style: actions always
-  // outrank quick results — searching "theme" surfaces Toggle Theme above
-  // theme-related files.
-  const groupOrder = [
-    "file",
-    "edit",
-    "view",
-    "tools",
-    "settings",
-    "help",
-    "navigation",
-  ];
-
-  return (
-    <CommandList>
-      <CommandEmpty>{t("noResults")}</CommandEmpty>
-      {groupOrder.map((groupName, index) => {
-        if (groupName === "navigation") {
-          return (
-            <FileQuickResults
-              key={groupName}
-              workspacePath={workspacePath}
-              query={trimmedQuery}
-              showSeparator={index > 0}
-              onClose={() => onOpenChange(false)}
-            />
-          );
-        }
-
-        const groupCommands = groupedCommands[groupName];
-        if (!groupCommands) return null;
-
-        const groupLabel = t(groupName);
-
-        return (
-          <div key={groupName}>
-            {index > 0 && <CommandSeparator />}
-            <CommandGroup heading={groupLabel}>
-              {groupCommands.map((command) => (
-                <CommandItem
-                  key={command.id}
-                  value={t(command.labelKey)}
-                  keywords={getLocalizedCommandKeywords(t, command.keywordKey)}
-                  onSelect={() => handleSelect(command)}
-                  className="flex items-center gap-2 cursor-pointer"
-                >
-                  <command.icon className="w-4 h-4 text-muted-foreground shrink-0" />
-                  <span className="flex-1">{t(command.labelKey)}</span>
-                  {command.shortcut && (
-                    <CommandShortcut className="ms-auto">
-                      {command.shortcut}
-                    </CommandShortcut>
-                  )}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </div>
-        );
-      })}
-    </CommandList>
-  );
-}
-
-export function CommandPalette(props: CommandPaletteProps) {
-  const {
-    open,
-    workspacePath,
-    onOpenChange,
-    onFocusTab,
-    direction = "ltr",
-  } = props;
-  const commands = usePaletteCommands(props);
   const { t } = useTranslation();
   // cmdk's Command value/onValueChange track the *highlighted item*, not the
   // input — the query needs its own controlled state (it drives file search).
   const [query, setQuery] = useState("");
   const [highlighted, setHighlighted] = useState("");
-  const skipFocusRestoreRef = useRef(false);
+
+  const handleOpenFolder = useOpenProjectFromPicker();
 
   useHotkey("Mod+K", () => {
     onOpenChange(!open);
@@ -509,16 +212,208 @@ export function CommandPalette(props: CommandPaletteProps) {
     }
   }, [open]);
 
-  const handleCloseAutoFocus = useCallback(
-    (event: Event) => {
-      event.preventDefault();
-      const shouldRestore = !skipFocusRestoreRef.current;
-      skipFocusRestoreRef.current = false;
-      if (!shouldRestore) return;
-      onFocusTab?.();
+  const swapTheme = () => {
+    if (theme === "dark") {
+      setTheme("light");
+      persistTheme("light");
+      return;
+    }
+    if (theme === "light") {
+      setTheme("dark");
+      persistTheme("dark");
+      return;
+    }
+    setTheme("light");
+    persistTheme("light");
+  };
+
+  const commands: CommandType[] = [
+    {
+      id: "new-scratchpad",
+      labelKey: "newScratchpad",
+      groupKey: "file",
+      keywordKey: "commandKeywords.newScratchpad",
+      icon: ScratchpadIcon,
+      shortcut: formatForDisplay("Mod+N"),
+      action: () => {
+        onNewScratchpad?.();
+      },
     },
-    [onFocusTab],
+    {
+      id: "new-file",
+      labelKey: "newFile",
+      groupKey: "file",
+      keywordKey: "commandKeywords.newFile",
+      icon: FilePlus,
+      action: () => onNewFile?.(),
+    },
+    {
+      id: "close-file",
+      labelKey: "closeFile",
+      groupKey: "file",
+      keywordKey: "commandKeywords.closeFile",
+      icon: FileText,
+      shortcut: formatForDisplay("Mod+W"),
+      action: onCloseFile,
+    },
+    {
+      id: "new-directory",
+      labelKey: "newFolder",
+      groupKey: "file",
+      keywordKey: "commandKeywords.newFolder",
+      icon: FolderPlus,
+      action: () => onNewDirectory?.(),
+    },
+    {
+      id: "open-folder",
+      labelKey: "openFolder",
+      groupKey: "file",
+      keywordKey: "commandKeywords.openFolder",
+      icon: FolderOpen,
+      action: () => {
+        handleOpenFolder();
+      },
+    },
+    {
+      id: "close-workspace",
+      labelKey: "closeWorkspace",
+      groupKey: "file",
+      keywordKey: "commandKeywords.closeWorkspace",
+      icon: Home,
+      action: () => {
+        // Really close (MET-177): the workspace leaves the open set and its
+        // agents demote; focus moves to the next open workspace, or the
+        // welcome screen with none left.
+        void core.workspace(workspacePath).close();
+      },
+    },
+    {
+      id: "undo",
+      labelKey: "undo",
+      groupKey: "edit",
+      keywordKey: "commandKeywords.undo",
+      icon: Undo,
+      shortcut: formatForDisplay("Mod+Z"),
+      action: onUndo,
+    },
+    {
+      id: "redo",
+      labelKey: "redo",
+      groupKey: "edit",
+      keywordKey: "commandKeywords.redo",
+      icon: Redo,
+      shortcut: formatForDisplay("Mod+Shift+Z"),
+      action: onRedo,
+    },
+    {
+      id: "search-in-file",
+      labelKey: "searchInFile",
+      groupKey: "edit",
+      keywordKey: "commandKeywords.searchInFile",
+      icon: Search,
+      shortcut: formatForDisplay("Mod+F"),
+      action: onSearchInFile,
+    },
+    {
+      id: "search-in-files",
+      labelKey: "searchInAllFiles",
+      groupKey: "edit",
+      keywordKey: "commandKeywords.searchInAllFiles",
+      icon: Search,
+      shortcut: formatForDisplay("Mod+Shift+F"),
+      action: onSearchInFiles,
+    },
+    {
+      id: "toggle-sidebar",
+      labelKey: "toggleSidebar",
+      groupKey: "view",
+      keywordKey: "commandKeywords.toggleSidebar",
+      icon: LayoutGrid,
+      shortcut: formatForDisplay("Mod+\\"),
+      action: onToggleSidebar,
+    },
+    {
+      id: "toggle-fullscreen",
+      labelKey: "toggleFullscreen",
+      groupKey: "view",
+      keywordKey: "commandKeywords.toggleFullscreen",
+      icon: Maximize,
+      shortcut: "F11",
+      action: onToggleFullscreen,
+    },
+    {
+      id: "open-settings",
+      labelKey: "openSettings",
+      groupKey: "settings",
+      keywordKey: "commandKeywords.openSettings",
+      icon: Settings,
+      shortcut: formatForDisplay("Mod+Shift+,"),
+      action: onOpenSettings,
+    },
+    {
+      id: "toggle-theme",
+      labelKey: "toggleTheme",
+      groupKey: "settings",
+      keywordKey: "commandKeywords.toggleTheme",
+      icon: Moon,
+      action: swapTheme,
+    },
+    ...helpCommands(core.feedback),
+  ];
+
+  const skipFocusRestoreRef = useRef(false);
+
+  const trimmedQuery = query.trim();
+
+  const handleSelect = (command: CommandType) => {
+    if (
+      command.id === "new-scratchpad" ||
+      command.id === "new-file" ||
+      command.id === "new-directory" ||
+      command.id === "search-in-file" ||
+      command.id === "search-in-files"
+    ) {
+      skipFocusRestoreRef.current = true;
+    }
+    if (command.action) {
+      Promise.resolve(command.action()).catch((error: unknown) => {
+        console.error(`Failed to run command: ${command.id}`, error);
+      });
+    }
+    onOpenChange(false);
+  };
+
+  const groupedCommands = commands.reduce(
+    (acc, command) => {
+      if (!acc[command.groupKey]) {
+        acc[command.groupKey] = [];
+      }
+      acc[command.groupKey].push(command);
+      return acc;
+    },
+    {} as Record<string, CommandType[]>,
   );
+
+  // "navigation" (file results) renders LAST, Linear-style: actions always
+  // outrank quick results — searching "theme" surfaces Toggle Theme above
+  // theme-related files.
+  const groupOrder = [
+    "file",
+    "edit",
+    "view",
+    "tools",
+    "settings",
+    "help",
+    "navigation",
+  ];
+
+  const handleCloseAutoFocus = (event: Event) => {
+    event.preventDefault();
+    const shouldRestore = !skipFocusRestoreRef.current;
+    skipFocusRestoreRef.current = false;
+    if (!shouldRestore) return;
+    onFocusTab?.();
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -560,13 +455,55 @@ export function CommandPalette(props: CommandPaletteProps) {
               <X className="size-4 text-muted-foreground" />
             </button>
           </div>
-          <CommandPaletteGroups
-            commands={commands}
-            workspacePath={workspacePath}
-            query={query}
-            skipFocusRestoreRef={skipFocusRestoreRef}
-            onOpenChange={onOpenChange}
-          />
+          <CommandList>
+            <CommandEmpty>{t("noResults")}</CommandEmpty>
+            {groupOrder.map((groupName, index) => {
+              if (groupName === "navigation") {
+                return (
+                  <FileQuickResults
+                    key={groupName}
+                    workspacePath={workspacePath}
+                    query={trimmedQuery}
+                    showSeparator={index > 0}
+                    onClose={() => onOpenChange(false)}
+                  />
+                );
+              }
+
+              const groupCommands = groupedCommands[groupName];
+              if (!groupCommands) return null;
+
+              const groupLabel = t(groupName);
+
+              return (
+                <div key={groupName}>
+                  {index > 0 && <CommandSeparator />}
+                  <CommandGroup heading={groupLabel}>
+                    {groupCommands.map((command) => (
+                      <CommandItem
+                        key={command.id}
+                        value={t(command.labelKey)}
+                        keywords={getLocalizedCommandKeywords(
+                          t,
+                          command.keywordKey,
+                        )}
+                        onSelect={() => handleSelect(command)}
+                        className="flex items-center gap-2 cursor-pointer"
+                      >
+                        <command.icon className="w-4 h-4 text-muted-foreground shrink-0" />
+                        <span className="flex-1">{t(command.labelKey)}</span>
+                        {command.shortcut && (
+                          <CommandShortcut className="ms-auto">
+                            {command.shortcut}
+                          </CommandShortcut>
+                        )}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </div>
+              );
+            })}
+          </CommandList>
         </Command>
       </DialogContent>
     </Dialog>

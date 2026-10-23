@@ -222,6 +222,7 @@ function DebugPanelContent({
   const { editors, agentStore: store, kv } = useCore();
   const snapshot = useDebugSnapshot();
   const { basePath, dockableLayout, openTabs, activeTabId } = snapshot;
+  const workspacePath = basePath ?? null;
   const {
     rows: latestGitStatus,
     error: latestGitStatusError,
@@ -371,13 +372,15 @@ function DebugPanelContent({
     q.from({ req: store.permissionRequests }),
   );
 
-  // Every workspace's sessions: the dock spans every open workspace, so the
-  // focused one (the sidebar's) need not be where the session ran.
   const workspaceTasks = useMemo(
     () =>
-      // Newest-first (task ids sort descending by construction).
-      [...allTasks].sort((a, b) => (a.taskId < b.taskId ? -1 : 1)),
-    [allTasks],
+      [...allTasks]
+        .filter(
+          (task) => !workspacePath || task.workspacePath === workspacePath,
+        )
+        // Newest-first (task ids sort descending by construction).
+        .sort((a, b) => (a.taskId < b.taskId ? -1 : 1)),
+    [allTasks, workspacePath],
   );
 
   const [selectedSessionTaskId, setSelectedSessionTaskId] = useState<
@@ -852,12 +855,11 @@ function DebugPanelContent({
                 className="h-6 text-[0.6875rem] font-mono bg-background border border-border rounded px-1.5 flex-1 min-w-0"
               >
                 {workspaceTasks.length === 0 && (
-                  <option value="">(no tasks)</option>
+                  <option value="">(no tasks in this workspace)</option>
                 )}
                 {workspaceTasks.map((task) => (
                   <option key={task.taskId} value={task.taskId}>
-                    [{task.status}] {task.title} —{" "}
-                    {task.workspacePath.split("/").pop()} — {task.taskId}
+                    [{task.status}] {task.title} — {task.taskId}
                   </option>
                 ))}
               </select>

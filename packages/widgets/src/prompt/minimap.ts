@@ -9,6 +9,7 @@
  * with the card.
  */
 import type { Node as PMNode } from "@tiptap/pm/model";
+import { sortEntriesChronologically } from "@notefig/shared/agent";
 import type {
   MinimapDotState,
   MinimapObserveHandle,
@@ -17,6 +18,7 @@ import type {
 } from "../minimap/contract";
 import {
   deriveQueuePosition,
+  deriveWidgetResponse,
   type BlobPhase,
 } from "./state";
 import { phaseOf } from "./machine";
@@ -107,6 +109,18 @@ export function describeDotState(
   }
 }
 
+/** A completed turn whose widget_respond answer flags an issue. */
+function roundHasIssue(
+  snapshot: PromptRoundSnapshot | undefined,
+  phase: BlobPhase,
+): boolean {
+  if (phase !== "done" || !snapshot) return false;
+  const response = deriveWidgetResponse(
+    sortEntriesChronologically(snapshot.entries),
+  );
+  return response?.kind === "issue";
+}
+
 function queuedBehind(
   snapshot: PromptRoundSnapshot | undefined,
   phase: BlobPhase,
@@ -123,6 +137,7 @@ function deriveDotInputs(
   blobId: string | null,
 ): {
   phase: BlobPhase;
+  roundKey: string | null;
   unseen: boolean;
   queueAhead: number;
   issue: boolean;
@@ -130,6 +145,7 @@ function deriveDotInputs(
   if (!blobId) {
     return {
       phase: "composing",
+      roundKey: null,
       unseen: false,
       queueAhead: 0,
       issue: false,
@@ -138,17 +154,21 @@ function deriveDotInputs(
   const widget = prompts.get(blobId);
   const snapshot = prompts.round(blobId);
   const phase = phaseOf(widget.state);
+  const roundKey = widget.boundTurnId ? `${blobId}:${widget.boundTurnId}` : null;
   return {
     phase,
-    unseen:
-      widget.boundTurnId !== null && widget.seenTurnId !== widget.boundTurnId,
+    roundKey,
+    unseen: roundKey ? !seenRounds.has(roundKey) : false,
     queueAhead: queuedBehind(snapshot, phase, widget.boundTurnId),
-    // A done round whose stored answer flags an issue.
-    issue: phase === "done" && widget.outcome?.response?.kind === "issue",
+    issue: roundHasIssue(snapshot, phase),
   };
 }
 
 // ── the source ────────────────────────────────────────────────────────
+
+/** Finished rounds whose widget the user has scrolled into view. Session-
+ *  scoped on purpose: nothing persists, ids never recur. */
+const seenRounds = new Set<string>();
 
 function promptEntry(
   prompts: PromptWidgetsApi,
@@ -178,16 +198,16 @@ function observePrompt(
     intersection = null;
   };
 
-  const watchVisibility = () => {
+  const watchVisibility = (roundKey: string) => {
     if (intersection || typeof IntersectionObserver === "undefined") return;
     const element = handle.getElement();
     if (!element) return;
     intersection = new IntersectionObserver(
       (observed) => {
         if (!observed.some((o) => o.isIntersecting)) return;
+        seenRounds.add(roundKey);
         stopWatchingVisibility();
-        // The service tells every observer, this one included.
-        if (blobId) prompts.markSeen(blobId);
+        recompute();
       },
       { threshold: 0.35 },
     );
@@ -198,8 +218,8 @@ function observePrompt(
     if (destroyed) return;
     const inputs = deriveDotInputs(prompts, blobId);
     current = describeDotState(inputs.phase, inputs);
-    if (inputs.phase === "done" && inputs.unseen) {
-      watchVisibility();
+    if (inputs.phase === "done" && inputs.unseen && inputs.roundKey) {
+      watchVisibility(inputs.roundKey);
     } else {
       stopWatchingVisibility();
     }

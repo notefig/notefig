@@ -1,11 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { testPrompts } from "../../testing/test-prompts";
 import {
-  dispatched,
-  testPrompts,
-  testReviewRanges,
-} from "../../testing/test-prompts";
-import { capabilitiesOf } from "../machine";
-import { roundStatus } from "../widgets-service";
+  discardPromptChanges,
+  getDocumentPromptChanges,
+  setDocumentPromptChanges,
+} from "../change-store";
 
 const ROUND = { taskId: "task_1", turnId: "trn_1" };
 
@@ -36,19 +35,18 @@ describe("createPromptWidgets", () => {
     expect(t.prompts.get("blob").state).toEqual({ name: "settled", outcome: "done" });
   });
 
-  it("treats a turn row that hasn't appeared yet as queued, and a vanished one as cancelled", async () => {
-    // The round is over, as its list of rounds says too — but the session
-    // stays: a revived session replays its turns away, and the widget
-    // still belongs to it.
+  it("treats a turn row that hasn't appeared yet as queued, and a vanished one as stale", async () => {
+    // Stale drops the turn, never the session: a revived session replays
+    // its turns away, and the widget still belongs to it.
     const t = testPrompts();
-    await t.prompts.send("blob", "hi", async () => dispatched(ROUND, "hi"));
+    await t.prompts.send("blob", "hi", async () => ROUND);
     expect(t.prompts.get("blob").state).toEqual({ name: "working", turn: "queued" });
     t.setTurn("trn_1", "task_1", "running");
     t.removeTurn("trn_1");
     expect(t.prompts.get("blob")).toMatchObject({
-      state: { name: "settled", outcome: "cancelled" },
+      state: { name: "composing" },
       boundTaskId: "task_1",
-      boundTurnId: "trn_1",
+      boundTurnId: null,
       lastSentPrompt: "hi",
     });
   });
@@ -68,9 +66,7 @@ describe("createPromptWidgets", () => {
   it("won't send while a round is live", async () => {
     const t = testPrompts();
     await t.send("blob", "first", ROUND);
-    const dispatch = vi.fn(async () =>
-      dispatched({ taskId: "task_1", turnId: "trn_2" }),
-    );
+    const dispatch = vi.fn(async () => ({ taskId: "task_1", turnId: "trn_2" }));
     expect(await t.prompts.send("blob", "second", dispatch)).toBe(false);
     expect(dispatch).not.toHaveBeenCalled();
   });
@@ -173,219 +169,16 @@ describe("createPromptWidgets", () => {
     const t = testPrompts();
     await t.send("blob_r", "one", { taskId: "task_1", turnId: "trn_1" });
     t.setTurn("trn_1", "task_1", "completed");
-    t.prompts.review.set("/ws/r.md", [
+    setDocumentPromptChanges("/ws/r.md", [
       { blobId: "blob_r", turnId: "trn_1", from: 1, to: 3 },
       { blobId: "blob_s", turnId: "trn_9", from: 4, to: 5 },
     ]);
     t.prompts.setDocument("blob_r", "/ws/r.md");
+    expect(getDocumentPromptChanges("/ws/r.md")).toHaveLength(2);
     await t.send("blob_r", "two", { taskId: "task_1", turnId: "trn_2" });
-    expect(t.prompts.review.changes("/ws/r.md")).toEqual([
+    expect(getDocumentPromptChanges("/ws/r.md")).toEqual([
       { blobId: "blob_s", turnId: "trn_9", from: 4, to: 5 },
     ]);
-  });
-
-});
-
-describe("stored rounds (MET-251)", () => {
-  const OUTCOME = {
-    response: null,
-    summary: "Shortened it.",
-    error: null,
-    touchedFiles: ["/ws/doc.md"],
-  };
-  const settled = (turnId = "trn_1", taskId = "task_1") => ({
-    turnId,
-    taskId,
-    status: "completed" as const,
-    prompt: "make it shorter\nplease",
-    outcome: OUTCOME,
-  });
-
-  it("a restored widget comes back as it was left", () => {
-    const t = testPrompts();
-    t.storeRound("blob", settled());
-    t.prompts.restore("blob", "task_1");
-    expect(t.prompts.get("blob")).toMatchObject({
-      state: { name: "settled", outcome: "done" },
-      boundTaskId: "task_1",
-      boundTurnId: "trn_1",
-      lastSentPrompt: "make it shorter\nplease",
-      outcome: OUTCOME,
-    });
-  });
-
-  it("adopts a stored round that loads after the restore", () => {
-    const t = testPrompts();
-    t.prompts.restore("blob", "task_1");
-    expect(t.prompts.get("blob").state.name).toBe("composing");
-    t.storeRound("blob", settled());
-    expect(t.prompts.get("blob").state).toEqual({ name: "settled", outcome: "done" });
-  });
-
-  it("a restored round the last run never finished settles when its record does", () => {
-    const t = testPrompts();
-    t.storeRound("blob", { ...settled(), status: "live", outcome: null });
-    t.prompts.restore("blob", "task_1");
-    expect(t.prompts.get("blob")).toMatchObject({
-      state: { name: "composing" },
-      boundTurnId: "trn_1",
-    });
-    t.storeRound("blob", { ...settled(), status: "cancelled", outcome: null });
-    expect(t.prompts.get("blob").state).toEqual({
-      name: "settled",
-      outcome: "cancelled",
-    });
-  });
-
-  it("doesn't adopt another session's round, or once the user moved on", () => {
-    const t = testPrompts();
-    t.storeRound("other", settled("trn_2", "task_other"));
-    t.prompts.restore("other", "task_1");
-    t.prompts.restore("moved", "task_1");
-    t.prompts.rebind("moved", "task_1");
-    t.storeRound("moved", settled());
-    for (const blobId of ["other", "moved"]) {
-      expect(t.prompts.get(blobId)).toMatchObject({
-        state: { name: "composing" },
-        boundTurnId: null,
-        outcome: null,
-      });
-    }
-  });
-
-  it("stays settled when a session revival replays its turn away", async () => {
-    const t = testPrompts();
-    await t.send("blob", "make it shorter", ROUND);
-    t.setTurn("trn_1", "task_1", "completed");
-    t.storeRound("blob", settled());
-    expect(t.prompts.get("blob").outcome).toEqual(OUTCOME);
-    t.removeTurn("trn_1");
-    expect(t.prompts.get("blob")).toMatchObject({
-      state: { name: "settled", outcome: "done" },
-      boundTurnId: "trn_1",
-      outcome: OUTCOME,
-    });
-  });
-
-  it("a live round ends when its record does, never before what it left is written", async () => {
-    const t = testPrompts();
-    await t.send("blob", "make it shorter", ROUND);
-    t.storeRound("blob", { ...settled(), status: "live", outcome: null });
-    t.setTurn("trn_1", "task_1", "running");
-    // The turn row ends first; the record of what it left comes after.
-    t.setTurn("trn_1", "task_1", "completed", { unrecorded: true });
-    expect(t.prompts.get("blob")).toMatchObject({
-      state: { name: "working", turn: "running" },
-      outcome: null,
-    });
-    t.storeRound("blob", settled());
-    expect(t.prompts.get("blob")).toMatchObject({
-      state: { name: "settled", outcome: "done" },
-      outcome: OUTCOME,
-    });
-  });
-
-  it("an errored turn waiting on a sign-in still asks for it while its record catches up", async () => {
-    const t = testPrompts();
-    await t.send("blob", "make it shorter", ROUND);
-    t.storeRound("blob", { ...settled(), status: "live", outcome: null });
-    t.setAuthRequired("task_1", true);
-    t.setTurn("trn_1", "task_1", "error");
-    expect(t.prompts.get("blob").state).toEqual({
-      name: "asking",
-      ask: { kind: "auth" },
-    });
-  });
-
-  it("runs a retried round again before its record reopens", async () => {
-    const t = testPrompts();
-    await t.send("blob", "make it shorter", ROUND);
-    t.setAuthRequired("task_1", true);
-    t.setTurn("trn_1", "task_1", "error");
-    // Signed in: the same turn goes back to the queue, its record still
-    // saying how the first attempt ended.
-    t.setAuthRequired("task_1", false);
-    t.setTurn("trn_1", "task_1", "queued");
-    expect(t.prompts.get("blob").state).toEqual({ name: "working", turn: "queued" });
-    expect(capabilitiesOf(t.prompts.get("blob").state, { summoned: false }).escape).toBe("stop");
-  });
-
-  it("a restored round was seen; one that ends this run is new until marked seen", async () => {
-    const t = testPrompts();
-    t.storeRound("restored", settled());
-    t.prompts.restore("restored", "task_1");
-    expect(t.prompts.get("restored").seenTurnId).toBe("trn_1");
-
-    await t.send("blob", "make it shorter", ROUND);
-    t.setTurn("trn_1", "task_1", "completed");
-    expect(t.prompts.get("blob").seenTurnId).toBeNull();
-    t.prompts.markSeen("blob");
-    expect(t.prompts.get("blob").seenTurnId).toBe("trn_1");
-  });
-
-  it("shows only the outcome of the round it is bound to", async () => {
-    const t = testPrompts();
-    await t.send("blob", "first", ROUND);
-    t.setTurn("trn_1", "task_1", "completed");
-    t.storeRound("blob", settled());
-    await t.send("blob", "second", { taskId: "task_1", turnId: "trn_2" });
-    expect(t.prompts.get("blob").outcome).toBeNull();
-    t.prompts.unbind("blob");
-    expect(t.prompts.get("blob").outcome).toBeNull();
-  });
-});
-
-describe("review ranges (MET-251)", () => {
-  const DOC = "/ws/doc.md";
-  const ranges = (blobId: string, turnId: string) => ({
-    fingerprint: "f",
-    changes: [{ blobId, turnId, from: 1, to: 4 }],
-  });
-
-  it("forgets a widget's saved ranges when it moves to a new round, open document or not", async () => {
-    const reviewRanges = testReviewRanges({ [DOC]: ranges("blob", "trn_1") });
-    const t = testPrompts({ reviewRanges });
-    await t.send("blob", "one", ROUND);
-    t.setTurn("trn_1", "task_1", "completed");
-    await t.send("blob", "two", { taskId: "task_1", turnId: "trn_2" });
-    expect(reviewRanges.saved.get(DOC)?.changes).toEqual([]);
-    expect(t.prompts.review.counts("blob")).toEqual(new Map());
-  });
-
-  it("keeps them when a restore takes up the round that made them", async () => {
-    const reviewRanges = testReviewRanges({ [DOC]: ranges("blob", "trn_1") });
-    const t = testPrompts({ reviewRanges });
-    await Promise.resolve();
-    t.storeRound("blob", {
-      turnId: "trn_1",
-      taskId: "task_1",
-      status: "completed",
-      prompt: "one",
-      outcome: null,
-    });
-    t.prompts.restore("blob", "task_1");
-    expect(t.prompts.get("blob").boundTurnId).toBe("trn_1");
-    expect(reviewRanges.saved.get(DOC)?.changes).toHaveLength(1);
-    expect(t.prompts.review.counts("blob")).toEqual(new Map([[DOC, 1]]));
-  });
-});
-
-describe("roundStatus", () => {
-  it.each([
-    // record, turn row, row gone → where the round stands
-    ["live", "queued", false, "queued"],
-    ["live", "running", false, "running"],
-    // Ended on its turn row, not yet on record: still running.
-    ["live", "completed", false, "running"],
-    [undefined, "error", false, "running"],
-    // Not written yet, or gone for good.
-    ["live", undefined, false, undefined],
-    ["live", undefined, true, "cancelled"],
-    // Ended on record: the record says, unless the turn runs again.
-    ["completed", undefined, true, "completed"],
-    ["error", "error", false, "error"],
-    ["error", "queued", false, "queued"],
-  ] as const)("%s record, %s turn, gone %s → %s", (record, turn, gone, expected) => {
-    expect(roundStatus(record, turn, gone)).toBe(expected);
+    discardPromptChanges("blob_s");
   });
 });

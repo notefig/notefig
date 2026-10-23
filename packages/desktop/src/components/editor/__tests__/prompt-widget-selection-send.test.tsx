@@ -50,7 +50,7 @@ function liveRoundHost(): PromptWidgetHost {
   return fakePromptWidgetHost({
     dispatchPrompt: vi.fn(({ taskId }) => {
       prompts.setTurn("trn_fake", taskId, "queued");
-      return { turnId: "trn_fake", sentPrompt: "" };
+      return { turnId: "trn_fake" };
     }),
   });
 }

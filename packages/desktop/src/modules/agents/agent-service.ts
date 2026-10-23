@@ -1174,10 +1174,6 @@ export class AgentTask {
           draft.error = undefined;
           draft.stopReason = undefined;
         });
-        this.deps.hooks.emit("agent:turn-requeued", {
-          taskId: this.taskId,
-          turnId: held.turnId,
-        });
       }
       this.pendingPrompts.unshift(held);
       if (!this.currentTurn && !this.draining) {

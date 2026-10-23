@@ -90,6 +90,7 @@ export const workspaceAgentsModule = defineModule({
       openAgentTab: (taskId) => ctx.use("tabs").openAgent(taskId),
       isOpen: (workspacePath) => ctx.workspaces.isOpen(workspacePath),
       ensureRuntime: ensureAgentRuntime,
+      hooks: ctx.hooks,
     }));
   },
   boot: (agents, ctx) => {

@@ -26,7 +26,6 @@ describe("seen", () => {
     rounds = createPromptRounds({
       persistence: db.get(),
       turns: { get: () => undefined },
-      transcript: () => [],
       hooks,
     });
     seen = createSeen({ persistence: db.get(), rounds: rounds.collection, hooks });
@@ -47,8 +46,6 @@ describe("seen", () => {
       workspacePath: "/ws",
       documentPath: "/ws/doc.md",
       prompt: "p",
-      blobId: "blob_1",
-      typedPrompt: "p",
     });
     expect(seen.targetOfSettledTurn(settled("task_1", "t1"))).toEqual({
       kind: "document",
@@ -86,8 +83,6 @@ describe("seen", () => {
       workspacePath: "/ws",
       documentPath: "/ws/doc.md",
       prompt: "p",
-      blobId: "blob_1",
-      typedPrompt: "p",
     });
     const at = Date.now() + 1_000;
     hooks.emit("agent:turn-settled", settled("task_9", "t9", at));

@@ -15,6 +15,16 @@ import type {
 
 declare module "@notefig/core" {
   interface CoreHookMap {
+    /** A prompt widget sent a prompt: a round began in a document. */
+    "widget:round-started": {
+      taskId: string;
+      turnId: string;
+      workspacePath: string;
+      /** Absolute path of the document the widget lives in. */
+      documentPath: string;
+      /** The prompt as sent. */
+      prompt: string;
+    };
     /** A live turn's tool call was reported or moved on (pending →
      *  in_progress → completed/failed); `toolCall` is the merged state so
      *  far. Never raised for a session/load replay. */
@@ -34,13 +44,6 @@ declare module "@notefig/core" {
       /** What the user asked, as typed. */
       prompt: string;
       harnessId: string;
-    };
-    /** A settled turn went back to the queue to run again — the retry of a
-     *  prompt a sign-in interrupted. Whatever recorded it as ended reopens
-     *  it; it settles again like any other turn. */
-    "agent:turn-requeued": {
-      taskId: string;
-      turnId: string;
     };
     /** A turn reached a terminal status. */
     "agent:turn-settled": {

@@ -150,7 +150,6 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
     showWorkspaceTools,
     openSearchPanel,
     openSessionsSidebar,
-    openUsageSettings,
     isCommandPaletteOpen,
     setIsCommandPaletteOpen,
     direction,
@@ -296,7 +295,6 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
           onUndo={() => runHistoryAction("undo")}
           onRedo={() => runHistoryAction("redo")}
           onOpenSettings={openSettings}
-          onOpenUsageSettings={openUsageSettings}
           onToggleSidebar={toggleSidebarCollapsed}
           onToggleFullscreen={handleToggleFullscreen}
           onSearchInFile={handleSearchInFile}

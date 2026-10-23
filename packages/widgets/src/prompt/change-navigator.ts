@@ -17,7 +17,12 @@
  */
 import { useCallback, useState, useSyncExternalStore } from "react";
 import type { Editor } from "@tiptap/core";
-import { promptChangeColor, type PromptReview } from "./change-store";
+import {
+  getPromptReview,
+  promptChangeColor,
+  setPromptReview,
+  subscribePromptChanges,
+} from "./change-store";
 import {
   promptChangeMarks,
   revealPromptChange,
@@ -47,17 +52,16 @@ function widgetMarks(editor: Editor, blobId: string): PromptChangeMark[] {
 }
 
 export function usePromptChangeNavigation(
-  review: PromptReview,
   blobId: string,
   editor: Editor,
 ): PromptChangeNavigation {
   const count = useSyncExternalStore(
-    review.subscribe,
+    subscribePromptChanges,
     () => widgetMarks(editor, blobId).length,
   );
   const reviewing = useSyncExternalStore(
-    review.subscribe,
-    () => review.reviewing() === blobId,
+    subscribePromptChanges,
+    () => getPromptReview() === blobId,
   );
   const [position, setPosition] = useState<number | null>(null);
   // Blocks can merge or go away under the cursor; the position never
@@ -67,13 +71,10 @@ export function usePromptChangeNavigation(
 
   const toggleReview = useCallback(() => {
     setPosition(null);
-    review.setReviewing(review.reviewing() === blobId ? null : blobId);
-  }, [review, blobId]);
+    setPromptReview(getPromptReview() === blobId ? null : blobId);
+  }, [blobId]);
 
-  const showChanges = useCallback(
-    () => review.setReviewing(blobId),
-    [review, blobId],
-  );
+  const showChanges = useCallback(() => setPromptReview(blobId), [blobId]);
 
   const step = useCallback(
     (direction: 1 | -1) => {
@@ -86,10 +87,10 @@ export function usePromptChangeNavigation(
             : marks.length - 1
           : (index + direction + marks.length) % marks.length;
       setPosition(next);
-      review.setReviewing(blobId);
+      setPromptReview(blobId);
       revealPromptChange(editor.view, marks[next]);
     },
-    [review, editor, blobId, index],
+    [editor, blobId, index],
   );
 
   return {

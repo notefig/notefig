@@ -14,14 +14,12 @@ import {
   persistedCollectionOptions,
   type PersistedCollectionPersistence,
 } from "@tanstack/db-sqlite-persistence-core";
-import {
-  newEventId,
-  sortEntriesChronologically,
-  type AgentEntry,
-  type AgentPermissionRequestRow,
-  type AgentTaskRow,
-  type AgentTaskStatus,
-  type AgentTurn,
+import type {
+  AgentEntry,
+  AgentPermissionRequestRow,
+  AgentTaskRow,
+  AgentTaskStatus,
+  AgentTurn,
 } from "@notefig/shared/agent";
 import {
   AGENT_TASKS_COLLECTION_ID,
@@ -344,16 +342,14 @@ export class ReplayStage implements AgentEntryWriter {
    * The atomic swap: drop the task's previous transcript rows and insert
    * the synthetic replay turn plus the staged entries. Turns in
    * `keepTurnIds` (prompts queued against the revival) keep their rows —
-   * they aren't part of the replayed history, and they come after it: their
-   * entries were minted before the replay's, and entry ids are the
-   * transcript's order, so they move to fresh ids behind it.
+   * they aren't part of the replayed history.
    */
   commit(replayTurn: AgentTurn, keepTurnIds: ReadonlySet<string>): void {
     const taskId = replayTurn.taskId;
-    const kept: AgentEntry[] = [];
     for (const entry of this.store.entriesForTask(taskId)) {
-      if (keepTurnIds.has(entry.turnId)) kept.push(entry);
-      this.store.entries.delete(entry.id);
+      if (!keepTurnIds.has(entry.turnId)) {
+        this.store.entries.delete(entry.id);
+      }
     }
     for (const turn of this.store.turnsForTask(taskId)) {
       if (!keepTurnIds.has(turn.turnId)) {
@@ -363,9 +359,6 @@ export class ReplayStage implements AgentEntryWriter {
     this.store.turns.insert(replayTurn);
     for (const row of this.rows.values()) {
       this.store.entries.insert(row);
-    }
-    for (const entry of sortEntriesChronologically(kept)) {
-      this.store.entries.insert({ ...entry, id: newEventId() });
     }
   }
 }

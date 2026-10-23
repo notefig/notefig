@@ -3,24 +3,24 @@
  * transaction records, how later edits move or drop it, and the store
  * round trip a recreated editor relies on.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { Schema } from "@tiptap/pm/model";
 import { EditorState, type Transaction } from "@tiptap/pm/state";
 import { EditorView } from "@tiptap/pm/view";
 import { PROMPT_NODE_NAME } from "../node";
 import {
   PROMPT_CHANGE_META,
-  createPromptReview,
-  type PromptReview,
-  type SavedReviewRanges,
+  discardPromptChanges,
+  getDocumentPromptChanges,
+  getPromptReview,
+  setDocumentPromptChanges,
+  setPromptReview,
 } from "../change-store";
 import {
-  documentFingerprint,
   promptChangeTrackingPlugin,
   promptChangesOf,
 } from "../change-tracking";
 import { promptChangeMarks } from "../change-gutter";
-import { testReviewRanges } from "../../testing/test-prompts";
 
 const schema = new Schema({
   nodes: {
@@ -34,14 +34,8 @@ const schema = new Schema({
 const DOC_PATH = "/ws/notes.md";
 const ROUND = { blobId: "blob_a", turnId: "trn_1" };
 
-/** The review store the plugin keeps its changes in — one per test. */
-let review: PromptReview;
-beforeEach(() => {
-  review = createPromptReview(testReviewRanges());
-});
-
-function docOf(...blocks: Array<string | "widget">) {
-  return schema.node(
+function stateOf(...blocks: Array<string | "widget">) {
+  const doc = schema.node(
     "doc",
     null,
     blocks.map((block) =>
@@ -50,22 +44,11 @@ function docOf(...blocks: Array<string | "widget">) {
         : schema.node("paragraph", null, block ? schema.text(block) : []),
     ),
   );
-}
-
-function stateOf(...blocks: Array<string | "widget">) {
   return EditorState.create({
-    doc: docOf(...blocks),
-    plugins: [promptChangeTrackingPlugin(DOC_PATH, review)],
+    doc,
+    plugins: [promptChangeTrackingPlugin(DOC_PATH)],
   });
 }
-
-const openAt = (documentPath: string, doc = docOf("hello world")) =>
-  new EditorView(document.createElement("div"), {
-    state: EditorState.create({
-      doc,
-      plugins: [promptChangeTrackingPlugin(documentPath, review)],
-    }),
-  });
 
 function asRound(tr: Transaction): Transaction {
   return tr.setMeta(PROMPT_CHANGE_META, ROUND);
@@ -73,6 +56,11 @@ function asRound(tr: Transaction): Transaction {
 
 const spans = (state: EditorState) =>
   promptChangesOf(state).map(({ from, to }) => [from, to]);
+
+afterEach(() => {
+  discardPromptChanges(ROUND.blobId);
+  discardPromptChanges("blob_b");
+});
 
 describe("prompt change tracking", () => {
   it("records what a round's transaction touched, and nothing else", () => {
@@ -140,119 +128,36 @@ describe("prompt change tracking", () => {
     expect(promptChangeMarks(state)).toEqual([{ pos: 0, blobId: ROUND.blobId }]);
   });
 
-  it("takes a closed document's changes back only onto the document they were mapped on", () => {
-    const view = openAt(DOC_PATH);
+  it("restores into a recreated editor only onto the document it was mapped on", () => {
+    const view = new EditorView(document.createElement("div"), {
+      state: stateOf("hello world"),
+    });
     view.dispatch(asRound(view.state.tr.insertText("big ", 7)));
-    expect(review.changes(DOC_PATH)).toHaveLength(1);
+    expect(getDocumentPromptChanges(DOC_PATH)).toHaveLength(1);
     const doc = view.state.doc;
     view.destroy();
 
-    const reopened = openAt(DOC_PATH, doc);
-    expect(spans(reopened.state)).toEqual([[7, 11]]);
-    reopened.destroy();
+    const recreate = (content: typeof doc) =>
+      EditorState.create({
+        doc: content,
+        plugins: [promptChangeTrackingPlugin(DOC_PATH)],
+      });
+    expect(spans(recreate(doc))).toEqual([[7, 11]]);
     // Same size, other text: the file changed while no editor held it.
-    const changed = openAt(DOC_PATH, docOf("hello WORLD big"));
-    expect(spans(changed.state)).toEqual([]);
-    // And the store follows: nothing left to count.
-    expect(review.counts(ROUND.blobId)).toEqual(new Map());
-    changed.destroy();
+    const changed = recreate(stateOf("hello WORLD big").doc);
+    expect(spans(changed)).toEqual([]);
+    // Mounting it clears what it could not restore.
+    new EditorView(document.createElement("div"), { state: changed }).destroy();
+    expect(getDocumentPromptChanges(DOC_PATH)).toEqual([]);
   });
 
   it("reviews one widget at a time, and ends a review whose changes are gone", () => {
-    review.setReviewing(ROUND.blobId);
-    review.setReviewing("blob_b");
-    expect(review.reviewing()).toBe("blob_b");
-    review.discard(ROUND.blobId);
-    expect(review.reviewing()).toBe("blob_b");
-    review.discard("blob_b");
-    expect(review.reviewing()).toBeNull();
-  });
-});
-
-describe("saved review ranges", () => {
-  const nested = new Schema({
-    nodes: {
-      doc: { content: "block+" },
-      paragraph: { group: "block", content: "text*" },
-      blockquote: { group: "block", content: "block+" },
-      text: {},
-    },
-  });
-  const p = (text: string) => nested.node("paragraph", null, [nested.text(text)]);
-  const quote = (...children: ReturnType<typeof p>[]) =>
-    nested.node("blockquote", null, children);
-
-  it("fingerprints structure, not just the text in order", () => {
-    // Same text, same node types in the same order — a paragraph inside
-    // the quote vs after it shifts every later position by one.
-    const inside = nested.node("doc", null, [quote(p("a"), p("b"))]);
-    const after = nested.node("doc", null, [quote(p("a")), p("b")]);
-    expect(documentFingerprint(inside)).not.toBe(documentFingerprint(after));
-    expect(documentFingerprint(inside)).toBe(
-      documentFingerprint(nested.node("doc", null, [quote(p("a"), p("b"))])),
-    );
-  });
-
-  /** A store over what an earlier run saved, once it has loaded. */
-  const loaded = async (saved: Record<string, SavedReviewRanges>) => {
-    review = createPromptReview(testReviewRanges(saved));
-    await Promise.resolve();
-  };
-  const savedFor = (doc = docOf("hello world"), count = 1) => ({
-    fingerprint: documentFingerprint(doc),
-    changes: Array.from({ length: count }, (_, i) => ({
-      ...ROUND,
-      from: 1 + i,
-      to: 2 + i,
-    })),
-  });
-
-  it("takes up ranges that finish loading after the editor opened", async () => {
-    let finishLoading = (_: ReadonlyMap<string, SavedReviewRanges>) => {};
-    review = createPromptReview({
-      ...testReviewRanges(),
-      loadAll: () => new Promise((resolve) => (finishLoading = resolve)),
-    });
-    const view = openAt(DOC_PATH);
-    expect(promptChangesOf(view.state)).toEqual([]);
-    finishLoading(new Map([[DOC_PATH, savedFor()]]));
-    await Promise.resolve();
-    expect(spans(view.state)).toEqual([[1, 2]]);
-    view.destroy();
-  });
-
-  it("counts a document's saved ranges until an editor opens it, then its live ones", async () => {
-    await loaded({ [DOC_PATH]: savedFor(docOf("other"), 3), "/ws/closed.md": savedFor(undefined, 2) });
-    expect(review.counts(ROUND.blobId)).toEqual(
-      new Map([
-        [DOC_PATH, 3],
-        ["/ws/closed.md", 2],
-      ]),
-    );
-    // Opened: the file changed while closed, so nothing is restored and
-    // its saved count no longer stands for anything shown.
-    const view = openAt(DOC_PATH);
-    expect(review.counts(ROUND.blobId)).toEqual(new Map([["/ws/closed.md", 2]]));
-    view.dispatch(asRound(view.state.tr.insertText("X", 1)));
-    expect(review.counts(ROUND.blobId).get(DOC_PATH)).toBe(1);
-    // Closed again, this run's ranges are still newer than the saved ones.
-    view.destroy();
-    expect(review.counts(ROUND.blobId).get(DOC_PATH)).toBe(1);
-  });
-
-  it("doesn't count saved ranges an editor rejected once it closes", async () => {
-    await loaded({ [DOC_PATH]: savedFor(docOf("other"), 3) });
-    openAt(DOC_PATH).destroy();
-    expect(review.counts(ROUND.blobId)).toEqual(new Map());
-  });
-
-  it("saves a document's ranges only when they changed", () => {
-    const store = testReviewRanges();
-    const save = vi.spyOn(store, "save");
-    review = createPromptReview(store);
-    const ranges = savedFor();
-    review.save(DOC_PATH, ranges);
-    review.save(DOC_PATH, { ...ranges, changes: [...ranges.changes] });
-    expect(save).toHaveBeenCalledTimes(1);
+    setPromptReview(ROUND.blobId);
+    setPromptReview("blob_b");
+    expect(getPromptReview()).toBe("blob_b");
+    discardPromptChanges(ROUND.blobId);
+    expect(getPromptReview()).toBe("blob_b");
+    discardPromptChanges("blob_b");
+    expect(getPromptReview()).toBeNull();
   });
 });

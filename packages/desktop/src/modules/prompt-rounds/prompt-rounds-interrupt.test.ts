@@ -45,8 +45,6 @@ function sendRound(task: AgentTask, text: string): string {
     workspacePath: "/ws",
     documentPath: "/ws/doc.md",
     prompt: text,
-    blobId: "blob_1",
-    typedPrompt: text,
   });
   return turnId;
 }
@@ -67,8 +65,6 @@ describe("interrupted prompt rounds", () => {
     rounds = createPromptRounds({
       persistence: createNodeTestDb().get(),
       turns: agentLayer.store.turns,
-      transcript: (turnId) =>
-        agentLayer.store.entries.toArray.filter((entry) => entry.turnId === turnId),
       hooks: agentLayer.hooks,
     });
     stop?.();
