@@ -2066,13 +2066,19 @@ describe("session hydration: buffered replay + manual refresh", () => {
     );
   });
 
-  it("prompts sent during a refresh queue and run once it completes", async () => {
+  it("prompts sent during a refresh queue, run once it completes, and follow the replayed history", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     let releaseLoad: (() => void) | undefined;
-    agent.onLoadSession = async () => {
+    // History streams after the prompt below was sent, as when a prompt
+    // wakes a sleeping session.
+    agent.onLoadSession = async (params, a) => {
       await new Promise<void>((resolve) => {
         releaseLoad = resolve;
+      });
+      a.update(params.sessionId, {
+        sessionUpdate: "user_message_chunk",
+        content: { type: "text", text: "replayed prompt" },
       });
       return {};
     };
@@ -2095,10 +2101,13 @@ describe("session hydration: buffered replay + manual refresh", () => {
     releaseLoad!();
     await refresh;
     await vi.waitFor(() => expect(promptedTexts).toEqual(["sent mid-refresh"]));
-    // Its queued transcript rows survived the replay commit.
+    // Its queued transcript rows survived the replay commit, after the
+    // history it replayed (the transcript is in entry-id order).
     expect(
-      entriesFor(task.taskId).some((e) => e.text === "sent mid-refresh"),
-    ).toBe(true);
+      entriesFor(task.taskId)
+        .filter((e) => e.type === "user")
+        .map((e) => e.text),
+    ).toEqual(["replayed prompt", "sent mid-refresh"]);
   });
 });
 
