@@ -23,6 +23,7 @@ const adapter = {
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 const WS = "/ws-file-search";
+const WS2 = "/ws-file-search-2";
 
 const WORKSPACE_FILES = [
   "notes.md",
@@ -33,26 +34,45 @@ const WORKSPACE_FILES = [
 // Returned by the walk but outside the workspace root — a loose file, so its
 // row gets no relativePath.
 const LOOSE_FILE = "/elsewhere/loose-notes.md";
+const WS2_FILES = ["other.md", "project/notes.md"];
+
+const adapter2 = {
+  getMetadata: vi.fn(),
+  readDirectory: vi.fn(),
+};
 
 let files: WorkspaceFiles;
+let files2: WorkspaceFiles;
 let core: Core;
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 let latest: FileSearchResult[] = [];
 
+type FileSearchSource = string | string[] | null | undefined;
+
 function Probe({
+  source,
   query,
   options,
 }: {
+  source: FileSearchSource;
   query: string;
   options?: FileSearchOptions;
 }) {
-  latest = useFileSearch(WS, query, options);
+  latest = useFileSearch(
+    source as Parameters<typeof useFileSearch>[0],
+    query,
+    options,
+  );
   return null;
 }
 
-async function renderSearch(query: string, options?: FileSearchOptions) {
+async function renderSearch(
+  query: string,
+  options?: FileSearchOptions,
+  source: FileSearchSource = WS,
+) {
   if (!root) {
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -62,7 +82,7 @@ async function renderSearch(query: string, options?: FileSearchOptions) {
     root!.render(
       createElement(CoreProvider, {
         core,
-        children: createElement(Probe, { query, options }),
+        children: createElement(Probe, { source, query, options }),
       }),
     );
   });
@@ -83,9 +103,18 @@ beforeEach(async () => {
       { path: LOOSE_FILE, type: "file" as const },
     ],
   }));
+  adapter2.getMetadata.mockResolvedValue({ succeeded: [], failed: [] });
+  adapter2.readDirectory.mockImplementation(async () => ({
+    ok: true,
+    value: WS2_FILES.map((rel) => ({
+      path: `${WS2}/${rel}`,
+      type: "file" as const,
+    })),
+  }));
 
   files = testWorkspaceFiles(WS, adapter);
-  core = createTestCore({ modules: [filesModuleOf([files])] });
+  files2 = testWorkspaceFiles(WS2, adapter2);
+  core = createTestCore({ modules: [filesModuleOf([files, files2])] });
   await core.workspace(WS).open();
   await files.collections.metadata.preload();
 });
@@ -96,6 +125,7 @@ afterEach(() => {
   container = null;
   root = null;
   files.dispose();
+  files2.dispose();
 });
 
 describe("useFileSearch", () => {
@@ -181,5 +211,42 @@ describe("useFileSearch", () => {
       });
     });
     expect(latest.map((r) => r.relativePath)).toEqual(["brand-new.md"]);
+  });
+});
+
+describe("useFileSearch across open workspaces", () => {
+  beforeEach(async () => {
+    await core.workspace(WS2).open();
+    await files2.collections.metadata.preload();
+  });
+
+  it("returns matches from every open workspace", async () => {
+    const results = await renderSearch("notes", undefined, null);
+    const paths = results.map((r) => r.path);
+    expect(paths).toContain(`${WS}/notes.md`);
+    expect(paths).toContain(`${WS2}/project/notes.md`);
+  });
+
+  it("lists files from all open workspaces when the query is empty and matchAllWhenEmpty is true", async () => {
+    const paths = (
+      await renderSearch("", { matchAllWhenEmpty: true }, null)
+    ).map((r) => r.path);
+    expect(paths).toContain(`${WS}/notes.md`);
+    expect(paths).toContain(`${WS2}/other.md`);
+  });
+
+  it("limits results after combining open workspaces", async () => {
+    await act(async () => {
+      const { metadata } = files2.collections;
+      for (let i = 0; i < 15; i++) {
+        metadata.utils.writeInsert({
+          path: `${WS2}/bulk/file-${i}.md`,
+          relativePath: `bulk/file-${i}.md`,
+          type: "file",
+          contentHash: "",
+        });
+      }
+    });
+    expect(await renderSearch("file-", undefined, null)).toHaveLength(10);
   });
 });

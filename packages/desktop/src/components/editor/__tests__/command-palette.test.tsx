@@ -11,6 +11,8 @@ import { filesModuleOf, testWorkspaceFiles } from "@/testing/test-files";
 import type { WorkspaceFiles } from "@/modules/files";
 import { kvModule } from "@/modules/kv";
 import { createFeedback, type FeedbackApi } from "@/modules/feedback";
+import { workspacesModule } from "@/modules/workspaces";
+import { path as pathutil } from "@/utils/path";
 
 // Real TanStack DB collections over a listing handed to them — file
 // results come from the actual metadata collection through useFileSearch.
@@ -19,11 +21,18 @@ const adapter = {
   readDirectory: vi.fn(),
 };
 
+const adapter2 = {
+  getMetadata: vi.fn(),
+  readDirectory: vi.fn(),
+};
+
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 const WS = "/ws-palette";
+const WS2 = "/ws-palette-2";
 
 let files: WorkspaceFiles;
+let files2: WorkspaceFiles;
 let testCore: Core;
 let feedback: FeedbackApi;
 
@@ -95,28 +104,41 @@ beforeEach(async () => {
       { path: `${WS}/binary.bin`, type: "file" as const },
     ],
   }));
+  adapter2.getMetadata.mockResolvedValue({ succeeded: [], failed: [] });
+  adapter2.readDirectory.mockImplementation(async () => ({
+    ok: true,
+    value: [
+      { path: `${WS2}/shared.md`, type: "file" as const },
+      { path: `${WS2}/project/other.md`, type: "file" as const },
+    ],
+  }));
 
   files = testWorkspaceFiles(WS, adapter);
+  files2 = testWorkspaceFiles(WS2, adapter2);
   // The settings the palette reads persist through the kv store over the
   // test core's platform db.
   feedback = createFeedback({ supportUrl: "https://support.notefig.com" });
   testCore = createTestCore({
     modules: [
       kvModule,
-      filesModuleOf([files]),
+      filesModuleOf([files, files2]),
+      workspacesModule,
       defineModule({ name: "feedback", register: () => feedback }),
     ],
   });
+  testCore.boot();
   await testCore.workspace(WS).open();
   await files.collections.metadata.preload();
 });
 
-afterEach(() => {
+afterEach(async () => {
   act(() => root?.unmount());
   container?.remove();
   container = null;
   root = null;
+  await testCore.dispose();
   files.dispose();
+  files2.dispose();
   document.body.innerHTML = "";
 });
 
@@ -173,6 +195,23 @@ describe("CommandPalette file search", () => {
     const fileIndex = labels.findIndex((l) => l.includes("theme.md"));
     expect(commandIndex).toBeGreaterThanOrEqual(0);
     expect(fileIndex).toBeGreaterThan(commandIndex);
+  });
+});
+
+describe("CommandPalette file search across open workspaces", () => {
+  beforeEach(async () => {
+    await testCore.workspace(WS2).open();
+    await files2.collections.metadata.preload();
+  });
+
+  it("shows files from the active workspace and other open workspaces", async () => {
+    renderPalette();
+    await act(async () => {});
+    await typeQuery("other");
+    const labels = itemLabels().join("\n");
+    expect(labels).toContain("other.md");
+    expect(labels).toContain(pathutil.basename(WS2));
+    expect(labels).toContain(pathutil.basename(WS2) + " › project/other.md");
   });
 });
 
