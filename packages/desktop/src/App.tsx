@@ -1,16 +1,10 @@
 import "./App.css";
-import {
-  Routes,
-  Route,
-  Navigate,
-  useNavigate,
-  useLocation,
-} from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { Workspace } from "@/components/workspace";
 import { MockDirectoryPickerDialog } from "@/components/mock-directory-picker-dialog";
 import { TextPromptDialog } from "@/components/text-prompt-dialog";
 import { FeedbackDialog } from "@/modules/feedback/react";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { isWeb } from "@/utils/platform";
 import { useAppSettings } from "@/hooks/use-app-settings";
@@ -21,41 +15,11 @@ import { useCore } from "@notefig/core/react";
 
 export const App = () => {
   const { setTheme } = useTheme();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const {
-    settings,
-    isReady: settingsReady,
-    setTheme: persistTheme,
-    setLastSearch,
-    setZoomLevel,
-  } = useAppSettings();
+  const { settings, setTheme: persistTheme, setZoomLevel } = useAppSettings();
 
   useEffect(() => {
     setTheme(settings.theme);
   }, [settings.theme, setTheme]);
-
-  // The URL carries the session (layout, chrome); the pathname is always
-  // "/". Restore last session's search once settings have hydrated — a
-  // cold boot lands on a bare "/" — then keep recording it. The restore is
-  // a render phase, not a ref: the record effect must not run in the same
-  // commit as the restore, or it would persist the bare boot URL over the
-  // saved one before the navigation lands. Flipping state defers it by
-  // exactly one render, which is also the render the navigation reaches.
-  const [sessionRestored, setSessionRestored] = useState(false);
-  useEffect(() => {
-    if (!settingsReady || sessionRestored) return;
-    if (location.pathname === "/" && !location.search && settings.lastSearch) {
-      navigate(`/${settings.lastSearch}`, { replace: true });
-    }
-    setSessionRestored(true);
-  }, [settingsReady, sessionRestored, settings.lastSearch, location, navigate]);
-  useEffect(() => {
-    if (!sessionRestored || location.pathname !== "/") return;
-    // One encoding of "nothing": an empty search is stored as null, the
-    // declared default, never as "".
-    setLastSearch(location.search || null);
-  }, [sessionRestored, location.pathname, location.search, setLastSearch]);
 
   const { ui } = useCore().platform;
   useEffect(() => {
