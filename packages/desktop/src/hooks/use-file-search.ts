@@ -1,4 +1,4 @@
-import { useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { type WorkspaceFiles } from "@/modules/files";
 import {
   rankFileRows,
@@ -20,6 +20,15 @@ function normalizeWorkspaceSource(
 ): string[] | null {
   if (source === null || source === undefined) return null;
   return Array.isArray(source) ? source : [source];
+}
+
+function useDebouncedQuery(query: string, delayMs: number): string {
+  const [debounced, setDebounced] = useState(query);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(query), delayMs);
+    return () => clearTimeout(timer);
+  }, [query, delayMs]);
+  return debounced;
 }
 
 type MetadataCollection = WorkspaceFiles["collections"]["metadata"];
@@ -186,8 +195,14 @@ export function useFileSearch(
   );
   const data = useFileRows(workspacePaths);
   const { limit, filter, matchAllWhenEmpty } = options;
+  const debouncedQuery = useDebouncedQuery(query, 300);
   return useMemo(
-    () => rankFileRows(data, query, { limit, filter, matchAllWhenEmpty }),
-    [data, query, limit, filter, matchAllWhenEmpty],
+    () =>
+      rankFileRows(data, debouncedQuery, {
+        limit,
+        filter,
+        matchAllWhenEmpty,
+      }),
+    [data, debouncedQuery, limit, filter, matchAllWhenEmpty],
   );
 }

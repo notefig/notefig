@@ -82,6 +82,9 @@ async function typeQuery(text: string) {
     else input.value = text;
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
+  await act(async () => {
+    vi.advanceTimersByTime(300);
+  });
 }
 
 function itemLabels(): string[] {
@@ -129,9 +132,11 @@ beforeEach(async () => {
   testCore.boot();
   await testCore.workspace(WS).open();
   await files.collections.metadata.preload();
+  vi.useFakeTimers({ shouldAdvanceTime: true });
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   act(() => root?.unmount());
   container?.remove();
   container = null;

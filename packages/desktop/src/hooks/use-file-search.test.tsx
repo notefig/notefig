@@ -95,6 +95,9 @@ async function renderSearch(
       }),
     );
   });
+  await act(async () => {
+    vi.advanceTimersByTime(300);
+  });
   return latest;
 }
 
@@ -140,9 +143,11 @@ beforeEach(async () => {
   });
   await core.workspace(WS).open();
   await files.collections.metadata.preload();
+  vi.useFakeTimers({ shouldAdvanceTime: true });
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   act(() => root?.unmount());
   container?.remove();
   container = null;
