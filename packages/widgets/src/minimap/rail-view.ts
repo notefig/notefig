@@ -155,6 +155,11 @@ export class MinimapRailView implements PluginView {
     this.nav.setAttribute("data-widget-minimap", "");
     this.nav.setAttribute("aria-label", "Prompt widgets in this document");
     this.nav.className = "group/map absolute right-2 top-6 h-28 w-3";
+    // A compositing layer of its own. The goo filter below is rendered on
+    // the CPU in WebKit (the macOS app's webview), and while the rail shared
+    // a layer with the document, every repaint under it — each selection
+    // change, caret blink and scroll — re-ran the blur.
+    this.nav.style.willChange = "transform";
     this.nav.hidden = true;
 
     const svg = svgEl("svg");
