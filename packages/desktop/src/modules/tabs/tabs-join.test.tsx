@@ -31,6 +31,7 @@ import { CoreProvider } from "@notefig/core/react";
 import type { WorkspaceFiles } from "@/modules/files";
 import { tabsModule } from "@/modules/tabs";
 import {
+  useStaleTabIds,
   useWorkspaceTabs,
   type WorkspaceTabsState,
 } from "@/modules/tabs/react";
@@ -49,14 +50,17 @@ let core: Core;
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
+type ProbeState = WorkspaceTabsState & { staleTabIds: string[] };
+
 function Probe({
   openTabs,
   onState,
 }: {
   openTabs: string[];
-  onState: (state: WorkspaceTabsState) => void;
+  onState: (state: ProbeState) => void;
 }) {
-  const state = useWorkspaceTabs(openTabs);
+  const tabs = useWorkspaceTabs(openTabs);
+  const state = { ...tabs, staleTabIds: useStaleTabIds(tabs) };
   useEffect(() => {
     onState(state);
   });
@@ -121,7 +125,7 @@ afterEach(async () => {
 
 describe("useWorkspaceTabs across open workspaces", () => {
   it("a tab from a backgrounded workspace is not stale", async () => {
-    let latest: WorkspaceTabsState | undefined;
+    let latest: ProbeState | undefined;
     const tabs = [`${WS_A}/note.md`, `${WS_B}/note.md`];
     await act(async () => {
       root!.render(
@@ -147,7 +151,7 @@ describe("useWorkspaceTabs across open workspaces", () => {
   });
 
   it("a tab whose file is in no open workspace is stale", async () => {
-    let latest: WorkspaceTabsState | undefined;
+    let latest: ProbeState | undefined;
     await act(async () => {
       root!.render(
         withCore(Probe, {

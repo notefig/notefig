@@ -5,7 +5,7 @@ import { cn } from "@notefig/ui/utils";
 import { TunnelStatus } from "@/components/tunnel/tunnel-status";
 import { useContentFetching, useOpenFileRows } from "@/modules/files/react";
 import { useWorkspaceOfPath } from "@/modules/workspaces/react";
-import { isFileTabId } from "@/modules/tabs";
+import { fileTabPath } from "@/modules/tabs";
 
 interface StatusBarProps {
   /** The tab in front; its file content, if it is a file, is counted. */
@@ -17,8 +17,7 @@ interface StatusBarProps {
  *  content has loaded. Read here rather than in the workspace shell, so a
  *  save re-renders the status bar alone. */
 function useActiveFileContent(activeTabId: string | null): string {
-  const activePath =
-    activeTabId !== null && isFileTabId(activeTabId) ? activeTabId : null;
+  const activePath = fileTabPath(activeTabId);
   // No file tab active → no workspace contains "" → no rows, no query.
   const workspacePath = useWorkspaceOfPath(activePath ?? "");
   const paths = useMemo(

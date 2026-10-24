@@ -21,7 +21,11 @@ import {
   useOpenWorkspacesReady,
   useWorkspaceOfPath,
 } from "@/modules/workspaces/react";
-import { useWorkspaceTabs } from "@/modules/tabs/react";
+import {
+  useStaleTabIds,
+  useWorkspaceTabs,
+  type OpenTabGroups,
+} from "@/modules/tabs/react";
 import { DebugPanel } from "./debug-panel";
 import { useOpenProject } from "@/hooks/use-open-project";
 import { Welcome } from "@/components/welcome";
@@ -35,7 +39,7 @@ import { useSidebarCollapseTween } from "@/hooks/use-sidebar-collapse-tween";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
-import { isFileTabId } from "@/modules/tabs";
+import { fileTabPath, isFileTabId } from "@/modules/tabs";
 import { useCore } from "@notefig/core/react";
 import { useTrackActiveTab } from "@/modules/seen/react";
 import { useTabElements } from "@/modules/tabs/tab-types";
@@ -128,11 +132,9 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
     getSelectedText,
   } = useDockableTabs({ dockableRef });
 
-  const { allDockableTabs } = useWorkspaceDocuments({
+  const { allDockableTabs, openTabGroups } = useWorkspaceDocuments({
     openTabs,
     activeTabId,
-    layout,
-    handleLayoutChange,
   });
 
   const {
@@ -182,7 +184,7 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
   // workspace: the two differ once tabs from several workspaces share
   // the dock.
   const activeFileWorkspace = useWorkspaceOfPath(
-    activeFilePath(activeTabId) ?? "",
+    fileTabPath(activeTabId) ?? "",
   );
   const searchWorkspacePath = activeFileWorkspace ?? workspacePath;
   const sidebarResize = useSidebarResize();
@@ -271,6 +273,12 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
 
         <StatusBar activeTabId={activeTabId} direction={direction} />
 
+        <StaleTabPruning
+          tabs={openTabGroups}
+          layout={layout}
+          onLayoutChange={handleLayoutChange}
+        />
+
         <SettingsModal
           direction={direction}
           onDirectionChange={setDirection}
@@ -319,16 +327,20 @@ function useDirectionSetting(workspacePath: string) {
   return { direction, setDirection };
 }
 
-/** Drop tabs whose backing rows are gone. One pass so concurrent prunes
+/** Drops tabs whose backing rows are gone. One pass so concurrent prunes
  *  can't race each other's layout writes; the fetch/boot-load gating
- *  already happened inside useWorkspaceTabs. */
-function useStaleTabPruning(
-  staleTabIds: string[],
-  layout: Parameters<typeof removeTabFromLayout>[0],
-  handleLayoutChange: (
-    layout: Parameters<typeof removeTabFromLayout>[0],
-  ) => void,
-) {
+ *  happens in useStaleTabIds. A component of its own so the metadata
+ *  fetches it waits out re-render it, not the shell. */
+function StaleTabPruning({
+  tabs,
+  layout,
+  onLayoutChange,
+}: {
+  tabs: OpenTabGroups;
+  layout: Parameters<typeof removeTabFromLayout>[0];
+  onLayoutChange: (layout: Parameters<typeof removeTabFromLayout>[0]) => void;
+}) {
+  const staleTabIds = useStaleTabIds(tabs);
   useEffect(() => {
     if (staleTabIds.length === 0) return;
 
@@ -337,37 +349,25 @@ function useStaleTabPruning(
       layout,
     );
 
-    handleLayoutChange(sanitizedLayout);
-  }, [staleTabIds, layout, handleLayoutChange]);
-}
-
-function activeFilePath(activeTabId: string | null): string | null {
-  if (activeTabId === null || !isFileTabId(activeTabId)) return null;
-  return activeTabId;
+    onLayoutChange(sanitizedLayout);
+  }, [staleTabIds, layout, onLayoutChange]);
+  return null;
 }
 
 /** Everything derived from the open tabs' backing rows: the cross-entity
- *  join (agent/file split, metadata ⋈ content rows, stale-tab detection),
- *  the rendered tab elements and watchers. */
+ *  join (agent/file split, metadata ⋈ content rows), the rendered tab
+ *  elements and watchers. */
 function useWorkspaceDocuments({
   openTabs,
   activeTabId,
-  layout,
-  handleLayoutChange,
 }: {
   openTabs: string[];
   activeTabId: string | null;
-  layout: Parameters<typeof removeTabFromLayout>[0];
-  handleLayoutChange: (
-    layout: Parameters<typeof removeTabFromLayout>[0],
-  ) => void;
 }) {
   const { tabs, recentDocuments } = useCore();
-  const {
-    fileTabsByWorkspace,
-    agentTaskRows: openAgentTaskRows,
-    staleTabIds,
-  } = useWorkspaceTabs(openTabs);
+  const openTabGroups = useWorkspaceTabs(openTabs);
+  const { fileTabsByWorkspace, agentTaskRows: openAgentTaskRows } =
+    openTabGroups;
 
   useReleaseNotesOnUpdate();
 
@@ -387,10 +387,9 @@ function useWorkspaceDocuments({
   // ...and the seen tracker: whatever tab is in front has been looked at.
   useTrackActiveTab(activeTabId);
 
-  useStaleTabPruning(staleTabIds, layout, handleLayoutChange);
   useContentWatches(fileTabsByWorkspace);
 
-  return { allDockableTabs };
+  return { allDockableTabs, openTabGroups };
 }
 
 /** The workspace's chrome state: sidebar/panel controls, the command
