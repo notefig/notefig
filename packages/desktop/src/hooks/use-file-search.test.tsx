@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StrictMode, act, createElement } from "react";
+import { StrictMode, act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { Core } from "@notefig/core";
 import { CoreProvider } from "@notefig/core/react";
@@ -161,6 +161,48 @@ describe("useFileSearch", () => {
   it("returns [] for an empty or whitespace query", async () => {
     expect(await renderSearch("")).toEqual([]);
     expect(await renderSearch("   ")).toEqual([]);
+  });
+
+  it("clears results immediately when the query is cleared", async () => {
+    let setQueryExternal: (query: string) => void = () => {};
+
+    function DynamicProbe({
+      source,
+      options,
+    }: {
+      source: FileSearchSource;
+      options?: FileSearchOptions;
+    }) {
+      const [query, setQuery] = useState("notes");
+      setQueryExternal = setQuery;
+      latest = useFileSearch(
+        source as Parameters<typeof useFileSearch>[0],
+        query,
+        options,
+      );
+      return null;
+    }
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(
+        createElement(CoreProvider, {
+          core,
+          children: createElement(DynamicProbe, { source: WS }),
+        }),
+      );
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(latest.map((r) => r.relativePath)).toContain("notes.md");
+
+    await act(async () => {
+      setQueryExternal("");
+    });
+    expect(latest).toEqual([]);
   });
 
   it("matches files by name, ranked basename-first, with title and paths", async () => {

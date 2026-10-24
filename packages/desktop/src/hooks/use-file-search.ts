@@ -25,6 +25,10 @@ function normalizeWorkspaceSource(
 function useDebouncedQuery(query: string, delayMs: number): string {
   const [debounced, setDebounced] = useState(query);
   useEffect(() => {
+    if (query.trim() === "") {
+      setDebounced("");
+      return;
+    }
     const timer = setTimeout(() => setDebounced(query), delayMs);
     return () => clearTimeout(timer);
   }, [query, delayMs]);
