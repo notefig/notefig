@@ -392,6 +392,34 @@ export function restoreKeptWidgetsTr(
   return restored > 0 ? tr : null;
 }
 
+/**
+ * Paste into a prompt draft. ProseMirror's default fit would turn pasted
+ * paragraphs after the first one into sibling document blocks; by inserting
+ * the clipboard's plain text as-is, multi-line content stays INSIDE the
+ * widget (MET-257). Newline characters are the same line breaks the draft
+ * already reads back via textBetween, so no extra node building is needed.
+ */
+function pasteIntoDraft(
+  view: EditorView,
+  event: ClipboardEvent,
+  _slice: Slice,
+  prompts: PromptWidgetsApi,
+): boolean {
+  const draft = selectionDraft(view.state);
+  if (!draft) return false;
+  const { selection } = view.state;
+  if (selection.from < draft.from || selection.to > draft.to) return false;
+  const { state } = prompts.get(draft.blobId);
+  if (!capabilitiesOf(state, { summoned: false }).fieldEditable) return true;
+  const text = event.clipboardData?.getData("text/plain").replace(/\r\n?/g, "\n");
+  // No plain text (e.g. HTML-only clipboard) leaves the parsed slice to
+  // ProseMirror's default handling instead of replacing the draft with
+  // nothing (MET-257).
+  if (!text) return false;
+  view.dispatch(view.state.tr.insertText(text).scrollIntoView());
+  return true;
+}
+
 /** The modifier that turns a drag-move into a copy (ProseMirror's own). */
 const COPY_KEY =
   typeof navigator !== "undefined" && /Mac|iP(hone|[oa]d)/.test(navigator.platform)
@@ -490,6 +518,9 @@ export function promptInteractionsPlugin(prompts: PromptWidgetsApi): Plugin {
         direct && node.type.name === PROMPT_NODE_NAME,
       handleKeyDown: (view, event) =>
         typeIntoSelectedWidget(view, event, prompts),
+      handlePaste(view, event, slice) {
+        return pasteIntoDraft(view, event, slice, prompts);
+      },
       handleTextInput(view, _from, _to, text) {
         // Over a widget the range covers through its draft: replaced from
         // the widget's edge, as Delete does.
