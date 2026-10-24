@@ -27,7 +27,7 @@ export type WidgetResponse = z.infer<typeof WidgetRespondInputSchema>;
  * The tool's name as it reaches the widget. ACP's ToolCallUpdate has no
  * tool-name field — identity travels in `title`, which harnesses mint from
  * the MCP tool name and the service normalizes (normalizeMcpToolName strips
- * the `mcp__notefig__` / `metrists_` prefixes) — so transcript entries carry
+ * the `mcp__notefig__` prefix) — so transcript entries carry
  * this plain string. Shared so the widget can match on it without importing
  * the tool.
  */

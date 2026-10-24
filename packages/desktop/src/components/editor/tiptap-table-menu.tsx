@@ -5,6 +5,12 @@ import type { Editor } from "@tiptap/core";
 
 const preventFocusLoss = (e: React.MouseEvent) => e.preventDefault();
 
+// Module scope: BubbleMenu dispatches an options transaction into the editor
+// whenever `shouldShow` changes identity, so an inline arrow cost one per
+// render.
+const showInTable = ({ editor }: { editor: Editor }) =>
+  editor.isActive("table") && !editor.isActive("link");
+
 interface TableMenuProps {
   editor: Editor;
 }
@@ -94,9 +100,7 @@ export function TableMenu({ editor }: TableMenuProps) {
     <BubbleMenu
       editor={editor}
       pluginKey="tableMenu"
-      shouldShow={({ editor }) =>
-        editor.isActive("table") && !editor.isActive("link")
-      }
+      shouldShow={showInTable}
     >
       <div className="flex items-center gap-0.5 rounded-md border bg-background p-1 shadow-md">
         <button

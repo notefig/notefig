@@ -81,8 +81,8 @@ export function deriveLatestAssistantLine(
  * Matching on `title` is deliberate, not a typo for a name field: ACP's
  * ToolCallUpdate has NO tool-name field — the identity only travels in
  * `title`, which harnesses mint from the MCP tool name and the service
- * normalizes (normalizeMcpToolName strips the `mcp__notefig__`/
- * `metrists_` prefixes) so entries carry the plain name here. Same
+ * normalizes (normalizeMcpToolName strips the `mcp__notefig__` prefix)
+ * so entries carry the plain name here. Same
  * contract findBlobAuthorTask matches against.
  */
 export function deriveWidgetResponse(

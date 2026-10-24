@@ -244,11 +244,11 @@ The desktop app runs in browser mode via `npm run dev:desktop` (Vite dev server 
 
 ```js
 await page.addInitScript(() => {
-  window.__METRISTS_FORCE_INDEXEDDB__ = true;
+  window.__NOTEFIG_FORCE_INDEXEDDB__ = true;
 });
 ```
 
-Then seed test files in the `metrists-fs` IndexedDB and navigate to `/<workspace-path>`.
+Then seed test files in the `notefig-fs` IndexedDB and navigate to `/<workspace-path>`.
 
 The `BrowserPlatformAdapter.pickDirectory()` dispatches a `mock-pick-directory` CustomEvent on `window`. Listen for it and respond with a workspace path:
 
