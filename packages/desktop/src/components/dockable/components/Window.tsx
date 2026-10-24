@@ -12,6 +12,7 @@ import { ScrollArea } from "@notefig/ui/scroll-area";
 import { cn } from "@notefig/ui/utils";
 import { dropZoneProps } from "@/utils/drag-protocol";
 import { useCore } from "@notefig/core/react";
+import { useRef } from "react";
 import type { TabsApi } from "@/modules/tabs";
 export type tabObject = {
   id: string;
@@ -19,6 +20,7 @@ export type tabObject = {
   content: React.ReactNode;
   renderTabs?: boolean;
   onClose?: () => void;
+  keepMounted?: boolean;
 };
 
 export type tabGroupObject = tabObject[];
@@ -81,6 +83,60 @@ function openDroppedFile(
   });
 }
 
+/** At most this many kept tabs stay mounted per window — the most
+ *  recently selected; an older one unmounts and mounts again on select. */
+export const MAX_KEPT_TABS = 8;
+
+/** The tabs to keep mounted: the window's most recently selected ones it
+ *  still holds. A kept tab mounts on its first selection, not when the
+ *  layout restores it. */
+function useShownTabs(tabs: tabGroupObject, selected: string): Set<string> {
+  const recent = useRef<string[]>([]);
+  const held = new Set(tabs.map((tab) => tab.id));
+  const next = recent.current.filter((id) => held.has(id) && id !== selected);
+  next.push(selected);
+  recent.current = next.slice(-MAX_KEPT_TABS);
+  return new Set(recent.current);
+}
+
+/** One tab's content. Selected, it lays out as a direct child of the
+ *  content box. A kept-mounted tab while another is selected is out of
+ *  flow and off screen, unrendered (`content-visibility` keeps its state,
+ *  scroll offsets included), and inert, so it takes no focus and leaves the
+ *  accessibility tree. Only this wrapper's style changes on select, so nothing remounts. */
+function TabContent({
+  hidden,
+  children,
+}: {
+  hidden: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      // Set as the DOM property: this React types package predates `inert`.
+      ref={(element) => {
+        if (element) element.inert = hidden;
+      }}
+      style={hidden ? HIDDEN_TAB_STYLE : SELECTED_TAB_STYLE}
+    >
+      {children}
+    </div>
+  );
+}
+
+const SELECTED_TAB_STYLE: React.CSSProperties = { display: "contents" };
+const HIDDEN_TAB_STYLE: React.CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  display: "flex",
+  visibility: "hidden",
+  contentVisibility: "hidden",
+  // Off screen too, so nothing inside reads as in view: visibility alone
+  // doesn't stop an IntersectionObserver (a prompt widget marks itself
+  // seen on one) wherever content-visibility is unsupported.
+  transform: "translateX(-200%)",
+};
+
 function TabView({
   tabs,
   hideTabs = false,
@@ -105,6 +161,7 @@ function TabView({
   // a single tab, so the content never jumps when that chrome comes and
   // goes with the sidebar.
   const isTopLeft = address.every((index) => index === 0);
+  const shown = useShownTabs(tabs, selected);
   const leading = isTopLeft ? tabBarLeading : null;
   // The top bar at the reading direction's end — physically top-left in
   // RTL — keeps the macOS lights clear.
@@ -198,9 +255,17 @@ function TabView({
           // overflow: hidden masked it by being a scroll port that
           // scrollIntoView could move; clip is not.
           minHeight: 0,
+          // Containing block for the kept-mounted tabs stacked under it.
+          position: "relative",
         }}
       >
-        {tabs.find((tab) => tab.id === selected)?.content}
+        {tabs.map((tab) =>
+          tab.id === selected || (tab.keepMounted && shown.has(tab.id)) ? (
+            <TabContent key={tab.id} hidden={tab.id !== selected}>
+              {tab.content}
+            </TabContent>
+          ) : null,
+        )}
       </div>
 
       <DroppableTargets

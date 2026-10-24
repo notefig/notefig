@@ -205,12 +205,13 @@ export async function getEditorContent(page: Page): Promise<string> {
   await page.waitForTimeout(200);
 
   return page.evaluate(() => {
-    // Get all editors and find the visible one (not display:none)
+    // The one editor actually shown: background file tabs stay mounted,
+    // hidden by an ancestor (visibility / content-visibility), not by
+    // their own display.
     const editors = Array.from(document.querySelectorAll('[role="textbox"]'));
-    const visibleEditor = editors.find((el) => {
-      const style = window.getComputedStyle(el as Element);
-      return style.display !== "none";
-    });
+    const visibleEditor = editors.find((el) =>
+      el.checkVisibility({ visibilityProperty: true }),
+    );
     return visibleEditor?.textContent || "";
   });
 }
@@ -220,7 +221,7 @@ export async function getEditorContent(page: Page): Promise<string> {
  */
 export async function typeInEditor(page: Page, text: string) {
   // Find the visible editor
-  const editor = page.locator('[role="textbox"]').first();
+  const editor = page.locator('[role="textbox"]:visible').first();
   await editor.click();
   await editor.pressSequentially(text);
 }

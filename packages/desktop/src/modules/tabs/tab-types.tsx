@@ -46,6 +46,8 @@ interface BuiltTab {
   name: string;
   content: ReactNode;
   deps: unknown[];
+  /** Hidden rather than unmounted while another tab is selected. */
+  keepMounted?: boolean;
 }
 
 interface TabTypeDefinition<K extends TabKind> {
@@ -98,6 +100,10 @@ const fileTab: TabTypeDefinition<"file"> = {
       name: getFileName(ref.path),
       deps: [ref.path],
       content: <FileTab path={ref.path} />,
+      // Remounting an editor resets its node views and re-registers its
+      // menus' plugins, rebuilding the whole document's DOM and every
+      // plugin view: hundreds of ms per switch on a long document.
+      keepMounted: true,
     };
   },
 };
@@ -207,6 +213,7 @@ export function useTabElements(
                 // closure over `layout`, so this element stays stable
                 // across tab selects and drags.
                 onClose={() => closeTab(tabId)}
+                keepMounted={built.keepMounted}
               >
                 {built.content}
               </Dockable.Tab>

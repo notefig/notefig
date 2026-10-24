@@ -64,7 +64,7 @@ async function openSettings(page: Page) {
 
 async function getWindowEditorText(page: Page, windowId: string) {
   const editor = page
-    .locator(`[data-dockable-window-id="${windowId}"] [role="textbox"]`)
+    .locator(`[data-dockable-window-id="${windowId}"] [role="textbox"]:visible`)
     .first();
   await expect(editor).toBeVisible();
   return (await editor.textContent()) ?? "";
@@ -284,7 +284,7 @@ test.describe("Focus Management", () => {
     await waitForFileTree(page, "tab-a.md");
 
     const rightEditor = page
-      .locator('[data-dockable-window-id="window-right"] [role="textbox"]')
+      .locator('[data-dockable-window-id="window-right"] [role="textbox"]:visible')
       .first();
     await rightEditor.click();
 
@@ -305,7 +305,7 @@ test.describe("Focus Management", () => {
       .toContain("alpha content for tab a");
 
     const leftEditor = page
-      .locator('[data-dockable-window-id="window-left"] [role="textbox"]')
+      .locator('[data-dockable-window-id="window-left"] [role="textbox"]:visible')
       .first();
     await leftEditor.click();
     await page.keyboard.press("Control+Tab");
