@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type React from "react";
 import { Dockable } from "@/components/dockable";
 import type { DockChrome } from "@/components/dockable/store";
@@ -15,11 +15,7 @@ import { cn } from "@notefig/ui/utils";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import {
-  useContentFetching,
-  useContentWatches,
-  useOpenFileRows,
-} from "@/modules/files/react";
+import { useContentWatches } from "@/modules/files/react";
 import {
   useFocusedWorkspace,
   useOpenWorkspacesReady,
@@ -132,7 +128,7 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
     getSelectedText,
   } = useDockableTabs({ dockableRef });
 
-  const { allDockableTabs, wordCount, isSynced } = useWorkspaceDocuments({
+  const { allDockableTabs } = useWorkspaceDocuments({
     openTabs,
     activeTabId,
     layout,
@@ -273,11 +269,7 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
           </div>
         </div>
 
-        <StatusBar
-          wordCount={wordCount}
-          isSynced={isSynced}
-          direction={direction}
-        />
+        <StatusBar activeTabId={activeTabId} direction={direction} />
 
         <SettingsModal
           direction={direction}
@@ -349,38 +341,14 @@ function useStaleTabPruning(
   }, [staleTabIds, layout, handleLayoutChange]);
 }
 
-/** The active tab's file content, "" unless a file tab is active and its
- *  content has loaded. Joined here, not lifted from the tab: the active tab
- *  resolves its own workspace like every file tab does. */
-function useActiveFileContent(activeTabId: string | null): string {
-  const activePath = activeFilePath(activeTabId);
-  // No file tab active → no workspace contains "" → no rows, no query.
-  const workspacePath = useWorkspaceOfPath(activePath ?? "");
-  const paths = useMemo(
-    () => (activePath === null ? [] : [activePath]),
-    [activePath],
-  );
-  const [row] = useOpenFileRows(workspacePath, paths);
-  return row?.content ?? "";
-}
-
 function activeFilePath(activeTabId: string | null): string | null {
   if (activeTabId === null || !isFileTabId(activeTabId)) return null;
   return activeTabId;
 }
 
-/** Status-bar word count, null with nothing to count. */
-function countWords(content: string): number | null {
-  if (!content) return null;
-  return content
-    .trim()
-    .split(/\s+/)
-    .filter((word: string) => word.length > 0).length;
-}
-
 /** Everything derived from the open tabs' backing rows: the cross-entity
  *  join (agent/file split, metadata ⋈ content rows, stale-tab detection),
- *  the rendered tab elements, watchers, and the status bar's inputs. */
+ *  the rendered tab elements and watchers. */
 function useWorkspaceDocuments({
   openTabs,
   activeTabId,
@@ -410,9 +378,6 @@ function useWorkspaceDocuments({
     closeTab: tabs.close,
   });
 
-  const activeContent = useActiveFileContent(activeTabId);
-  const wordCount = useMemo(() => countWords(activeContent), [activeContent]);
-
   // The Everything view's recent documents: whatever file tab is in front.
   useEffect(() => {
     if (activeTabId !== null && isFileTabId(activeTabId)) {
@@ -422,11 +387,10 @@ function useWorkspaceDocuments({
   // ...and the seen tracker: whatever tab is in front has been looked at.
   useTrackActiveTab(activeTabId);
 
-  const isFetchingContent = useContentFetching();
   useStaleTabPruning(staleTabIds, layout, handleLayoutChange);
   useContentWatches(fileTabsByWorkspace);
 
-  return { allDockableTabs, wordCount, isSynced: !isFetchingContent };
+  return { allDockableTabs };
 }
 
 /** The workspace's chrome state: sidebar/panel controls, the command

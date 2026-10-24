@@ -1,14 +1,41 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Cloud, CloudUpload, Type } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@notefig/ui/utils";
 import { TunnelStatus } from "@/components/tunnel/tunnel-status";
+import { useContentFetching, useOpenFileRows } from "@/modules/files/react";
+import { useWorkspaceOfPath } from "@/modules/workspaces/react";
+import { isFileTabId } from "@/modules/tabs";
 
 interface StatusBarProps {
-  /** Omitted (null) when the focused tab has no text content of its own. */
-  wordCount: number | null;
-  isSynced: boolean;
+  /** The tab in front; its file content, if it is a file, is counted. */
+  activeTabId: string | null;
   direction?: "ltr" | "rtl";
+}
+
+/** The active tab's file content, "" unless a file tab is active and its
+ *  content has loaded. Read here rather than in the workspace shell, so a
+ *  save re-renders the status bar alone. */
+function useActiveFileContent(activeTabId: string | null): string {
+  const activePath =
+    activeTabId !== null && isFileTabId(activeTabId) ? activeTabId : null;
+  // No file tab active → no workspace contains "" → no rows, no query.
+  const workspacePath = useWorkspaceOfPath(activePath ?? "");
+  const paths = useMemo(
+    () => (activePath === null ? [] : [activePath]),
+    [activePath],
+  );
+  const [row] = useOpenFileRows(workspacePath, paths);
+  return row?.content ?? "";
+}
+
+/** Word count, null with nothing to count. */
+function countWords(content: string): number | null {
+  if (!content) return null;
+  return content
+    .trim()
+    .split(/\s+/)
+    .filter((word: string) => word.length > 0).length;
 }
 
 function useDebouncedSyncState(
@@ -40,12 +67,10 @@ function useDebouncedSyncState(
  *  bottom corner at the reading-direction end (the shell root is its
  *  containing block, so it sits under the root padding, flush with the
  *  window edge). */
-export function StatusBar({
-  wordCount,
-  isSynced,
-  direction = "ltr",
-}: StatusBarProps) {
-  const debouncedSynced = useDebouncedSyncState(isSynced);
+export function StatusBar({ activeTabId, direction = "ltr" }: StatusBarProps) {
+  const content = useActiveFileContent(activeTabId);
+  const wordCount = useMemo(() => countWords(content), [content]);
+  const debouncedSynced = useDebouncedSyncState(!useContentFetching());
 
   return (
     <div
