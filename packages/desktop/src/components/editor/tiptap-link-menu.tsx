@@ -10,6 +10,11 @@ import { isExternalUrl, buildInternalCandidates } from "./tiptap-link-utils";
 
 const preventFocusLoss = (e: React.MouseEvent) => e.preventDefault();
 
+// Module scope: BubbleMenu dispatches an options transaction into the editor
+// whenever `shouldShow` changes identity, so an inline arrow cost one per
+// render.
+const showOnLink = ({ editor }: { editor: Editor }) => editor.isActive("link");
+
 interface LinkBubbleMenuProps {
   editor: Editor;
   onEdit: () => void;
@@ -64,7 +69,7 @@ export function LinkBubbleMenu({
   return (
     <BubbleMenu
       editor={editor}
-      shouldShow={({ editor }) => editor.isActive("link")}
+      shouldShow={showOnLink}
     >
       <div className="flex items-center gap-0.5 rounded-md border bg-background p-1 shadow-md">
         <button

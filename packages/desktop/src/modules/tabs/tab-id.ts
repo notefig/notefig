@@ -62,3 +62,8 @@ export function tabKind(tabId: string): TabKind {
 export function isFileTabId(tabId: string): boolean {
   return tabKind(tabId) === "file";
 }
+
+/** The file a tab shows: its id when it is a file tab, else null. */
+export function fileTabPath(tabId: string | null): string | null {
+  return tabId !== null && isFileTabId(tabId) ? tabId : null;
+}

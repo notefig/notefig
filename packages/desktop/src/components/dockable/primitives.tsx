@@ -15,6 +15,9 @@ export type TabProps = {
   name: string;
   children: React.ReactNode;
   onClose?: () => void;
+  /** Stay mounted, hidden, while another tab in the window is selected,
+   *  instead of unmounting — for content that is costly to rebuild. */
+  keepMounted?: boolean;
 };
 
 export function Tab(props: TabProps) {

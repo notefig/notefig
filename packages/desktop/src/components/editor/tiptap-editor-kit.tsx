@@ -90,6 +90,35 @@ const NativeFormatIntercept = Extension.create({
   },
 });
 
+/**
+ * The browser's own undo (⌘Z the keymap left unhandled, Edit ▸ Undo) fires
+ * `historyUndo`/`historyRedo` at the contenteditable it last saw edited, not
+ * the focused one — which can be a kept, hidden tab's editor. Only the
+ * focused editor answers it; above StarterKit's priority so this runs before
+ * the history plugin's own handler.
+ */
+const NativeHistoryFocusGuard = Extension.create({
+  name: "nativeHistoryFocusGuard",
+  priority: 1000,
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          handleDOMEvents: {
+            beforeinput: (view, event) => {
+              if (!event.inputType?.startsWith("history")) return false;
+              if (view.hasFocus()) return false;
+              event.preventDefault();
+              return true;
+            },
+          },
+        },
+      }),
+    ];
+  },
+});
+
 export const editorExtensions = [
   ...createSchemaExtensions(
     MarkdownImage,
@@ -112,4 +141,5 @@ export const editorExtensions = [
   }),
   CharacterCount,
   NativeFormatIntercept,
+  NativeHistoryFocusGuard,
 ];

@@ -120,6 +120,13 @@ function spreadRatios(ratios: number[]): number[] {
 }
 
 /** Pure derivation, exported for tests. */
+/** A dot's title as the rail shows it: clamped, with an ellipsis. */
+export function dotTitle(title: string): string {
+  return title.length > TITLE_MAX_CHARS
+    ? `${title.slice(0, TITLE_MAX_CHARS)}…`
+    : title;
+}
+
 export function deriveMinimapEntries(
   doc: PMNode,
   sources: Record<string, MinimapSource>,
@@ -140,10 +147,7 @@ export function deriveMinimapEntries(
       // Clamped in from the edges so the first/last dot never sits on the
       // rail's boundary; crowding is resolved by spreadRatios below.
       ratio: Math.min(Math.max(pos / size, RATIO_LO), RATIO_HI),
-      title:
-        info.title.length > TITLE_MAX_CHARS
-          ? `${info.title.slice(0, TITLE_MAX_CHARS)}…`
-          : info.title,
+      title: dotTitle(info.title),
     });
     return false;
   });

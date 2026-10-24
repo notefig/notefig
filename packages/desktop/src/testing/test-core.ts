@@ -17,6 +17,7 @@ export function memoryUrlState(initialSearch = ""): UrlState {
   let search = initialSearch;
   const listeners = new Set<() => void>();
   return {
+    pathname: () => "/",
     search: () => search,
     setSearch(next) {
       search = next;
@@ -33,6 +34,7 @@ export function memoryUrlState(initialSearch = ""): UrlState {
 export function windowUrlState(): UrlState {
   const listeners = new Set<() => void>();
   return {
+    pathname: () => window.location.pathname,
     search: () => window.location.search,
     setSearch(next, options) {
       const url = `${window.location.pathname}${next}`;
