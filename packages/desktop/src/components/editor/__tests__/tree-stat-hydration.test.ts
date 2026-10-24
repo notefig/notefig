@@ -3,6 +3,12 @@ import { FileTree } from "@pierre/trees";
 import { attachTreeStatHydration } from "../tree-stat-hydration";
 // The workspace's files, as far as hydration needs them.
 const hydrateMock = vi.fn((_dirPath: string) => Promise.resolve());
+/** Each request, as the directories it names. */
+const requests: string[][] = [];
+const hydrateDirectoryStats = (dirs: readonly string[]) => {
+  requests.push([...dirs]);
+  return Promise.all(dirs.map((dir) => hydrateMock(dir))).then(() => {});
+};
 
 const WS = "/ws";
 const toAbs = (rel: string) => `${WS}/${rel.replace(/\/+$/, "")}`;
@@ -13,7 +19,7 @@ let detach: (() => void) | null = null;
 function attach(): void {
   detach = attachTreeStatHydration(
     model,
-    { workspacePath: WS, hydrateDirectoryStats: hydrateMock },
+    { workspacePath: WS, hydrateDirectoryStats },
     toAbs,
   );
 }
@@ -21,6 +27,7 @@ function attach(): void {
 beforeEach(() => {
   hydrateMock.mockClear();
   hydrateMock.mockImplementation(() => Promise.resolve());
+  requests.length = 0;
 });
 
 afterEach(() => {
@@ -34,6 +41,15 @@ describe("attachTreeStatHydration", () => {
     model = new FileTree({ paths: ["a.md"], initialExpansion: "closed" });
     attach();
     expect(hydrateMock).toHaveBeenCalledWith(WS);
+  });
+
+  it("asks for the root and every expanded directory in one request", () => {
+    model = new FileTree({
+      paths: ["a/x.md", "b/y.md"],
+      initialExpandedPaths: ["a", "b"],
+    });
+    attach();
+    expect(requests).toEqual([[WS, `${WS}/a`, `${WS}/b`]]);
   });
 
   it("hydrates expanded directories but not collapsed ones", () => {

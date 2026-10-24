@@ -99,9 +99,11 @@ export const fileQueryKeys = {
   content: (workspacePath: string) => ["file-content", workspacePath],
 };
 
+/** The directory holding `path`, in the app's path flavor (backslashes on
+ *  Windows): the refetch's re-stat and the tree's hydration both match
+ *  rows to directories by it. */
 function parentDirectory(path: string): string {
-  const separator = path.lastIndexOf("/");
-  return separator > 0 ? path.slice(0, separator) : "/";
+  return pathutil.dirname(path);
 }
 
 function createMetadataCollection(
@@ -484,13 +486,14 @@ export interface WorkspaceFiles {
    */
   refetchMetadata(): Promise<void>;
   /**
-   * Stat a directory's direct children and write modified/size into their
-   * rows. Callers re-invoke freely (tree expand, child-count changes) — one
-   * stat batch per directory is cheap, concurrent calls per directory
-   * coalesce, and rows the collection doesn't hold yet are picked up by a
-   * later call or the periodic refetch's hydrated-dir re-stat.
+   * Stat the direct children of these directories and write modified/size
+   * into their rows — one stat batch and one write for all of them. Callers
+   * re-invoke freely (tree expand, child-count changes): a hydrated
+   * directory is skipped (the refetch re-stats its children), concurrent
+   * calls per directory coalesce, and rows the collection doesn't hold yet
+   * are picked up by a later call or the refetch.
    */
-  hydrateDirectoryStats(dirPath: string): Promise<void>;
+  hydrateDirectoryStats(dirPaths: readonly string[]): Promise<void>;
   /**
    * Bring a loaded file's rows (content, and metadata's hash) to `content`.
    * The one implementation of "a loaded file's row reflects its bytes",
@@ -825,42 +828,59 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
     }
   };
 
-  const hydrateDirectoryStats = (dirPath: string) => {
-    // Once hydrated, a directory's stats are kept fresh by the refetch,
-    // which re-stats its children; the tree asks again for every visible
-    // directory on each expand or collapse, and each ask was a stat batch
-    // plus a write of every row's cache.
-    if (hydratedDirs.has(dirPath)) return Promise.resolve();
-    const inFlight = hydrationInFlight.get(dirPath);
-    if (inFlight) return inFlight;
+  const hydrateDirectoryStats = async (dirPaths: readonly string[]) => {
+    // Already hydrated: the refetch keeps those fresh, and the tree asks
+    // again for every visible directory on each expand or collapse.
+    const waits: Promise<void>[] = [];
+    const pending: string[] = [];
+    for (const dir of new Set(dirPaths)) {
+      if (hydratedDirs.has(dir)) continue;
+      const inFlight = hydrationInFlight.get(dir);
+      if (inFlight) waits.push(inFlight);
+      else pending.push(dir);
+    }
+    if (pending.length > 0) {
+      const batch = statChildren(pending).finally(() => {
+        for (const dir of pending) hydrationInFlight.delete(dir);
+      });
+      for (const dir of pending) hydrationInFlight.set(dir, batch);
+      waits.push(batch);
+    }
+    await Promise.all(waits);
+  };
 
-    const promise = (async () => {
-      // The refetch's parent test (normalized absolute paths throughout),
-      // not a relative path per row: this scans the whole collection.
-      const children = collections.metadata.toArray.filter(
-        (row) => row.path !== dirPath && parentDirectory(row.path) === dirPath,
-      );
-
-      if (children.length > 0) {
-        const result = await fs.getMetadata(children.map((c) => c.path));
-        const updates: FileMetadata[] = [];
-        for (const m of result.succeeded) {
-          const row = collections.metadata.get(m.path);
-          if (!row) continue;
-          updates.push({ ...row, modified: m.modifiedAt, size: m.size });
-        }
-        if (updates.length > 0) {
-          collections.metadata.utils.writeUpsert(updates);
-        }
-      }
-
-      hydratedDirs.add(dirPath);
-    })().finally(() => {
-      hydrationInFlight.delete(dirPath);
+  /** One stat batch and one write for every child of `dirs`: each write
+   *  rewrites the collection's whole query cache, so a first visit with
+   *  many folders open paid that once per folder. */
+  const statChildren = async (dirs: string[]) => {
+    // Before the first walk lands there are no rows to stat: leave the
+    // directories unhydrated, so the next request does them.
+    if (!collections.metadata.isReady()) return;
+    const wanted = new Set(dirs);
+    // The refetch's parent test, not a relative path per row: this scans
+    // the whole collection.
+    const children = collections.metadata.toArray.filter((row) => {
+      const parent = parentDirectory(row.path);
+      return parent !== row.path && wanted.has(parent);
     });
 
-    hydrationInFlight.set(dirPath, promise);
-    return promise;
+    if (children.length > 0) {
+      const result = await fs.getMetadata(children.map((c) => c.path));
+      const updates: FileMetadata[] = [];
+      for (const m of result.succeeded) {
+        const row = collections.metadata.get(m.path);
+        if (!row) continue;
+        updates.push({ ...row, modified: m.modifiedAt, size: m.size });
+      }
+      if (updates.length > 0) {
+        collections.metadata.utils.writeUpsert(updates);
+      }
+      // Some stats failed: the next request retries rather than the
+      // directories waiting out the refetch.
+      if (result.failed.length > 0) return;
+    }
+
+    for (const dir of dirs) hydratedDirs.add(dir);
   };
 
   const dropQueries = () => {
