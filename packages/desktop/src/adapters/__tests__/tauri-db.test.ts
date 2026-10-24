@@ -182,6 +182,81 @@ describe("corruption guard", () => {
   });
 });
 
+describe("idempotent schema statements", () => {
+  const CREATE = "CREATE TABLE IF NOT EXISTS collection_registry (id TEXT)";
+  const ALTER = "ALTER TABLE applied_tx ADD COLUMN replay_json TEXT";
+
+  it("run once per connection, however many adapters initialise", async () => {
+    const execute = vi.fn(() => ({ rowsAffected: 0, lastInsertId: 0 }));
+    withMockedTauri({ db_execute: execute });
+    const db = new RusqliteDatabase();
+
+    await Promise.all([db.execute(CREATE), db.execute(CREATE)]);
+    await db.execute(CREATE);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("keep a duplicate-column failure, which the package catches", async () => {
+    const execute = vi.fn(() => {
+      throw { type: "sql", message: "duplicate column name: replay_json" };
+    });
+    withMockedTauri({ db_execute: execute });
+    const db = new RusqliteDatabase();
+
+    await expect(db.execute(ALTER)).rejects.toThrow("duplicate column");
+    await expect(db.execute(ALTER)).rejects.toThrow("duplicate column");
+
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("retry any other failure", async () => {
+    const execute = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw dbError("busy");
+      })
+      .mockImplementation(() => ({ rowsAffected: 0, lastInsertId: 0 }));
+    withMockedTauri({ db_execute: execute });
+    const db = new RusqliteDatabase();
+
+    await expect(db.execute(CREATE)).rejects.toThrow();
+    await expect(db.execute(CREATE)).resolves.toBeDefined();
+
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("run again after anything that can undo them", async () => {
+    const execute = vi.fn((_args: Record<string, unknown>) => ({
+      rowsAffected: 0,
+      lastInsertId: 0,
+    }));
+    withMockedTauri({ db_execute: execute });
+    const db = new RusqliteDatabase();
+    const INDEX = "CREATE INDEX IF NOT EXISTS idx ON t (a)";
+
+    await db.execute(INDEX);
+    await db.execute("DROP INDEX IF EXISTS idx");
+    await db.execute(INDEX);
+    await db.execute("ROLLBACK");
+    await db.execute(INDEX);
+
+    const creates = execute.mock.calls.filter(([args]) => args.sql === INDEX);
+    expect(creates).toHaveLength(3);
+  });
+
+  it("leave every other statement alone", async () => {
+    const execute = vi.fn(() => ({ rowsAffected: 1, lastInsertId: 0 }));
+    withMockedTauri({ db_execute: execute });
+    const db = new RusqliteDatabase();
+
+    await db.execute("INSERT INTO t (a) VALUES (1)");
+    await db.execute("INSERT INTO t (a) VALUES (1)");
+
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("the db surface itself", () => {
   it("touches no storage when the persistence is created", () => {
     const invoked: string[] = [];
