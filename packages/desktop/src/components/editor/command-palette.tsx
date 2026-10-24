@@ -52,6 +52,7 @@ import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { canOpenFile } from "@/modules/editors";
 import { FileTypeIcon } from "./file-type-icon";
 import { useCore } from "@notefig/core/react";
+import { path as pathutil } from "@/utils/path";
 import type { FeedbackApi } from "@/modules/feedback";
 import { FEEDBACK_HOTKEY } from "@/modules/feedback/react";
 
@@ -103,16 +104,16 @@ function helpCommands(feedback: FeedbackApi): CommandType[] {
 
 /**
  * The palette's Linear-style "quick results" tail: fuzzy file matches from
- * the workspace, rendered after every command group. Hidden outside a
- * workspace tab surface (the editor test harness) — there is nowhere to open
- * a file there.
+ * any open workspace, rendered after every command group. Hidden outside a
+ * workspace tab surface (the editor test harness) — there is nowhere to
+ * open a file there.
  *
- * useFileSearch only pre-selects the top matches out of the whole workspace;
- * visible filtering/ranking stays with cmdk's default scorer, so file rows
- * get the same interaction behavior as commands (within-group sorting,
- * selection management). cmdk's group re-sorting is a no-op here because
- * every group lives in its own wrapper div, so commands always stay above
- * these results.
+ * useFileSearch only pre-selects the top matches out of every open
+ * workspace; visible filtering/ranking stays with cmdk's default scorer,
+ * so file rows get the same interaction behavior as commands (within-group
+ * sorting, selection management). cmdk's group re-sorting is a no-op here
+ * because every group lives in its own wrapper div, so commands always stay
+ * above these results.
  */
 function FileQuickResults({
   workspacePath,
@@ -126,8 +127,8 @@ function FileQuickResults({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const { tabs } = useCore();
-  const fileResults = useFileSearch(workspacePath, query, {
+  const { tabs, workspaceRegistry } = useCore();
+  const fileResults = useFileSearch(undefined, query, {
     filter: canOpenFile,
   });
 
@@ -142,31 +143,48 @@ function FileQuickResults({
     <div>
       {showSeparator && <CommandSeparator />}
       <CommandGroup heading={t("quickResultsFor", { query })}>
-        {fileResults.map((result) => (
-          <CommandItem
-            key={result.path}
-            // Scored by cmdk's default filter — the relative path, not the
-            // absolute one, so the workspace prefix can't match the query.
-            value={result.relativePath}
-            keywords={[result.title]}
-            onSelect={() => handleSelect(result)}
-            className="flex items-center gap-2 cursor-pointer"
-          >
-            <FileTypeIcon
-              path={result.path}
-              className="w-4 h-4 text-muted-foreground shrink-0"
-            />
-            <span className="truncate">{result.title}</span>
-            {result.relativePath !== result.title && (
-              <span
-                className="ms-auto min-w-0 truncate text-xs text-muted-foreground"
-                dir="ltr"
-              >
-                {result.relativePath}
-              </span>
-            )}
-          </CommandItem>
-        ))}
+        {fileResults.map((result) => {
+          const resultWorkspace = workspaceRegistry.workspaceOf(result.path);
+          const isActiveWorkspace = resultWorkspace === workspacePath;
+          const showWorkspace = resultWorkspace && !isActiveWorkspace;
+          return (
+            <CommandItem
+              key={result.path}
+              // The absolute path keeps every result unique when the same
+              // relative path exists in several open workspaces; keywords
+              // carry relativePath/title so the query still matches what
+              // the user sees.
+              value={result.path}
+              keywords={[
+                result.relativePath,
+                result.title,
+                ...(showWorkspace ? [pathutil.basename(resultWorkspace)] : []),
+              ]}
+              onSelect={() => handleSelect(result)}
+              className="flex items-center gap-2 cursor-pointer"
+            >
+              <FileTypeIcon
+                path={result.path}
+                className="w-4 h-4 text-muted-foreground shrink-0"
+              />
+              <span className="truncate">{result.title}</span>
+              {(result.relativePath !== result.title || showWorkspace) && (
+                <span
+                  className="ms-auto min-w-0 truncate text-xs text-muted-foreground"
+                  dir="ltr"
+                >
+                  {showWorkspace && (
+                    <>
+                      {pathutil.basename(resultWorkspace)}{" "}
+                      <span className="mx-1">›</span>{" "}
+                    </>
+                  )}
+                  {result.relativePath}
+                </span>
+              )}
+            </CommandItem>
+          );
+        })}
       </CommandGroup>
     </div>
   );
