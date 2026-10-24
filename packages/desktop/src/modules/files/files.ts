@@ -49,6 +49,9 @@ import {
 import { platformModule, queryClientModule } from "@/core/services";
 
 const METADATA_REFETCH_INTERVAL_MS = 30_000;
+/** How long a walked listing counts as current: returning to a workspace
+ *  (its tree remounting, its focus) re-walks only an older one. */
+const LISTING_FRESH_MS = 10_000;
 const INVALIDATE_DEBOUNCE_MS = 500;
 
 /** Temporary MET-135 diagnostics — grep for [scratchpad-debug]. */
@@ -119,6 +122,10 @@ function createMetadataCollection(
       // Safety net for changes the fs watcher misses (network volumes,
       // watcher gaps): periodically re-read the tree from disk.
       refetchInterval: METADATA_REFETCH_INTERVAL_MS,
+      // A subscriber arriving (the file tree remounting on a workspace
+      // switch) re-walks only a listing older than this; with the default
+      // of 0, every return to a workspace walked it again.
+      staleTime: LISTING_FRESH_MS,
 
       // Access errors can't be retried away — fail fast so the recovery UI
       // (WorkspaceErrorBoundary) shows immediately.
@@ -478,6 +485,12 @@ export interface WorkspaceFiles {
   file(filePath: string): FileHandle;
   /** Refetch the listing; call when files are known to have changed. */
   refresh(): Promise<void>;
+  /**
+   * Re-walk unless a walk is in flight or landed within `maxAgeMs` — for
+   * catching watcher gaps on a return, without a full walk (and a cancel
+   * of the one running) on every switch.
+   */
+  catchUp(maxAgeMs: number): Promise<void>;
   /**
    * Re-walk after out-of-band disk mutations (the entry-time scratchpad
    * sweep). Resolves once a walk that STARTED after this call has landed: a
@@ -914,6 +927,14 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
     refresh: async () => {
       await collections.metadata.utils.refetch();
     },
+    catchUp: async (maxAgeMs) => {
+      const state = queryClient.getQueryState(
+        fileQueryKeys.metadata(workspacePath),
+      );
+      if (state?.fetchStatus === "fetching") return;
+      if (state && Date.now() - state.dataUpdatedAt < maxAgeMs) return;
+      await collections.metadata.utils.refetch();
+    },
     refetchMetadata,
     hydrateDirectoryStats,
     updateLoadedContent,
@@ -967,8 +988,9 @@ declare module "@notefig/core" {
 export const filesModule = defineModule({
   name: "files",
   needs: [platformModule, queryClientModule],
-  // Coming back to a workspace re-stats its listing (cheap, catches
-  // watcher gaps) and gives a watcher whose start failed another chance.
+  // Coming back to a workspace re-walks its listing (catches watcher gaps)
+  // unless a walk is running or recent, and gives a watcher whose start
+  // failed another chance.
   boot: (_api, ctx) =>
     ctx.hooks.on("workspace:focused", ({ path }) => {
       // An earlier focus step can still be waiting when the workspace
@@ -978,7 +1000,7 @@ export const filesModule = defineModule({
       if (!workspace.isOpen()) return;
       const { files } = workspace;
       files.ensureWatching();
-      void files.refresh();
+      void files.catchUp(LISTING_FRESH_MS);
     }),
   workspace: {
     create: (ctx) =>
