@@ -22,6 +22,9 @@
 /// Stage 0 spikes in docs/architecture/spikes/):
 /// - GUI-launched apps get a bare PATH, so `npx`/`node` (nvm) don't resolve;
 ///   we replace the child PATH with a cached `$SHELL -ilc` probe (macOS only).
+///   When that probe fails, nothing is spawned: the bare PATH would leave
+///   every harness unable to find its binary, so the caller gets
+///   `shell_env_unavailable` instead, and the next spawn probes again.
 /// - claude-code-acp refuses to run "inside another Claude Code session", so
 ///   we strip the `CLAUDECODE` / `CLAUDE_CODE_*` guard vars from the child env.
 use serde::{Deserialize, Serialize};
@@ -41,6 +44,8 @@ pub enum AgentProcErrorType {
     NotFound,
     StdinClosed,
     IoError,
+    /// macOS: the login shell didn't tell us its PATH, so nothing was spawned.
+    ShellEnvUnavailable,
     Unknown,
 }
 
@@ -371,57 +376,92 @@ lazy_static::lazy_static! {
 // reboot (MET-158 — installing Node/npm in PowerShell after launching the
 // app left spawn_agent stuck on the stale PATH from before the install).
 
-static LOGIN_PATH: OnceCell<Option<String>> = OnceCell::const_new();
+/// How long a `$SHELL -ilc` may take: the PATH probe and `run_shell_command`
+/// alike. The first launch after an update is the slow one — a new binary
+/// being verified, cold caches, several login shells started at once at
+/// boot — and a heavy work-machine zsh setup went past the old 5s there.
+const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The PATH a freshly-launched process would actually see right now.
-/// macOS: a login-shell probe, resolved once and cached (nvm/brew paths).
+/// Only a PATH that was found is kept. A failed probe is not: the next
+/// spawn probes again, so one slow launch doesn't break every harness until
+/// the app restarts.
+static LOGIN_PATH: OnceCell<String> = OnceCell::const_new();
+
+/// The PATH a freshly-launched process would actually see right now, or why
+/// it couldn't be found.
+/// macOS: a login-shell probe, cached once it succeeds (nvm/brew paths).
 /// Windows: a live registry read, NOT cached — re-resolved on every spawn so
 /// an install made mid-session is visible on the very next agent start, no
 /// app restart required. Other platforms keep the inherited PATH (None).
-async fn resolve_login_path() -> Option<String> {
+async fn resolve_login_path() -> Result<Option<String>, String> {
     #[cfg(target_os = "macos")]
     {
-        LOGIN_PATH.get_or_init(probe_login_path).await.clone()
+        LOGIN_PATH
+            .get_or_try_init(probe_login_path)
+            .await
+            .map(|path| Some(path.clone()))
     }
     #[cfg(windows)]
     {
-        win_env::fresh_path()
+        Ok(win_env::fresh_path())
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {
-        None
+        Ok(None)
     }
 }
 
 #[cfg(target_os = "macos")]
-async fn probe_login_path() -> Option<String> {
+async fn probe_login_path() -> Result<String, String> {
     // `-ilc` (login AND interactive): nvm loads from .zshrc (interactive) and
     // needs brew from .zprofile (login) — both flags are required. See
     // docs/architecture/spikes/phase1-macos-path-spike.md.
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let output = tokio::time::timeout(
-        Duration::from_secs(5),
+        LOGIN_SHELL_TIMEOUT,
         Command::new(&shell)
             .args(["-ilc", "printf '__MP__%s__END__' \"$PATH\""])
             .stdin(Stdio::null())
             .stderr(Stdio::null())
+            // A timeout drops the output() future; don't leave the shell behind.
+            .kill_on_drop(true)
             .output(),
     )
     .await
-    .ok()? // timed out
-    .ok()?; // spawn/io error
+    .map_err(|_| {
+        format!(
+            "`{shell} -ilc` took longer than {}s",
+            LOGIN_SHELL_TIMEOUT.as_secs()
+        )
+    })?
+    .map_err(|e| format!("couldn't run `{shell}`: {e}"))?;
 
-    let text = String::from_utf8_lossy(&output.stdout);
-    // Init scripts may print banners; extract the PATH via the sentinel.
-    let start = text.find("__MP__")? + "__MP__".len();
-    let rest = &text[start..];
-    let end = rest.find("__END__")?;
-    let path = rest[..end].to_string();
-    if path.is_empty() {
-        None
-    } else {
-        Some(path)
+    login_path_from(&String::from_utf8_lossy(&output.stdout))
+        .ok_or_else(|| format!("`{shell} -ilc` printed no PATH"))
+}
+
+/// The probed PATH, or why the child can't be started without it. A
+/// harness's own `PATH` (its env) replaces the probed one in the child, so a
+/// failed probe doesn't stop it.
+fn path_for_child(
+    probed: Result<Option<String>, String>,
+    env: &HashMap<String, String>,
+) -> Result<Option<String>, String> {
+    match probed {
+        Err(_) if env.contains_key("PATH") => Ok(None),
+        probed => probed,
     }
+}
+
+/// The PATH between the probe's sentinels. Init scripts may print banners
+/// around it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn login_path_from(stdout: &str) -> Option<String> {
+    let start = stdout.find("__MP__")? + "__MP__".len();
+    let rest = &stdout[start..];
+    let end = rest.find("__END__")?;
+    let path = &rest[..end];
+    (!path.is_empty()).then(|| path.to_string())
 }
 
 /// `HarnessDefinition.command` scheme naming an adapter bundled with the app
@@ -507,7 +547,7 @@ pub async fn run_shell_command(script: String) -> AgentResult<ShellCommandOutput
         // would outlive the command and leak.
         .kill_on_drop(true);
 
-    let output = match tokio::time::timeout(Duration::from_secs(10), cmd.output()).await {
+    let output = match tokio::time::timeout(LOGIN_SHELL_TIMEOUT, cmd.output()).await {
         Ok(Ok(output)) => output,
         Ok(Err(e)) => {
             return AgentResult::err(
@@ -547,8 +587,19 @@ pub async fn spawn_agent<R: tauri::Runtime>(
 ) -> AgentResult<SpawnInfo> {
     // Resolved BEFORE the PATHEXT lookup below so both use the same fresh
     // value: on Windows this is a live registry read (MET-158), not the
-    // app's own stale inherited PATH.
-    let resolved_path = resolve_login_path().await;
+    // app's own stale inherited PATH. Without it nothing is spawned — even a
+    // bundled sidecar finds the harness's own CLI on PATH — unless the
+    // harness brings its own PATH.
+    let resolved_path = match path_for_child(resolve_login_path().await, &env) {
+        Ok(path) => path,
+        Err(reason) => {
+            return AgentResult::err(
+                proc_id,
+                AgentProcErrorType::ShellEnvUnavailable,
+                format!("couldn't read your shell's PATH ({reason}), so `{program}` wasn't started"),
+            );
+        }
+    };
 
     // MET-210: a bundled adapter is addressed by absolute path beside the app
     // binary — no PATH involved (the Windows lookup below passes absolute
@@ -787,6 +838,35 @@ pub fn kill_all_agents() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn login_path_is_read_between_the_sentinels() {
+        assert_eq!(
+            login_path_from("Welcome back!\n__MP__/opt/homebrew/bin:/usr/bin__END__"),
+            Some("/opt/homebrew/bin:/usr/bin".to_string())
+        );
+        assert_eq!(login_path_from("__MP____END__"), None);
+        assert_eq!(login_path_from("no sentinel here"), None);
+    }
+
+    #[test]
+    fn a_failed_probe_blocks_only_children_without_their_own_path() {
+        let failed = || Err("`/bin/zsh -ilc` took longer than 10s".to_string());
+        let own_path = HashMap::from([("PATH".to_string(), "/opt/bin".to_string())]);
+
+        assert_eq!(path_for_child(failed(), &own_path), Ok(None));
+        assert!(path_for_child(failed(), &HashMap::new()).is_err());
+        assert_eq!(
+            path_for_child(Ok(Some("/usr/bin".to_string())), &HashMap::new()),
+            Ok(Some("/usr/bin".to_string()))
+        );
+    }
+
+    #[test]
+    fn shell_env_unavailable_serializes_snake_case() {
+        let json = serde_json::to_value(AgentProcErrorType::ShellEnvUnavailable).unwrap();
+        assert_eq!(json, "shell_env_unavailable");
+    }
 
     #[test]
     fn ok_result_serializes_with_ok_true() {

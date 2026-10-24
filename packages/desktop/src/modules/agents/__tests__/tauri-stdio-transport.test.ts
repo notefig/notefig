@@ -140,6 +140,25 @@ describe("TauriStdioTransport", () => {
     await expect(transport.start()).rejects.toThrow(/ENOENT/);
   });
 
+  it("keeps a missing login-shell PATH distinct from a spawn failure", async () => {
+    withMockedTauri({
+      spawn_agent: () => ({
+        ok: false,
+        error: {
+          proc_id: "p1",
+          type: "shell_env_unavailable",
+          message: "couldn't read your shell's PATH (`/bin/zsh -ilc` took longer than 10s)",
+        },
+      }),
+    });
+
+    await expect(new TauriStdioTransport(OPTIONS).start()).rejects.toMatchObject({
+      name: "AgentTransportError",
+      type: "shell_env_unavailable",
+      message: expect.stringMatching(/took longer than 10s/),
+    });
+  });
+
   it("send() after close throws instead of writing", async () => {
     withMockedTauri({
       spawn_agent: () => spawnOk,

@@ -20,6 +20,9 @@ import type { McpServer } from "@notefig/shared/agent";
 
 export type AgentTransportErrorType =
   | "spawn_failed"
+  /** The login shell didn't report its PATH (macOS), so the harness wasn't
+   *  started: retrying may work, the harness itself is fine. */
+  | "shell_env_unavailable"
   | "closed"
   | "relay_unreachable"
   | "pairing_failed"

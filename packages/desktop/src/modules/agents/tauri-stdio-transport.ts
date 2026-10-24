@@ -146,7 +146,9 @@ export class TauriStdioTransport implements AgentTransport {
     if (!result.ok) {
       this.teardown();
       throw new AgentTransportError(
-        "spawn_failed",
+        result.error?.type === "shell_env_unavailable"
+          ? "shell_env_unavailable"
+          : "spawn_failed",
         result.error?.message ?? "failed to spawn agent process",
       );
     }
