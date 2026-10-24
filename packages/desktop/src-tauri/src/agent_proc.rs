@@ -440,6 +440,19 @@ async fn probe_login_path() -> Result<String, String> {
         .ok_or_else(|| format!("`{shell} -ilc` printed no PATH"))
 }
 
+/// The probed PATH, or why the child can't be started without it. A
+/// harness's own `PATH` (its env) replaces the probed one in the child, so a
+/// failed probe doesn't stop it.
+fn path_for_child(
+    probed: Result<Option<String>, String>,
+    env: &HashMap<String, String>,
+) -> Result<Option<String>, String> {
+    match probed {
+        Err(_) if env.contains_key("PATH") => Ok(None),
+        probed => probed,
+    }
+}
+
 /// The PATH between the probe's sentinels. Init scripts may print banners
 /// around it.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -575,8 +588,9 @@ pub async fn spawn_agent<R: tauri::Runtime>(
     // Resolved BEFORE the PATHEXT lookup below so both use the same fresh
     // value: on Windows this is a live registry read (MET-158), not the
     // app's own stale inherited PATH. Without it nothing is spawned — even a
-    // bundled sidecar finds the harness's own CLI on PATH.
-    let resolved_path = match resolve_login_path().await {
+    // bundled sidecar finds the harness's own CLI on PATH — unless the
+    // harness brings its own PATH.
+    let resolved_path = match path_for_child(resolve_login_path().await, &env) {
         Ok(path) => path,
         Err(reason) => {
             return AgentResult::err(
@@ -833,6 +847,19 @@ mod tests {
         );
         assert_eq!(login_path_from("__MP____END__"), None);
         assert_eq!(login_path_from("no sentinel here"), None);
+    }
+
+    #[test]
+    fn a_failed_probe_blocks_only_children_without_their_own_path() {
+        let failed = || Err("`/bin/zsh -ilc` took longer than 10s".to_string());
+        let own_path = HashMap::from([("PATH".to_string(), "/opt/bin".to_string())]);
+
+        assert_eq!(path_for_child(failed(), &own_path), Ok(None));
+        assert!(path_for_child(failed(), &HashMap::new()).is_err());
+        assert_eq!(
+            path_for_child(Ok(Some("/usr/bin".to_string())), &HashMap::new()),
+            Ok(Some("/usr/bin".to_string()))
+        );
     }
 
     #[test]
