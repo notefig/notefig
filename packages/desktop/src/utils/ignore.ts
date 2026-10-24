@@ -98,9 +98,11 @@ export interface IgnoreRules {
   extensions: string[];
 }
 
+/** Lowercased: the Rust walker, watcher and search compare them against
+ *  lowercased names, so a capitalized entry ("Pods") never matched. */
 export const IGNORE_RULES: IgnoreRules = {
-  directories: IGNORED_DIRECTORIES,
-  extensions: IGNORED_EXTENSIONS,
+  directories: IGNORED_DIRECTORIES.map((d) => d.toLowerCase()),
+  extensions: IGNORED_EXTENSIONS.map((e) => e.toLowerCase()),
 };
 
 const ignoredDirectorySet = new Set(
