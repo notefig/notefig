@@ -826,14 +826,20 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
   };
 
   const hydrateDirectoryStats = (dirPath: string) => {
+    // Once hydrated, a directory's stats are kept fresh by the refetch,
+    // which re-stats its children; the tree asks again for every visible
+    // directory on each expand or collapse, and each ask was a stat batch
+    // plus a write of every row's cache.
+    if (hydratedDirs.has(dirPath)) return Promise.resolve();
     const inFlight = hydrationInFlight.get(dirPath);
     if (inFlight) return inFlight;
 
     const promise = (async () => {
-      const children = collections.metadata.toArray.filter((row) => {
-        const rel = relativeTreePath(dirPath, row.path);
-        return rel !== undefined && rel !== "" && !rel.includes("/");
-      });
+      // The refetch's parent test (normalized absolute paths throughout),
+      // not a relative path per row: this scans the whole collection.
+      const children = collections.metadata.toArray.filter(
+        (row) => row.path !== dirPath && parentDirectory(row.path) === dirPath,
+      );
 
       if (children.length > 0) {
         const result = await fs.getMetadata(children.map((c) => c.path));

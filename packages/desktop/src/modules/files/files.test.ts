@@ -194,6 +194,21 @@ describe("lazy stat hydration", () => {
     expect(rows.get(B)?.modified).toBeUndefined();
   });
 
+  it("asks again for a hydrated directory without statting it again", async () => {
+    await files.refresh();
+    adapter.getMetadata.mockClear();
+
+    await files.hydrateDirectoryStats(WS);
+    await files.hydrateDirectoryStats(WS);
+    await files.hydrateDirectoryStats(SUB);
+    await files.hydrateDirectoryStats(SUB);
+
+    // Once per directory: the tree re-asks for every visible directory on
+    // each expand and collapse, and the refetch keeps them fresh.
+    expect(adapter.getMetadata).toHaveBeenCalledTimes(2);
+    expect(files.collections.metadata.get(B)?.modified).toBeInstanceOf(Date);
+  });
+
   it("refetch preserves hydrated stats and re-stats hydrated dirs", async () => {
     await files.refresh();
     await files.hydrateDirectoryStats(WS);
