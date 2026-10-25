@@ -1,9 +1,27 @@
 /**
  * Every widget this package ships, and the two collectors the host editor
- * consumes. An explicit array rather than a glob: unlike the blob types
- * (whose one-file protocol makes them genuinely open-ended), widgets are few
- * and their registration ORDER can influence schema construction, so it is
- * worth reading in one place.
+ * consumes. This array is THE place a new kind of in-document block is
+ * registered — the user's or an agent's alike; there is no second registry.
+ * An explicit array rather than a glob: widgets are few and their
+ * registration ORDER can influence schema construction, so it is worth
+ * reading in one place.
+ *
+ * Agent-placed blocks (not built yet; the decisions so far):
+ * - A block the agent drops into a document is a widget instance like any
+ *   other. If it converses (a question, an approval, a status), it is a
+ *   prompt widget bound to the placing task, and a new kind of block is a
+ *   new entry in `WIDGET_RESPONSE_KINDS` (@notefig/shared/agent) plus its
+ *   face in ./prompt. If it doesn't (a chart, a table over data), it is a new
+ *   `defineEditorWidget` listed here.
+ * - The file holds only the marker's ids, never the payload: the block's
+ *   content is the placing tool call's input in the transcript, derived like
+ *   a `widget_respond` round (the old blob types kept their state in the
+ *   file, and broke on every rewrite).
+ * - Placement is a document position the placing tool is given; the tool
+ *   mints the ids and inserts the marker. The agent never writes markers.
+ * - Removal follows the widget rules: it stays until the user dismisses it,
+ *   as a summoned widget does.
+ * - Scope (which documents an agent may place into) is undecided.
  */
 import type {
   EditorWidgetDefinition,

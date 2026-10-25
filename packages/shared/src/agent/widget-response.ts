@@ -6,7 +6,9 @@ import { z } from "zod";
  * and whether the round then waits on the user (`awaitsReply`, which the
  * widget's state machine reads). A new kind of response — multiple-choice
  * options, an approval — is a new entry here plus the fields it carries in
- * the schema below; the tool's description and the widget follow.
+ * the schema below; the tool's description and the widget follow. Blocks
+ * an agent places on its own will draw on this same table (see the note in
+ * @notefig/widgets' registry.ts).
  */
 export const WIDGET_RESPONSE_KINDS = {
   answer: {
