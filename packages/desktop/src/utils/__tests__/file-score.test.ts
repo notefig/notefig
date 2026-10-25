@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   compareScoredPaths,
   fuzzyScore,
+  rankFileRows,
   scoreFilePath,
 } from "@/utils/file-score";
 
@@ -91,4 +92,51 @@ describe("compareScoredPaths", () => {
       [...rows].sort(compareScoredPaths).map((r) => r.relativePath),
     ).toEqual(["a.md", "b.md", "deeply/nested/a.md"]);
   });
+});
+
+describe("rankFileRows edge cases", () => {
+  const rows = [
+    { path: "/ws/notes.md", relativePath: "notes.md" },
+    { path: "/ws/src/readme.md", relativePath: "src/readme.md" },
+  ];
+
+  it("returns an empty list when the cap is zero", () => {
+    expect(rankFileRows(rows, "md", { limit: 0 })).toEqual([]);
+  });
+
+  it("returns an empty list for a negative cap", () => {
+    expect(rankFileRows(rows, "md", { limit: -1 })).toEqual([]);
+  });
+});
+
+describe("rankFileRows keeps exactly the best results", () => {
+  // Deep, overlapping paths: the shape where skipping rows that cannot make
+  // the cut, and paths that cannot beat their basename, matters most.
+  const words = ["notes", "src", "components", "readme", "2026", "q3", "draft"];
+  const rows = Array.from({ length: 400 }, (_, i) => {
+    const segments = Array.from(
+      { length: 1 + (i % 6) },
+      (_, k) => words[(i * 7 + k * 3) % words.length],
+    );
+    const relativePath = `${segments.join("/")}/${words[i % words.length]}-${i}.md`;
+    return { path: `/ws/${relativePath}`, relativePath };
+  });
+
+  it.each(["r", "rea", "readme", "nts", "src/comp", "q3/dr", "co-1"])(
+    "matches scoring and sorting every file for %j",
+    (query) => {
+      const expected = rows
+        .map((row) => ({
+          ...row,
+          score: scoreFilePath(query, row.relativePath),
+        }))
+        .filter((row) => row.score > 0)
+        .sort(compareScoredPaths)
+        .slice(0, 10)
+        .map((row) => [row.relativePath, row.score]);
+      expect(
+        rankFileRows(rows, query).map((r) => [r.relativePath, r.score]),
+      ).toEqual(expected);
+    },
+  );
 });

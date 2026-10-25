@@ -73,8 +73,8 @@ function searchWorkspaceFiles(
   limit: number,
 ): MentionCandidate[] {
   const { metadata } = files.collections;
-  // The raw collection holds directory rows too (useFileSearch's live query
-  // filters them; a one-shot read must do it itself).
+  // The raw collection holds directory rows too (useFileSearch skips them
+  // too; a one-shot read must do it itself).
   const fileRows = metadata.toArray.filter((row) => row.type === "file");
   return rankFileRows(fileRows, query, {
     limit,
