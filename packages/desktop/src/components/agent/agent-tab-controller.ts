@@ -47,8 +47,13 @@ function createAgentTabController(
       if (!element) return false;
 
       const active = document.activeElement;
-      // Already inside this tab — nothing to take.
-      if (active instanceof HTMLElement && element.contains(active)) {
+      // Already inside this tab — nothing to take. The root itself doesn't
+      // count: it only holds focus while the composer can't.
+      if (
+        active instanceof HTMLElement &&
+        active !== element &&
+        element.contains(active)
+      ) {
         return true;
       }
       // Same rule as a document tab: ambient intents (tab activation,
@@ -56,10 +61,16 @@ function createAgentTabController(
       // elsewhere; only an explicit hand-off may.
       if (!steal && isTextEntryActive(active)) return false;
 
+      if (composer.current?.focus()) return true;
+
       // The composer declines while it is disabled (session still
-      // loading), which leaves a when-mounted intent retrying until it
-      // opens up — no other path focuses this tab.
-      return composer.current?.focus() ?? false;
+      // loading) and is absent for an unavailable session. Park focus on
+      // the root meanwhile — inside the dock, so its hotkeys (Ctrl+Tab,
+      // ⌘W, ⌘1-9) keep working instead of focus falling to the body — and
+      // report false, which leaves a when-mounted intent retrying until
+      // the composer opens up.
+      element.focus({ preventScroll: true });
+      return false;
     },
 
     isFocusable: () => root.current !== null,

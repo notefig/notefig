@@ -240,7 +240,9 @@ export function CodeViewer({ file }: CodeViewerProps) {
       // transparent (see TRANSPARENT_BACKGROUND_CSS), so this container
       // paints the app background with its grain — same surface treatment
       // as the rest of the app, independent of what sits behind the tab.
-      className="select-text bg-background texture-surface flex flex-col flex-1 min-h-0 w-full"
+      // outline-none: tab focus lands on this container, which would
+      // otherwise paint the browser's focus ring around the code.
+      className="select-text bg-background texture-surface flex flex-col flex-1 min-h-0 w-full outline-none"
       tabIndex={-1}
     >
       <WorkerPoolContextProvider

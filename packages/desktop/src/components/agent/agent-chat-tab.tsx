@@ -153,9 +153,12 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
   return (
     // The dock's content wrapper is a plain flex box, so this root brings
     // its own positioning context for the absolute composer overlay.
+    // tabIndex -1: the controller parks focus here while the composer
+    // can't take it, so the dock's hotkeys stay live.
     <div
       ref={rootRef}
-      className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
+      tabIndex={-1}
+      className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden outline-none"
     >
       <Transcript
         taskId={taskId}
