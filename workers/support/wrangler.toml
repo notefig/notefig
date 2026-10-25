@@ -20,20 +20,10 @@ LINEAR_MODEL_LABEL_IDS = "Kimi K2.7 Code=e2e835b3-ad04-4d1e-bcd1-67daf74a1ca2,GL
 # Cloudflare's Clef, through the build agents' gateway. It bills as Workers AI.
 DECISION_MODEL = "@cf/cloudflare/clef"
 AI_GATEWAY_ID = "notefig-build-agents"
-# The agent: an accepted issue assigned to Notefig Support by an approver
-# (Parsa) starts a Claude Code routine. See README.md, "Agent".
-AGENT_USER_ID = "c62305f9-fdea-4fb1-9ecd-9c2e71069c46"
-APPROVER_IDS = "566cdfe1-fc7f-4489-bc41-99ee9694e025"
 
 # Workers AI, for the decision model. Calls through a binding need no gateway token.
 [ai]
 binding = "AI"
-
-# Which Linear deliveries already fired a routine run (kept a day), so a
-# retried delivery can't fire a second one.
-[[kv_namespaces]]
-binding = "AGENT_DELIVERIES"
-id = "d737c6e09cea4fea9488e9117bc784d6"
 
 # 1 request a minute per IP, per route (the key is "<route>:<ip>").
 [[ratelimits]]
