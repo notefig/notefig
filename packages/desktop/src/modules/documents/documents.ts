@@ -1,7 +1,7 @@
 /**
  * Documents — `core.documents`: reading and writing a workspace text file
  * as the agent does (ACP fs/read_text_file and fs/write_text_file,
- * author_blob, history_restore, blob answers), wherever it lives among the
+ * history_restore, blob answers), wherever it lives among the
  * open workspaces.
  *
  * The write is the *adopting* primitive. The platform watcher suppresses

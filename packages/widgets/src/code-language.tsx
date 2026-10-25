@@ -3,8 +3,8 @@
  * (the popover list the session settings use) — that sets the block's
  * `language`: its fence (```python), and what `codeHighlight` colours it
  * by. Common languages by their Shiki id, plus plain text; a language not
- * listed (an alias like `ts`) stays shown. Not on blob widgets' fences, and
- * disabled where the editor is read-only.
+ * listed (an alias like `ts`) stays shown. Disabled where the editor is
+ * read-only.
  */
 import { useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -13,7 +13,6 @@ import { Check } from "lucide-react";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { BLOB_LANG_PREFIX } from "@notefig/shared/blobs";
 import { Popover, PopoverContent, PopoverTrigger } from "@notefig/ui/popover";
 import {
   Command,
@@ -136,19 +135,17 @@ function decorate(doc: PMNode): DecorationSet {
   doc.descendants((node, pos) => {
     if (node.type.name !== "codeBlock") return true;
     const language = (node.attrs.language as string | null) ?? "";
-    if (!language.startsWith(BLOB_LANG_PREFIX)) {
-      decorations.push(
-        Decoration.widget(pos + 1, (view, getPos) => mount(view, getPos, language), {
-          side: -1,
-          // A new picker when the language changes; the same one otherwise.
-          key: `language:${language}`,
-          ignoreSelection: true,
-          stopEvent: () => true,
-          // After this update: unmounting during one of React's renders warns.
-          destroy: (host) => queueMicrotask(() => roots.get(host as HTMLElement)?.unmount()),
-        }),
-      );
-    }
+    decorations.push(
+      Decoration.widget(pos + 1, (view, getPos) => mount(view, getPos, language), {
+        side: -1,
+        // A new picker when the language changes; the same one otherwise.
+        key: `language:${language}`,
+        ignoreSelection: true,
+        stopEvent: () => true,
+        // After this update: unmounting during one of React's renders warns.
+        destroy: (host) => queueMicrotask(() => roots.get(host as HTMLElement)?.unmount()),
+      }),
+    );
     return false;
   });
   return DecorationSet.create(doc, decorations);

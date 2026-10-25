@@ -13,6 +13,7 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import { useTranslation } from "react-i18next";
 import {
   Check,
+  CornerDownLeft,
   FileText,
   MessageSquare,
   Pencil,
@@ -25,6 +26,7 @@ import { toast } from "sonner";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import { Button } from "@notefig/ui/button";
+import { Checkbox } from "@notefig/ui/checkbox";
 import { OrbLoader } from "@notefig/ui/orb-loader";
 import {
   DropdownMenu,
@@ -45,7 +47,7 @@ import { draftToNode, readDraftNode } from "../composer/draft-text";
 import { mentionPopupHasResults } from "../composer/mention-bridge";
 import { hostIsMention } from "../composer/mention-suggestion";
 import { registerComposerKeyHandler } from "../composer/key-bridge";
-import { WidgetResponseView } from "./widget-response-view";
+import { choiceChipBaseClass, WidgetResponseView } from "./widget-response-view";
 import { usePromptChangeCounts, type PromptReview } from "../change-store";
 import {
   usePromptChangeNavigation,
@@ -72,9 +74,13 @@ import {
   deriveLatestAssistantLine,
   deriveQueuePosition,
   deriveComposerKeyAction,
+  type ComposerKeyAction,
   widgetPromptTarget,
   blobCardClass,
   referenceRemovalArmed,
+  takesTyping,
+  composeChoiceAnswer,
+  deriveChoiceKey,
   type BlobPhase,
   type RoundOutcome,
 } from "../state";
@@ -460,6 +466,7 @@ function useComposerKeys({
   capabilities,
   composing,
   actions,
+  choiceKey,
 }: {
   blobId: string;
   documentPath: string;
@@ -476,9 +483,11 @@ function useComposerKeys({
     | "revertToSlash"
     | "backspaceDismiss"
   >;
+  /** A choice question's options take the keys first (useChoiceAnswer). */
+  choiceKey: ChoiceAnswer["onKey"];
 }) {
-  const latest = useRef({ draftIO, capabilities, composing, actions });
-  latest.current = { draftIO, capabilities, composing, actions };
+  const latest = useRef({ draftIO, capabilities, composing, actions, choiceKey });
+  latest.current = { draftIO, capabilities, composing, actions, choiceKey };
 
   useEffect(
     () =>
@@ -491,6 +500,8 @@ function useComposerKeys({
         // stale "empty" here would dismiss the widget on the very keypress
         // meant to delete the last character.
         const text = io.read();
+        const choice = latest.current.choiceKey(input.key, text);
+        if (choice !== null) return choice;
         const action = deriveComposerKeyAction({
           key: input.key,
           shiftKey: input.shiftKey,
@@ -504,20 +515,51 @@ function useComposerKeys({
           inFlight: can.escape === "stop",
         });
         if (action.type === "none") return false;
-        if (action.type === "send") {
-          if (can.fieldEditable) void (fresh ? live.send() : live.sendFollowUp());
-        } else if (action.type === "cancel") live.stop();
-        else if (action.type === "revert") live.revertToSlash?.();
-        else if (action.type === "backspaceDismiss") live.backspaceDismiss?.();
-        else live.escapeToEditor();
+        runComposerKey(action, can.fieldEditable && (fresh ? live.send : live.sendFollowUp), live);
         return true;
       }),
     [blobId, documentPath],
   );
 }
 
+/** Carry out a composer key. `send` is how this widget sends now, false
+ *  when its field takes nothing. */
+function runComposerKey(
+  action: Exclude<ComposerKeyAction, { type: "none" }>,
+  send: false | (() => Promise<void> | void),
+  actions: Pick<
+    PromptBlobFaceActions,
+    "stop" | "revertToSlash" | "backspaceDismiss" | "escapeToEditor"
+  >,
+): void {
+  switch (action.type) {
+    case "send":
+      if (send) void send();
+      return;
+    case "cancel":
+      return actions.stop();
+    case "revert":
+      return actions.revertToSlash?.();
+    case "backspaceDismiss":
+      return actions.backspaceDismiss?.();
+    case "escape":
+      return actions.escapeToEditor();
+  }
+}
+
+/** The options a choice question offers, and what the user has picked. */
+export type ChoiceDisplay = {
+  options: string[];
+  multiple: boolean;
+  picked: string[];
+  /** The option the keys are on; null while they are in the field. */
+  focused: number | null;
+};
+
 /** What the face renders besides its state. */
 interface PromptBlobDisplay extends OutcomeDisplay {
+  /** The open choice question's options; null when none is asked. */
+  choice?: ChoiceDisplay | null;
   activeToolLine: string | null;
   assistantTeaser: string | null;
   queueAhead: number;
@@ -532,6 +574,9 @@ interface PromptBlobDisplay extends OutcomeDisplay {
 interface PromptBlobFaceActions {
   send: () => Promise<void> | void;
   sendFollowUp: () => Promise<void> | void;
+  /** A choice option clicked: a single choice sends it, a multiple one
+   *  toggles it. */
+  pickOption?: (option: string) => void;
   editPrompt: () => void;
   retry: () => void;
   stop: () => void;
@@ -771,6 +816,13 @@ export function PromptBlobFace({
             />
 
             <SettledState
+              mark={
+                <HarnessMark
+                  task={task}
+                  workspacePath={workspacePath}
+                  boundTaskId={boundTaskId}
+                />
+              }
               phase={phase}
               display={display}
               boundTaskId={boundTaskId}
@@ -877,12 +929,6 @@ function useShakeOn(
   }, [element, at]);
 }
 
-/** The draft takes typing in these phases, for faces rendered without a
- *  widget behind them (the marketing demo, tests). */
-function takesTyping(phase: BlobPhase): boolean {
-  return phase === "composing" || phase === "done" || phase === "error";
-}
-
 /** Why a delete just did nothing. */
 function RemovalRefusedHint({ shown }: { shown: boolean }) {
   const { t } = useTranslation();
@@ -897,24 +943,38 @@ function RemovalRefusedHint({ shown }: { shown: boolean }) {
   );
 }
 
-/** The face of a settled round: Done and Error are the two resting cards,
- *  chosen here so the face itself stays phase-agnostic layout. */
+/** The face of a round that has ended: Done and Error are the two resting
+ *  cards, and a question is the done card waiting on its answer (the draft
+ *  row below takes it). Chosen here so the face itself stays phase-agnostic
+ *  layout. */
 function SettledState({
+  mark,
   phase,
   display,
   boundTaskId,
   documentPath,
   actions,
 }: {
+  mark: React.ReactNode;
   phase: BlobPhase;
   display: PromptBlobDisplay;
   boundTaskId: string | null;
   documentPath: string;
   actions: PromptBlobFaceActions;
 }) {
-  if (phase === "done") {
+  if (phase === "done" || phase === "needs-answer") {
     return (
       <DoneState
+        mark={mark}
+        choices={
+          phase === "needs-answer" && display.choice && actions.pickOption ? (
+            <ChoiceOptions
+              choice={display.choice}
+              onPick={actions.pickOption}
+              onSend={() => void actions.sendFollowUp()}
+            />
+          ) : null
+        }
         cancelled={display.cancelled}
         response={display.widgetResponse}
         fallbackText={display.summary}
@@ -1024,15 +1084,21 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     draftIO,
   });
 
-  const display = usePromptBlobDisplay({
-    review: prompts.review,
-    blobId,
-    editor,
-    phase,
-    widget,
-    sortedEntries,
-    taskTurns,
-  });
+  const choice = useChoiceAnswer(widget, draft, actions.sendFollowUp);
+  const { sendFollowUp, pickOption } = choice;
+
+  const display = {
+    ...usePromptBlobDisplay({
+      review: prompts.review,
+      blobId,
+      editor,
+      phase,
+      widget,
+      sortedEntries,
+      taskTurns,
+    }),
+    choice: choice.display,
+  };
 
   useComposerKeys({
     blobId,
@@ -1040,7 +1106,8 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     draftIO,
     capabilities,
     composing: state.name === "composing",
-    actions: { ...actions, escapeToEditor },
+    actions: { ...actions, sendFollowUp, escapeToEditor },
+    choiceKey: choice.onKey,
   });
 
   const openBoundChat = openBoundChatAction(host, boundTaskId);
@@ -1069,6 +1136,8 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     documentPath,
     actions: {
       ...actions,
+      sendFollowUp,
+      pickOption,
       escapeToEditor,
       openBoundChat,
       openFile: host.openFile,
@@ -1178,8 +1247,12 @@ function usePromptSendActions({
   // shared session, which the picker may have re-targeted since this
   // widget's first round. A new FIFO turn on the same ACP session. No
   // trust gate: round one already required it for this workspace.
-  const sendFollowUp = useCallback(async () => {
-    const text = draftIO.read().trim();
+  // `compose` turns the draft into the prompt (a choice answer adds the
+  // picked options to it).
+  const sendFollowUp = useCallback(async (
+    compose: (draft: string) => string = (draft) => draft,
+  ) => {
+    const text = compose(draftIO.read()).trim();
     const taskId = prompts.get(blobId).boundTaskId;
     if (!text || !taskId) return;
     if (!host.ensureRuntime()) return;
@@ -1470,9 +1543,7 @@ function DraftRow({
           // nothing — keys, IME, spellcheck, a stray click — edits it.
           contentEditable={open ? undefined : false}
           data-empty={empty ? "true" : "false"}
-          data-placeholder={
-            composing ? t("promptBlobPlaceholder") : t("promptBlobReply")
-          }
+          data-placeholder={t(draftPlaceholderKey(phase))}
           className={cn(
             "prompt-editor relative min-w-0 flex-1 whitespace-pre-wrap break-words",
             composing ? "pt-1 pb-1.5 text-sm" : "text-xs",
@@ -1493,6 +1564,11 @@ function DraftRow({
   );
 }
 
+function draftPlaceholderKey(phase: BlobPhase) {
+  if (phase === "composing") return "promptBlobPlaceholder";
+  return phase === "needs-answer" ? "promptBlobAnswer" : "promptBlobReply";
+}
+
 /**
  * The session picker, logo-only trigger in the composer row: shows where
  * the next prompt actually goes (the adopted session's harness logo, or the
@@ -1501,6 +1577,42 @@ function DraftRow({
  * harnesses — each its own entry with its logo; picking one also becomes the
  * remembered default (the sessions panel's split-button rule).
  */
+/** The harness the widget's prompts go to: its bound session's, else the
+ *  session a send would join, else the default. The session it points at is
+ *  in the list whenever it is live, so no second lookup is needed. */
+function useTargetHarnessId(
+  workspacePath: string,
+  boundTaskId: string | null | undefined,
+): string {
+  const host = usePromptWidgetHost();
+  const harnesses = host.useHarnessList();
+  const sessions = host.useSessionList(workspacePath);
+  const taskId = boundTaskId ?? host.peekSession(workspacePath);
+  return (
+    sessions.find((session) => session.taskId === taskId)?.harnessId ??
+    harnesses[0].id
+  );
+}
+
+/** What leads a response's heading: the logo of the harness that answered.
+ *  Read off the bound task's own row: the picker's list drops a session
+ *  once it is cancelled or failed, and the answer still came from it. */
+function HarnessMark({
+  task,
+  workspacePath,
+  boundTaskId,
+}: {
+  task: AgentTaskRow | undefined;
+  workspacePath: string;
+  boundTaskId: string | null;
+}) {
+  const { HarnessLogo } = usePromptWidgetHost().slots;
+  const target = useTargetHarnessId(workspacePath, boundTaskId);
+  return (
+    <HarnessLogo harnessId={task?.harnessId ?? target} className="size-3" />
+  );
+}
+
 function SessionControl({
   workspacePath,
   boundTaskId,
@@ -1530,11 +1642,7 @@ function SessionControl({
   const [open, setOpen] = useState(false);
 
   const peekedTaskId = boundTaskId ?? host.peekSession(workspacePath);
-  // The trigger's logo names where the prompt would go. The session it points
-  // at is in the list whenever it is live, so no second lookup is needed.
-  const triggerHarnessId =
-    sessions.find((session) => session.taskId === peekedTaskId)?.harnessId ??
-    harnesses[0].id;
+  const triggerHarnessId = useTargetHarnessId(workspacePath, boundTaskId);
 
   const recentSessions = sessions.slice(0, 5);
 
@@ -1876,6 +1984,8 @@ function ChangeDot({ on }: { on: boolean }) {
  *  Exported for tests only — mounting the whole PromptBlob needs Tiptap and
  *  live collections; the done face is testable standalone. */
 export function DoneState({
+  mark,
+  choices,
   cancelled,
   response,
   fallbackText,
@@ -1887,6 +1997,10 @@ export function DoneState({
   onOpenChat,
   onDismiss,
 }: {
+  /** Leads the heading row (HarnessMark). */
+  mark?: React.ReactNode;
+  /** The open choice question's controls, under the question. */
+  choices?: React.ReactNode;
   cancelled: boolean;
   response: WidgetResponse | null;
   /** Latest assistant text of the bound turn — the summary line when the
@@ -1907,6 +2021,7 @@ export function DoneState({
       response={response}
       fallbackText={fallbackText}
       cancelled={cancelled}
+      mark={mark}
       actions={
         <>
           <button
@@ -1930,6 +2045,7 @@ export function DoneState({
         </>
       }
     >
+      {choices}
       <TouchedFileChips
         paths={touchedFiles}
         documentPath={documentPath}
@@ -1995,3 +2111,196 @@ function ErrorState({
     </div>
   );
 }
+
+/**
+ * A choice question's answer: what is picked, which option the keys are
+ * on, and how the reply carries the picks. Held per round: a new round (a
+ * later question, or none) starts with nothing picked. Typing in the field
+ * leaves the options. `sendFollowUp` and `pickOption` replace the plain
+ * reply: outside a choice nothing is picked, so the reply is the draft.
+ */
+function useChoiceAnswer(
+  widget: PromptWidget,
+  draft: string,
+  sendReply: (compose: (draft: string) => string) => Promise<void>,
+) {
+  const response = widget.outcome?.response ?? null;
+  const asking =
+    widget.state.name === "asking" && widget.state.ask.kind === "question";
+  const options = asking ? (response?.options ?? null) : null;
+  const multiple = response?.kind === "multiple_choice";
+  const turnId = widget.boundTurnId;
+  const [picks, setPicks] = useState<ChoicePicks>(() => noPicks(turnId));
+  const round = options && picks.turnId === turnId ? picks : noPicks(turnId);
+  /** Change this round's picks; another round's start from nothing. */
+  const update = useCallback(
+    (change: (round: ChoicePicks) => Partial<ChoicePicks>) =>
+      setPicks((previous) => {
+        const base = previous.turnId === turnId ? previous : noPicks(turnId);
+        const next = { ...base, ...change(base) };
+        return next.picked === previous.picked &&
+          next.focused === previous.focused &&
+          next.turnId === previous.turnId
+          ? previous
+          : next;
+      }),
+    [turnId],
+  );
+  const focus = useCallback(
+    (index: number | null) => update(() => ({ focused: index })),
+    [update],
+  );
+  useEffect(() => focus(null), [draft, focus]);
+  // So does any pointer press — the field, a chip, the document — and the
+  // window losing focus: a digit is then typed, never a stale pick.
+  const navigating = round.focused !== null;
+  useEffect(() => {
+    if (!navigating) return;
+    const leave = () => focus(null);
+    window.addEventListener("pointerdown", leave, true);
+    window.addEventListener("blur", leave);
+    return () => {
+      window.removeEventListener("pointerdown", leave, true);
+      window.removeEventListener("blur", leave);
+    };
+  }, [navigating, focus]);
+
+  const sendFollowUp = useCallback(
+    () => sendReply((typed) => composeChoiceAnswer(round.picked, typed)),
+    [sendReply, round.picked],
+  );
+  const pickOption = useCallback(
+    (option: string) => {
+      if (!multiple) {
+        void sendReply((typed) => composeChoiceAnswer([option], typed));
+        return;
+      }
+      update(({ picked }) => ({
+        picked: picked.includes(option)
+          ? picked.filter((each) => each !== option)
+          : [...picked, option],
+      }));
+    },
+    [multiple, sendReply, update],
+  );
+  /** A key in the field: consumed or not, or null when it isn't one of the
+   *  options' keys (deriveChoiceKey). */
+  const onKey = (key: string, typed: string): boolean | null => {
+    if (!options) return null;
+    const action = deriveChoiceKey({
+      key,
+      focused: round.focused,
+      count: options.length,
+      multiple,
+      picked: round.picked.length,
+      draftEmpty: typed.trim().length === 0,
+    });
+    if (!action) return null;
+    if ("focus" in action) {
+      focus(action.focus);
+      return action.consumed;
+    }
+    if ("send" in action) void sendFollowUp();
+    else {
+      focus(action.pick);
+      pickOption(options[action.pick]);
+    }
+    return true;
+  };
+  const display: ChoiceDisplay | null = options
+    ? { options, multiple, picked: round.picked, focused: round.focused }
+    : null;
+  return { display, sendFollowUp, pickOption, onKey };
+}
+
+type ChoiceAnswer = ReturnType<typeof useChoiceAnswer>;
+
+type ChoicePicks = {
+  turnId: string | null;
+  picked: string[];
+  /** The option the keys are on; null while they are in the field. */
+  focused: number | null;
+};
+
+function noPicks(turnId: string | null): ChoicePicks {
+  return { turnId, picked: [], focused: null };
+}
+
+/** A choice question's options, inline: a chip per option. A single
+ *  choice's chip answers on click; a multiple choice's chip carries a
+ *  checkbox, and once something is picked a small send arrow ends the row
+ *  (Enter sends the picks too). While the keys are on the options (↑ from
+ *  the field) the focused chip is ringed and each chip shows the digit
+ *  that picks it. The field below still takes a typed answer or a note. */
+function ChoiceOptions({
+  choice,
+  onPick,
+  onSend,
+}: {
+  choice: ChoiceDisplay;
+  onPick: (option: string) => void;
+  onSend: () => void;
+}) {
+  const { t } = useTranslation();
+  const navigating = choice.focused !== null;
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1.5 pt-0.5"
+      data-choice={choice.multiple ? "multiple" : "single"}
+    >
+      {choice.options.map((option, index) => {
+        const picked = choice.picked.includes(option);
+        const chip = cn(
+          choiceChipClass,
+          choice.focused === index && "ring-1 ring-ring",
+          picked && "border-foreground/30 bg-accent text-foreground",
+        );
+        const digit = navigating && index < 9 && (
+          <kbd className="font-sans text-[0.625rem] text-muted-foreground">
+            {index + 1}
+          </kbd>
+        );
+        return choice.multiple ? (
+          <label key={option} className={chip} data-choice-focused={choice.focused === index || undefined}>
+            <Checkbox
+              className="size-3 rounded-[3px] [&_svg]:size-2.5"
+              checked={picked}
+              onCheckedChange={() => onPick(option)}
+              data-choice-option={option}
+            />
+            {option}
+            {digit}
+          </label>
+        ) : (
+          <button
+            key={option}
+            type="button"
+            className={chip}
+            data-choice-option={option}
+            data-choice-focused={choice.focused === index || undefined}
+            onClick={() => onPick(option)}
+          >
+            {option}
+            {digit}
+          </button>
+        );
+      })}
+      {choice.multiple && choice.picked.length > 0 && (
+        <button
+          type="button"
+          aria-label={t("send")}
+          title={t("send")}
+          className="ml-auto cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          onClick={onSend}
+        >
+          <CornerDownLeft className="size-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+const choiceChipClass = cn(
+  choiceChipBaseClass,
+  "cursor-pointer transition-colors hover:bg-accent hover:text-foreground",
+);

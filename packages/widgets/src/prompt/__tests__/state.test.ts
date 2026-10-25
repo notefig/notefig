@@ -15,6 +15,9 @@ import {
   deriveComposerKeyAction,
   deriveWidgetResponse,
   deriveDoneLine,
+  composeChoiceAnswer,
+  deriveChoiceKey,
+  ENTERED_FROM_ABOVE,
   widgetPromptTarget,
   blobCardClass,
 } from "../state";
@@ -607,7 +610,11 @@ describe("widgetPromptTarget", () => {
 });
 
 describe("deriveDoneLine", () => {
-  const labels = { done: "Done", stopped: "Stopped", issue: "Issue" };
+  const labels = {
+    done: "Done",
+    stopped: "Stopped",
+    issue: "Issue",
+  };
   const base = {
     fallbackText: null,
     cancelled: false,
@@ -676,15 +683,50 @@ describe("deriveDoneLine", () => {
     expect(deriveDoneLine({ ...base, response: null }).body).toBeNull();
   });
 
-  it("flags issue kind", () => {
+  it("reads the response's kind; no response reads as an answer", () => {
     expect(
       deriveDoneLine({ ...base, response: { kind: "issue", markdown: "x" } })
-        .isIssue,
-    ).toBe(true);
+        .kind,
+    ).toBe("issue");
     expect(
-      deriveDoneLine({ ...base, response: { kind: "answer", markdown: "x" } })
-        .isIssue,
-    ).toBe(false);
+      deriveDoneLine({ ...base, response: { kind: "single_choice", markdown: "x", options: ["a", "b"] } })
+        .kind,
+    ).toBe("single_choice");
+    expect(deriveDoneLine({ ...base, response: null }).kind).toBe("answer");
+  });
+
+  it("a choice question is its own heading, collapsed or not, with nothing to expand", () => {
+    for (const kind of ["single_choice", "multiple_choice"] as const) {
+      for (const expanded of [false, true]) {
+        expect(
+          deriveDoneLine({
+            ...base,
+            expanded,
+            response: {
+              kind,
+              markdown: "Which tier?",
+              title: "Tier",
+              options: ["Pro", "Team"],
+            },
+          }),
+        ).toEqual({ summary: "Which tier?", body: null, kind });
+      }
+    }
+  });
+});
+
+describe("composeChoiceAnswer", () => {
+  it("sends one pick plainly, several as a list, and a typed note after", () => {
+    expect(composeChoiceAnswer(["Pro"], "")).toBe("Pro");
+    expect(composeChoiceAnswer(["Pro", "Team"], "")).toBe("- Pro\n- Team");
+    expect(composeChoiceAnswer(["Pro"], "  monthly only ")).toBe(
+      "Pro\n\nmonthly only",
+    );
+  });
+
+  it("with nothing picked, is the typed answer alone", () => {
+    expect(composeChoiceAnswer([], " Neither ")).toBe("Neither");
+    expect(composeChoiceAnswer([], "")).toBe("");
   });
 });
 
@@ -699,9 +741,65 @@ describe("blobCardClass", () => {
     expect(blobCardClass("running", false)).toContain("border-border bg-card");
     expect(blobCardClass("needs-auth", false)).toContain("border-warning/40");
     expect(blobCardClass("needs-permission", false)).toContain("from-muted/40");
+    expect(blobCardClass("needs-answer", false)).toContain("from-muted/40");
     // Issue-ness only matters at rest — an active phase ignores it.
     expect(blobCardClass("running", true)).toBe(
       blobCardClass("running", false),
     );
+  });
+});
+
+describe("deriveChoiceKey", () => {
+  const key = (
+    pressed: string,
+    over: Partial<Parameters<typeof deriveChoiceKey>[0]> = {},
+  ) =>
+    deriveChoiceKey({
+      key: pressed,
+      focused: 0,
+      count: 3,
+      multiple: false,
+      picked: 0,
+      draftEmpty: true,
+      ...over,
+    });
+
+  it("moves onto the last option with ↑ from an empty field, and nothing else", () => {
+    expect(key("ArrowUp", { focused: null })).toEqual({ focus: 2, consumed: true });
+    expect(key("ArrowUp", { focused: null, draftEmpty: false })).toBeNull();
+    expect(key(ENTERED_FROM_ABOVE, { focused: null, draftEmpty: false })).toEqual({
+      focus: 0,
+      consumed: true,
+    });
+    for (const other of ["ArrowDown", "ArrowLeft", "1", " ", "Enter"]) {
+      expect(key(other, { focused: null })).toBeNull();
+    }
+  });
+
+  it("steps with ←/→, wrapping, and goes back to the field with Escape", () => {
+    expect(key("ArrowRight", { focused: 2 })).toEqual({ focus: 0, consumed: true });
+    expect(key("ArrowLeft", { focused: 0 })).toEqual({ focus: 2, consumed: true });
+    expect(key("Escape")).toEqual({ focus: null, consumed: true });
+  });
+
+  it("steps with ↑/↓ along the options and on into the field", () => {
+    expect(key("ArrowUp", { focused: 2 })).toEqual({ focus: 1, consumed: true });
+    expect(key("ArrowDown", { focused: 0 })).toEqual({ focus: 1, consumed: true });
+    expect(key("ArrowDown", { focused: 2 })).toEqual({ focus: null, consumed: true });
+  });
+
+  it("leaves upward from the first option, and to type, without taking the key", () => {
+    expect(key("ArrowUp")).toEqual({ focus: null, consumed: false });
+    expect(key("x")).toEqual({ focus: null, consumed: false });
+    expect(key("Backspace")).toEqual({ focus: null, consumed: false });
+  });
+
+  it("picks with a digit, Space, or Enter; Enter sends a multiple choice's picks", () => {
+    expect(key("3")).toEqual({ pick: 2 });
+    expect(key("4")).toEqual({ focus: null, consumed: false });
+    expect(key(" ", { focused: 1 })).toEqual({ pick: 1 });
+    expect(key("Enter", { focused: 1 })).toEqual({ pick: 1 });
+    expect(key("Enter", { focused: 1, multiple: true })).toEqual({ pick: 1 });
+    expect(key("Enter", { multiple: true, picked: 2 })).toEqual({ send: true });
   });
 });

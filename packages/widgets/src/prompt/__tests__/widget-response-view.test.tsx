@@ -11,6 +11,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 import { WidgetResponseView } from "../ui/widget-response-view";
+import { renderPromptToolCall } from "../transcript";
 import type { WidgetResponse } from "@notefig/shared/agent";
 import { fakePromptWidgetHost, withHost } from "../../testing/fake-host";
 
@@ -22,6 +23,7 @@ let root: Root | null = null;
 function render(props: {
   response: WidgetResponse | null;
   fallbackText?: string | null;
+  mark?: ReactNode;
   actions?: ReactNode;
   children?: ReactNode;
 }) {
@@ -50,7 +52,48 @@ afterEach(() => {
   root = null;
 });
 
+function renderNode(node: ReactNode) {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  act(() => root!.render(withHost(fakePromptWidgetHost(), node)));
+}
+
 describe("WidgetResponseView", () => {
+  it("tints the heading's mark by the response's kind", () => {
+    const mark = createElement("svg", { "data-testid": "mark" });
+    const tint = () =>
+      container!.querySelector('[data-testid="mark"]')!.parentElement!.className;
+    render({ response: { kind: "issue", markdown: "blocked" }, mark });
+    expect(tint()).toContain("text-warning");
+    act(() => root?.unmount());
+    container?.remove();
+    render({ response: { kind: "answer", markdown: "ok" }, mark });
+    expect(tint()).toContain("text-success");
+  });
+
+  it("the chat's card shows a question's options as a record, not controls", () => {
+    renderNode(
+      renderPromptToolCall({
+        toolCallId: "t1",
+        title: "widget_respond",
+        status: "completed",
+        rawInput: {
+          kind: "multiple_choice",
+          markdown: "Which tiers?",
+          options: ["Pro", "Team"],
+        },
+      } as never),
+    );
+    const record = container!.querySelector("[data-choice-record]")!;
+    expect(record.getAttribute("data-choice-record")).toBe("multiple");
+    expect(record.textContent).toBe("ProTeam");
+    expect(container!.querySelector("[data-choice-option]")).toBeNull();
+    for (const box of record.querySelectorAll("button")) {
+      expect(box.hasAttribute("disabled")).toBe(true);
+    }
+  });
+
   it("renders the response markdown through the host slot, headed by its title", () => {
     render({ response: { kind: "answer", markdown: "**bold**", title: "Summary" } });
     expect(body()?.textContent).toBe("**bold**");

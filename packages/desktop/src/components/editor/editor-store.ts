@@ -119,7 +119,7 @@ const BLOCK_RENDER_WAIT_MS = 2_000;
 
 /**
  * The rendered element of a widget block (`data-blob-id`, set by the
- * prompt widget and code-block blob node views) inside this editor, once
+ * prompt widget's node view) inside this editor, once
  * it exists. Node views can render after the editor mounts, so a missing
  * block is watched for, not polled — and only inside this editor's DOM.
  */
@@ -322,8 +322,7 @@ function createMarkdownInstance(
       workspaceRoot,
       filePath,
     } as any),
-    // filePath lets BlobNodeView address answerBlob at the right document.
-    MarkdownCodeBlock.configure({ filePath } as any),
+    MarkdownCodeBlock,
     // filePath/basePath scope the widgets to this document and its
     // workspace; they also arm the prompt widget's empty-doc keeper
     // (unconfigured schema-only instances never self-insert).

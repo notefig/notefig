@@ -1,0 +1,150 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-10-24T12:00:00.000Z",
+  "harnessId": "claude-code",
+  "taskId": "task_fixture_claude-code",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_claude-code",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Write a pricing section for this doc"
+        },
+        {
+          "type": "resource_link",
+          "uri": "notefig://widget-context?path=%2Fworkspace%2Frecorded%2Fnotes.md&pos=12",
+          "name": "widget-context",
+          "mimeType": "application/json"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_q",
+            "title": "mcp__notefig__widget_respond",
+            "kind": "other",
+            "status": "pending",
+            "rawInput": {
+              "kind": "multiple_choice",
+              "markdown": "Which tiers should the section cover?",
+              "options": [
+                "Pro",
+                "Team",
+                "Enterprise"
+              ]
+            }
+          },
+          "at": 120
+        },
+        {
+          "kind": "mcp",
+          "method": "tools/call",
+          "params": {
+            "name": "widget_respond",
+            "arguments": {
+              "kind": "multiple_choice",
+              "markdown": "Which tiers should the section cover?",
+              "options": [
+                "Pro",
+                "Team",
+                "Enterprise"
+              ]
+            }
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"recorded\":true}"
+              }
+            ]
+          },
+          "at": 240
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_q",
+            "status": "completed"
+          },
+          "at": 360
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 480
+    },
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "- Pro\n- Enterprise"
+        },
+        {
+          "type": "resource_link",
+          "uri": "notefig://widget-context?path=%2Fworkspace%2Frecorded%2Fnotes.md&pos=12",
+          "name": "widget-context",
+          "mimeType": "application/json"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_a",
+            "title": "mcp__notefig__widget_respond",
+            "kind": "other",
+            "status": "pending",
+            "rawInput": {
+              "kind": "answer",
+              "title": "Pricing section drafted",
+              "markdown": "Covered **Pro** and **Enterprise**, Enterprise first."
+            }
+          },
+          "at": 120
+        },
+        {
+          "kind": "mcp",
+          "method": "tools/call",
+          "params": {
+            "name": "widget_respond",
+            "arguments": {
+              "kind": "answer",
+              "title": "Pricing section drafted",
+              "markdown": "Covered **Pro** and **Enterprise**, Enterprise first."
+            }
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"recorded\":true}"
+              }
+            ]
+          },
+          "at": 240
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_a",
+            "status": "completed"
+          },
+          "at": 360
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 480
+    }
+  ]
+}

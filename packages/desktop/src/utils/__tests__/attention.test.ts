@@ -217,6 +217,26 @@ describe("deriveAttention", () => {
     expect(attention.asks[0].permission?.id).toBe("p1");
   });
 
+  it("a widget round that ended on a choice question asks from its document until looked at", () => {
+    const question = round({
+      turnId: "t_q",
+      outcome: {
+        response: { kind: "single_choice", markdown: "Pro or Team?", options: ["Pro", "Team"] },
+        summary: null,
+        error: null,
+        touchedFiles: [],
+      },
+    });
+    const attention = deriveAttention({ ...EMPTY, rounds: [question] });
+    expect(attention.byRound.get("t_q")).toBe("error");
+    expect(attention.asks.map((item) => [item.ask, item.question, item.turnId])).toEqual([
+      ["question", "Pro or Team?", "t_q"],
+    ]);
+    // Answering means looking at it in its document; that clears it.
+    const looked = seenAt([[seenKey({ kind: "document", id: "/ws-a/doc.md" }), 20]]);
+    expect(deriveAttention({ ...EMPTY, rounds: [question], seen: looked }).items).toEqual([]);
+  });
+
   it("a restored session is quiet until it is revived", () => {
     const restored = task({
       taskId: "task_restored",

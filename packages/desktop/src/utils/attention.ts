@@ -14,6 +14,8 @@
  *    turn, a harness that never came up, a session that has gone: each
  *    clears when looked at, and a later failure marks it again. Only a
  *    session that is *asking* (permission, sign-in) clears when answered.
+ *    A widget round that ended on a question asks too, from its document,
+ *    and clears as a round does — looked at, which answering it is.
  *
  * A widget round lands on its document, never on its session: the widget
  * is where the user is pointed, so the session stays quiet.
@@ -26,10 +28,11 @@ import type {
 import type { PromptRoundRow } from "@/modules/prompt-rounds";
 import { lastSeenAt, type SeenTarget } from "@/modules/seen";
 import { workspaceKey } from "@/utils/path";
+import { awaitsReply } from "@notefig/shared/agent";
 
 export type AttentionKind = "bau" | "error";
 /** A question the agent is blocked on; answered where the item jumps to. */
-export type AttentionAsk = "permission" | "auth";
+export type AttentionAsk = "permission" | "auth" | "question";
 
 export interface AttentionItem {
   target: SeenTarget;
@@ -43,6 +46,8 @@ export interface AttentionItem {
   permission?: AgentPermissionRequestRow;
   /** The task row, for what an ask says about itself. */
   task?: AgentTaskRow;
+  /** The question a widget round asks (ask "question"). */
+  question?: string;
 }
 
 export interface Attention {
@@ -176,9 +181,12 @@ function roundAttention(
   if (round.settledAt === undefined) return null;
   const target: SeenTarget = { kind: "document", id: round.documentPath };
   if (round.settledAt <= lastSeenAt(seen, target)) return null;
+  const response = round.outcome?.response ?? null;
+  const asks = round.status === "completed" && awaitsReply(response);
   return {
     target,
-    kind: round.status === "error" ? "error" : "bau",
+    kind: round.status === "error" || asks ? "error" : "bau",
+    ...(asks && response ? { ask: "question" as const, question: response.markdown } : {}),
     taskId: round.taskId,
     turnId: round.turnId,
     since: round.settledAt,

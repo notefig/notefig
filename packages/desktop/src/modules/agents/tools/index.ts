@@ -7,7 +7,6 @@ import { historyLog } from "./history-log";
 import { historyDiff } from "./history-diff";
 import { historyCheckpoint } from "./history-checkpoint";
 import { historyRestore } from "./history-restore";
-import { authorBlob } from "./author-blob";
 import { widgetRespond } from "./widget-respond";
 
 /**
@@ -27,7 +26,6 @@ export const toolRegistry: readonly AgentTool<unknown, unknown>[] = [
   historyDiff,
   historyCheckpoint,
   historyRestore,
-  authorBlob,
   widgetRespond,
 ] as unknown as readonly AgentTool<unknown, unknown>[];
 

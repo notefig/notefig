@@ -5,6 +5,7 @@
  * without mounting Tiptap.
  */
 import {
+  isChoiceKind,
   sortEntriesChronologically,
   WIDGET_RESPOND_TOOL_NAME,
   WidgetRespondInputSchema,
@@ -12,6 +13,7 @@ import {
   type AgentTurn,
   type ToolCallUpdate,
   type WidgetResponse,
+  type WidgetResponseKind,
 } from "@notefig/shared/agent";
 import { basename } from "./basename";
 import type { WidgetPromptTarget } from "./host";
@@ -23,6 +25,7 @@ export type BlobPhase =
   | "running"
   | "needs-permission"
   | "needs-auth"
+  | "needs-answer"
   | "done"
   | "error";
 
@@ -120,13 +123,24 @@ export function readWidgetResponse(
  */
 /**
  * Whether the captured reference may be removed: exactly the phases where
- * the NEXT prompt is being composed — a fresh widget, or a reply after a
- * settled round (the same set useComposerKeys calls `replying`, plus
- * composing itself). While a turn is queued/running the quote is part of
+ * the NEXT prompt is being composed — a fresh widget, a reply after a
+ * settled round, or the answer to the agent's question. While a turn is queued/running the quote is part of
  * what the agent received — a record, not a setting.
  */
 export function referenceRemovalArmed(phase: BlobPhase): boolean {
-  return phase === "composing" || phase === "done" || phase === "error";
+  return takesTyping(phase);
+}
+
+/** The draft takes typing in these phases. The machine's `fieldEditable`
+ *  is the authority; this is its reading for a face with no widget behind
+ *  it (the marketing demo, tests). */
+export function takesTyping(phase: BlobPhase): boolean {
+  return (
+    phase === "composing" ||
+    phase === "done" ||
+    phase === "error" ||
+    phase === "needs-answer"
+  );
 }
 
 export function blobCardClass(phase: BlobPhase, hasIssue: boolean): string {
@@ -139,7 +153,7 @@ export function blobCardClass(phase: BlobPhase, hasIssue: boolean): string {
   if (phase === "needs-auth") {
     return `${raised} border-warning/40 bg-background bg-gradient-to-b from-warning/10 to-warning/10`;
   }
-  if (phase === "needs-permission") {
+  if (phase === "needs-permission" || phase === "needs-answer") {
     return `${raised} border-border bg-background bg-gradient-to-b from-muted/40 to-muted/40`;
   }
   return `${raised} border-border bg-card`;
@@ -201,14 +215,113 @@ export function deriveDoneLine(params: {
   cancelled: boolean;
   expanded: boolean;
   labels: { done: string; stopped: string; issue: string };
-}): { summary: string; body: string | null; isIssue: boolean } {
+}): { summary: string; body: string | null; kind: WidgetResponseKind } {
   const { response, fallbackText, cancelled, expanded, labels } = params;
-  const isIssue = response?.kind === "issue";
+  // A choice question is its own heading, whole: nothing to expand, and
+  // the options sit under it.
+  if (response && isChoiceKind(response.kind)) {
+    return { summary: response.markdown, body: null, kind: response.kind };
+  }
+  // No response reads as a plain answer: the turn's own text, or the label.
+  const kind = response?.kind ?? "answer";
   const body = response?.markdown ?? fallbackText;
   const doneLabel = cancelled ? labels.stopped : labels.done;
-  const heading = response?.title ?? (isIssue ? labels.issue : doneLabel);
+  const kindLabel = kind === "issue" ? labels.issue : doneLabel;
+  const heading = response?.title ?? kindLabel;
   const summary = expanded ? heading : (response?.title ?? body ?? doneLabel);
-  return { summary, body, isIssue };
+  return { summary, body, kind };
+}
+
+/**
+ * The prompt a choice answer sends: the picked options (one plainly, several
+ * as a list), then whatever the user typed in the field as a note. With
+ * nothing picked it is just the note — the field still takes a free answer.
+ */
+export function composeChoiceAnswer(picked: string[], note: string): string {
+  const typed = note.trim();
+  const choice =
+    picked.length <= 1
+      ? (picked[0] ?? "")
+      : picked.map((option) => `- ${option}`).join("\n");
+  return [choice, typed].filter(Boolean).join("\n\n");
+}
+
+/**
+ * What a key does to a choice question's options. The caret stays in the
+ * answer field; `focused` is the option the keys are on, null while they
+ * are in the field. ↑/↓ walk one line — the options, then the field — so
+ * ↑ from an empty field lands on the last option, ↑ past the first leaves
+ * upward as caret movement does, and ↓ past the last is the field again.
+ * They don't follow wrapped rows: that would mean measuring the chips.
+ * ↓ from the block above enters at the other end, on the first option
+ * (`ENTERED_FROM_ABOVE`, sent by the widget's keymap as the caret crosses
+ * in). ←/→ step round the options, a digit or Space picks, Enter picks (or
+ * sends a multiple choice's picks), Escape goes back to the field, and any
+ * other key leaves to type. Null: not the options' key.
+ */
+export type ChoiceKey =
+  | { focus: number | null; consumed: boolean }
+  | { pick: number }
+  | { send: true };
+
+/** Not a key: the caret just came down into the widget from above. */
+export const ENTERED_FROM_ABOVE = "EnteredFromAbove";
+
+export function deriveChoiceKey(params: {
+  key: string;
+  focused: number | null;
+  count: number;
+  multiple: boolean;
+  picked: number;
+  draftEmpty: boolean;
+}): ChoiceKey | null {
+  const { key, focused, count } = params;
+  if (focused === null) {
+    if (key === ENTERED_FROM_ABOVE) return { focus: 0, consumed: true };
+    return key === "ArrowUp" && params.draftEmpty
+      ? { focus: count - 1, consumed: true }
+      : null;
+  }
+  const digit = Number(key);
+  if (Number.isInteger(digit) && digit >= 1 && digit <= count) {
+    return { pick: digit - 1 };
+  }
+  if (key.startsWith("Arrow")) return arrowOverOptions(key, focused, count);
+  switch (key) {
+    case "Escape":
+      return { focus: null, consumed: true };
+    case " ":
+      return { pick: focused };
+    case "Enter":
+      return params.multiple && params.picked > 0
+        ? { send: true }
+        : { pick: focused };
+    default:
+      return { focus: null, consumed: false };
+  }
+}
+
+/** An arrow while the keys are on the options: ←/→ step round them, ↑/↓
+ *  step along them and out of either end (see deriveChoiceKey). */
+function arrowOverOptions(
+  key: string,
+  focused: number,
+  count: number,
+): ChoiceKey {
+  switch (key) {
+    case "ArrowLeft":
+      return { focus: (focused - 1 + count) % count, consumed: true };
+    case "ArrowRight":
+      return { focus: (focused + 1) % count, consumed: true };
+    case "ArrowUp":
+      // Past the first, the key goes on: the caret leaves upward.
+      return focused > 0
+        ? { focus: focused - 1, consumed: true }
+        : { focus: null, consumed: false };
+    default:
+      // ↓: past the last is the field.
+      return { focus: focused < count - 1 ? focused + 1 : null, consumed: true };
+  }
 }
 
 /** Kinds that mean "this call changed a document". */

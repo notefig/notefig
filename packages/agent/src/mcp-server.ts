@@ -48,12 +48,6 @@ function jsonrpcError(
   return { jsonrpc: "2.0", id, error: { code, message } };
 }
 
-/** A tool's hand-rendered schema wins over the generic zod rendering — see
- *  `AgentTool.inputJsonSchema` (author_blob's blob-type `anyOf` lives with
- *  the tool, in desktop). */
-function toolInputJsonSchema(tool: AgentTool<unknown, unknown>): unknown {
-  return tool.inputJsonSchema?.() ?? toJsonSchema(tool.input);
-}
 
 /**
  * Permission gate + execute, extracted from Stage 2's `executeFenceTool` now
@@ -131,8 +125,9 @@ function parseStringifiedObjectValues(
  * - 2025-11-25: additive only (auth discovery, icons, elicitation, sampling
  *   tools, experimental tasks). The one item touching us is SEP-1303, a
  *   SHOULD-level clarification that tool input-validation errors go back as
- *   tool execution errors rather than protocol errors; we still answer
- *   -32602 after the repair pass, which remains compliant.
+ *   tool execution errors rather than protocol errors. We follow it: the
+ *   model reads an execution error and can fix its call, where a protocol
+ *   error reads as a broken server.
  * - 2025-06-18: removed JSON-RPC batching (we never batched), structured
  *   tool output + elicitation are optional additions.
  * - 2025-03-26: streamable HTTP + audio content — transport/content
@@ -224,7 +219,7 @@ function handleToolsList(
       name: tool.name,
       title: deps.translate(tool.title),
       description: tool.description,
-      inputSchema: toolInputJsonSchema(tool),
+      inputSchema: toJsonSchema(tool.input),
     })),
   });
 }
@@ -286,11 +281,16 @@ async function handleToolsCall(
     if (repaired) parsed = tool.input.safeParse(repaired);
   }
   if (!parsed.success) {
-    return jsonrpcError(
-      id,
-      -32602,
-      `invalid input for ${tool.name}: ${parsed.error.message}`,
-    );
+    // Each problem on its own, by field, so the agent can fix the call.
+    const problems = parsed.error.issues
+      .map((issue) => `${issue.path.join(".") || "(input)"}: ${issue.message}`)
+      .join("; ");
+    return jsonrpcResult(id, {
+      isError: true,
+      content: [
+        { type: "text", text: `invalid input for ${tool.name}: ${problems}` },
+      ],
+    });
   }
   const result = await dispatchToolCall(tool, deps, parsed.data);
   return jsonrpcResult(id, result);

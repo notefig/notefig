@@ -38,10 +38,12 @@ export const PROMPT_WIDGET_I18N_KEYS = [
   "promptBlobQueuedAhead",
   "promptBlobReferenceRemove",
   "promptBlobReply",
+  "promptBlobAnswer",
   "promptBlobRetry",
   "promptBlobSessionGone",
   "promptBlobShowLess",
   "promptBlobShowMore",
   "promptBlobStopped",
   "promptBlobTrustWarning",
+  "send",
 ] as const;

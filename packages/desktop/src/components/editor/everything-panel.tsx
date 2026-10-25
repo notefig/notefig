@@ -300,7 +300,23 @@ function askLabel(
   t: (key: string, options?: Record<string, unknown>) => string,
 ): string {
   if (item.permission) return item.permission.title;
+  if (item.question) return item.question;
   return t("attentionAuth", { title: item.task?.title ?? "" });
+}
+
+/** Where an ask is answered. A widget's question is in its document, which
+ *  opens even before its widget has mounted this run; the others go
+ *  through their session. */
+function jumpToAsk(core: Parameters<typeof jumpToTask>[0], item: AttentionItem) {
+  if (item.ask === "question" && item.turnId) {
+    jumpToRound(core, {
+      taskId: item.taskId,
+      turnId: item.turnId,
+      documentPath: item.target.id,
+    });
+    return;
+  }
+  jumpToTask(core, item.taskId, { turnId: item.turnId });
 }
 
 /**
@@ -324,14 +340,12 @@ function AttentionGroup({ items }: { items: AttentionItem[] }) {
         </SectionTitle>
         {shown.map((item) => (
           <NavRow
-            key={item.taskId}
+            key={`${item.taskId}:${item.turnId}`}
             leading={<StatusGlyph state={attentionGlyphState(item.kind)} />}
             label={askLabel(item, t)}
             title={`${askLabel(item, t)} · ${deriveProjectName(item.task?.workspacePath ?? "")}`}
             trailing={formatTimeAgo(item.since)}
-            onClick={() =>
-              jumpToTask(core, item.taskId, { turnId: item.turnId })
-            }
+            onClick={() => jumpToAsk(core, item)}
           />
         ))}
       </div>

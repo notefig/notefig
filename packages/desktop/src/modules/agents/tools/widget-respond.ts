@@ -1,6 +1,7 @@
 import type { AgentTool } from "@notefig/agent";
 import {
   WIDGET_RESPOND_TOOL_NAME,
+  WIDGET_RESPONSE_KINDS,
   WidgetRespondInputSchema,
   type WidgetResponse,
 } from "@notefig/shared/agent";
@@ -17,31 +18,36 @@ export { WidgetRespondInputSchema, type WidgetResponse };
  * the record of this call is the `tool_call` transcript entry the service
  * already writes for every tool call — stamped with the running turnId and
  * carrying `rawInput` verbatim — and the widget derives the response from
- * that entry. Same no-separate-tracking-state design `author_blob`
- * documents for blob-answer routing (findBlobAuthorTask): the transcript
- * is the record; readers derive.
+ * that entry. The transcript is the record; readers derive.
  *
- * Unlike author_blob this module stays a leaf (shared types only): the
- * widget reads the same schema from @notefig/shared/agent, and pulling
- * anything from the editor/component layer in here would open a cycle.
+ * The kinds it offers are WIDGET_RESPONSE_KINDS, listed into the
+ * description from there, so a kind added for the widget is a kind the
+ * agent hears about. A question needs no routing of its own: the user's
+ * answer is the widget's next prompt on the same session.
+ *
+ * This module stays a leaf (shared types only): the widget reads the same
+ * schema from @notefig/shared/agent, and pulling anything from the
+ * editor/component layer in here would open a cycle.
  */
 export const widgetRespond: AgentTool<WidgetResponse, { recorded: true }> = {
   name: WIDGET_RESPOND_TOOL_NAME,
   title: "agentToolWidgetRespond",
   description:
-    `Deliver your final answer (kind: "answer") or flag a problem/blocker ` +
-    `(kind: "issue") to the in-document widget the prompt came from. Call this ` +
-    `once, at the end of the turn, with your response in \`markdown\` ` +
-    `(an optional short \`title\` becomes the widget's heading). The widget ` +
-    `renders inline in the document, so keep \`markdown\` to a few sentences ` +
-    `or a short bullet list — never restate content you wrote into the ` +
-    `document; run long only when the answer itself demands it. Call it even ` +
-    `when the request needed no edits or tool actions — a prose-only answer to ` +
-    `a widget prompt is still delivered through this tool, not as chat text. ` +
-    `Only for prompts that carried a widget-context resource_link or an ` +
-    `empty-document widget framing — never for chat conversations.`,
+    `Deliver your response to the in-document widget the prompt came from, ` +
+    `once, as the turn's last step. Pick its \`kind\`: ` +
+    `${describeResponseKinds()}. An optional short \`title\` becomes the ` +
+    `widget's heading. The widget renders inline, so keep \`markdown\` to a ` +
+    `few sentences or a short list, and never restate what you wrote into ` +
+    `the document.`,
   input: WidgetRespondInputSchema,
   async execute() {
     return { ok: true, value: { recorded: true } };
   },
 };
+
+/** Every response kind and when to use it. */
+function describeResponseKinds(): string {
+  return Object.entries(WIDGET_RESPONSE_KINDS)
+    .map(([kind, { use }]) => `"${kind}" — ${use}`)
+    .join("; ");
+}

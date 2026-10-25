@@ -1,6 +1,66 @@
 import { z } from "zod";
 
 /**
+ * What a `widget_respond` call can be, one entry per kind: when the agent
+ * should reach for it (`use`, the line the tool's description advertises)
+ * and whether the round then waits on the user (`awaitsReply`, which the
+ * widget's state machine reads). A new kind of response — multiple-choice
+ * options, an approval — is a new entry here plus the fields it carries in
+ * the schema below; the tool's description and the widget follow. Blocks
+ * an agent places on its own will draw on this same table (see the note in
+ * @notefig/widgets' registry.ts).
+ */
+export const WIDGET_RESPONSE_KINDS = {
+  answer: {
+    use: "your response to the request — the default",
+    awaitsReply: false,
+  },
+  issue: {
+    use: "a blocker or problem you hit and couldn't resolve",
+    awaitsReply: false,
+  },
+  single_choice: {
+    use:
+      "the request has readings that lead to different results, or a " +
+      "decision shapes much of the work, and neither the widget context nor " +
+      "the document settles it. Ask before doing the work it decides (do the " +
+      "parts that don't depend on it), not after; don't ask what the document " +
+      "answers or about a small edit the user can undo. Put the question in " +
+      "`markdown` and concrete outcomes in `options`, the one you'd pick " +
+      "first, no \"Other\" (the user can type their own). Never ask the user " +
+      "in an answer's prose; their pick arrives as your next prompt",
+    awaitsReply: true,
+  },
+  multiple_choice: {
+    use:
+      "like single_choice, when the `options` are independent additions the " +
+      "user may want any number of, not alternatives",
+    awaitsReply: true,
+  },
+} as const satisfies Record<string, { use: string; awaitsReply: boolean }>;
+
+export type WidgetResponseKind = keyof typeof WIDGET_RESPONSE_KINDS;
+
+/** The kinds that carry `options` for the user to pick from. */
+const CHOICE_KINDS: ReadonlySet<WidgetResponseKind> = new Set([
+  "single_choice",
+  "multiple_choice",
+]);
+
+export function isChoiceKind(kind: WidgetResponseKind): boolean {
+  return CHOICE_KINDS.has(kind);
+}
+
+/** What fits a widget heading and a chip; past these, the call fails and
+ *  the agent is told to shorten it. */
+export const WIDGET_RESPONSE_LIMITS = { title: 80, question: 200, option: 60 };
+
+const KINDS = Object.keys(WIDGET_RESPONSE_KINDS) as [
+  WidgetResponseKind,
+  ...WidgetResponseKind[],
+];
+
+/**
  * The `widget_respond` payload — the agent's final answer to an in-document
  * prompt widget (MET-92).
  *
@@ -11,17 +71,70 @@ import { z } from "zod";
  * @notefig/widgets). One definition is what keeps the writer and the reader
  * from drifting.
  *
- * Flat strings only — deliberately no nested objects, so harness-side
- * argument mangling (the OpenCode stringified-payload quirk mcp-server.ts
- * repairs) can't corrupt what the widget reads.
+ * One flat object whatever the kind, not a union per kind: a tool's input
+ * schema must be an object at the top level (the Anthropic API refuses a
+ * top-level anyOf), so a field only one kind carries (options, say) goes
+ * here as optional and is checked against the kind with a refinement
+ * (`options`: required by the choice kinds, refused by the rest). Flat
+ * values only — strings and a list of strings, no nested objects, so
+ * harness-side argument mangling (the OpenCode stringified-payload quirk
+ * mcp-server.ts repairs) can't corrupt what the widget reads.
  */
-export const WidgetRespondInputSchema = z.object({
-  kind: z.enum(["answer", "issue"]),
-  markdown: z.string().min(1),
-  title: z.string().optional(),
-});
+export const WidgetRespondInputSchema = z
+  .object({
+    kind: z.enum(KINDS),
+    markdown: z.string().min(1),
+    title: z
+      .string()
+      .max(WIDGET_RESPONSE_LIMITS.title, shorten("a title", WIDGET_RESPONSE_LIMITS.title))
+      .optional(),
+    options: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(WIDGET_RESPONSE_LIMITS.option, shorten("an option", WIDGET_RESPONSE_LIMITS.option)),
+      )
+      .min(2)
+      .max(8)
+      .optional(),
+  })
+  .superRefine((response, ctx) => {
+    const choice = isChoiceKind(response.kind);
+    // A choice's `markdown` is the question itself, read as the heading.
+    if (choice && response.markdown.length > WIDGET_RESPONSE_LIMITS.question) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["markdown"],
+        message: shorten("a question", WIDGET_RESPONSE_LIMITS.question),
+      });
+    }
+    if (choice && !response.options) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["options"],
+        message: `${response.kind} needs options`,
+      });
+    }
+    if (!choice && response.options) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["options"],
+        message: "options are only for single_choice and multiple_choice",
+      });
+    }
+  });
+
+function shorten(what: string, limit: number): string {
+  return `${what} is at most ${limit} characters — shorten it and call again`;
+}
 
 export type WidgetResponse = z.infer<typeof WidgetRespondInputSchema>;
+
+/** The round this response ends waits on the user's reply. */
+export function awaitsReply(response: WidgetResponse | null): boolean {
+  return response !== null && WIDGET_RESPONSE_KINDS[response.kind].awaitsReply;
+}
 
 /**
  * The tool's name as it reaches the widget. ACP's ToolCallUpdate has no

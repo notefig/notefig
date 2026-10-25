@@ -23,14 +23,6 @@ export interface AgentTool<In, Out> {
   title: string;
   description: string;
   input: z.ZodType<In>;
-  /**
-   * Optional hand-rendered JSON Schema for `tools/list`, regenerated per
-   * call; when absent, the generic zodToJsonSchema rendering of `input` is
-   * used. `author_blob` sets this: its payload shape depends on the
-   * registered blob types, which only the tool's own module can enumerate —
-   * the protocol layer stays tool-agnostic.
-   */
-  inputJsonSchema?: () => unknown;
   /** Mutating tools set this so the MCP dispatch gates behind the existing
    *  PermissionBroker before calling `execute` — no second consent surface. */
   requiresPermission?: boolean;

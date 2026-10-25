@@ -1,28 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { z } from "zod";
 
-// Real blob-registry.ts glob-imports the *.blob.tsx files, which pull in
-// blob-node-view -> blob-actions -> agent-service -> tools/index ->
-// author-blob -> blob-registry: a circular import that only resolves
-// cleanly when entered via agent-service.ts (as agent-service.test.ts does),
-// not via blob-registry.ts directly (as this file would). Mock it with real
-// Zod schemas (unlike author-blob.test.ts's hand-rolled safeParse stub) so
-// zodToJsonSchema still has something real to render.
-const { blobTypes } = vi.hoisted(() => ({
-  blobTypes: [
-    { type: "question", schema: undefined as unknown },
-    { type: "approval", schema: undefined as unknown },
-    { type: "status", schema: undefined as unknown },
-  ],
-}));
-vi.mock("@/components/editor/blobs/blob-registry", () => ({
-  getAllBlobTypes: () => blobTypes,
-  getBlobType: (type: string) => blobTypes.find((t) => t.type === type),
-}));
-
-// author_blob's execute reads/writes through the task's documents; fake
-// them so the stringified-payload repair test below exercises the full
-// dispatch without touching a real workspace.
+// The document tools read/write through the task's documents; fake them so
+// dispatch never touches a real workspace.
 const readWorkspaceTextFile = vi.fn(async (_path: string) => "# Doc\n");
 const writeWorkspaceTextFile = vi.fn(
   async (_path: string, _content: string) => {},
@@ -39,27 +19,16 @@ import {
   encodeWidgetContextUri,
   SUPPORTED_MCP_PROTOCOL_VERSIONS,
 } from "@notefig/agent";
-import type { McpEndpoint, ToolContext } from "@notefig/agent";
+import type { AgentTool, McpEndpoint, ToolContext } from "@notefig/agent";
 import { PermissionBroker } from "../permission-broker";
 import type { AgentStore } from "../agent-collections";
 import { toolRegistry, getTool } from "../tools";
 import { serverInstructions } from "../mcp-instructions";
+import { WIDGET_RESPONSE_KINDS } from "@notefig/shared/agent";
 import i18n from "@/utils/intl";
 import { createLayout } from "@/modules/layout";
 import { memoryUrlState } from "@/testing/test-core";
 import { testAgentStore } from "@/testing/test-agents";
-
-// vi.hoisted can't reference `z` (hoisted above the "zod" import); assign
-// real schemas onto the mocked blob types now that imports have resolved.
-blobTypes[0].schema = z.object({
-  prompt: z.string(),
-  options: z.array(z.string()).optional(),
-});
-blobTypes[1].schema = z.object({ prompt: z.string() });
-blobTypes[2].schema = z.object({
-  label: z.string(),
-  state: z.enum(["pending", "done"]),
-});
 
 const ctx: ToolContext = {
   workspacePath: "/ws",
@@ -78,18 +47,51 @@ const ctx: ToolContext = {
 // The broker's permission requests, fresh per test.
 let store: AgentStore;
 
+/** A tool with a nested object argument, which no desktop tool has: the
+ *  shape the OpenCode stringified-argument repair exists for. */
+const nestedTool = {
+  name: "nested_echo",
+  title: "agentToolWidgetRespond",
+  description: "Echo a nested payload.",
+  input: z.object({ payload: z.object({ prompt: z.string() }) }),
+  async execute(_ctx, input) {
+    return { ok: true, value: input.payload };
+  },
+} satisfies AgentTool<{ payload: { prompt: string } }, { prompt: string }>;
+
+/** A tool call that failed as a tool execution error: its message. */
+function failure(response: { result?: unknown; error?: unknown } | null): string {
+  expect(response?.error).toBeUndefined();
+  const result = response?.result as { isError?: boolean; content: Array<{ text: string }> };
+  expect(result.isError).toBe(true);
+  return result.content[0].text;
+}
+
+/** The real registry plus the nested stub. */
+const withNestedTool = {
+  list: () => [...toolRegistry, nestedTool as unknown as AgentTool<unknown, unknown>],
+  get: (name: string) =>
+    name === nestedTool.name
+      ? (nestedTool as unknown as AgentTool<unknown, unknown>)
+      : getTool(name),
+};
+
 function handler(
   permissionBroker = new PermissionBroker(
     ctx.taskId,
     store.permissionRequests,
   ),
+  tools: { list: () => readonly AgentTool<unknown, unknown>[]; get: typeof getTool } = {
+    list: () => toolRegistry,
+    get: getTool,
+  },
 ) {
   return createMcpRequestHandler({
     ctx,
     permissionBroker,
     // The real desktop registry — this suite is deliberately an integration
     // test of the protocol handler against the actual tool set.
-    tools: { list: () => toolRegistry, get: getTool },
+    tools,
     translate: (key) => i18n.t(key),
     instructions: serverInstructions,
     buildWidgetContextPayload,
@@ -123,7 +125,7 @@ describe("createMcpRequestHandler", () => {
       .instructions;
     // The steering text lives on the server's own channel (not a prompt
     // preamble) so only sessions that have the server hear about its tools.
-    expect(instructions).toContain("author_blob");
+    expect(instructions).toContain("widget_respond");
     expect(instructions).toContain("resources/read");
     // Steering is directive, not optional: resources/read first, and full
     // document reads are the fallback, not the default (context-size ask).
@@ -139,6 +141,10 @@ describe("createMcpRequestHandler", () => {
       "you MUST deliver your final response by calling `widget_respond`",
     );
     expect(instructions).toContain("do NOT call `widget_respond`");
+    // Every response kind is named; the tool's description says when.
+    for (const kind of Object.keys(WIDGET_RESPONSE_KINDS)) {
+      expect(instructions).toContain(kind);
+    }
   });
 
   it("resources/read: an undecodable uri returns a JSON-RPC error, not a thrown exception", async () => {
@@ -192,7 +198,7 @@ describe("createMcpRequestHandler", () => {
     expect(response).toBeNull();
   });
 
-  it("tools/list includes every registered tool with a title, a JSON Schema, and author_blob's payload is an anyOf over registered blob types", async () => {
+  it("tools/list includes every registered tool with a title and a JSON Schema", async () => {
     const response = await handler()({
       jsonrpc: "2.0",
       id: 2,
@@ -212,25 +218,11 @@ describe("createMcpRequestHandler", () => {
         "history_diff",
         "history_checkpoint",
         "history_restore",
-        "author_blob",
         "widget_respond",
       ]),
     );
     // Every tool has a human-readable title distinct from its snake_case name.
     expect(result.tools.every((t) => t.title && t.title !== t.name)).toBe(true);
-
-    const authorBlob = result.tools.find((t) => t.name === "author_blob");
-    expect(authorBlob?.title).toBe("Add Interactive Block");
-    const schema = authorBlob?.inputSchema as {
-      type: string;
-      required: string[];
-      properties: { payload: { anyOf: unknown[] }; type: { enum: string[] } };
-    };
-    expect(schema.required).toEqual(["path", "type", "id"]);
-    expect(schema.properties.payload.anyOf.length).toBeGreaterThan(0);
-    expect(schema.properties.type.enum).toEqual(
-      expect.arrayContaining(["question", "approval", "status"]),
-    );
   });
 
   // MET-92: execute is validate-and-acknowledge only — the tool_call
@@ -261,8 +253,25 @@ describe("createMcpRequestHandler", () => {
         arguments: { kind: "summary", markdown: "x" },
       },
     });
-    expect(bad?.error?.code).toBe(-32602);
-    expect(bad?.error?.message).toContain("widget_respond");
+    expect(failure(bad)).toContain("invalid input for widget_respond");
+
+    // Past a limit, the call fails with what to fix, for the agent to retry.
+    const long = await handler()({
+      jsonrpc: "2.0",
+      id: 42,
+      method: "tools/call",
+      params: {
+        name: "widget_respond",
+        arguments: {
+          kind: "single_choice",
+          markdown: "Which?",
+          options: ["Pro", "x".repeat(61)],
+        },
+      },
+    });
+    expect(failure(long)).toBe(
+      "invalid input for widget_respond: options.1: an option is at most 60 characters — shorten it and call again",
+    );
   });
 
   it("tools/call: unknown tool returns a JSON-RPC error", async () => {
@@ -276,16 +285,15 @@ describe("createMcpRequestHandler", () => {
     expect(response?.error?.message).toMatch(/unknown tool/);
   });
 
-  it("tools/call: invalid input returns a JSON-RPC error with the validation message", async () => {
+  it("tools/call: invalid input fails the call with the validation message (SEP-1303)", async () => {
     const response = await handler()({
       jsonrpc: "2.0",
       id: 4,
       method: "tools/call",
       params: { name: "workspace_read_document", arguments: { path: 123 } },
     });
-    expect(response?.error?.code).toBe(-32602);
-    expect(response?.error?.message).toMatch(
-      /invalid input for workspace_read_document/,
+    expect(failure(response)).toMatch(
+      /^invalid input for workspace_read_document: path: /,
     );
   });
 
@@ -293,18 +301,13 @@ describe("createMcpRequestHandler", () => {
     // OpenCode has been observed sending `payload` as the JSON *string* of
     // the object (v2-opencode-config-mcp-spike.md); one repair pass re-parses
     // it before rejecting.
-    const response = await handler()({
+    const response = await handler(undefined, withNestedTool)({
       jsonrpc: "2.0",
       id: 9,
       method: "tools/call",
       params: {
-        name: "author_blob",
-        arguments: {
-          path: "notes.md",
-          type: "question",
-          id: "question_str1",
-          payload: '{"prompt": "Pick one"}',
-        },
+        name: "nested_echo",
+        arguments: { payload: '{"prompt": "Pick one"}' },
       },
     });
     expect(response?.error).toBeUndefined();
@@ -313,15 +316,8 @@ describe("createMcpRequestHandler", () => {
       content: Array<{ text: string }>;
     };
     expect(result.isError).toBeUndefined();
-    expect(JSON.parse(result.content[0].text)).toEqual({
-      blobId: "question_str1",
-    });
-    // The written fence carries the parsed payload, not the string.
-    const written = writeWorkspaceTextFile.mock.calls.at(-1) as unknown as [
-      string,
-      string,
-    ];
-    expect(written[1]).toContain("Pick one");
+    // The tool got the parsed payload, not the string.
+    expect(JSON.parse(result.content[0].text)).toEqual({ prompt: "Pick one" });
   });
 
   it("tools/call: happy path dispatches to the tool and wraps the result as MCP content", async () => {
@@ -419,26 +415,20 @@ describe("createMcpRequestHandler", () => {
       method: "tools/call",
       params: { name: "widget_respond", arguments: ["kind", "answer"] },
     });
-    expect(arrayArgs?.error?.code).toBe(-32602);
+    expect(failure(arrayArgs)).toContain("invalid input for widget_respond");
 
     // A value that looks like JSON but doesn't parse keeps the original
     // string and still fails validation.
-    const brokenJson = await handler()({
+    const brokenJson = await handler(undefined, withNestedTool)({
       jsonrpc: "2.0",
       id: 54,
       method: "tools/call",
       params: {
-        name: "author_blob",
-        arguments: {
-          path: "notes.md",
-          type: "question",
-          id: "question_bad1",
-          payload: '{"prompt": broken',
-        },
+        name: "nested_echo",
+        arguments: { payload: '{"prompt": broken' },
       },
     });
-    expect(brokenJson?.error?.code).toBe(-32602);
-    expect(brokenJson?.error?.message).toMatch(/invalid input for author_blob/);
+    expect(failure(brokenJson)).toMatch(/invalid input for nested_echo/);
   });
 
   it("resources/list is empty (widget-context URIs are handed out inline, not enumerated)", async () => {
