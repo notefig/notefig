@@ -253,7 +253,9 @@ export function composeChoiceAnswer(picked: string[], note: string): string {
  * ↑ from an empty field lands on the last option, ↑ past the first leaves
  * upward as caret movement does, and ↓ past the last is the field again.
  * They don't follow wrapped rows: that would mean measuring the chips.
- * ←/→ step round the options, a digit or Space picks, Enter picks (or
+ * ↓ from the block above enters at the other end, on the first option
+ * (`ENTERED_FROM_ABOVE`, sent by the widget's keymap as the caret crosses
+ * in). ←/→ step round the options, a digit or Space picks, Enter picks (or
  * sends a multiple choice's picks), Escape goes back to the field, and any
  * other key leaves to type. Null: not the options' key.
  */
@@ -261,6 +263,9 @@ export type ChoiceKey =
   | { focus: number | null; consumed: boolean }
   | { pick: number }
   | { send: true };
+
+/** Not a key: the caret just came down into the widget from above. */
+export const ENTERED_FROM_ABOVE = "EnteredFromAbove";
 
 export function deriveChoiceKey(params: {
   key: string;
@@ -272,6 +277,7 @@ export function deriveChoiceKey(params: {
 }): ChoiceKey | null {
   const { key, focused, count } = params;
   if (focused === null) {
+    if (key === ENTERED_FROM_ABOVE) return { focus: 0, consumed: true };
     return key === "ArrowUp" && params.draftEmpty
       ? { focus: count - 1, consumed: true }
       : null;
@@ -280,19 +286,8 @@ export function deriveChoiceKey(params: {
   if (Number.isInteger(digit) && digit >= 1 && digit <= count) {
     return { pick: digit - 1 };
   }
+  if (key.startsWith("Arrow")) return arrowOverOptions(key, focused, count);
   switch (key) {
-    case "ArrowLeft":
-      return { focus: (focused - 1 + count) % count, consumed: true };
-    case "ArrowRight":
-      return { focus: (focused + 1) % count, consumed: true };
-    case "ArrowUp":
-      return focused > 0
-        ? { focus: focused - 1, consumed: true }
-        : { focus: null, consumed: false };
-    case "ArrowDown":
-      return focused < count - 1
-        ? { focus: focused + 1, consumed: true }
-        : { focus: null, consumed: true };
     case "Escape":
       return { focus: null, consumed: true };
     case " ":
@@ -303,6 +298,29 @@ export function deriveChoiceKey(params: {
         : { pick: focused };
     default:
       return { focus: null, consumed: false };
+  }
+}
+
+/** An arrow while the keys are on the options: ←/→ step round them, ↑/↓
+ *  step along them and out of either end (see deriveChoiceKey). */
+function arrowOverOptions(
+  key: string,
+  focused: number,
+  count: number,
+): ChoiceKey {
+  switch (key) {
+    case "ArrowLeft":
+      return { focus: (focused - 1 + count) % count, consumed: true };
+    case "ArrowRight":
+      return { focus: (focused + 1) % count, consumed: true };
+    case "ArrowUp":
+      // Past the first, the key goes on: the caret leaves upward.
+      return focused > 0
+        ? { focus: focused - 1, consumed: true }
+        : { focus: null, consumed: false };
+    default:
+      // ↓: past the last is the field.
+      return { focus: focused < count - 1 ? focused + 1 : null, consumed: true };
   }
 }
 

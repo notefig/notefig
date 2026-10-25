@@ -17,6 +17,7 @@ import {
   deriveDoneLine,
   composeChoiceAnswer,
   deriveChoiceKey,
+  ENTERED_FROM_ABOVE,
   widgetPromptTarget,
   blobCardClass,
 } from "../state";
@@ -766,6 +767,10 @@ describe("deriveChoiceKey", () => {
   it("moves onto the last option with ↑ from an empty field, and nothing else", () => {
     expect(key("ArrowUp", { focused: null })).toEqual({ focus: 2, consumed: true });
     expect(key("ArrowUp", { focused: null, draftEmpty: false })).toBeNull();
+    expect(key(ENTERED_FROM_ABOVE, { focused: null, draftEmpty: false })).toEqual({
+      focus: 0,
+      consumed: true,
+    });
     for (const other of ["ArrowDown", "ArrowLeft", "1", " ", "Enter"]) {
       expect(key(other, { focused: null })).toBeNull();
     }

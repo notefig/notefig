@@ -43,6 +43,7 @@ import {
 } from "react";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import { AiPromptNodeBase, PROMPT_NODE_NAME } from "./node";
+import { ENTERED_FROM_ABOVE } from "./state";
 import { UI_ONLY_TRANSACTION_META } from "../define-widget";
 import {
   deleteWidgetTr,
@@ -126,6 +127,13 @@ function arrowAcrossWidget(
   view.dispatch(
     (onto ?? state.tr.setSelection(entry.target)).scrollIntoView(),
   );
+  // From above, a question's options come before its field: the widget
+  // takes the keys onto the first one (deriveChoiceKey). Any other widget
+  // ignores it.
+  const blobId = state.doc.nodeAt(entry.widgetPos)?.attrs.blobId;
+  if (!onto && dir > 0 && blobId) {
+    dispatchComposerKey(blobId, { key: ENTERED_FROM_ABOVE, shiftKey: false });
+  }
   return true;
 }
 

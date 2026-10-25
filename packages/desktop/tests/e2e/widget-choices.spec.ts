@@ -28,7 +28,8 @@ import {
   summonWidget,
 } from "../agent/agent-helpers";
 
-const DOC = "para one\n\npara two\n";
+// The widget is summoned onto "para one", below the heading.
+const DOC = "# Plans\n\npara one\n\npara two\n";
 
 /** A fresh document whose widget has asked the recording's question. */
 async function asked(page: Page, name: string, fixture: string) {
@@ -151,6 +152,37 @@ test.describe("prompt widget choices", () => {
     await expect(focusedOption(widget)).toContainText("Enterprise");
     await page.keyboard.press("Enter");
     await answered(page, widget, "Enterprise");
+  });
+
+  test("keyboard: ↓ from above walks the options, then the field, then out below; ↑ walks back and out above", async ({
+    page,
+    headless,
+  }) => {
+    const { editor, widget } = await asked(page, "walk", "widget-single-choice.json");
+    await editor.locator("h1").click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("ArrowDown");
+    await expect(focusedOption(widget)).toContainText("Pro");
+    await stop(page, headless);
+    await page.keyboard.press("ArrowDown");
+    await expect(focusedOption(widget)).toContainText("Enterprise");
+    await page.keyboard.press("ArrowDown");
+    await expect(focusedOption(widget)).toHaveCount(0);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.type("!");
+    await expect(editor.locator("p", { hasText: "!para one" })).toHaveCount(1);
+    await page.keyboard.press("Backspace");
+
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
+    await expect(focusedOption(widget)).toContainText("Enterprise");
+    await page.keyboard.press("ArrowUp");
+    await expect(focusedOption(widget)).toContainText("Pro");
+    await page.keyboard.press("ArrowUp");
+    await expect(focusedOption(widget)).toHaveCount(0);
+    await page.keyboard.type("?");
+    await expect(editor.locator("h1")).toContainText("?");
+    await expect(face(widget)).toHaveAttribute("data-blob-phase", "needs-answer");
   });
 
   test("keyboard, single choice: a digit answers directly", async ({ page }) => {
