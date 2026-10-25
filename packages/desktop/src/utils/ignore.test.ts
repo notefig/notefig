@@ -82,8 +82,14 @@ describe("isIgnoredPath", () => {
 });
 
 describe("IGNORE_RULES", () => {
-  it("mirrors the exported lists", () => {
-    expect(IGNORE_RULES.directories).toBe(IGNORED_DIRECTORIES);
-    expect(IGNORE_RULES.extensions).toBe(IGNORED_EXTENSIONS);
+  it("sends the exported lists lowercased, as the Rust side matches them", () => {
+    expect(IGNORE_RULES.directories).toEqual(
+      IGNORED_DIRECTORIES.map((d) => d.toLowerCase()),
+    );
+    expect(IGNORE_RULES.extensions).toEqual(
+      IGNORED_EXTENSIONS.map((e) => e.toLowerCase()),
+    );
+    expect(IGNORE_RULES.directories).toContain("pods");
+    expect(IGNORE_RULES.directories).toContain("deriveddata");
   });
 });

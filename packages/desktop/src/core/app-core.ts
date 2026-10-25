@@ -32,6 +32,7 @@ import { recentDocumentsModule } from "@/modules/recent-documents";
 import { scratchpadLandingModule } from "@/modules/scratchpads";
 import { scratchpadsModule } from "@/modules/scratchpads";
 import { seenModule } from "@/modules/seen";
+import { sessionModule } from "@/modules/session";
 import { usageModule } from "@/modules/usage";
 import { feedbackModule } from "@/modules/feedback";
 import { turnWritesModule } from "@/modules/turn-writes";
@@ -93,6 +94,8 @@ export function desktopModules(): AnyModule[] {
     // Reopen the workspaces the user left open; the marketing site seeds
     // its one fixed root instead.
     restoreWorkspacesModule,
+    // Restores the last session's layout on a cold boot, records it after.
+    sessionModule,
     // Finds what each harness offers before a session does; never in a
     // browser or mock mode, which have no harness to spawn.
     harnessProbeModule,

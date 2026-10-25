@@ -6,6 +6,7 @@ import type {
   PanelNode,
   WindowNode,
 } from "../utils/serializeLayout";
+import type { TabProps } from "../primitives";
 import { useDockable } from "../store";
 import DroppableDivider from "../dndkit/DroppableDivider";
 import styles from "./Panel.module.css";
@@ -98,6 +99,7 @@ function PanelView({
                   name: tab.props.name,
                   content: tab,
                   onClose: tab.props.onClose,
+                  keepMounted: tab.props.keepMounted,
                 };
               })
               .filter((t): t is NonNullable<typeof t> => t !== null);
@@ -139,13 +141,6 @@ function PanelView({
   );
 }
 
-type WindowProps = {
-  id: string;
-  name: string;
-  children: React.ReactNode;
-  onClose?: () => void;
-};
-
-export const View: React.FC<WindowProps> = ({ children }) => <>{children}</>;
+export const View: React.FC<TabProps> = ({ children }) => <>{children}</>;
 
 export default PanelView;

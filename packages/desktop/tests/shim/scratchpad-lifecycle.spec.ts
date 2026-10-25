@@ -108,8 +108,9 @@ test.describe("shim: scratchpad entry lifecycle", () => {
 
   /**
    * The app records the session URL's search string (`?layout=…`) to the
-   * `settings.lastSearch` KV row fire-and-forget (App.tsx): the DOM updates
-   * the moment a tab closes, but the durable write can still be in flight.
+   * `session.lastSearch` KV row fire-and-forget (the session module): the
+   * DOM updates the moment a tab closes, but the durable write can still be
+   * in flight.
    * A re-entry that lands before it completes reads the STALE row — still
    * listing the closed tab — so a sweep keyed off that layout wrongly keeps
    * what should have been an abandoned leftover.
@@ -133,7 +134,7 @@ test.describe("shim: scratchpad entry lifecycle", () => {
                 };
               }
             ).__notefigCore;
-            return (await kv.read("settings", "lastSearch")) ?? null;
+            return (await kv.read("session", "lastSearch")) ?? null;
           }),
         { timeout: 10000 },
       )

@@ -49,6 +49,9 @@ import {
 import { platformModule, queryClientModule } from "@/core/services";
 
 const METADATA_REFETCH_INTERVAL_MS = 30_000;
+/** How long a walked listing counts as current: returning to a workspace
+ *  (its tree remounting, its focus) re-walks only an older one. */
+const LISTING_FRESH_MS = 10_000;
 const INVALIDATE_DEBOUNCE_MS = 500;
 
 /** Temporary MET-135 diagnostics — grep for [scratchpad-debug]. */
@@ -99,9 +102,11 @@ export const fileQueryKeys = {
   content: (workspacePath: string) => ["file-content", workspacePath],
 };
 
+/** The directory holding `path`, in the app's path flavor (backslashes on
+ *  Windows): the refetch's re-stat and the tree's hydration both match
+ *  rows to directories by it. */
 function parentDirectory(path: string): string {
-  const separator = path.lastIndexOf("/");
-  return separator > 0 ? path.slice(0, separator) : "/";
+  return pathutil.dirname(path);
 }
 
 function createMetadataCollection(
@@ -117,6 +122,10 @@ function createMetadataCollection(
       // Safety net for changes the fs watcher misses (network volumes,
       // watcher gaps): periodically re-read the tree from disk.
       refetchInterval: METADATA_REFETCH_INTERVAL_MS,
+      // A subscriber arriving (the file tree remounting on a workspace
+      // switch) re-walks only a listing older than this; with the default
+      // of 0, every return to a workspace walked it again.
+      staleTime: LISTING_FRESH_MS,
 
       // Access errors can't be retried away — fail fast so the recovery UI
       // (WorkspaceErrorBoundary) shows immediately.
@@ -477,6 +486,12 @@ export interface WorkspaceFiles {
   /** Refetch the listing; call when files are known to have changed. */
   refresh(): Promise<void>;
   /**
+   * Re-walk unless a walk is in flight or landed within `maxAgeMs` — for
+   * catching watcher gaps on a return, without a full walk (and a cancel
+   * of the one running) on every switch.
+   */
+  catchUp(maxAgeMs: number): Promise<void>;
+  /**
    * Re-walk after out-of-band disk mutations (the entry-time scratchpad
    * sweep). Resolves once a walk that STARTED after this call has landed: a
    * walk already in flight may predate the mutation, so it finishes and a
@@ -484,13 +499,14 @@ export interface WorkspaceFiles {
    */
   refetchMetadata(): Promise<void>;
   /**
-   * Stat a directory's direct children and write modified/size into their
-   * rows. Callers re-invoke freely (tree expand, child-count changes) — one
-   * stat batch per directory is cheap, concurrent calls per directory
-   * coalesce, and rows the collection doesn't hold yet are picked up by a
-   * later call or the periodic refetch's hydrated-dir re-stat.
+   * Stat the direct children of these directories and write modified/size
+   * into their rows — one stat batch and one write for all of them. Callers
+   * re-invoke freely (tree expand, child-count changes): a hydrated
+   * directory is skipped (the refetch re-stats its children), concurrent
+   * calls per directory coalesce, and rows the collection doesn't hold yet
+   * are picked up by a later call or the refetch.
    */
-  hydrateDirectoryStats(dirPath: string): Promise<void>;
+  hydrateDirectoryStats(dirPaths: readonly string[]): Promise<void>;
   /**
    * Bring a loaded file's rows (content, and metadata's hash) to `content`.
    * The one implementation of "a loaded file's row reflects its bytes",
@@ -825,36 +841,59 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
     }
   };
 
-  const hydrateDirectoryStats = (dirPath: string) => {
-    const inFlight = hydrationInFlight.get(dirPath);
-    if (inFlight) return inFlight;
-
-    const promise = (async () => {
-      const children = collections.metadata.toArray.filter((row) => {
-        const rel = relativeTreePath(dirPath, row.path);
-        return rel !== undefined && rel !== "" && !rel.includes("/");
+  const hydrateDirectoryStats = async (dirPaths: readonly string[]) => {
+    // Already hydrated: the refetch keeps those fresh, and the tree asks
+    // again for every visible directory on each expand or collapse.
+    const waits: Promise<void>[] = [];
+    const pending: string[] = [];
+    for (const dir of new Set(dirPaths)) {
+      if (hydratedDirs.has(dir)) continue;
+      const inFlight = hydrationInFlight.get(dir);
+      if (inFlight) waits.push(inFlight);
+      else pending.push(dir);
+    }
+    if (pending.length > 0) {
+      const batch = statChildren(pending).finally(() => {
+        for (const dir of pending) hydrationInFlight.delete(dir);
       });
+      for (const dir of pending) hydrationInFlight.set(dir, batch);
+      waits.push(batch);
+    }
+    await Promise.all(waits);
+  };
 
-      if (children.length > 0) {
-        const result = await fs.getMetadata(children.map((c) => c.path));
-        const updates: FileMetadata[] = [];
-        for (const m of result.succeeded) {
-          const row = collections.metadata.get(m.path);
-          if (!row) continue;
-          updates.push({ ...row, modified: m.modifiedAt, size: m.size });
-        }
-        if (updates.length > 0) {
-          collections.metadata.utils.writeUpsert(updates);
-        }
-      }
-
-      hydratedDirs.add(dirPath);
-    })().finally(() => {
-      hydrationInFlight.delete(dirPath);
+  /** One stat batch and one write for every child of `dirs`: each write
+   *  rewrites the collection's whole query cache, so a first visit with
+   *  many folders open paid that once per folder. */
+  const statChildren = async (dirs: string[]) => {
+    // Before the first walk lands there are no rows to stat: leave the
+    // directories unhydrated, so the next request does them.
+    if (!collections.metadata.isReady()) return;
+    const wanted = new Set(dirs);
+    // The refetch's parent test, not a relative path per row: this scans
+    // the whole collection.
+    const children = collections.metadata.toArray.filter((row) => {
+      const parent = parentDirectory(row.path);
+      return parent !== row.path && wanted.has(parent);
     });
 
-    hydrationInFlight.set(dirPath, promise);
-    return promise;
+    if (children.length > 0) {
+      const result = await fs.getMetadata(children.map((c) => c.path));
+      const updates: FileMetadata[] = [];
+      for (const m of result.succeeded) {
+        const row = collections.metadata.get(m.path);
+        if (!row) continue;
+        updates.push({ ...row, modified: m.modifiedAt, size: m.size });
+      }
+      if (updates.length > 0) {
+        collections.metadata.utils.writeUpsert(updates);
+      }
+      // Some stats failed: the next request retries rather than the
+      // directories waiting out the refetch.
+      if (result.failed.length > 0) return;
+    }
+
+    for (const dir of dirs) hydratedDirs.add(dir);
   };
 
   const dropQueries = () => {
@@ -886,6 +925,14 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
       prefetch: () => prefetch(filePath),
     }),
     refresh: async () => {
+      await collections.metadata.utils.refetch();
+    },
+    catchUp: async (maxAgeMs) => {
+      const state = queryClient.getQueryState(
+        fileQueryKeys.metadata(workspacePath),
+      );
+      if (state?.fetchStatus === "fetching") return;
+      if (state && Date.now() - state.dataUpdatedAt < maxAgeMs) return;
       await collections.metadata.utils.refetch();
     },
     refetchMetadata,
@@ -941,8 +988,9 @@ declare module "@notefig/core" {
 export const filesModule = defineModule({
   name: "files",
   needs: [platformModule, queryClientModule],
-  // Coming back to a workspace re-stats its listing (cheap, catches
-  // watcher gaps) and gives a watcher whose start failed another chance.
+  // Coming back to a workspace re-walks its listing (catches watcher gaps)
+  // unless a walk is running or recent, and gives a watcher whose start
+  // failed another chance.
   boot: (_api, ctx) =>
     ctx.hooks.on("workspace:focused", ({ path }) => {
       // An earlier focus step can still be waiting when the workspace
@@ -952,7 +1000,7 @@ export const filesModule = defineModule({
       if (!workspace.isOpen()) return;
       const { files } = workspace;
       files.ensureWatching();
-      void files.refresh();
+      void files.catchUp(LISTING_FRESH_MS);
     }),
   workspace: {
     create: (ctx) =>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type React from "react";
 import { Dockable } from "@/components/dockable";
 import type { DockChrome } from "@/components/dockable/store";
@@ -15,17 +15,17 @@ import { cn } from "@notefig/ui/utils";
 import { SettingsModal } from "@/components/editor/settings-modal";
 import { CommandPalette } from "@/components/editor/command-palette";
 import { useTranslation } from "react-i18next";
-import {
-  useContentFetching,
-  useContentWatches,
-  useOpenFileRows,
-} from "@/modules/files/react";
+import { useContentWatches } from "@/modules/files/react";
 import {
   useFocusedWorkspace,
   useOpenWorkspacesReady,
   useWorkspaceOfPath,
 } from "@/modules/workspaces/react";
-import { useWorkspaceTabs } from "@/modules/tabs/react";
+import {
+  useStaleTabIds,
+  useWorkspaceTabs,
+  type OpenTabGroups,
+} from "@/modules/tabs/react";
 import { DebugPanel } from "./debug-panel";
 import { useOpenProject } from "@/hooks/use-open-project";
 import { Welcome } from "@/components/welcome";
@@ -39,7 +39,7 @@ import { useSidebarCollapseTween } from "@/hooks/use-sidebar-collapse-tween";
 import { removeTabFromLayout } from "@/utils/dockable-layout";
 import { PromptWidgetBoundary } from "@/components/agent/prompt-widget-boundary";
 import { useThrowWorkspaceAccessError } from "@/components/workspace-error-boundary";
-import { isFileTabId } from "@/modules/tabs";
+import { fileTabPath, isFileTabId } from "@/modules/tabs";
 import { useCore } from "@notefig/core/react";
 import { useTrackActiveTab } from "@/modules/seen/react";
 import { useTabElements } from "@/modules/tabs/tab-types";
@@ -132,11 +132,9 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
     getSelectedText,
   } = useDockableTabs({ dockableRef });
 
-  const { allDockableTabs, wordCount, isSynced } = useWorkspaceDocuments({
+  const { allDockableTabs, openTabGroups } = useWorkspaceDocuments({
     openTabs,
     activeTabId,
-    layout,
-    handleLayoutChange,
   });
 
   const {
@@ -186,7 +184,7 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
   // workspace: the two differ once tabs from several workspaces share
   // the dock.
   const activeFileWorkspace = useWorkspaceOfPath(
-    activeFilePath(activeTabId) ?? "",
+    fileTabPath(activeTabId) ?? "",
   );
   const searchWorkspacePath = activeFileWorkspace ?? workspacePath;
   const sidebarResize = useSidebarResize();
@@ -273,10 +271,12 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
           </div>
         </div>
 
-        <StatusBar
-          wordCount={wordCount}
-          isSynced={isSynced}
-          direction={direction}
+        <StatusBar activeTabId={activeTabId} direction={direction} />
+
+        <StaleTabPruning
+          tabs={openTabGroups}
+          layout={layout}
+          onLayoutChange={handleLayoutChange}
         />
 
         <SettingsModal
@@ -327,16 +327,20 @@ function useDirectionSetting(workspacePath: string) {
   return { direction, setDirection };
 }
 
-/** Drop tabs whose backing rows are gone. One pass so concurrent prunes
+/** Drops tabs whose backing rows are gone. One pass so concurrent prunes
  *  can't race each other's layout writes; the fetch/boot-load gating
- *  already happened inside useWorkspaceTabs. */
-function useStaleTabPruning(
-  staleTabIds: string[],
-  layout: Parameters<typeof removeTabFromLayout>[0],
-  handleLayoutChange: (
-    layout: Parameters<typeof removeTabFromLayout>[0],
-  ) => void,
-) {
+ *  happens in useStaleTabIds. A component of its own so the metadata
+ *  fetches it waits out re-render it, not the shell. */
+function StaleTabPruning({
+  tabs,
+  layout,
+  onLayoutChange,
+}: {
+  tabs: OpenTabGroups;
+  layout: Parameters<typeof removeTabFromLayout>[0];
+  onLayoutChange: (layout: Parameters<typeof removeTabFromLayout>[0]) => void;
+}) {
+  const staleTabIds = useStaleTabIds(tabs);
   useEffect(() => {
     if (staleTabIds.length === 0) return;
 
@@ -345,61 +349,25 @@ function useStaleTabPruning(
       layout,
     );
 
-    handleLayoutChange(sanitizedLayout);
-  }, [staleTabIds, layout, handleLayoutChange]);
-}
-
-/** The active tab's file content, "" unless a file tab is active and its
- *  content has loaded. Joined here, not lifted from the tab: the active tab
- *  resolves its own workspace like every file tab does. */
-function useActiveFileContent(activeTabId: string | null): string {
-  const activePath = activeFilePath(activeTabId);
-  // No file tab active → no workspace contains "" → no rows, no query.
-  const workspacePath = useWorkspaceOfPath(activePath ?? "");
-  const paths = useMemo(
-    () => (activePath === null ? [] : [activePath]),
-    [activePath],
-  );
-  const [row] = useOpenFileRows(workspacePath, paths);
-  return row?.content ?? "";
-}
-
-function activeFilePath(activeTabId: string | null): string | null {
-  if (activeTabId === null || !isFileTabId(activeTabId)) return null;
-  return activeTabId;
-}
-
-/** Status-bar word count, null with nothing to count. */
-function countWords(content: string): number | null {
-  if (!content) return null;
-  return content
-    .trim()
-    .split(/\s+/)
-    .filter((word: string) => word.length > 0).length;
+    onLayoutChange(sanitizedLayout);
+  }, [staleTabIds, layout, onLayoutChange]);
+  return null;
 }
 
 /** Everything derived from the open tabs' backing rows: the cross-entity
- *  join (agent/file split, metadata ⋈ content rows, stale-tab detection),
- *  the rendered tab elements, watchers, and the status bar's inputs. */
+ *  join (agent/file split, metadata ⋈ content rows), the rendered tab
+ *  elements and watchers. */
 function useWorkspaceDocuments({
   openTabs,
   activeTabId,
-  layout,
-  handleLayoutChange,
 }: {
   openTabs: string[];
   activeTabId: string | null;
-  layout: Parameters<typeof removeTabFromLayout>[0];
-  handleLayoutChange: (
-    layout: Parameters<typeof removeTabFromLayout>[0],
-  ) => void;
 }) {
   const { tabs, recentDocuments } = useCore();
-  const {
-    fileTabsByWorkspace,
-    agentTaskRows: openAgentTaskRows,
-    staleTabIds,
-  } = useWorkspaceTabs(openTabs);
+  const openTabGroups = useWorkspaceTabs(openTabs);
+  const { fileTabsByWorkspace, agentTaskRows: openAgentTaskRows } =
+    openTabGroups;
 
   useReleaseNotesOnUpdate();
 
@@ -410,9 +378,6 @@ function useWorkspaceDocuments({
     closeTab: tabs.close,
   });
 
-  const activeContent = useActiveFileContent(activeTabId);
-  const wordCount = useMemo(() => countWords(activeContent), [activeContent]);
-
   // The Everything view's recent documents: whatever file tab is in front.
   useEffect(() => {
     if (activeTabId !== null && isFileTabId(activeTabId)) {
@@ -422,11 +387,9 @@ function useWorkspaceDocuments({
   // ...and the seen tracker: whatever tab is in front has been looked at.
   useTrackActiveTab(activeTabId);
 
-  const isFetchingContent = useContentFetching();
-  useStaleTabPruning(staleTabIds, layout, handleLayoutChange);
   useContentWatches(fileTabsByWorkspace);
 
-  return { allDockableTabs, wordCount, isSynced: !isFetchingContent };
+  return { allDockableTabs, openTabGroups };
 }
 
 /** The workspace's chrome state: sidebar/panel controls, the command

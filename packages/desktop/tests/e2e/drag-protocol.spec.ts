@@ -218,8 +218,8 @@ test.describe("drag protocol: file tree → tabs/editor", () => {
       .locator('[data-testid="tab-bar"]')
       .getByText(NOTES_NAME)
       .click();
-    await expect(page.locator(".ProseMirror")).not.toContainText(OTHER_PATH);
-    await expect(page.locator(".ProseMirror")).not.toContainText("file://");
+    await expect(page.locator(".ProseMirror:visible")).not.toContainText(OTHER_PATH);
+    await expect(page.locator(".ProseMirror:visible")).not.toContainText("file://");
   });
 
   test("dropping an image file row on the editor inserts it into the document", async ({

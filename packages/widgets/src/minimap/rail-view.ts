@@ -37,6 +37,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import {
   MINIMAP_STILL_DOT,
   deriveMinimapEntries,
+  dotTitle,
   type MinimapDotState,
   type MinimapEntry,
   type MinimapObserver,
@@ -133,6 +134,8 @@ export class MinimapRailView implements PluginView {
   private dots: Dot[] = [];
   private observers = new Map<string, MinimapObserver>();
   private lastSerialized = "";
+  /** The doc the last render read; a selection-only update keeps it. */
+  private lastDoc: PMNode | null = null;
 
   constructor(
     view: EditorView,
@@ -152,6 +155,11 @@ export class MinimapRailView implements PluginView {
     this.nav.setAttribute("data-widget-minimap", "");
     this.nav.setAttribute("aria-label", "Prompt widgets in this document");
     this.nav.className = "group/map absolute right-2 top-6 h-28 w-3";
+    // A compositing layer of its own. The goo filter below is rendered on
+    // the CPU in WebKit (the macOS app's webview), and while the rail shared
+    // a layer with the document, every repaint under it — each selection
+    // change, caret blink and scroll — re-ran the blur.
+    this.nav.style.willChange = "transform";
     this.nav.hidden = true;
 
     const svg = svgEl("svg");
@@ -225,7 +233,13 @@ export class MinimapRailView implements PluginView {
   }
 
   private render(): void {
-    const entries = deriveMinimapEntries(this.view.state.doc, this.sources);
+    // Every view update calls this — caret moves and selections included —
+    // and deriving walks the whole document. Entries change with the doc,
+    // or with a source's own state, which its observer reports (above).
+    const doc = this.view.state.doc;
+    if (doc === this.lastDoc) return;
+    this.lastDoc = doc;
+    const entries = deriveMinimapEntries(doc, this.sources);
     const serialized = JSON.stringify(entries);
     if (serialized === this.lastSerialized) return;
     this.lastSerialized = serialized;
@@ -385,10 +399,28 @@ export class MinimapRailView implements PluginView {
         },
       };
       const key = entry.observerKey;
-      const observer = source.observe(handle, () => this.applyObserver(key));
+      const observer = source.observe(handle, () => {
+        // A dot's title can come from outside the doc (a prompt's last sent
+        // text): when the source now titles this one differently, re-derive
+        // the entries. Only then — a live turn notifies on every update.
+        if (this.titleChanged(key)) {
+          this.lastDoc = null;
+          this.render();
+        }
+        this.applyObserver(key);
+      });
       this.observers.set(key, observer);
       this.applyObserver(key);
     }
+  }
+
+  /** Whether the source would now title this widget's dot differently. */
+  private titleChanged(observerKey: string): boolean {
+    const dot = this.dots.find((d) => d.entry.observerKey === observerKey);
+    const node = this.currentNode(observerKey);
+    if (!dot || !node) return false;
+    const info = this.sources[dot.entry.nodeTypeName]?.entry(node);
+    return !!info && dotTitle(info.title) !== dot.entry.title;
   }
 
   private currentNode(observerKey: string): PMNode | null {

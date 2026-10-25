@@ -69,6 +69,17 @@ function isCorruption(error: unknown): boolean {
   return typeof type === "string" && RECREATE_ON.has(type as DbErrorType);
 }
 
+/** Schema statements that are no-ops once they have run on a database. */
+const IDEMPOTENT_SCHEMA =
+  /^\s*(CREATE\s+(TABLE|INDEX)\s+IF\s+NOT\s+EXISTS|ALTER\s+TABLE\s+\S+\s+ADD\s+COLUMN)\b/i;
+
+/** Statements after which a remembered schema statement may no longer hold. */
+const UNDOES_SCHEMA = /^\s*(DROP|ROLLBACK)\b/i;
+
+function isDuplicateColumn(error: unknown): boolean {
+  return error instanceof Error && /duplicate column/i.test(error.message);
+}
+
 /** Matches `QueryResult` in `db_ops.rs` (and plugin-sql's own shape). */
 type QueryResult = { rowsAffected: number; lastInsertId: number };
 
@@ -83,7 +94,36 @@ class RusqliteDatabase {
 
   private resetInFlight: Promise<void> | null = null;
 
+  /**
+   * Idempotent schema statements this connection has settled, by text. The
+   * persistence package initialises its shared tables once per adapter but
+   * marks itself initialised only after the last statement, so every
+   * collection loading at boot re-runs the whole set — about a hundred
+   * round trips that queue in front of the first real queries. Each such
+   * statement now runs once: a success is kept, and so is a duplicate-column
+   * failure (the column already exists, which the package expects and
+   * catches); any other failure is retried next time. Anything that can undo
+   * schema — a DROP (an index or table the package recreates with the same
+   * text), a ROLLBACK, a reset — forgets them all.
+   */
+  private readonly schemaStatements = new Map<string, Promise<QueryResult>>();
+
   execute(query: string, bindValues?: unknown[]): Promise<QueryResult> {
+    if (UNDOES_SCHEMA.test(query)) this.schemaStatements.clear();
+    if (bindValues?.length || !IDEMPOTENT_SCHEMA.test(query)) {
+      return this.run(query, bindValues);
+    }
+    const settled = this.schemaStatements.get(query);
+    if (settled) return settled;
+    const result = this.run(query, bindValues);
+    this.schemaStatements.set(query, result);
+    result.catch((error) => {
+      if (!isDuplicateColumn(error)) this.schemaStatements.delete(query);
+    });
+    return result;
+  }
+
+  private run(query: string, bindValues?: unknown[]): Promise<QueryResult> {
     return this.guarded(() =>
       invoke<QueryResult>("db_execute", { sql: query, params: bindValues }),
     );
@@ -132,6 +172,7 @@ class RusqliteDatabase {
       try {
         await invoke("db_reset");
       } finally {
+        this.schemaStatements.clear();
         this.resetInFlight = null;
       }
     })();

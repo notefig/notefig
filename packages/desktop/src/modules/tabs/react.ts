@@ -1,8 +1,8 @@
 /**
  * The open-tabs cross-entity join (`useWorkspaceTabs`): URL layout →
- * agent/file split → per-workspace grouping + agent task rows + stale-tab
- * detection, in one hook. Callers keep layout interaction on
- * `useDockableTabs`; this is the read side.
+ * agent/file split → per-workspace grouping + agent task rows, and the
+ * stale-tab detection beside it (`useStaleTabIds`). Callers keep layout
+ * interaction on `useDockableTabs`; this is the read side.
  */
 import { useMemo, useCallback, useSyncExternalStore } from "react";
 import type { Core } from "@notefig/core";
@@ -38,13 +38,6 @@ export interface WorkspaceTabsState {
   agentTaskRows: AgentTaskRow[];
   /** Whether the release-notes tab is in the layout. */
   isReleaseNotesTabOpen: boolean;
-  /**
-   * Open tab ids (file paths / `agent:<taskId>`) whose backing entity no
-   * longer exists — already gated on the metadata fetch and the agent
-   * collection's boot load, so a tab is never reported stale while its
-   * backing load is still in flight.
-   */
-  staleTabIds: string[];
 }
 
 /** `fileTabIds` grouped by the workspace containing each; tabs in no open
@@ -125,27 +118,25 @@ function openFilesOf(
  * (modules/tabs/tab-types.tsx), since each tab resolves its own workspace.
  */
 export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
-  const { agentStore, tabs, workspaceRegistry: registry } = useCore();
-  const fileTabIds = useMemo(() => openTabs.filter(isFileTabId), [openTabs]);
-  const agentTaskIds = useMemo(
-    () =>
-      openTabs
-        .map(agentTaskIdFromTabId)
-        .filter((taskId): taskId is string => taskId !== null),
-    [openTabs],
-  );
-  const isReleaseNotesTabOpen = useMemo(
-    () => openTabs.some(isReleaseNotesTabId),
-    [openTabs],
-  );
+  const groups = useOpenTabGroups(openTabs);
+  const agentTaskRows = useAgentTaskRowsById(groups.agentTaskIds);
+  return { ...groups, agentTaskRows };
+}
 
-  // Re-group when workspaces open or close, not only when tabs change.
-  const openWorkspaces = useOpenWorkspaces();
-  const fileTabsByWorkspace = useMemo(
-    () => groupFileTabsByWorkspace(registry, fileTabIds),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [registry, fileTabIds, openWorkspaces],
-  );
+/**
+ * Open tab ids (file paths / `agent:<taskId>`) whose backing entity no
+ * longer exists — gated on the metadata fetch and the agent collection's
+ * boot load, so a tab is never reported stale while its backing load is
+ * still in flight. Kept apart from `useWorkspaceTabs`: these subscriptions
+ * (every metadata fetch flips one) belong to whoever prunes, not to the
+ * shell that renders the tabs.
+ */
+export function useStaleTabIds({
+  fileTabIds,
+  fileTabsByWorkspace,
+  agentTaskIds,
+}: OpenTabGroups): string[] {
+  const { agentStore, tabs } = useCore();
   const missingFileTabs = useMissingFileTabs(fileTabsByWorkspace, fileTabIds);
   // Coarse on purpose: a metadata walk in any workspace defers pruning in
   // all of them; the walk is short and pruning is not urgent. Before the
@@ -154,9 +145,7 @@ export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
   const isFetchingMetadata = useMetadataFetching();
   const agentTasksReady = useAgentTasksReady();
 
-  const agentTaskRows = useAgentTaskRowsById(agentTaskIds);
-
-  const staleTabIds = useMemo(() => {
+  return useMemo(() => {
     // File tabs wait out the metadata fetch; agent tabs wait out the tasks
     // collection's boot load (restored sessions come back as rows).
     const midRenameIds = new Set([...tabs.renaming()].flat());
@@ -182,13 +171,36 @@ export function useWorkspaceTabs(openTabs: string[]): WorkspaceTabsState {
     agentStore,
     tabs,
   ]);
+}
 
-  return {
-    fileTabIds,
-    fileTabsByWorkspace,
-    agentTaskIds,
-    agentTaskRows,
-    isReleaseNotesTabOpen,
-    staleTabIds,
-  };
+/** The open tabs `useStaleTabIds` judges, as `useWorkspaceTabs` groups them. */
+export type OpenTabGroups = Pick<
+  WorkspaceTabsState,
+  "fileTabIds" | "fileTabsByWorkspace" | "agentTaskIds"
+>;
+
+/** The layout's open tabs split by kind, file tabs grouped by workspace. */
+function useOpenTabGroups(openTabs: string[]) {
+  const { workspaceRegistry: registry } = useCore();
+  const fileTabIds = useMemo(() => openTabs.filter(isFileTabId), [openTabs]);
+  const agentTaskIds = useMemo(
+    () =>
+      openTabs
+        .map(agentTaskIdFromTabId)
+        .filter((taskId): taskId is string => taskId !== null),
+    [openTabs],
+  );
+  const isReleaseNotesTabOpen = useMemo(
+    () => openTabs.some(isReleaseNotesTabId),
+    [openTabs],
+  );
+
+  // Re-group when workspaces open or close, not only when tabs change.
+  const openWorkspaces = useOpenWorkspaces();
+  const fileTabsByWorkspace = useMemo(
+    () => groupFileTabsByWorkspace(registry, fileTabIds),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [registry, fileTabIds, openWorkspaces],
+  );
+  return { fileTabIds, fileTabsByWorkspace, agentTaskIds, isReleaseNotesTabOpen };
 }

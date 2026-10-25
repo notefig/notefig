@@ -25,6 +25,8 @@ import { urlModule } from "@/core/services";
  * when no route has a loader.
  */
 export interface UrlState {
+  /** The route's path; the app's own surface is "/". */
+  pathname(): string;
   search(): string;
   setSearch(search: string, options?: { replace?: boolean }): void;
   /** Called after every location change; returns the unsubscribe. */
@@ -32,7 +34,7 @@ export interface UrlState {
 }
 
 interface DataRouterLike {
-  state: { location: { search: string } };
+  state: { location: { pathname: string; search: string } };
   navigate(
     to: { search: string },
     options?: { replace?: boolean },
@@ -42,6 +44,7 @@ interface DataRouterLike {
 
 export function urlStateFromRouter(router: DataRouterLike): UrlState {
   return {
+    pathname: () => router.state.location.pathname,
     search: () => router.state.location.search,
     setSearch: (search, options) => {
       void router.navigate({ search }, { replace: options?.replace });

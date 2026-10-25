@@ -10,7 +10,8 @@
  */
 
 import { Extension, Node } from "@tiptap/core";
-import { Plugin } from "@tiptap/pm/state";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
 import { ListItem } from "@tiptap/extension-list";
@@ -446,6 +447,8 @@ const DIRECTION_OWNING_WRAPPERS = new Set([
  *    inside those wrappers lets it inherit the wrapper's own computed
  *    direction via normal CSS inheritance instead of racing it.
  */
+export const autoDirectionKey = new PluginKey<DecorationSet>("autoDirection");
+
 export const AutoDirection = Extension.create({
   name: "autoDirection",
   addGlobalAttributes() {
@@ -463,36 +466,46 @@ export const AutoDirection = Extension.create({
     ];
   },
   addProseMirrorPlugins() {
-    return [
-      new Plugin({
-        props: {
-          decorations: (state) => {
-            const decorations: Decoration[] = [];
-            state.doc.descendants((node, pos, parent) => {
-              if (
-                node.type.name !== "paragraph" &&
-                node.type.name !== "heading" &&
-                // A prompt widget's draft is a textblock like any other and
-                // needs the same RTL resolution — it is just not in the
-                // group above, being admissible only inside its widget.
-                node.type.name !== PROMPT_DRAFT_NODE_NAME
-              ) {
-                return;
-              }
-              if (parent && DIRECTION_OWNING_WRAPPERS.has(parent.type.name)) {
-                return;
-              }
-              decorations.push(
-                Decoration.node(pos, pos + node.nodeSize, { dir: "auto" }),
-              );
-            });
-            return DecorationSet.create(state.doc, decorations);
-          },
-        },
-      }),
-    ];
+    // Held as plugin state and rebuilt only when the doc changes: a
+    // `decorations` prop alone reruns on every view update, so each caret
+    // move and selection change walked the whole document.
+    const plugin: Plugin<DecorationSet> = new Plugin({
+      key: autoDirectionKey,
+      state: {
+        init: (_, state) => autoDirectionDecorations(state.doc),
+        apply: (tr, decorations) =>
+          tr.docChanged ? autoDirectionDecorations(tr.doc) : decorations,
+      },
+      props: {
+        decorations: (state) => plugin.getState(state),
+      },
+    });
+    return [plugin];
   },
 });
+
+function autoDirectionDecorations(doc: ProseMirrorNode): DecorationSet {
+  const decorations: Decoration[] = [];
+  doc.descendants((node, pos, parent) => {
+    // Nothing inside a textblock is a block that takes `dir`.
+    if (!node.isTextblock) return true;
+    if (
+      (node.type.name === "paragraph" ||
+        node.type.name === "heading" ||
+        // A prompt widget's draft is a textblock like any other and
+        // needs the same RTL resolution — it is just not in the
+        // group above, being admissible only inside its widget.
+        node.type.name === PROMPT_DRAFT_NODE_NAME) &&
+      !(parent && DIRECTION_OWNING_WRAPPERS.has(parent.type.name))
+    ) {
+      decorations.push(
+        Decoration.node(pos, pos + node.nodeSize, { dir: "auto" }),
+      );
+    }
+    return false;
+  });
+  return DecorationSet.create(doc, decorations);
+}
 
 /**
  * The schema-defining extension list, in the same order the editor has

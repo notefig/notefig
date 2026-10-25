@@ -181,7 +181,7 @@ describe("lazy stat hydration", () => {
     await files.refresh();
     adapter.getMetadata.mockClear();
 
-    await files.hydrateDirectoryStats(WS);
+    await files.hydrateDirectoryStats([WS]);
 
     expect(adapter.getMetadata).toHaveBeenCalledTimes(1);
     const statted = adapter.getMetadata.mock.calls[0][0] as string[];
@@ -194,9 +194,50 @@ describe("lazy stat hydration", () => {
     expect(rows.get(B)?.modified).toBeUndefined();
   });
 
+  it("asks again for a hydrated directory without statting it again", async () => {
+    await files.refresh();
+    adapter.getMetadata.mockClear();
+
+    await files.hydrateDirectoryStats([WS]);
+    await files.hydrateDirectoryStats([WS]);
+    await files.hydrateDirectoryStats([SUB]);
+    await files.hydrateDirectoryStats([SUB]);
+
+    // Once per directory: the tree re-asks for every visible directory on
+    // each expand and collapse, and the refetch keeps them fresh.
+    expect(adapter.getMetadata).toHaveBeenCalledTimes(2);
+    expect(files.collections.metadata.get(B)?.modified).toBeInstanceOf(Date);
+  });
+
+  it("retries a directory whose stats partly failed", async () => {
+    await files.refresh();
+    adapter.getMetadata.mockClear();
+    adapter.getMetadata.mockResolvedValueOnce({
+      succeeded: [metadata(SUB, 7)],
+      failed: [{ path: A, type: "io_error", message: "busy" }],
+    });
+
+    await files.hydrateDirectoryStats([WS]);
+    await files.hydrateDirectoryStats([WS]);
+
+    expect(adapter.getMetadata).toHaveBeenCalledTimes(2);
+    expect(files.collections.metadata.get(A)?.modified).toBeInstanceOf(Date);
+  });
+
+  it("stats several directories in one batch", async () => {
+    await files.refresh();
+    adapter.getMetadata.mockClear();
+
+    await files.hydrateDirectoryStats([WS, SUB]);
+
+    expect(adapter.getMetadata).toHaveBeenCalledTimes(1);
+    const statted = adapter.getMetadata.mock.calls[0][0] as string[];
+    expect(new Set(statted)).toEqual(new Set([SUB, A, B]));
+  });
+
   it("refetch preserves hydrated stats and re-stats hydrated dirs", async () => {
     await files.refresh();
-    await files.hydrateDirectoryStats(WS);
+    await files.hydrateDirectoryStats([WS]);
 
     // Stat source dries up: carried-forward stats must survive the refetch.
     adapter.getMetadata.mockClear();
