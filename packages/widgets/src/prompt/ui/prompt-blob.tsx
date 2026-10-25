@@ -816,6 +816,12 @@ export function PromptBlobFace({
             />
 
             <SettledState
+              mark={
+                <HarnessMark
+                  workspacePath={workspacePath}
+                  boundTaskId={boundTaskId}
+                />
+              }
               phase={phase}
               display={display}
               boundTaskId={boundTaskId}
@@ -941,12 +947,14 @@ function RemovalRefusedHint({ shown }: { shown: boolean }) {
  *  row below takes it). Chosen here so the face itself stays phase-agnostic
  *  layout. */
 function SettledState({
+  mark,
   phase,
   display,
   boundTaskId,
   documentPath,
   actions,
 }: {
+  mark: React.ReactNode;
   phase: BlobPhase;
   display: PromptBlobDisplay;
   boundTaskId: string | null;
@@ -956,6 +964,7 @@ function SettledState({
   if (phase === "done" || phase === "needs-answer") {
     return (
       <DoneState
+        mark={mark}
         choices={
           phase === "needs-answer" && display.choice && actions.pickOption ? (
             <ChoiceOptions
@@ -1567,6 +1576,39 @@ function draftPlaceholderKey(phase: BlobPhase) {
  * harnesses — each its own entry with its logo; picking one also becomes the
  * remembered default (the sessions panel's split-button rule).
  */
+/** The harness the widget's prompts go to: its bound session's, else the
+ *  session a send would join, else the default. The session it points at is
+ *  in the list whenever it is live, so no second lookup is needed. */
+function useTargetHarnessId(
+  workspacePath: string,
+  boundTaskId: string | null | undefined,
+): string {
+  const host = usePromptWidgetHost();
+  const harnesses = host.useHarnessList();
+  const sessions = host.useSessionList(workspacePath);
+  const taskId = boundTaskId ?? host.peekSession(workspacePath);
+  return (
+    sessions.find((session) => session.taskId === taskId)?.harnessId ??
+    harnesses[0].id
+  );
+}
+
+/** What leads a response's heading: the logo of the harness that answered,
+ *  the same one the composer's session picker shows. */
+function HarnessMark({
+  workspacePath,
+  boundTaskId,
+}: {
+  workspacePath: string;
+  boundTaskId: string | null;
+}) {
+  const { HarnessLogo } = usePromptWidgetHost().slots;
+  const harnessId = useTargetHarnessId(workspacePath, boundTaskId);
+  return (
+    <HarnessLogo harnessId={harnessId} className="size-3 text-muted-foreground" />
+  );
+}
+
 function SessionControl({
   workspacePath,
   boundTaskId,
@@ -1596,11 +1638,7 @@ function SessionControl({
   const [open, setOpen] = useState(false);
 
   const peekedTaskId = boundTaskId ?? host.peekSession(workspacePath);
-  // The trigger's logo names where the prompt would go. The session it points
-  // at is in the list whenever it is live, so no second lookup is needed.
-  const triggerHarnessId =
-    sessions.find((session) => session.taskId === peekedTaskId)?.harnessId ??
-    harnesses[0].id;
+  const triggerHarnessId = useTargetHarnessId(workspacePath, boundTaskId);
 
   const recentSessions = sessions.slice(0, 5);
 
@@ -1942,6 +1980,7 @@ function ChangeDot({ on }: { on: boolean }) {
  *  Exported for tests only — mounting the whole PromptBlob needs Tiptap and
  *  live collections; the done face is testable standalone. */
 export function DoneState({
+  mark,
   choices,
   cancelled,
   response,
@@ -1954,6 +1993,8 @@ export function DoneState({
   onOpenChat,
   onDismiss,
 }: {
+  /** Leads the heading row (HarnessMark). */
+  mark?: React.ReactNode;
   /** The open choice question's controls, under the question. */
   choices?: React.ReactNode;
   cancelled: boolean;
@@ -1976,6 +2017,7 @@ export function DoneState({
       response={response}
       fallbackText={fallbackText}
       cancelled={cancelled}
+      mark={mark}
       actions={
         <>
           <button

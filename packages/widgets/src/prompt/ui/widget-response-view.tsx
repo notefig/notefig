@@ -1,6 +1,5 @@
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, MessageCircleQuestion, TriangleAlert } from "lucide-react";
 import { cn } from "@notefig/ui/utils";
 import {
   isChoiceKind,
@@ -16,8 +15,9 @@ import { CopyTextButton } from "./copy-text-button";
  * doubles as the collapse toggle), the copy button, and the markdown body.
  * The widget's done face and the chat's widget_respond card both render
  * this, so the answer reads the same in the document and in the transcript.
- * Placement-specific chrome comes in from the caller: `actions` sit at the
- * end of the heading row, `children` below the body.
+ * Placement-specific chrome comes in from the caller: `mark` leads the
+ * heading row (the widget's harness logo), `actions` sit at its end,
+ * `children` below the body.
  *
  * The content prefers the response and falls back to `fallbackText` (the
  * turn's last assistant text), so a harness that never calls the tool still
@@ -28,6 +28,7 @@ export function WidgetResponseView({
   fallbackText = null,
   cancelled = false,
   defaultExpanded = true,
+  mark,
   actions,
   children,
 }: {
@@ -37,6 +38,7 @@ export function WidgetResponseView({
   /** In a document the body IS the outcome, so it lands expanded (MET-133).
    *  The chat lands collapsed: the answer is one row among many there. */
   defaultExpanded?: boolean;
+  mark?: ReactNode;
   actions?: ReactNode;
   children?: ReactNode;
 }) {
@@ -64,9 +66,9 @@ export function WidgetResponseView({
         data-widget-response={kind}
       >
         <div className="flex items-start gap-1.5">
-          <span className="flex h-[1.125rem] items-center">
-            {KIND_ICONS[kind]}
-          </span>
+          {mark && (
+            <span className="flex h-[1.125rem] items-center">{mark}</span>
+          )}
           {/* The question is the heading, wrapped rather than cut to one
               line: a question read up to an ellipsis can't be answered. */}
           <Markdown
@@ -86,6 +88,7 @@ export function WidgetResponseView({
       data-widget-response={response?.kind}
     >
       <div className="flex items-center gap-1.5">
+        {mark}
         <SummaryLine
           summary={summary}
           expandable={body !== null}
@@ -127,18 +130,6 @@ export function WidgetResponseView({
   );
 }
 
-/** Each response kind's mark at the head of the line. */
-const KIND_ICONS: Record<WidgetResponseKind, ReactNode> = {
-  answer: <Check className="size-3 shrink-0 text-success/80" />,
-  issue: <TriangleAlert className="size-3 shrink-0 text-warning" />,
-  single_choice: (
-    <MessageCircleQuestion className="size-3 shrink-0 text-primary" />
-  ),
-  multiple_choice: (
-    <MessageCircleQuestion className="size-3 shrink-0 text-primary" />
-  ),
-};
-
 function SummaryLine({
   summary,
   expandable,
@@ -156,7 +147,6 @@ function SummaryLine({
   const isIssue = kind === "issue";
   return (
     <>
-      {KIND_ICONS[kind]}
       <button
         type="button"
         disabled={!expandable}
