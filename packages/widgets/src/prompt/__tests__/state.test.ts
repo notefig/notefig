@@ -763,22 +763,27 @@ describe("deriveChoiceKey", () => {
       ...over,
     });
 
-  it("moves onto the options with ↑ from an empty field, and nothing else", () => {
-    expect(key("ArrowUp", { focused: null })).toEqual({ focus: 0, consumed: true });
+  it("moves onto the last option with ↑ from an empty field, and nothing else", () => {
+    expect(key("ArrowUp", { focused: null })).toEqual({ focus: 2, consumed: true });
     expect(key("ArrowUp", { focused: null, draftEmpty: false })).toBeNull();
     for (const other of ["ArrowDown", "ArrowLeft", "1", " ", "Enter"]) {
       expect(key(other, { focused: null })).toBeNull();
     }
   });
 
-  it("steps with ←/→, wrapping, and goes back to the field with ↓ or Escape", () => {
+  it("steps with ←/→, wrapping, and goes back to the field with Escape", () => {
     expect(key("ArrowRight", { focused: 2 })).toEqual({ focus: 0, consumed: true });
     expect(key("ArrowLeft", { focused: 0 })).toEqual({ focus: 2, consumed: true });
-    expect(key("ArrowDown")).toEqual({ focus: null, consumed: true });
     expect(key("Escape")).toEqual({ focus: null, consumed: true });
   });
 
-  it("leaves upward and to type without taking the key", () => {
+  it("steps with ↑/↓ along the options and on into the field", () => {
+    expect(key("ArrowUp", { focused: 2 })).toEqual({ focus: 1, consumed: true });
+    expect(key("ArrowDown", { focused: 0 })).toEqual({ focus: 1, consumed: true });
+    expect(key("ArrowDown", { focused: 2 })).toEqual({ focus: null, consumed: true });
+  });
+
+  it("leaves upward from the first option, and to type, without taking the key", () => {
     expect(key("ArrowUp")).toEqual({ focus: null, consumed: false });
     expect(key("x")).toEqual({ focus: null, consumed: false });
     expect(key("Backspace")).toEqual({ focus: null, consumed: false });

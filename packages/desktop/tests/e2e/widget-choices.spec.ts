@@ -5,10 +5,12 @@
  * and the user answers by pointer or by keyboard. Every answer is the next
  * prompt on the same session, so each test reads what went over the wire.
  *
- * The keyboard contract (deriveChoiceKey): ↑ from an empty answer field
- * moves onto the options, ←/→ step, a digit or Space picks, Enter picks or
- * sends a multiple choice's picks, ↓/Escape go back to the field, and any
- * other key leaves to type.
+ * The keyboard contract (deriveChoiceKey): ↑/↓ walk the options and then
+ * the field as one line, so ↑ from an empty answer field lands on the last
+ * option and ↓ past the last is the field again; ←/→ step round the
+ * options, a digit or Space picks, Enter picks or sends a multiple
+ * choice's picks, Escape goes back to the field, and any other key leaves
+ * to type.
  *
  * Headed, each test stops at its interesting moments (Resume in the
  * inspector moves on); headless it runs straight through.
@@ -122,7 +124,7 @@ test.describe("prompt widget choices", () => {
     await answered(page, widget, "- Pro\n- Enterprise");
   });
 
-  test("keyboard, single choice: ↑ from the line below reaches the field, ↑ again the options; → and Enter pick", async ({
+  test("keyboard, single choice: ↑ from the line below reaches the field, ↑ again the last option; arrows step and Enter picks", async ({
     page,
     headless,
   }) => {
@@ -133,12 +135,15 @@ test.describe("prompt widget choices", () => {
     await page.keyboard.press("ArrowUp");
     await expect(focusedOption(widget)).toHaveCount(0);
     await page.keyboard.press("ArrowUp");
-    await expect(focusedOption(widget)).toContainText("Pro");
+    await expect(focusedOption(widget)).toContainText("Enterprise");
     // While the keys are on the options, each shows the digit that picks it.
     await expect(widget.locator("kbd")).toHaveText(["1", "2"]);
     await stop(page, headless);
 
-    await page.keyboard.press("ArrowRight");
+    // ↑/↓ step like ←/→; only ←/→ wrap round.
+    await page.keyboard.press("ArrowUp");
+    await expect(focusedOption(widget)).toContainText("Pro");
+    await page.keyboard.press("ArrowDown");
     await expect(focusedOption(widget)).toContainText("Enterprise");
     await page.keyboard.press("ArrowRight");
     await expect(focusedOption(widget)).toContainText("Pro");
@@ -163,9 +168,12 @@ test.describe("prompt widget choices", () => {
     const { widget } = await asked(page, "multi-keys", "widget-multiple-choice.json");
     await draft(widget).click();
     await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
+    await expect(focusedOption(widget)).toContainText("Pro");
     await page.keyboard.press("Space");
-    await page.keyboard.press("2");
     await page.keyboard.press("3");
+    await page.keyboard.press("2");
     await page.keyboard.press("2");
     await expect(widget.getByRole("checkbox", { checked: true })).toHaveCount(2);
     await expect(focusedOption(widget)).toContainText("Team");
@@ -175,7 +183,7 @@ test.describe("prompt widget choices", () => {
     await answered(page, widget, "- Pro\n- Enterprise");
   });
 
-  test("↓ and Escape go back to the field; typing leaves the options and answers in words", async ({
+  test("↓ past the last option and Escape go back to the field; typing leaves the options and answers in words", async ({
     page,
   }) => {
     const { widget } = await asked(page, "free-text", "widget-single-choice.json");

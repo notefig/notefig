@@ -249,11 +249,13 @@ export function composeChoiceAnswer(picked: string[], note: string): string {
 /**
  * What a key does to a choice question's options. The caret stays in the
  * answer field; `focused` is the option the keys are on, null while they
- * are in the field. ↑ from an empty field moves onto the options and ↑
- * again leaves upward, as caret movement does; ←/→ step, a digit or Space
- * picks, Enter picks (or sends a multiple choice's picks), ↓ and Escape go
- * back to the field, and any other key leaves to type. Null: not the
- * options' key.
+ * are in the field. ↑/↓ walk one line — the options, then the field — so
+ * ↑ from an empty field lands on the last option, ↑ past the first leaves
+ * upward as caret movement does, and ↓ past the last is the field again.
+ * They don't follow wrapped rows: that would mean measuring the chips.
+ * ←/→ step round the options, a digit or Space picks, Enter picks (or
+ * sends a multiple choice's picks), Escape goes back to the field, and any
+ * other key leaves to type. Null: not the options' key.
  */
 export type ChoiceKey =
   | { focus: number | null; consumed: boolean }
@@ -271,7 +273,7 @@ export function deriveChoiceKey(params: {
   const { key, focused, count } = params;
   if (focused === null) {
     return key === "ArrowUp" && params.draftEmpty
-      ? { focus: 0, consumed: true }
+      ? { focus: count - 1, consumed: true }
       : null;
   }
   const digit = Number(key);
@@ -283,7 +285,14 @@ export function deriveChoiceKey(params: {
       return { focus: (focused - 1 + count) % count, consumed: true };
     case "ArrowRight":
       return { focus: (focused + 1) % count, consumed: true };
+    case "ArrowUp":
+      return focused > 0
+        ? { focus: focused - 1, consumed: true }
+        : { focus: null, consumed: false };
     case "ArrowDown":
+      return focused < count - 1
+        ? { focus: focused + 1, consumed: true }
+        : { focus: null, consumed: true };
     case "Escape":
       return { focus: null, consumed: true };
     case " ":
