@@ -304,6 +304,21 @@ function askLabel(
   return t("attentionAuth", { title: item.task?.title ?? "" });
 }
 
+/** Where an ask is answered. A widget's question is in its document, which
+ *  opens even before its widget has mounted this run; the others go
+ *  through their session. */
+function jumpToAsk(core: Parameters<typeof jumpToTask>[0], item: AttentionItem) {
+  if (item.ask === "question" && item.turnId) {
+    jumpToRound(core, {
+      taskId: item.taskId,
+      turnId: item.turnId,
+      documentPath: item.target.id,
+    });
+    return;
+  }
+  jumpToTask(core, item.taskId, { turnId: item.turnId });
+}
+
 /**
  * The questions the agent is blocked on, as a card. A row jumps to where
  * the answer is given — the prompt widget in the document when one is
@@ -330,9 +345,7 @@ function AttentionGroup({ items }: { items: AttentionItem[] }) {
             label={askLabel(item, t)}
             title={`${askLabel(item, t)} · ${deriveProjectName(item.task?.workspacePath ?? "")}`}
             trailing={formatTimeAgo(item.since)}
-            onClick={() =>
-              jumpToTask(core, item.taskId, { turnId: item.turnId })
-            }
+            onClick={() => jumpToAsk(core, item)}
           />
         ))}
       </div>

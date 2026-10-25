@@ -203,6 +203,21 @@ test.describe("prompt widget choices", () => {
     await answered(page, widget, "Neither");
   });
 
+  test("a click takes the keys off the options: a digit is then typed, never a pick", async ({
+    page,
+  }) => {
+    const { widget } = await asked(page, "click-leaves", "widget-single-choice.json");
+    await draft(widget).click();
+    await page.keyboard.press("ArrowUp");
+    await expect(focusedOption(widget)).toHaveCount(1);
+    await draft(widget).click();
+    await expect(focusedOption(widget)).toHaveCount(0);
+    await page.keyboard.press("2");
+    await expect(draft(widget)).toContainText("2");
+    await expect(face(widget)).toHaveAttribute("data-blob-phase", "needs-answer");
+    expect((await collectionStats(page)).turns).toBe(1);
+  });
+
   test("multiple choice: Enter in the field sends the picks with the typed note", async ({
     page,
   }) => {

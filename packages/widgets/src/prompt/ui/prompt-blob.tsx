@@ -2105,6 +2105,19 @@ function useChoiceAnswer(
     [update],
   );
   useEffect(() => focus(null), [draft, focus]);
+  // So does any pointer press — the field, a chip, the document — and the
+  // window losing focus: a digit is then typed, never a stale pick.
+  const navigating = round.focused !== null;
+  useEffect(() => {
+    if (!navigating) return;
+    const leave = () => focus(null);
+    window.addEventListener("pointerdown", leave, true);
+    window.addEventListener("blur", leave);
+    return () => {
+      window.removeEventListener("pointerdown", leave, true);
+      window.removeEventListener("blur", leave);
+    };
+  }, [navigating, focus]);
 
   const sendFollowUp = useCallback(
     () => sendReply((typed) => composeChoiceAnswer(round.picked, typed)),
