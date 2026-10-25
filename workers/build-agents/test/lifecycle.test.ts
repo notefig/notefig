@@ -191,6 +191,11 @@ describe("an issue's agent", () => {
 	});
 
 	it("ends for good when its PR merges, it's unassigned or its issue closes: storage erased, branch unmapped, later events ignored", async () => {
+		const empty = async (stub: Stub) => {
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).toEqual([]);
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.tables())).toEqual([]);
+			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.alarmAt())).toBeNull();
+		};
 		for (const end of [
 			(agent: TestIssueAgent) => agent.closed({ merged: true }),
 			(agent: TestIssueAgent) => agent.undelegated(),
@@ -207,15 +212,19 @@ describe("an issue's agent", () => {
 			expect(await env.BRANCHES.get(ISSUE.branchName)).toBeNull();
 			expect(await env.BRANCHES.get(issueKey(ISSUE.id))).toBeNull();
 			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.released())).toBe(true);
-			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).toEqual([]);
-			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.alarmAt())).toBeNull();
+			// Nothing stored at all, harness tables included: Cloudflare keeps any object that has data.
+			await empty(stub);
 			// A late review, CI failure or Linear message finds nothing to work on.
 			await runInDurableObject(stub, (agent: TestIssueAgent) => agent.feedback({ text: "One more thing", requestId: "github:review:9" }));
 			await runInDurableObject(stub, (agent: TestIssueAgent) =>
 				agent.ciFailed({ branch: ISSUE.branchName, sha: "abc1234", runId: 1, name: "CI", url: "u", requestId: "github:run:1:1" }),
 			);
 			await runInDurableObject(stub, (agent: TestIssueAgent) => agent.steer({ sessionId: "session-1", text: "Keep going", requestId: "linear:late" }));
-			expect(await runInDurableObject(stub, (agent: TestIssueAgent) => agent.stored())).toEqual([]);
+			await empty(stub);
+			// Woken again from scratch, it writes nothing either.
+			await evictDurableObject(stub);
+			await runInDurableObject(stub, (agent: TestIssueAgent) => agent.ended("completed"));
+			await empty(stub);
 		}
 	});
 
