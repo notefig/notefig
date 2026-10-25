@@ -70,7 +70,7 @@ function renderPalette() {
 
 // The palette's CommandInput is a controlled React input — updates must go
 // through the native value setter so React sees the change event.
-async function typeQuery(text: string, { settle = true } = {}) {
+async function typeQuery(text: string) {
   const input = document.querySelector("[cmdk-input]") as HTMLInputElement;
   expect(input).toBeTruthy();
   const setValue = Object.getOwnPropertyDescriptor(
@@ -81,14 +81,6 @@ async function typeQuery(text: string, { settle = true } = {}) {
     if (setValue) setValue.call(input, text);
     else input.value = text;
     input.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-  // File results follow the query once typing pauses.
-  if (settle) await waitOutDebounce();
-}
-
-async function waitOutDebounce() {
-  await act(async () => {
-    vi.advanceTimersByTime(300);
   });
 }
 
@@ -137,11 +129,9 @@ beforeEach(async () => {
   testCore.boot();
   await testCore.workspace(WS).open();
   await files.collections.metadata.preload();
-  vi.useFakeTimers({ shouldAdvanceTime: true });
 });
 
 afterEach(async () => {
-  vi.useRealTimers();
   act(() => root?.unmount());
   container?.remove();
   container = null;
@@ -220,7 +210,7 @@ describe("CommandPalette file search across open workspaces", () => {
     await act(async () => {});
     await typeQuery("other");
     const row = document.querySelector(
-      `[cmdk-item][data-value="project/other.md ${pathutil.basename(WS2)}"]`,
+      `[cmdk-item][data-value="file-result:${WS2}/project/other.md"]`,
     );
     // Title, parent folder, then the workspace it lives in.
     expect(row?.textContent).toBe(`other.mdproject${pathutil.basename(WS2)}`);
@@ -234,22 +224,21 @@ describe("CommandPalette file search across open workspaces", () => {
   });
 });
 
-describe("CommandPalette file search debounce", () => {
-  it("waits for typing to pause before listing files", async () => {
-    renderPalette();
-    await act(async () => {});
-    await typeQuery("notes", { settle: false });
-    expect(itemLabels().join("\n")).not.toContain("notes.md");
-    await waitOutDebounce();
-    expect(itemLabels().join("\n")).toContain("notes.md");
-  });
-
-  it("clears file results at once when the input is emptied", async () => {
+describe("CommandPalette file search updates with the input", () => {
+  it("lists files on the same keystroke as the commands", async () => {
     renderPalette();
     await act(async () => {});
     await typeQuery("notes");
     expect(itemLabels().join("\n")).toContain("notes.md");
-    await typeQuery("", { settle: false });
+  });
+
+  it("drops file results on the keystroke that stops matching", async () => {
+    renderPalette();
+    await act(async () => {});
+    await typeQuery("notes");
+    await typeQuery("notesx");
+    expect(itemLabels().join("\n")).not.toContain("notes.md");
+    await typeQuery("");
     expect(itemLabels().join("\n")).not.toContain("notes.md");
   });
 });

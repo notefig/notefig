@@ -33,6 +33,7 @@ import {
   CommandList,
   CommandSeparator,
   CommandShortcut,
+  defaultFilter,
 } from "@notefig/ui/command";
 import {
   Dialog,
@@ -103,27 +104,17 @@ function helpCommands(feedback: FeedbackApi): CommandType[] {
   ];
 }
 
-/** How long typing pauses before file results re-rank. */
-const FILE_SEARCH_DEBOUNCE_MS = 120;
+/** Marks a file row's cmdk value, so the palette filter can pass it. */
+const FILE_RESULT_VALUE = "file-result:";
 
 /**
- * The query after typing pauses; clearing it applies at once, so an
- * emptied input never shows the last query's results.
+ * cmdk's default scorer for commands. File rows are already ranked by
+ * useFileSearch for this same query, so they all score alike and keep
+ * that order rather than being re-scored by cmdk's different scorer.
  */
-function useDebouncedQuery(query: string): string {
-  const [debounced, setDebounced] = useState(query);
-  useEffect(() => {
-    if (query === "") {
-      setDebounced("");
-      return;
-    }
-    const timer = setTimeout(
-      () => setDebounced(query),
-      FILE_SEARCH_DEBOUNCE_MS,
-    );
-    return () => clearTimeout(timer);
-  }, [query]);
-  return debounced;
+function paletteFilter(value: string, search: string, keywords?: string[]) {
+  if (value.startsWith(FILE_RESULT_VALUE)) return 1;
+  return defaultFilter(value, search, keywords);
 }
 
 /**
@@ -132,12 +123,11 @@ function useDebouncedQuery(query: string): string {
  * command group. Hidden outside a workspace tab surface (the editor test
  * harness) — there is nowhere to open a file there.
  *
- * useFileSearch only pre-selects the top matches; visible filtering and
- * ranking stay with cmdk's default scorer, so file rows get the same
- * interaction behavior as commands (within-group sorting, selection
- * management). cmdk's group re-sorting is a no-op here because every group
- * lives in its own wrapper div, so commands always stay above these
- * results.
+ * The rows are exactly useFileSearch's ranking (paletteFilter keeps cmdk
+ * from re-filtering them), ranked on the same keystroke as the commands
+ * are filtered — no debounce, so the list never shows one half updated.
+ * cmdk's group re-sorting is a no-op here because every group lives in
+ * its own wrapper div, so commands always stay above these results.
  */
 function FileQuickResults({
   workspacePath,
@@ -152,8 +142,7 @@ function FileQuickResults({
 }) {
   const { t } = useTranslation();
   const { tabs } = useCore();
-  const debouncedQuery = useDebouncedQuery(query);
-  const fileResults = useFileSearch(debouncedQuery, {
+  const fileResults = useFileSearch(query, {
     filter: canOpenFile,
     preferWorkspace: workspacePath,
   });
@@ -174,7 +163,7 @@ function FileQuickResults({
   return (
     <div>
       {showSeparator && <CommandSeparator />}
-      <CommandGroup heading={t("quickResultsFor", { query: debouncedQuery })}>
+      <CommandGroup heading={t("quickResultsFor", { query })}>
         {fileResults.map((result) => {
           const workspaceName = pathutil.basename(result.workspacePath);
           // relativePath is a tree path: "/"-separated on every OS.
@@ -185,12 +174,7 @@ function FileQuickResults({
           return (
             <CommandItem
               key={result.path}
-              // Scored by cmdk's default filter: what the row shows, never
-              // the absolute path, so the workspace's location on disk
-              // can't match the query. The workspace name keeps the same
-              // relative path in two workspaces apart.
-              value={`${result.relativePath} ${workspaceName}`}
-              keywords={[result.title]}
+              value={`${FILE_RESULT_VALUE}${result.path}`}
               onSelect={() => handleSelect(result)}
               className="flex items-center gap-2 cursor-pointer"
             >
@@ -585,6 +569,7 @@ export function CommandPalette(props: CommandPaletteProps) {
         showCloseButton={false}
       >
         <Command
+          filter={paletteFilter}
           value={highlighted}
           onValueChange={setHighlighted}
           className={`bg-transparent [&_[cmdk-group-heading]]:text-muted-foreground **:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-1.5 [&_[cmdk-item]_svg]:h-4 [&_[cmdk-item]_svg]:w-4 ${

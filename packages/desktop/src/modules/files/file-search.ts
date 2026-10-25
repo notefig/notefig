@@ -10,6 +10,7 @@ import {
   compareScoredPaths,
   DEFAULT_FILE_SEARCH_LIMIT,
   rankFileRows,
+  searchKeyOf,
   type FileSearchOptions,
   type FileSearchResult,
 } from "@/utils/file-score";
@@ -106,14 +107,29 @@ export function createSearchedWorkspaces(
   };
 }
 
+/** A searchable file with its search key worked out once. */
+interface SearchRow {
+  path: string;
+  relativePath: string;
+  searchKey: string;
+}
+
 /** Workspace files only: directories and files of nested workspaces drop. */
-function* searchableRows({ metadata, nested }: SearchedWorkspace) {
-  for (const row of metadata.values()) {
-    if (row.type !== "file") continue;
-    if (nested.some((inner) => relativeTreePath(inner, row.path) !== undefined))
+function searchableRows({ metadata, nested }: SearchedWorkspace) {
+  const rows: SearchRow[] = [];
+  for (const { type, path, relativePath } of metadata.values()) {
+    if (type !== "file" || !relativePath) continue;
+    if (nested.some((inner) => relativeTreePath(inner, path) !== undefined))
       continue;
-    yield row;
+    rows.push({ path, relativePath, searchKey: searchKeyOf(relativePath) });
   }
+  return rows;
+}
+
+/** A workspace's searchable rows for one metadata version. */
+interface CachedRows {
+  version: number;
+  rows: SearchRow[];
 }
 
 interface CachedRanking {
@@ -129,6 +145,16 @@ interface CachedRanking {
  */
 export function createFileSearch() {
   const cache = new WeakMap<MetadataCollection, CachedRanking>();
+  const rowCache = new WeakMap<MetadataCollection, CachedRows>();
+
+  /** The workspace's searchable rows, rebuilt only when it changes. */
+  const rowsOf = (ws: SearchedWorkspace) => {
+    const cached = rowCache.get(ws.metadata);
+    if (cached?.version === ws.version) return cached.rows;
+    const rows = searchableRows(ws);
+    rowCache.set(ws.metadata, { version: ws.version, rows });
+    return rows;
+  };
 
   const rankWorkspace = (
     ws: SearchedWorkspace,
@@ -145,9 +171,10 @@ export function createFileSearch() {
     ) {
       return cached.results;
     }
-    const results = rankFileRows(searchableRows(ws), query, options).map(
-      (result) => ({ ...result, workspacePath: ws.path }),
-    );
+    const results = rankFileRows(rowsOf(ws), query, options).map((result) => ({
+      ...result,
+      workspacePath: ws.path,
+    }));
     cache.set(ws.metadata, { version: ws.version, query, options, results });
     return results;
   };
