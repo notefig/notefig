@@ -386,7 +386,7 @@ What exists for an issue, and when it goes away:
 | **Durable Object** | the first webhook for the issue | only while handling an event or running the harness; it hibernates in between, and an evicted object costs nothing | | its storage (transcript, checkpoints, the issue, the session, the snapshot record) is erased on the end (`deleteAll`), and its alarm cleared |
 | **Heartbeat alarm** | when work is admitted | wakes the object every 60 s while the harness has live tasks | once idle, it clears itself | on the end |
 | **Branch mapping** (`BRANCHES` KV) | when the agent starts: branch → issue, and `issue:<id>` → branch | | | on the end, so GitHub and Linear events stop reaching it |
-| **PR preview** (Pages, `pr-<number>` branch) | by `pr-preview.yml` on the agent's PR | (static files) | | every deployment on the branch, when the PR merges or closes (`pr-preview.yml`'s `remove` job) |
+| **PR preview** (Pages, `pr-<number>` branch) | by `pr-preview.yml` on the agent's PR | (static files) | | every deployment on the branch, when the PR merges or closes (`pr-preview.yml`'s `remove` job, on `pull_request_target` so a conflicting PR is cleaned up too), or by its daily sweep |
 
 **The end** comes when the PR merges or closes, the agent is unassigned, or the issue is marked done, cancelled or
 deleted. The agent aborts any run, destroys the
