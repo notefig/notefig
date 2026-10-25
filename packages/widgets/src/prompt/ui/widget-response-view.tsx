@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@notefig/ui/utils";
+import { Checkbox } from "@notefig/ui/checkbox";
 import {
   isChoiceKind,
   type WidgetResponse,
@@ -16,8 +17,8 @@ import { CopyTextButton } from "./copy-text-button";
  * The widget's done face and the chat's widget_respond card both render
  * this, so the answer reads the same in the document and in the transcript.
  * Placement-specific chrome comes in from the caller: `mark` leads the
- * heading row (the widget's harness logo), `actions` sit at its end,
- * `children` below the body.
+ * heading row (the widget's harness logo, tinted here by the response's
+ * kind), `actions` sit at its end, `children` below the body.
  *
  * The content prefers the response and falls back to `fallbackText` (the
  * turn's last assistant text), so a harness that never calls the tool still
@@ -59,6 +60,11 @@ export function WidgetResponseView({
     },
   });
   const isIssue = kind === "issue";
+  const tinted = mark && (
+    <span className={cn("flex shrink-0 items-center", KIND_TONES[kind])}>
+      {mark}
+    </span>
+  );
   if (isChoiceKind(kind)) {
     return (
       <div
@@ -66,9 +72,7 @@ export function WidgetResponseView({
         data-widget-response={kind}
       >
         <div className="flex items-start gap-1.5">
-          {mark && (
-            <span className="flex h-[1.125rem] items-center">{mark}</span>
-          )}
+          {tinted && <span className="flex h-[1.125rem]">{tinted}</span>}
           {/* The question is the heading, wrapped rather than cut to one
               line: a question read up to an ellipsis can't be answered. */}
           <Markdown
@@ -88,7 +92,7 @@ export function WidgetResponseView({
       data-widget-response={response?.kind}
     >
       <div className="flex items-center gap-1.5">
-        {mark}
+        {tinted}
         <SummaryLine
           summary={summary}
           expandable={body !== null}
@@ -129,6 +133,48 @@ export function WidgetResponseView({
     </div>
   );
 }
+
+/** Each response kind's tint for the heading's mark. */
+const KIND_TONES: Record<WidgetResponseKind, string> = {
+  answer: "text-success/80",
+  issue: "text-warning",
+  single_choice: "text-primary",
+  multiple_choice: "text-primary",
+};
+
+/** A choice question's options as a record, not a control: the chat's card
+ *  shows what was asked; the answer is the session's next prompt. */
+export function ReadOnlyChoices({
+  options,
+  multiple,
+}: {
+  options: readonly string[];
+  multiple: boolean;
+}) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1.5 pt-0.5"
+      data-choice-record={multiple ? "multiple" : "single"}
+    >
+      {options.map((option) => (
+        <span key={option} className={choiceChipBaseClass}>
+          {multiple && (
+            <Checkbox
+              disabled
+              tabIndex={-1}
+              className="size-3 rounded-[3px] disabled:cursor-default"
+            />
+          )}
+          {option}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** A choice chip's shape, shared by the widget's live options. */
+export const choiceChipBaseClass =
+  "flex items-center gap-1.5 rounded-md border border-border px-2 py-0.5 text-xs text-foreground/80";
 
 function SummaryLine({
   summary,

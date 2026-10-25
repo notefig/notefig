@@ -47,7 +47,7 @@ import { draftToNode, readDraftNode } from "../composer/draft-text";
 import { mentionPopupHasResults } from "../composer/mention-bridge";
 import { hostIsMention } from "../composer/mention-suggestion";
 import { registerComposerKeyHandler } from "../composer/key-bridge";
-import { WidgetResponseView } from "./widget-response-view";
+import { choiceChipBaseClass, WidgetResponseView } from "./widget-response-view";
 import { usePromptChangeCounts, type PromptReview } from "../change-store";
 import {
   usePromptChangeNavigation,
@@ -1605,7 +1605,7 @@ function HarnessMark({
   const { HarnessLogo } = usePromptWidgetHost().slots;
   const harnessId = useTargetHarnessId(workspacePath, boundTaskId);
   return (
-    <HarnessLogo harnessId={harnessId} className="size-3 text-muted-foreground" />
+    <HarnessLogo harnessId={harnessId} className="size-3" />
   );
 }
 
@@ -2296,5 +2296,7 @@ function ChoiceOptions({
   );
 }
 
-const choiceChipClass =
-  "flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 py-0.5 text-xs text-foreground/80 transition-colors hover:bg-accent hover:text-foreground";
+const choiceChipClass = cn(
+  choiceChipBaseClass,
+  "cursor-pointer transition-colors hover:bg-accent hover:text-foreground",
+);

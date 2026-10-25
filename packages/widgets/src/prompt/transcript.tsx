@@ -5,15 +5,19 @@
  * `renderPromptToolCall`; it never learns the tool's name or schema.
  */
 import type { ReactElement } from "react";
-import type { ToolCallUpdate, WidgetResponse } from "@notefig/shared/agent";
+import {
+  isChoiceKind,
+  type ToolCallUpdate,
+  type WidgetResponse,
+} from "@notefig/shared/agent";
 import { cn } from "@notefig/ui/utils";
 import { blobCardClass, readWidgetResponse } from "./state";
-import { WidgetResponseView } from "./ui/widget-response-view";
+import { ReadOnlyChoices, WidgetResponseView } from "./ui/widget-response-view";
 
 /**
  * The card for one of the prompt widget's tool calls, or null to leave the
  * call to the chat's generic line: not one of ours, or not completed yet.
- * The card's check mark says "delivered", so a call that is still pending
+ * The card says "delivered", so a call that is still pending
  * or running — even with its full answer already streamed in — keeps the
  * generic line's in-flight state, and a failed one its error. A plain
  * function, not a component — the chat calls it while rendering an entry,
@@ -38,7 +42,14 @@ function WidgetRespondCard({ response }: { response: WidgetResponse }) {
         blobCardClass("done", response.kind === "issue"),
       )}
     >
-      <WidgetResponseView response={response} defaultExpanded={false} />
+      <WidgetResponseView response={response} defaultExpanded={false}>
+        {isChoiceKind(response.kind) && response.options && (
+          <ReadOnlyChoices
+            options={response.options}
+            multiple={response.kind === "multiple_choice"}
+          />
+        )}
+      </WidgetResponseView>
     </div>
   );
 }
