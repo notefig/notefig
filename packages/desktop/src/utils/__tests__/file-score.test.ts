@@ -94,6 +94,21 @@ describe("compareScoredPaths", () => {
   });
 });
 
+describe("rankFileRows edge cases", () => {
+  const rows = [
+    { path: "/ws/notes.md", relativePath: "notes.md" },
+    { path: "/ws/src/readme.md", relativePath: "src/readme.md" },
+  ];
+
+  it("returns an empty list when the cap is zero", () => {
+    expect(rankFileRows(rows, "md", { limit: 0 })).toEqual([]);
+  });
+
+  it("returns an empty list for a negative cap", () => {
+    expect(rankFileRows(rows, "md", { limit: -1 })).toEqual([]);
+  });
+});
+
 describe("rankFileRows keeps exactly the best results", () => {
   // Deep, overlapping paths: the shape where skipping rows that cannot make
   // the cut, and paths that cannot beat their basename, matters most.

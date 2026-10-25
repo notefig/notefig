@@ -197,6 +197,7 @@ export function rankFileRows(
   }: FileSearchOptions = {},
 ): FileSearchResult[] {
   const trimmedQuery = query.trim().toLowerCase();
+  if (limit <= 0) return [];
   if (!trimmedQuery && !matchAllWhenEmpty) return [];
   // Only the best `limit` are kept, in order, as the rows stream past:
   // nearly every file matches a one-letter query, and building and sorting
