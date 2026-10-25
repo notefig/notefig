@@ -25,7 +25,6 @@ Not an npm workspace: installed, tested and deployed on its own, like `workers/s
 [Costs](#costs) ·
 [Troubleshooting](#troubleshooting) ·
 [Last end-to-end run](#last-end-to-end-run-2026-10-19-local) ·
-[Cutover from the routine](#cutover-from-the-routine) ·
 [Files](#files)
 
 ## Overview
@@ -474,16 +473,6 @@ Not exercised live: Linear's own webhook delivery and its UI (stop button, repli
 access (no such account; covered by unit tests); asking the agent to leak private data or push to `main` on purpose
 (the session's safety check declined to send those instructions; both guards are unit-tested, and the agent's own
 bash pushes were refused live). The model's edits were correct but not always tidy (MET-238's split a sentence).
-
-## Cutover from the routine
-
-The first version of this stage was a claude.ai routine fired by the support Worker's `/v1/linear` route (#432), with
-config PR #435. Once build agents run in production:
-- remove `agent-trigger.ts`, `AGENT_DELIVERIES`, `CLAUDE_ROUTINE_*`, `AGENT_USER_ID` and `APPROVER_IDS` from
-  `workers/support`, its README's Agent section, and the Worker secrets `LINEAR_WEBHOOK_SECRET` and
-  `CLAUDE_ROUTINE_TOKEN`;
-- delete the Linear webhook pointing at support.notefig.com/v1/linear, and the routine in claude.ai;
-- close #435;
 
 ## Files
 

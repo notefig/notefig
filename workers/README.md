@@ -28,10 +28,6 @@ installed, tested and deployed on its own.
    └── Linear (messages, stop) and GitHub (reviews, failed CI, merge/close) come back to the same agent
 ```
 
-The support Worker also has a `/v1/linear` route from the first version of the agent stage (assigning an issue to
-the Notefig Support user fired a claude.ai routine). Build agents replace it; the route, its KV namespace and
-secrets, and the routine are removed once build agents run in production (see build-agents/README.md, "Cutover").
-
 ## Accounts
 
 | Account | What lives there |
@@ -73,7 +69,7 @@ part of the Workers.
 
 | Worker | Secrets |
 |---|---|
-| `notefig-support` | `LINEAR_API_KEY` (from CI); `LINEAR_WEBHOOK_SECRET`, `CLAUDE_ROUTINE_FIRE_URL`, `CLAUDE_ROUTINE_TOKEN` (set by hand for the old agent route; the fire URL becomes a `wrangler.toml` var with #435; all removed at cutover) |
+| `notefig-support` | `LINEAR_API_KEY` (from CI) |
 | `notefig-build-agents` | the seven secrets of the `build-agents` environment above, copied on every release |
 
 ### Cloudflare: API tokens
