@@ -49,7 +49,8 @@ export class IssueAgent extends DurableObject<Env> {
 	readonly #config: Config;
 	#linear: LinearAgentClient | undefined;
 	#github: GitHubClient | undefined;
-	#harness!: Harness;
+	/** Opened on first use, by an object with an issue: opening writes the harness's tables (see `#opened`). */
+	#harness: Promise<Harness> | undefined;
 	#workspace: Promise<ContainerEnv> | undefined;
 	/** Why the workspace last failed to start, for the coding tools' error. */
 	#workspaceError: string | undefined;
@@ -58,16 +59,30 @@ export class IssueAgent extends DurableObject<Env> {
 		super(ctx, env);
 		this.#config = readConfig(env);
 		void ctx.blockConcurrencyWhile(async () => {
+			// Only an object working on an issue has anything to resume. An ended or never delegated one stays empty, so
+			// Cloudflare drops it: no alarm, no harness tables.
+			if (!this.#get("issue")) return;
 			// A fallback before anything can throw: an object whose open or recovery fails is started again.
 			const fallback = Date.now() + HEARTBEAT_MS;
 			const current = await ctx.storage.getAlarm();
 			if (current === null || current > fallback) await ctx.storage.setAlarm(fallback);
-			this.#harness = await this.#open();
 			await this.#current();
-			this.#harness.resume();
+			(await this.#opened()).resume();
 			await this.#drainPending();
 			await this.#heartbeat();
 		});
+	}
+
+	/**
+	 * The harness, opened once. Opening creates its tables, so only an object with an issue opens it: an ended one would
+	 * otherwise keep data, and Cloudflare keeps every object that has any. A submission enables its scheduling.
+	 */
+	#opened(): Promise<Harness> {
+		this.#harness ??= this.#open().catch((error: unknown) => {
+			this.#harness = undefined;
+			throw error;
+		});
+		return this.#harness;
 	}
 
 	/** The harness on the object's SQLite (tables prefixed `pi_`), with this process's models, registry and workspace. */
@@ -287,7 +302,7 @@ export class IssueAgent extends DurableObject<Env> {
 		// The container goes first: that ends any running command at once, so the abort after it doesn't wait on one.
 		// (The Worker keeps this call alive only for a short while after answering Linear.)
 		await this.release();
-		await (await this.#root()).abort(context);
+		if (this.#get("issue")) await (await this.#root()).abort(context);
 		// Again: a tool call between the two could have started a new container.
 		await this.release();
 		await this.#heartbeat();
@@ -319,20 +334,19 @@ export class IssueAgent extends DurableObject<Env> {
 		const issue = this.#get("issue");
 		// Container first, as in `stop`: a running command ends with it, so the abort doesn't wait.
 		await this.release();
-		await (await this.#root()).abort(context);
+		if (issue) await (await this.#root()).abort(context);
 		await this.release();
 		if (issue) await Promise.all([this.env.BRANCHES.delete(issue.branchName), this.env.BRANCHES.delete(issueKey(issue.id))]);
 		await this.#post({ type: "response", body: farewell }).catch((error: unknown) => console.error("linear: farewell not posted", error));
-		await this.#harness.close(context);
+		await (await this.#harness)?.close(context);
+		this.#harness = undefined;
 		await this.ctx.storage.deleteAlarm();
 		await this.ctx.storage.deleteAll();
-		// A harness on the now empty storage, so this instance is as fresh as a new one; it stores nothing until the
-		// issue is delegated again.
-		this.#harness = await this.#open();
+		// Nothing is reopened: the object stays empty until the issue is delegated again.
 	}
 
 	override async alarm(): Promise<void> {
-		this.#harness.resume();
+		if (this.#get("issue")) (await this.#opened()).resume();
 		await this.#drainPending();
 		await this.#heartbeat();
 	}
@@ -348,15 +362,15 @@ export class IssueAgent extends DurableObject<Env> {
 		await root.submit({ type: "input", content, requestId, ...(whenBusy === "steer" ? { whenBusy: "steer" } : {}) }, context);
 	}
 
-	#root(): Promise<Conversation> {
-		return this.#harness.root(context, {
+	async #root(): Promise<Conversation> {
+		return (await this.#opened()).root(context, {
 			agent: { model: this.#model(), instructions: INSTRUCTIONS, cwd: REPO_DIR },
 		});
 	}
 
 	/** A recovery heartbeat while the harness has live tasks; none once it's idle, so the object can sleep. */
 	async #heartbeat(): Promise<void> {
-		const { tasks } = await this.#harness.inspect(context);
+		const { tasks } = this.#get("issue") ? await (await this.#opened()).inspect(context) : { tasks: [] };
 		if (tasks.length > 0) await this.ctx.storage.setAlarm(Date.now() + HEARTBEAT_MS);
 		else await this.ctx.storage.deleteAlarm();
 	}

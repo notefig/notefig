@@ -76,6 +76,14 @@ export class TestIssueAgent extends IssueAgent {
 		return [...this.ctx.storage.kv.list()].map(([key]) => key);
 	}
 
+	/** The object's own SQL tables (the harness's, prefixed `pi_`): none once it has ended. */
+	tables(): string[] {
+		return this.ctx.storage.sql
+			.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'")
+			.toArray()
+			.map((row) => row.name);
+	}
+
 	alarmAt(): Promise<number | null> {
 		return this.ctx.storage.getAlarm();
 	}
