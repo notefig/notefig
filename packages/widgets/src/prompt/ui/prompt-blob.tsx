@@ -818,6 +818,7 @@ export function PromptBlobFace({
             <SettledState
               mark={
                 <HarnessMark
+                  task={task}
                   workspacePath={workspacePath}
                   boundTaskId={boundTaskId}
                 />
@@ -1593,19 +1594,22 @@ function useTargetHarnessId(
   );
 }
 
-/** What leads a response's heading: the logo of the harness that answered,
- *  the same one the composer's session picker shows. */
+/** What leads a response's heading: the logo of the harness that answered.
+ *  Read off the bound task's own row: the picker's list drops a session
+ *  once it is cancelled or failed, and the answer still came from it. */
 function HarnessMark({
+  task,
   workspacePath,
   boundTaskId,
 }: {
+  task: AgentTaskRow | undefined;
   workspacePath: string;
   boundTaskId: string | null;
 }) {
   const { HarnessLogo } = usePromptWidgetHost().slots;
-  const harnessId = useTargetHarnessId(workspacePath, boundTaskId);
+  const target = useTargetHarnessId(workspacePath, boundTaskId);
   return (
-    <HarnessLogo harnessId={harnessId} className="size-3" />
+    <HarnessLogo harnessId={task?.harnessId ?? target} className="size-3" />
   );
 }
 

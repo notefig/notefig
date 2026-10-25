@@ -238,6 +238,17 @@ describe("PromptBlobFace", () => {
       `[data-choice-option="${name}"]`,
     ) as HTMLButtonElement;
 
+  it("the heading's logo is the bound session's harness, even once it left the picker", () => {
+    // The fake picker lists no sessions (as for a cancelled one), and its
+    // default harness is "claude".
+    render("needs-answer", {
+      display: question("single_choice"),
+      task: { taskId: "task_1", harnessId: "opencode" },
+    });
+    expect(container?.querySelector('[data-testid="harness-logo-opencode"]')).not.toBeNull();
+    expect(container?.querySelector('[data-testid="harness-logo-claude"]')).toBeNull();
+  });
+
   it("a single choice offers a button per option; clicking one picks it", () => {
     pickOption.mockClear();
     const text = render("needs-answer", { display: question("single_choice") });
