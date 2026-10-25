@@ -13,7 +13,7 @@ import { mentionContextParts } from "../prompt-widget-host";
 import { createHooks } from "@notefig/core";
 
 // Real TanStack DB collections over a listing handed to them (same harness
-// as use-file-search.test.tsx).
+// as modules/files/file-search.test.tsx).
 const WS = "/ws-mention-context";
 const fs = {
   getMetadata: vi.fn(async () => ({ succeeded: [], failed: [] })),

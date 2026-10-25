@@ -47,9 +47,10 @@ import { useAppSettings } from "@/hooks/use-app-settings";
 import { useTranslation } from "react-i18next";
 import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
 import { getLocalizedCommandKeywords } from "@/utils/command-keywords";
-import { useFileSearch, type FileSearchResult } from "@/hooks/use-file-search";
 import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
 import { canOpenFile } from "@/modules/editors";
+import type { WorkspaceFileSearchResult } from "@/modules/files";
+import { useFileSearch } from "@/modules/files/react";
 import { FileTypeIcon } from "./file-type-icon";
 import { useCore } from "@notefig/core/react";
 import { path as pathutil } from "@/utils/path";
@@ -102,18 +103,41 @@ function helpCommands(feedback: FeedbackApi): CommandType[] {
   ];
 }
 
+/** How long typing pauses before file results re-rank. */
+const FILE_SEARCH_DEBOUNCE_MS = 120;
+
+/**
+ * The query after typing pauses; clearing it applies at once, so an
+ * emptied input never shows the last query's results.
+ */
+function useDebouncedQuery(query: string): string {
+  const [debounced, setDebounced] = useState(query);
+  useEffect(() => {
+    if (query === "") {
+      setDebounced("");
+      return;
+    }
+    const timer = setTimeout(
+      () => setDebounced(query),
+      FILE_SEARCH_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [query]);
+  return debounced;
+}
+
 /**
  * The palette's Linear-style "quick results" tail: fuzzy file matches from
- * any open workspace, rendered after every command group. Hidden outside a
- * workspace tab surface (the editor test harness) — there is nowhere to
- * open a file there.
+ * every open workspace, the active one winning ties, rendered after every
+ * command group. Hidden outside a workspace tab surface (the editor test
+ * harness) — there is nowhere to open a file there.
  *
- * useFileSearch only pre-selects the top matches out of every open
- * workspace; visible filtering/ranking stays with cmdk's default scorer,
- * so file rows get the same interaction behavior as commands (within-group
- * sorting, selection management). cmdk's group re-sorting is a no-op here
- * because every group lives in its own wrapper div, so commands always stay
- * above these results.
+ * useFileSearch only pre-selects the top matches; visible filtering and
+ * ranking stay with cmdk's default scorer, so file rows get the same
+ * interaction behavior as commands (within-group sorting, selection
+ * management). cmdk's group re-sorting is a no-op here because every group
+ * lives in its own wrapper div, so commands always stay above these
+ * results.
  */
 function FileQuickResults({
   workspacePath,
@@ -127,14 +151,22 @@ function FileQuickResults({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const { tabs, workspaceRegistry } = useCore();
-  const fileResults = useFileSearch(undefined, query, {
+  const { tabs } = useCore();
+  const debouncedQuery = useDebouncedQuery(query);
+  const fileResults = useFileSearch(debouncedQuery, {
     filter: canOpenFile,
+    preferWorkspace: workspacePath,
   });
 
   if (fileResults.length === 0) return null;
 
-  const handleSelect = (result: FileSearchResult) => {
+  // Name the workspace on every row once any result comes from elsewhere;
+  // with everything local it would only repeat itself.
+  const showWorkspace = fileResults.some(
+    (result) => result.workspacePath !== workspacePath,
+  );
+
+  const handleSelect = (result: WorkspaceFileSearchResult) => {
     tabs.open(result.path, { intent: "replace" });
     onClose();
   };
@@ -142,24 +174,23 @@ function FileQuickResults({
   return (
     <div>
       {showSeparator && <CommandSeparator />}
-      <CommandGroup heading={t("quickResultsFor", { query })}>
+      <CommandGroup heading={t("quickResultsFor", { query: debouncedQuery })}>
         {fileResults.map((result) => {
-          const resultWorkspace = workspaceRegistry.workspaceOf(result.path);
-          const isActiveWorkspace = resultWorkspace === workspacePath;
-          const showWorkspace = resultWorkspace && !isActiveWorkspace;
+          const workspaceName = pathutil.basename(result.workspacePath);
+          // relativePath is a tree path: "/"-separated on every OS.
+          const folder = result.relativePath.slice(
+            0,
+            Math.max(result.relativePath.lastIndexOf("/"), 0),
+          );
           return (
             <CommandItem
               key={result.path}
-              // The absolute path keeps every result unique when the same
-              // relative path exists in several open workspaces; keywords
-              // carry relativePath/title so the query still matches what
-              // the user sees.
-              value={result.path}
-              keywords={[
-                result.relativePath,
-                result.title,
-                ...(showWorkspace ? [pathutil.basename(resultWorkspace)] : []),
-              ]}
+              // Scored by cmdk's default filter: what the row shows, never
+              // the absolute path, so the workspace's location on disk
+              // can't match the query. The workspace name keeps the same
+              // relative path in two workspaces apart.
+              value={`${result.relativePath} ${workspaceName}`}
+              keywords={[result.title]}
               onSelect={() => handleSelect(result)}
               className="flex items-center gap-2 cursor-pointer"
             >
@@ -168,18 +199,21 @@ function FileQuickResults({
                 className="w-4 h-4 text-muted-foreground shrink-0"
               />
               <span className="truncate">{result.title}</span>
-              {(result.relativePath !== result.title || showWorkspace) && (
+              {folder && (
+                // Truncated from the start (rtl), so the folders nearest
+                // the file stay in view; bdi keeps the path reading ltr.
                 <span
                   className="ms-auto min-w-0 truncate text-xs text-muted-foreground"
-                  dir="ltr"
+                  dir="rtl"
                 >
-                  {showWorkspace && (
-                    <>
-                      {pathutil.basename(resultWorkspace)}{" "}
-                      <span className="mx-1">›</span>{" "}
-                    </>
-                  )}
-                  {result.relativePath}
+                  <bdi>{folder}</bdi>
+                </span>
+              )}
+              {showWorkspace && (
+                <span
+                  className={`${folder ? "" : "ms-auto "}max-w-[35%] shrink-0 truncate text-xs text-muted-foreground/70`}
+                >
+                  {workspaceName}
                 </span>
               )}
             </CommandItem>

@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StrictMode, act, createElement, useState } from "react";
+import { StrictMode, act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { Core } from "@notefig/core";
 import { CoreProvider } from "@notefig/core/react";
-import {
-  useFileSearch,
-  type FileSearchOptions,
-  type FileSearchResult,
-} from "@/hooks/use-file-search";
-import type { WorkspaceFiles } from "@/modules/files";
+import type {
+  WorkspaceFileSearchOptions,
+  WorkspaceFileSearchResult,
+  WorkspaceFiles,
+} from "@/modules/files";
+import { useFileSearch } from "@/modules/files/react";
 import { createTestCore } from "@/testing/test-core";
 import { filesModuleOf, testWorkspaceFiles } from "@/testing/test-files";
 
@@ -54,31 +54,22 @@ let core: Core;
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
-let latest: FileSearchResult[] = [];
-
-type FileSearchSource = string | string[] | null | undefined;
+let latest: WorkspaceFileSearchResult[] = [];
 
 function Probe({
-  source,
   query,
   options,
 }: {
-  source: FileSearchSource;
   query: string;
-  options?: FileSearchOptions;
+  options?: WorkspaceFileSearchOptions;
 }) {
-  latest = useFileSearch(
-    source as Parameters<typeof useFileSearch>[0],
-    query,
-    options,
-  );
+  latest = useFileSearch(query, options);
   return null;
 }
 
 async function renderSearch(
   query: string,
-  options?: FileSearchOptions,
-  source: FileSearchSource = WS,
+  options?: WorkspaceFileSearchOptions,
   strict = false,
 ) {
   if (!root) {
@@ -86,7 +77,7 @@ async function renderSearch(
     document.body.appendChild(container);
     root = createRoot(container);
   }
-  const child = createElement(Probe, { source, query, options });
+  const child = createElement(Probe, { query, options });
   await act(async () => {
     root!.render(
       createElement(CoreProvider, {
@@ -94,9 +85,6 @@ async function renderSearch(
         children: strict ? createElement(StrictMode, null, child) : child,
       }),
     );
-  });
-  await act(async () => {
-    vi.advanceTimersByTime(300);
   });
   return latest;
 }
@@ -143,11 +131,9 @@ beforeEach(async () => {
   });
   await core.workspace(WS).open();
   await files.collections.metadata.preload();
-  vi.useFakeTimers({ shouldAdvanceTime: true });
 });
 
 afterEach(() => {
-  vi.useRealTimers();
   act(() => root?.unmount());
   container?.remove();
   container = null;
@@ -161,48 +147,6 @@ describe("useFileSearch", () => {
   it("returns [] for an empty or whitespace query", async () => {
     expect(await renderSearch("")).toEqual([]);
     expect(await renderSearch("   ")).toEqual([]);
-  });
-
-  it("clears results immediately when the query is cleared", async () => {
-    let setQueryExternal: (query: string) => void = () => {};
-
-    function DynamicProbe({
-      source,
-      options,
-    }: {
-      source: FileSearchSource;
-      options?: FileSearchOptions;
-    }) {
-      const [query, setQuery] = useState("notes");
-      setQueryExternal = setQuery;
-      latest = useFileSearch(
-        source as Parameters<typeof useFileSearch>[0],
-        query,
-        options,
-      );
-      return null;
-    }
-
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-    await act(async () => {
-      root!.render(
-        createElement(CoreProvider, {
-          core,
-          children: createElement(DynamicProbe, { source: WS }),
-        }),
-      );
-    });
-    await act(async () => {
-      vi.advanceTimersByTime(300);
-    });
-    expect(latest.map((r) => r.relativePath)).toContain("notes.md");
-
-    await act(async () => {
-      setQueryExternal("");
-    });
-    expect(latest).toEqual([]);
   });
 
   it("matches files by name, ranked basename-first, with title and paths", async () => {
@@ -292,16 +236,16 @@ describe("useFileSearch across open workspaces", () => {
   });
 
   it("returns matches from every open workspace", async () => {
-    const results = await renderSearch("notes", undefined, null);
+    const results = await renderSearch("notes");
     const paths = results.map((r) => r.path);
     expect(paths).toContain(`${WS}/notes.md`);
     expect(paths).toContain(`${WS2}/project/notes.md`);
   });
 
   it("lists files from all open workspaces when the query is empty and matchAllWhenEmpty is true", async () => {
-    const paths = (
-      await renderSearch("", { matchAllWhenEmpty: true }, null)
-    ).map((r) => r.path);
+    const paths = (await renderSearch("", { matchAllWhenEmpty: true })).map(
+      (r) => r.path,
+    );
     expect(paths).toContain(`${WS}/notes.md`);
     expect(paths).toContain(`${WS2}/other.md`);
   });
@@ -318,7 +262,36 @@ describe("useFileSearch across open workspaces", () => {
         });
       }
     });
-    expect(await renderSearch("file-", undefined, null)).toHaveLength(10);
+    expect(await renderSearch("file-")).toHaveLength(10);
+  });
+
+  it("puts the preferred workspace first among equal scores", async () => {
+    const notes = (path: string) => ({
+      path,
+      relativePath: "same/tie.md",
+      type: "file" as const,
+      contentHash: "",
+    });
+    await act(async () => {
+      files.collections.metadata.utils.writeInsert(notes(`${WS}/same/tie.md`));
+      files2.collections.metadata.utils.writeInsert(
+        notes(`${WS2}/same/tie.md`),
+      );
+    });
+    const first = async (preferWorkspace: string) =>
+      (await renderSearch("tie", { preferWorkspace }))[0]?.workspacePath;
+    expect(await first(WS)).toBe(WS);
+    expect(await first(WS2)).toBe(WS2);
+  });
+
+  it("drops a closed workspace's files", async () => {
+    expect((await renderSearch("other")).map((r) => r.path)).toContain(
+      `${WS2}/other.md`,
+    );
+    await act(async () => {
+      await core.workspace(WS2).close();
+    });
+    expect(latest.map((r) => r.path)).not.toContain(`${WS2}/other.md`);
   });
 });
 
@@ -340,17 +313,18 @@ describe("useFileSearch with nested workspaces", () => {
       });
     });
 
-    const results = await renderSearch("shared", undefined, null);
+    const results = await renderSearch("shared");
     expect(results).toHaveLength(1);
     expect(results[0].path).toBe(`${WSNested}/shared.md`);
     // The inner workspace's relative path wins.
     expect(results[0].relativePath).toBe("shared.md");
+    expect(results[0].workspacePath).toBe(WSNested);
   });
 });
 
 describe("useFileSearch under React StrictMode", () => {
   it("keeps updating after StrictMode effect replay", async () => {
-    await renderSearch("strict-test", undefined, null, true);
+    await renderSearch("strict-test", undefined, true);
     expect(latest).toEqual([]);
 
     await act(async () => {

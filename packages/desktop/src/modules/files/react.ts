@@ -2,7 +2,7 @@
  * Reading a workspace's file rows from React: the open-tab join, fetch
  * state, and the content watch that follows the open tabs.
  */
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import {
   useLiveQuery,
@@ -15,6 +15,12 @@ import {
 import { useIsFetching } from "@tanstack/react-query";
 import { workspaceKey } from "@/utils/path";
 import type { FileMetadata, WorkspaceCollections } from "./files";
+import {
+  createFileSearch,
+  createSearchedWorkspaces,
+  type WorkspaceFileSearchOptions,
+  type WorkspaceFileSearchResult,
+} from "./file-search";
 
 /**
  * A file row shaped for open tabs: metadata joined with content.
@@ -123,5 +129,42 @@ export function useContentWatches(
       }
     },
     [core],
+  );
+}
+
+/**
+ * Fuzzy file-name search over every open workspace's eager metadata —
+ * pure in-memory matching, no fs access (MET-155). Live: a file change or
+ * a workspace opening or closing re-ranks. Deliberately unaware of the
+ * palette, tabs, and the editor: consumers decide what opening a result
+ * means, and debounce the query if they need to. Empty/whitespace queries
+ * return [] (unless matchAllWhenEmpty).
+ */
+export function useFileSearch(
+  query: string,
+  options: WorkspaceFileSearchOptions = {},
+): WorkspaceFileSearchResult[] {
+  const core = useCore();
+  const store = useMemo(() => createSearchedWorkspaces(core), [core]);
+  const workspaces = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const search = useMemo(createFileSearch, []);
+  const { limit, filter, matchAllWhenEmpty, preferWorkspace } = options;
+  return useMemo(
+    () =>
+      search(workspaces, query, {
+        limit,
+        filter,
+        matchAllWhenEmpty,
+        preferWorkspace,
+      }),
+    [
+      search,
+      workspaces,
+      query,
+      limit,
+      filter,
+      matchAllWhenEmpty,
+      preferWorkspace,
+    ],
   );
 }
