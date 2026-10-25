@@ -21,16 +21,20 @@ export const WIDGET_RESPONSE_KINDS = {
   },
   single_choice: {
     use:
-      "you need the user to pick ONE of a few options before you can go on " +
-      "(ask in `markdown`, list the choices in `options`). Ask here instead " +
-      "of guessing or asking in prose; their pick (or a note they type " +
-      "instead) arrives as your next prompt in this session",
+      "the request has readings that lead to different results, or a " +
+      "decision shapes much of the work, and neither the widget context nor " +
+      "the document settles it. Ask before doing the work it decides (do the " +
+      "parts that don't depend on it), not after; don't ask what the document " +
+      "answers or about a small edit the user can undo. Put the question in " +
+      "`markdown` and concrete outcomes in `options`, the one you'd pick " +
+      "first, no \"Other\" (the user can type their own). Never ask the user " +
+      "in an answer's prose; their pick arrives as your next prompt",
     awaitsReply: true,
   },
   multiple_choice: {
     use:
-      "like single_choice, but the user may pick ANY number of the " +
-      "`options`; the picks arrive together as your next prompt",
+      "like single_choice, when the `options` are independent additions the " +
+      "user may want any number of, not alternatives",
     awaitsReply: true,
   },
 } as const satisfies Record<string, { use: string; awaitsReply: boolean }>;
@@ -93,7 +97,6 @@ export const WidgetRespondInputSchema = z
       )
       .min(2)
       .max(8)
-      .describe("The choices, for single_choice and multiple_choice only.")
       .optional(),
   })
   .superRefine((response, ctx) => {
