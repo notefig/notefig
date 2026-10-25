@@ -3,7 +3,8 @@
  *
  * Every widget is in exactly one of five states. The agent's side of a
  * round arrives as `RoundFacts` (the bound turn's status, whether the task
- * waits on a sign-in or a permission), and `stateFromRound` is the one
+ * waits on a sign-in or a permission, whether the agent's answer asks the
+ * user something), and `stateFromRound` is the one
  * place those facts become a state. Everything that behaves differently per
  * state — the keys, the document's deletion rules, Escape, the face's chrome
  * — asks `capabilitiesOf`, never the state's name, so a new kind of "the
@@ -14,7 +15,12 @@ import type { AgentTurn } from "@notefig/shared/agent";
 import type { BlobPhase } from "./state";
 
 /** What the agent is waiting on the user for. */
-export type Ask = { kind: "permission" } | { kind: "auth" };
+export type Ask =
+  | { kind: "permission" }
+  | { kind: "auth" }
+  /** The round ended on a question (a `widget_respond` kind that awaits a
+   *  reply); the field takes the answer. */
+  | { kind: "question" };
 
 export type WidgetState =
   /** Writing a prompt; `confirmingTrust` while the workspace trust warning
@@ -36,6 +42,8 @@ export type RoundFacts = {
   turn: AgentTurn["status"] | undefined;
   authRequired: boolean;
   pendingPermission: boolean;
+  /** The completed round's response waits on the user's reply. */
+  awaitingReply: boolean;
 };
 
 export type WidgetEvent =
@@ -74,7 +82,9 @@ export function stateFromRound(facts: RoundFacts): WidgetState {
     case "error":
       return { name: "settled", outcome: "error" };
     case "completed":
-      return { name: "settled", outcome: "done" };
+      return facts.awaitingReply
+        ? { name: "asking", ask: { kind: "question" } }
+        : { name: "settled", outcome: "done" };
     case "cancelled":
       return { name: "settled", outcome: "cancelled" };
   }
@@ -93,8 +103,10 @@ const HANDLERS: {
       : state,
   trustAnswered: (state) =>
     state.name === "composing" && state.confirmingTrust ? COMPOSING : state,
+  // A send leaves from wherever the field takes typing: a prompt, a reply,
+  // an answer.
   sendStarted: (state) =>
-    state.name === "composing" || state.name === "settled"
+    capabilitiesOf(state, { summoned: false }).fieldEditable
       ? { name: "sending" }
       : state,
   sendFailed: (state) => (state.name === "sending" ? COMPOSING : state),
@@ -128,8 +140,8 @@ function same(previous: WidgetState, next: WidgetState): WidgetState {
 /**
  * What a widget in this state allows. The only thing behaviour reads.
  *
- * - `fieldEditable`: the draft takes typing — composing a prompt, or a reply
- *   after a settled round.
+ * - `fieldEditable`: the draft takes typing — composing a prompt, a reply
+ *   after a settled round, or the answer to the agent's question.
  * - `removable`: no live turn depends on the widget, so an edit may delete
  *   it. A sign-in hold isn't live: nothing runs until the user signs in.
  * - `escape`: what Escape does — turn a fresh "/" summon back into a slash,
@@ -157,9 +169,15 @@ export function capabilitiesOf(
     case "working":
       return { fieldEditable: false, removable: false, escape: "stop" };
     case "asking":
-      return state.ask.kind === "auth"
-        ? { fieldEditable: false, removable: true, escape: "leave" }
-        : { fieldEditable: false, removable: false, escape: "stop" };
+      switch (state.ask.kind) {
+        case "auth":
+          return { fieldEditable: false, removable: true, escape: "leave" };
+        case "permission":
+          return { fieldEditable: false, removable: false, escape: "stop" };
+        // The turn is over; only the answer is missing.
+        case "question":
+          return { fieldEditable: true, removable: true, escape: "leave" };
+      }
     case "settled":
       return { fieldEditable: true, removable: true, escape: "leave" };
   }
@@ -175,8 +193,14 @@ export function phaseOf(state: WidgetState): BlobPhase {
     case "working":
       return state.turn;
     case "asking":
-      return state.ask.kind === "auth" ? "needs-auth" : "needs-permission";
+      return ASK_PHASES[state.ask.kind];
     case "settled":
       return state.outcome === "error" ? "error" : "done";
   }
 }
+
+const ASK_PHASES: Record<Ask["kind"], BlobPhase> = {
+  permission: "needs-permission",
+  auth: "needs-auth",
+  question: "needs-answer",
+};

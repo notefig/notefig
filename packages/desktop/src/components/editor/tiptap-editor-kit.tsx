@@ -4,7 +4,6 @@ import { ReactNodeViewRenderer } from "@tiptap/react";
 import Placeholder from "@tiptap/extension-placeholder";
 import CharacterCount from "@tiptap/extension-character-count";
 import { EditorImage } from "./editor-image-node";
-import { BlobNodeView } from "./blobs/blob-node-view";
 import { FrontmatterNode } from "./frontmatter-node";
 import { widgetRendererNodes, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
 // By path, not through the barrel: @pierre/diffs registers custom elements
@@ -32,17 +31,12 @@ export const MarkdownImage = MarkdownImageBase.extend({
 });
 
 /**
- * Renders every code block through BlobNodeView, which itself dispatches on
- * the `language` attr: metrists:* fences render as interactive blob widgets,
- * everything else falls back to the ordinary code block chrome, highlighted
- * like the code viewer (`codeHighlight`). Schema is unchanged (CodeBlock's
- * own attrs/parsing), so this is presentation only — the worker's markdown
- * round-trip is unaffected.
+ * Code blocks, highlighted like the code viewer (`codeHighlight`) and with a
+ * language picker. Schema is unchanged (CodeBlock's own attrs/parsing), so
+ * this is presentation only — the worker's markdown round-trip is
+ * unaffected.
  */
 export const MarkdownCodeBlock = CodeBlock.extend({
-  addNodeView() {
-    return ReactNodeViewRenderer(BlobNodeView);
-  },
   addProseMirrorPlugins() {
     return [...(this.parent?.() ?? []), codeHighlight(), codeLanguagePicker()];
   },

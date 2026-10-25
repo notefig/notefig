@@ -203,8 +203,8 @@ export interface HarnessAdapter {
    *  agent, a subagent's id, or null when it isn't tagged. */
   agentOf?(update: WithMeta): string | null;
   /** Prefixes it mints the app's MCP tool names under
-   *  (`mcp__notefig__author_blob`), stripped so the transcript and
-   *  `findBlobAuthorTask` see the plain tool name. */
+   *  (`mcp__notefig__widget_respond`), stripped so the transcript and
+   *  the widget see the plain tool name. */
   toolNamePrefixes: readonly string[];
   /** The tool a call names, for a harness whose title is prose instead
    *  (Devin: "Calling widget_respond from notefig"); null when it doesn't

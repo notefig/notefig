@@ -15,7 +15,8 @@ vi.mock("react-i18next", () => ({
   initReactI18next: { type: "3rdParty" as const, init: () => {} },
 }));
 
-import { PromptBlobFace } from "../ui/prompt-blob";
+import { PromptBlobFace, type ChoiceDisplay } from "../ui/prompt-blob";
+import type { WidgetResponse } from "@notefig/shared/agent";
 import type { BlobPhase } from "../state";
 import type { AgentTaskRow } from "@notefig/shared/agent";
 import { fakePromptWidgetHost, withHost } from "../../testing/fake-host";
@@ -33,9 +34,13 @@ const record = {
   lastSentPrompt: "the sent prompt",
 };
 
+const sendFollowUp = vi.fn();
+const pickOption = vi.fn();
+
 const actions = {
   send: noop,
-  sendFollowUp: noop,
+  sendFollowUp,
+  pickOption,
   editPrompt: noop,
   retry: noop,
   stop: noop,
@@ -54,7 +59,8 @@ function render(
   overrides: {
     display?: Partial<{
       touchedFiles: string[];
-      widgetResponse: { kind: "answer" | "issue"; markdown: string } | null;
+      widgetResponse: WidgetResponse | null;
+      choice: ChoiceDisplay | null;
       summary: string | null;
       errorMessage: string | null;
       activeToolLine: string | null;
@@ -209,6 +215,65 @@ describe("PromptBlobFace", () => {
     expect(
       render("running", { display: { activeToolLine: "Reading foo" } }),
     ).toContain("Reading foo");
+  });
+
+  const question = (
+    kind: "single_choice" | "multiple_choice",
+    picked: string[] = [],
+  ) => ({
+    widgetResponse: {
+      kind,
+      markdown: "Pro or Enterprise?",
+      options: ["Pro", "Enterprise"],
+    },
+    choice: {
+      options: ["Pro", "Enterprise"],
+      multiple: kind === "multiple_choice",
+      picked,
+      focused: null,
+    },
+  });
+  const option = (name: string) =>
+    container?.querySelector(
+      `[data-choice-option="${name}"]`,
+    ) as HTMLButtonElement;
+
+  it("a single choice offers a button per option; clicking one picks it", () => {
+    pickOption.mockClear();
+    const text = render("needs-answer", { display: question("single_choice") });
+    expect(text).toContain("Pro or Enterprise?");
+    expect(container?.querySelector('[data-choice="single"]')).not.toBeNull();
+    act(() => option("Enterprise").click());
+    expect(pickOption).toHaveBeenCalledWith("Enterprise");
+    // The field stays open for a typed answer instead.
+    const draftRow = container?.querySelector("[data-prompt-draft]");
+    expect(draftRow?.getAttribute("data-placeholder")).toBe("promptBlobAnswer");
+    expect(draftRow?.closest("[hidden]")).toBeNull();
+  });
+
+  it("a multiple choice offers checkboxes, and a send arrow once something is picked", () => {
+    pickOption.mockClear();
+    sendFollowUp.mockClear();
+    const send = () =>
+      container?.querySelector('button[aria-label="send"]') as HTMLButtonElement | null;
+    render("needs-answer", { display: question("multiple_choice") });
+    expect(container?.querySelector('[data-choice="multiple"]')).not.toBeNull();
+    expect(option("Pro").getAttribute("role")).toBe("checkbox");
+    expect(send()).toBeNull();
+    act(() => option("Pro").click());
+    expect(pickOption).toHaveBeenCalledWith("Pro");
+    act(() => root?.unmount());
+    container?.remove();
+
+    render("needs-answer", { display: question("multiple_choice", ["Pro"]) });
+    expect(option("Pro").getAttribute("data-state")).toBe("checked");
+    act(() => send()!.click());
+    expect(sendFollowUp).toHaveBeenCalledTimes(1);
+  });
+
+  it("a finished round shows no options", () => {
+    render("done", { display: question("single_choice") });
+    expect(container?.querySelector("[data-choice]")).toBeNull();
   });
 
   it("renders the permission card only in needs-permission", () => {

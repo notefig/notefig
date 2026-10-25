@@ -83,6 +83,13 @@ export function describeDotState(
         label: "Needs sign-in",
         ping: true,
       };
+    case "needs-answer":
+      return {
+        ...QUIET,
+        core: "attention",
+        label: "Needs your answer",
+        ping: true,
+      };
     case "error":
       // Errors demand attention the same way blocked states do.
       return { ...QUIET, core: "error", label: "Failed", ping: true };

@@ -285,6 +285,38 @@ describe("stored rounds (MET-251)", () => {
     });
   });
 
+  it("a round that ends on a question asks for the answer, which is the next send", async () => {
+    const t = testPrompts();
+    await t.send("blob", "draft the pricing section", ROUND);
+    t.setTurn("trn_1", "task_1", "completed");
+    const question = {
+      ...OUTCOME,
+      response: {
+        kind: "single_choice" as const,
+        markdown: "Pro or Enterprise?",
+        options: ["Pro", "Enterprise"],
+      },
+    };
+    t.storeRound("blob", { ...settled(), outcome: question });
+    expect(t.prompts.get("blob")).toMatchObject({
+      state: { name: "asking", ask: { kind: "question" } },
+      outcome: question,
+    });
+    expect(capabilitiesOf(t.prompts.get("blob").state, { summoned: false })).toEqual({
+      fieldEditable: true,
+      removable: true,
+      escape: "leave",
+    });
+    // The answer continues the same session.
+    expect(
+      await t.send("blob", "Enterprise", { taskId: "task_1", turnId: "trn_2" }),
+    ).toBe(true);
+    expect(t.prompts.get("blob")).toMatchObject({
+      state: { name: "working", turn: "queued" },
+      boundTurnId: "trn_2",
+    });
+  });
+
   it("an errored turn waiting on a sign-in still asks for it while its record catches up", async () => {
     const t = testPrompts();
     await t.send("blob", "make it shorter", ROUND);

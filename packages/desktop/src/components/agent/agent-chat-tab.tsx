@@ -17,7 +17,6 @@ import {
   Check,
   ChevronRight,
   Loader2,
-  Sparkles,
   Square,
   X,
 } from "lucide-react";
@@ -69,7 +68,6 @@ import { useAgentTabController } from "./agent-tab-controller";
 import { requestTabFocus } from "@/modules/tabs/tab-controllers";
 import { agentTabId } from "@/modules/tabs/tab-id";
 import { CopyTextButton, renderPromptToolCall } from "@notefig/widgets";
-import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 import { splitLeadingQuote } from "@/modules/agents/agents";
 
 /**
@@ -752,12 +750,7 @@ export const EntryView = memo(function EntryView({
         </div>
       );
     }
-    const CustomCard = TOOL_NAME_RENDERER[entry.toolCall.title ?? ""];
-    return CustomCard ? (
-      <CustomCard toolCall={entry.toolCall} />
-    ) : (
-      <ToolCallCard toolCall={entry.toolCall} />
-    );
+    return <ToolCallCard toolCall={entry.toolCall} />;
   }
   if (entry.type === "plan") return <PlanView plan={entry.plan} />;
   if (entry.type === "thought") return <ThoughtEntry text={entry.text} />;
@@ -958,58 +951,6 @@ function ThoughtEntry({ text }: { text?: string }) {
         {text}
       </p>
     </details>
-  );
-}
-
-/**
- * Per-tool-name transcript renderers, for tools whose generic ToolCallCard
- * (raw JSON result) isn't a useful summary. Deliberately a plain lookup
- * table, not a glob-based registry like blob-registry.ts — proportionate to
- * the one case that exists today; promote to a real registry file if a
- * second one shows up. (The prompt widget's tools aren't listed here: the
- * widget renders its own cards, through renderPromptToolCall.)
- */
-const TOOL_NAME_RENDERER: Record<
-  string,
-  (props: { toolCall: ToolCallUpdate }) => ReactNode
-> = {
-  author_blob: AuthorBlobCard,
-};
-
-/** "authored a question in notes.md" instead of the raw {blobId} JSON result. */
-function AuthorBlobCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
-  const { t } = useTranslation();
-  const { tabs: jumpTabs } = useCore();
-  const rawInput = call.rawInput as
-    { path?: string; type?: string; id?: string } | undefined;
-  const status: ToolCallStatus = call.status ?? "pending";
-  if (!rawInput?.path || !rawInput.type || !rawInput.id) {
-    return <ToolCallCard toolCall={call} />;
-  }
-  // rawInput.path is whatever the agent sent (usually workspace-relative);
-  // locations[0] carries the workspace-resolved absolute path the jump needs.
-  const jumpPath = call.locations?.[0]?.path ?? rawInput.path;
-  const fileName = rawInput.path.split("/").pop();
-  return (
-    <div
-      className="flex w-full items-center gap-2 text-xs text-muted-foreground"
-      data-tool-call
-      data-tool-title="author_blob"
-      data-tool-status={status}
-    >
-      <Sparkles className="size-3.5 shrink-0" />
-      <span className="min-w-0 flex-1 truncate">
-        {t("agentAuthoredBlob", { type: rawInput.type })}{" "}
-        <button
-          type="button"
-          className="underline hover:text-foreground"
-          onClick={() => jumpToBlob(jumpTabs, jumpPath, rawInput.id!)}
-        >
-          {fileName}
-        </button>
-      </span>
-      <ToolStatusIcon status={status} />
-    </div>
   );
 }
 

@@ -14,6 +14,7 @@ const facts = (overrides: Partial<RoundFacts> = {}): RoundFacts => ({
   turn: "running",
   authRequired: false,
   pendingPermission: false,
+  awaitingReply: false,
   ...overrides,
 });
 
@@ -25,6 +26,7 @@ const STATES: Record<string, WidgetState> = {
   running: { name: "working", turn: "running" },
   permission: { name: "asking", ask: { kind: "permission" } },
   auth: { name: "asking", ask: { kind: "auth" } },
+  question: { name: "asking", ask: { kind: "question" } },
   done: { name: "settled", outcome: "done" },
   error: { name: "settled", outcome: "error" },
   cancelled: { name: "settled", outcome: "cancelled" },
@@ -61,6 +63,16 @@ describe("stateFromRound", () => {
       stateFromRound(facts({ turn: "completed", authRequired: true })),
     ).toEqual(STATES.done);
   });
+
+  it("asks a question when the completed round's response awaits a reply", () => {
+    expect(
+      stateFromRound(facts({ turn: "completed", awaitingReply: true })),
+    ).toEqual(STATES.question);
+    // Only a completed round ends on its response.
+    expect(
+      stateFromRound(facts({ turn: "error", awaitingReply: true })),
+    ).toEqual(STATES.error);
+  });
 });
 
 describe("transition", () => {
@@ -82,9 +94,16 @@ describe("transition", () => {
     expect(answered.composing).toBe(COMPOSING);
   });
 
-  it("sends from a composer or a settled round, nowhere else", () => {
+  it("sends from a composer, a settled round or a question, nowhere else", () => {
     const next = every({ type: "sendStarted" });
-    for (const name of ["composing", "confirmingTrust", "done", "error", "cancelled"]) {
+    for (const name of [
+      "composing",
+      "confirmingTrust",
+      "question",
+      "done",
+      "error",
+      "cancelled",
+    ]) {
       expect(next[name]).toEqual(STATES.sending);
     }
     for (const name of ["sending", "queued", "running", "permission", "auth"]) {
@@ -134,13 +153,14 @@ describe("transition", () => {
 describe("capabilitiesOf", () => {
   const plain = { summoned: false };
 
-  it("opens the field to a composer and a reply, nothing else", () => {
+  it("opens the field to a composer, a reply and an answer, nothing else", () => {
     const editable = Object.entries(STATES)
       .filter(([, state]) => capabilitiesOf(state, plain).fieldEditable)
       .map(([name]) => name);
     expect(editable).toEqual([
       "composing",
       "confirmingTrust",
+      "question",
       "done",
       "error",
       "cancelled",
@@ -161,7 +181,7 @@ describe("capabilitiesOf", () => {
     for (const name of ["queued", "running", "permission"]) {
       expect(capabilitiesOf(STATES[name], plain).escape).toBe("stop");
     }
-    for (const name of ["sending", "auth", "done", "error"]) {
+    for (const name of ["sending", "auth", "question", "done", "error"]) {
       expect(capabilitiesOf(STATES[name], plain).escape).toBe("leave");
     }
   });
@@ -181,6 +201,7 @@ describe("phaseOf", () => {
       running: "running",
       permission: "needs-permission",
       auth: "needs-auth",
+      question: "needs-answer",
       done: "done",
       error: "error",
       cancelled: "done",

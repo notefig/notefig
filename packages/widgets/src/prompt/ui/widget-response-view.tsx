@@ -1,8 +1,12 @@
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, TriangleAlert } from "lucide-react";
+import { Check, MessageCircleQuestion, TriangleAlert } from "lucide-react";
 import { cn } from "@notefig/ui/utils";
-import type { WidgetResponse } from "@notefig/shared/agent";
+import {
+  isChoiceKind,
+  type WidgetResponse,
+  type WidgetResponseKind,
+} from "@notefig/shared/agent";
 import { deriveDoneLine } from "../state";
 import { usePromptWidgetHost } from "../host-context";
 import { CopyTextButton } from "./copy-text-button";
@@ -41,7 +45,7 @@ export function WidgetResponseView({
   // Component-local on purpose; a remount resets to the placement's
   // default, which is the desired landing state anyway.
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const { summary, body, isIssue } = deriveDoneLine({
+  const { summary, body, kind } = deriveDoneLine({
     response,
     fallbackText,
     cancelled,
@@ -52,6 +56,30 @@ export function WidgetResponseView({
       issue: t("promptBlobIssue"),
     },
   });
+  const isIssue = kind === "issue";
+  if (isChoiceKind(kind)) {
+    return (
+      <div
+        className="flex flex-col gap-1 px-2 py-1"
+        data-widget-response={kind}
+      >
+        <div className="flex items-start gap-1.5">
+          <span className="flex h-[1.125rem] items-center">
+            {KIND_ICONS[kind]}
+          </span>
+          {/* The question is the heading, wrapped rather than cut to one
+              line: a question read up to an ellipsis can't be answered. */}
+          <Markdown
+            text={summary}
+            className="max-h-40 min-w-0 flex-1 overflow-y-auto text-xs leading-relaxed text-foreground"
+          />
+          <CopyTextButton text={summary} className="p-0.5" iconClassName="size-3" />
+          {actions}
+        </div>
+        {children}
+      </div>
+    );
+  }
   return (
     <div
       className="flex flex-col gap-0.5 px-2 py-1"
@@ -62,7 +90,7 @@ export function WidgetResponseView({
           summary={summary}
           expandable={body !== null}
           expanded={expanded}
-          isIssue={isIssue}
+          kind={kind}
           onToggle={() => setExpanded((value) => !value)}
         />
         {body && (
@@ -99,27 +127,36 @@ export function WidgetResponseView({
   );
 }
 
+/** Each response kind's mark at the head of the line. */
+const KIND_ICONS: Record<WidgetResponseKind, ReactNode> = {
+  answer: <Check className="size-3 shrink-0 text-success/80" />,
+  issue: <TriangleAlert className="size-3 shrink-0 text-warning" />,
+  single_choice: (
+    <MessageCircleQuestion className="size-3 shrink-0 text-primary" />
+  ),
+  multiple_choice: (
+    <MessageCircleQuestion className="size-3 shrink-0 text-primary" />
+  ),
+};
+
 function SummaryLine({
   summary,
   expandable,
   expanded,
-  isIssue,
+  kind,
   onToggle,
 }: {
   summary: string;
   expandable: boolean;
   expanded: boolean;
-  isIssue: boolean;
+  kind: WidgetResponseKind;
   onToggle: () => void;
 }) {
   const { t } = useTranslation();
+  const isIssue = kind === "issue";
   return (
     <>
-      {isIssue ? (
-        <TriangleAlert className="size-3 shrink-0 text-warning" />
-      ) : (
-        <Check className="size-3 shrink-0 text-success/80" />
-      )}
+      {KIND_ICONS[kind]}
       <button
         type="button"
         disabled={!expandable}

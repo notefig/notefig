@@ -497,9 +497,13 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
    * reached through mention-bridge.ts.
    */
   addKeyboardShortcuts() {
+    // Synced first: a key right after a click would otherwise be read
+    // against the caret from before the click (the DOM selection reaches
+    // the editor's state a moment later).
     const forward =
       (key: string, shiftKey = false) =>
       () => {
+        syncSelectionFromDOM(this.editor);
         const draft = selectionDraft(this.editor.state);
         if (!draft) return false;
         return dispatchComposerKey(draft.blobId, { key, shiftKey });
@@ -589,12 +593,28 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
       // rows, returning false hands the arrows to the suggestion plugin's
       // own onKeyDown (it runs after this keymap) so they step through the
       // list instead of carrying the caret out of the widget.
+      //
+      // A choice question's options come first: the composer map moves the
+      // keys onto them, and back (see deriveChoiceKey).
       ArrowUp: () =>
         !suggestionOwnsArrows() &&
-        arrowAcrossWidget(this.editor, this.options.prompts, -1),
+        (forward("ArrowUp")() ||
+          arrowAcrossWidget(this.editor, this.options.prompts, -1)),
       ArrowDown: () =>
         !suggestionOwnsArrows() &&
-        arrowAcrossWidget(this.editor, this.options.prompts, 1),
+        (forward("ArrowDown")() ||
+          arrowAcrossWidget(this.editor, this.options.prompts, 1)),
+      // Stepping through and picking a choice question's options; each
+      // falls through to the draft when the keys aren't on them.
+      ArrowLeft: forward("ArrowLeft"),
+      ArrowRight: forward("ArrowRight"),
+      Space: forward(" "),
+      ...Object.fromEntries(
+        ["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => [
+          digit,
+          forward(digit),
+        ]),
+      ),
       // Delete-to-line-start. Inside a draft the composer map gets its
       // dismiss chance first (empty summoned draft), then the delete is
       // clamped to the draft's own start — and the key is ALWAYS consumed

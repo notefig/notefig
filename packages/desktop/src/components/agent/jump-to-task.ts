@@ -7,7 +7,6 @@
  * document nobody has opened since launch).
  */
 import type { PromptWidgetsApi } from "@notefig/widgets";
-import { jumpToBlob } from "@/components/editor/blobs/jump-to-blob";
 import type { PromptRound } from "@/modules/prompt-rounds";
 import type { Core } from "@notefig/core";
 
@@ -27,7 +26,7 @@ export function jumpToTask(
 ): JumpTarget {
   const widget = core.promptWidgets.findByTask(taskId, options.turnId);
   if (widget) {
-    jumpToBlob(core.tabs, widget.documentPath, widget.blobId);
+    revealWidget(core, widget);
     return "widget";
   }
   core.tabs.openAgent(taskId);
@@ -44,8 +43,21 @@ export function jumpToRound(
 ): void {
   const widget = core.promptWidgets.findByTask(round.taskId, round.turnId);
   if (widget && widget.boundTurnId === round.turnId) {
-    jumpToBlob(core.tabs, widget.documentPath, widget.blobId);
+    revealWidget(core, widget);
   } else {
     core.tabs.open(round.documentPath, { intent: "replace" });
   }
+}
+
+/** Focus (opening if need be) the widget's document and scroll the widget
+ *  into view: it is found by the `data-blob-id` its node view sets. */
+function revealWidget(
+  core: Jumper,
+  widget: { documentPath: string; blobId: string },
+): void {
+  void core.tabs.reveal(
+    widget.documentPath,
+    { blockId: widget.blobId },
+    { intent: "new-tab", moveIfOpen: true },
+  );
 }

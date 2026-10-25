@@ -512,15 +512,11 @@ i18n
           searchFileCount_other: "in {{count}} files",
           noResultsFound: "No results found",
 
-          // Interactive blobs (question / approval)
-          blobAnswerPlaceholder: "Type an answer\u2026",
+          // Interactive blobs (approval)
           send: "Send",
-          sending: "Sending\u2026",
           approve: "Approve",
           reject: "Reject",
           details: "Details",
-          questionChangedReload:
-            "This question was changed or removed \u2014 reload the document.",
           approvalChangedReload:
             "This approval was changed or removed \u2014 reload the document.",
           blobAnsweredConflict:
@@ -597,7 +593,6 @@ i18n
           agentStop: "Stop",
           copyMessage: "Copy message",
           copied: "Copied",
-          agentAuthoredBlob: "authored a {{type}} in",
           agentChangedFiles_one: "{{count}} changed file",
           agentChangedFiles_other: "{{count}} changed files",
           agentTerminal: "Terminal {{id}}",
@@ -618,6 +613,7 @@ i18n
           promptBlobStopToRemove: "Stop the agent to remove this prompt",
           promptBlobOpenChat: "Open chat",
           promptBlobReply: "Reply…",
+          promptBlobAnswer: "↑ to pick, or type an answer…",
           promptBlobShowMore: "Show more",
           promptBlobShowLess: "Show less",
           promptBlobIssue: "Issue",
@@ -689,7 +685,6 @@ i18n
           agentToolHistoryDiff: "Compare Versions",
           agentToolHistoryCheckpoint: "Save Checkpoint",
           agentToolHistoryRestore: "Restore Version",
-          agentToolAuthorBlob: "Add Interactive Block",
           agentToolWidgetRespond: "Respond in Widget",
 
           // Telemetry consent + Privacy settings

@@ -177,8 +177,6 @@ export interface AgentsApi {
   task(taskId: string): AgentTaskHandle;
   turn(turnId: string): AgentTurnHandle;
   workspace(workspacePath: string): AgentWorkspaceHandle;
-  /** Which task authored a blob (from its `author_blob` call), if any. */
-  blobAuthor: AgentRuntime["findBlobAuthor"];
   /**
    * Whether a new session can run here: always on desktop; on the web only
    * with a paired machine (otherwise the user is shown how to pair one).
@@ -411,7 +409,6 @@ export function createAgents({
     task: taskHandle,
     turn: turnHandle,
     workspace: workspaceHandle,
-    blobAuthor: (blobId) => runtime.findBlobAuthor(blobId),
     ensureRuntime,
     whenReconciled: () => runtime.whenReconciled(),
     disposeWorkspace: (workspacePath) =>

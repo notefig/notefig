@@ -1,11 +1,11 @@
 import { toolRegistry } from "./tools";
+import { WIDGET_RESPONSE_KINDS } from "@notefig/shared/agent";
 
 /**
  * MCP's `tools/list` schema is enough for the model to call a tool
  * correctly, but not enough to make it *reach* for one — a real session
- * defaulted to native Read/cat/Write for workspace files and wrote plain
- * text instead of calling `author_blob` for an explicit "add a question"
- * request, only using the MCP tools once told to directly. This steering
+ * defaulted to native Read/cat/Write for workspace files, only using the
+ * MCP tools once told to directly. This steering
  * text rides MCP's own channel for exactly that purpose —
  * `initialize.instructions` — instead of a prompt preamble: the server
  * describes itself, so only sessions that actually have the server hear
@@ -22,7 +22,7 @@ export function serverInstructions(): string {
     `you are running as an agent inside that app. Notefig registers this server ` +
     `automatically for the session via a per-task, ephemeral config — it will not ` +
     `appear in your global or project config files, and you don't need to locate ` +
-    `or verify it. Four of these are your PRIMARY tools — keep them top of mind; ` +
+    `or verify it. Three of these are your PRIMARY tools — keep them top of mind; ` +
     `everything else is secondary, for when the task specifically calls for it. ` +
     `(1) The widget-context resource: a prompt sent from an in-document widget ` +
     `always carries a \`resource_link\` whose URI starts with ` +
@@ -41,8 +41,9 @@ export function serverInstructions(): string {
     `a wider window — same coordinate space, no conversion. ` +
     `(2) \`widget_respond\`: when a prompt carries that widget-context ` +
     `resource_link, you MUST deliver your final response by calling ` +
-    `\`widget_respond\` before ending the turn — kind "answer" for the response ` +
-    `itself, kind "issue" if you hit a blocker or need to flag a problem. This ` +
+    `\`widget_respond\` before ending the turn, with the kind that fits ` +
+    `(${Object.keys(WIDGET_RESPONSE_KINDS).join(", ")}; the tool says when ` +
+    `to use each — ask a choice there rather than guessing). This ` +
     `holds ESPECIALLY for turns that need no tool actions at all: a widget prompt ` +
     `answered with prose alone still ends with \`widget_respond\` — for widget ` +
     `prompts, plain assistant text is progress notes, never the deliverable. ` +
@@ -55,13 +56,7 @@ export function serverInstructions(): string {
     `\`resources/read\` on those; read each one before acting (prefer ` +
     `\`workspace_read_document\` with its workspace-relative name so you see ` +
     `live editor state). ` +
-    `(3) \`author_blob\` with a multiple-choice question: whenever you need the ` +
-    `user to decide or clarify something — or they ask you to add an interactive ` +
-    `question, approval, or status block to a document — author a block instead ` +
-    `of asking in prose. It renders as an answerable widget, and you'll get a ` +
-    `follow-up prompt with the user's answer once they respond — don't re-ask or ` +
-    `wait synchronously. ` +
-    `(4) \`workspace_read_document\`: the fallback when the widget context ` +
+    `(3) \`workspace_read_document\`: the fallback when the widget context ` +
     `genuinely doesn't cover what the request needs — e.g. editing a different ` +
     `section you can see named in the outline but whose text isn't in the ` +
     `surrounding-text window. Do NOT read the entire document by default: that ` +

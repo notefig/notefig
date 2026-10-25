@@ -159,18 +159,6 @@ test.describe("agent workflows", () => {
       await expect(entries(page, "assistant").last()).toContainText("Want me to fix it?");
     });
 
-    test("author_blob renders the authored-blob card with a jump link", async ({
-      page,
-    }) => {
-      const { recording } = await sessionWith(page, "blob", "author-blob.json");
-      await sendAndSettle(page, promptTextOf(recording));
-
-      const card = toolCards(page, "author_blob").first();
-      await expect(card).toContainText("authored a question in");
-      await expect(card.getByRole("button", { name: "notes.md" })).toBeVisible();
-      await expect(card).toHaveAttribute("data-tool-status", "completed");
-    });
-
     test("available_commands / current_mode / session_info updates are kept as data, never rendered", async ({
       page,
     }) => {

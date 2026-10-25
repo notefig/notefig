@@ -300,6 +300,7 @@ function askLabel(
   t: (key: string, options?: Record<string, unknown>) => string,
 ): string {
   if (item.permission) return item.permission.title;
+  if (item.question) return item.question;
   return t("attentionAuth", { title: item.task?.title ?? "" });
 }
 
@@ -324,7 +325,7 @@ function AttentionGroup({ items }: { items: AttentionItem[] }) {
         </SectionTitle>
         {shown.map((item) => (
           <NavRow
-            key={item.taskId}
+            key={`${item.taskId}:${item.turnId}`}
             leading={<StatusGlyph state={attentionGlyphState(item.kind)} />}
             label={askLabel(item, t)}
             title={`${askLabel(item, t)} · ${deriveProjectName(item.task?.workspacePath ?? "")}`}

@@ -25,7 +25,11 @@
  * restored from the file comes back through `restore`, which takes up its
  * last recorded round.
  */
-import type { AgentTaskRow, AgentTurn } from "@notefig/shared/agent";
+import {
+  awaitsReply,
+  type AgentTaskRow,
+  type AgentTurn,
+} from "@notefig/shared/agent";
 import {
   createPromptReview,
   NO_SAVED_REVIEW_RANGES,
@@ -249,6 +253,8 @@ function factsOf(snapshot: PromptRoundSnapshot): RoundFacts {
     turn: snapshot.turn?.status,
     authRequired: snapshot.task?.authRequired === true,
     pendingPermission: snapshot.hasPendingPermission,
+    // What the round ended on is its record's, not its rows' (see `fold`).
+    awaitingReply: false,
   };
 }
 
@@ -353,12 +359,17 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
     // A bound turn whose row isn't written yet: nothing to fold.
     if (widget.boundTurnId && turn === undefined) return false;
     const ended = record && record.status !== "live";
+    const outcome = ended ? record.outcome : null;
     write(blobId, {
       state: transition(widget.state, {
         type: "roundChanged",
-        facts: { ...live, turn },
+        facts: {
+          ...live,
+          turn,
+          awaitingReply: awaitsReply(outcome?.response ?? null),
+        },
       }),
-      outcome: ended ? record.outcome : null,
+      outcome,
     });
     return get(blobId) !== widget;
   };
@@ -557,7 +568,12 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
         const snapshot = watches.get(blobId)?.observation.get();
         const facts = snapshot
           ? factsOf(snapshot)
-          : { turn: undefined, authRequired: false, pendingPermission: false };
+          : {
+              turn: undefined,
+              authRequired: false,
+              pendingPermission: false,
+              awaitingReply: false,
+            };
         const turn = facts.turn
           ? roundStatus(recordOf(blobId)?.status, facts.turn, true)
           : "queued";

@@ -1259,33 +1259,6 @@ describe("MCP tool calls (Stage 3.5)", () => {
     expect(tools[0].toolCall?.locations).toEqual([{ path: "/ws/notes.md" }]);
     expect(tools[0].toolCall?.status).toBe("completed");
   });
-
-  it("findBlobAuthorTask resolves a known blobId from the normalized author_blob call", async () => {
-    const [client, agentSide] = createLoopbackPair();
-    const agent = new FakeAgent(agentSide);
-    agent.onPrompt = async (_p, a) => {
-      a.update("sess_test", {
-        sessionUpdate: "tool_call",
-        toolCallId: "call_1",
-        title: "mcp__notefig__author_blob",
-        kind: "other",
-        status: "completed",
-        rawInput: { path: "notes.md", type: "question", id: "question_8f2a" },
-      });
-      return { stopReason: "end_turn" };
-    };
-
-    const task = new TaskManager(deps, "/ws").createTask(harness);
-    await task.start(() => client);
-    await runPrompt(task, "ask a question");
-
-    expect(runtime.findBlobAuthor("question_8f2a")).toEqual({
-      taskId: task.taskId,
-      blobType: "question",
-      path: "notes.md",
-    });
-    expect(runtime.findBlobAuthor("does_not_exist")).toBeUndefined();
-  });
 });
 
 describe("Stage 4: auth flows", () => {
@@ -1690,10 +1663,10 @@ describe("Stage 4: per-harness MCP registration", () => {
       a.update("sess_test", {
         sessionUpdate: "tool_call",
         toolCallId: "oc_1",
-        title: "notefig_author_blob",
+        title: "notefig_widget_respond",
         kind: "other",
         status: "completed",
-        rawInput: { path: "notes.md", type: "question", id: "question_oc01" },
+        rawInput: { kind: "answer", markdown: "Done." },
       });
       return { stopReason: "end_turn" };
     };
@@ -1701,8 +1674,7 @@ describe("Stage 4: per-harness MCP registration", () => {
     await task.start(() => client);
     await runPrompt(task, "ask");
 
-    expect(toolEntries(task.taskId)[0].toolCall?.title).toBe("author_blob");
-    expect(runtime.findBlobAuthor("question_oc01")?.taskId).toBe(task.taskId);
+    expect(toolEntries(task.taskId)[0].toolCall?.title).toBe("widget_respond");
   });
 });
 

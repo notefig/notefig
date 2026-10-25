@@ -250,7 +250,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Some app tools (workspace_read_document, history_restore, author_blob, …)
+ * Some app tools (workspace_read_document, history_restore, …)
  * don't get `locations` from the adapter the way native tool calls
  * sometimes do (confirmed absent on every MCP tool_call in
  * docs/architecture/spikes/v2-mcp-passthrough-spike.md). Derive the same
@@ -1499,10 +1499,10 @@ export class AgentTask {
    * the task level so updates land even after the turn that started them ends.
    * Tool entries are first-class — not nested under a message.
    *
-   * MCP tool names arrive prefixed (`mcp__notefig__author_blob`, confirmed
-   * on claude-agent-acp) and without `locations` — normalize the former and
-   * derive the latter from `rawInput.path` so app tools render and address
-   * (`findBlobAuthorTask`) exactly like any other tool call.
+   * MCP tool names arrive prefixed (`mcp__notefig__widget_respond`,
+   * confirmed on claude-agent-acp) and without `locations` — normalize the
+   * former and derive the latter from `rawInput.path` so app tools render
+   * exactly like any other tool call.
    */
   private upsertToolEntry(
     update: Extract<
@@ -2172,21 +2172,6 @@ export interface AgentRuntime {
     value: string,
   ): Promise<ActionResult>;
   /**
-   * Which task authored a given blob, and its type/path — read straight off
-   * the `author_blob` tool call's transcript entry (every fence tool call
-   * already gets one, with `rawInput` verbatim), rather than a dedicated
-   * blob-tracking table. Used by `answerBlob` (blob-actions.ts) to address
-   * a fresh prompt back at the right session once the user interacts with
-   * the blob; the answer is a plain prompt, no interaction bookkeeping.
-   *
-   * Deliberately a full scan (not the taskId index): the lookup is by
-   * blobId ACROSS tasks, and it runs once per user blob interaction — rare
-   * enough that a dedicated index isn't worth its bookkeeping.
-   */
-  findBlobAuthor(
-    blobId: string,
-  ): { taskId: string; blobType: string; path: string } | undefined;
-  /**
    * Resolves once boot reconciliation has settled — i.e. the hydrated rows
    * have loaded and the ones that can never be revived have been deleted.
    *
@@ -2473,25 +2458,6 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       const task = live.get(taskId);
       if (!task) return { ok: false, error: "agent task is not started" };
       return task.setConfigOption(optionId, value);
-    },
-    findBlobAuthor(blobId) {
-      const entry = store.entries.toArray.find(
-        (e) =>
-          e.type === "tool_call" &&
-          e.toolCall?.title === "author_blob" &&
-          isPlainObject(e.toolCall.rawInput) &&
-          e.toolCall.rawInput.id === blobId,
-      );
-      if (!entry?.toolCall?.rawInput) return undefined;
-      const rawInput = entry.toolCall.rawInput as {
-        path: string;
-        type: string;
-      };
-      return {
-        taskId: entry.taskId,
-        blobType: rawInput.type,
-        path: rawInput.path,
-      };
     },
     whenReconciled() {
       reconciled ??= store

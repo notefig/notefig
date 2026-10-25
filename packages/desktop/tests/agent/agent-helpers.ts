@@ -6,6 +6,7 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   openFileInTree,
   openWorkspace,
@@ -115,10 +116,10 @@ export type AgentRecordingFixture = {
   [key: string]: unknown;
 };
 
-/** Read a fixture from tests/agent/fixtures/ (relative to the running spec's
- *  directory, so it works from any cwd). */
+/** Read a fixture from tests/agent/fixtures/ (beside this file, so it works
+ *  from any spec and any cwd). */
 export function loadRecording(name: string): AgentRecordingFixture {
-  const file = join(dirname(test.info().file), "fixtures", name);
+  const file = join(dirname(fileURLToPath(import.meta.url)), "fixtures", name);
   const parsed = JSON.parse(readFileSync(file, "utf8"));
   if (parsed?.format !== "notefig-agent-recording") {
     throw new Error(`${name} is not a notefig-agent-recording`);
