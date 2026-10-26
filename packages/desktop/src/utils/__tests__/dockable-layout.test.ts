@@ -408,6 +408,49 @@ describe("window navigation", () => {
     expect(findAdjacentWindow(layout, "editor-window", "right")).toBeNull();
   });
 
+  it("tolerates floating-point rounding in nested split ratios", () => {
+    const win = (id: string, size = 1): LayoutNode => ({
+      type: "Window",
+      id,
+      children: [`${id}.md`],
+      selected: `${id}.md`,
+      size,
+    });
+    const layout: LayoutNode[] = [
+      {
+        type: "Panel",
+        id: "root",
+        orientation: "row",
+        size: 1,
+        children: [
+          win("left"),
+          {
+            type: "Panel",
+            id: "middle-col",
+            orientation: "column",
+            size: 1,
+            children: [
+              win("top-middle"),
+              {
+                type: "Panel",
+                id: "bottom-row",
+                orientation: "row",
+                size: 1,
+                children: [win("bottom-left", 2), win("bottom-right", 1)],
+              },
+            ],
+          },
+          win("right"),
+        ],
+      },
+    ];
+    // bottom-right ends at 2/3 + fp noise, right starts at 2/3 - fp noise;
+    // the tolerance must still treat them as sharing an edge.
+    expect(findAdjacentWindow(layout, "bottom-right", "right")?.id).toBe(
+      "right",
+    );
+  });
+
   it("navigates a flat row of windows left and right", () => {
     const layout: LayoutNode[] = [
       {

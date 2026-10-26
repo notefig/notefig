@@ -457,6 +457,10 @@ export function assignWindowRects(layout: LayoutNode[]): WindowRect[] {
  * picks the nearest in-bounds window, penalising perpendicular offset so
  * directly-adjacent panes win over diagonally-placed ones.
  */
+// Computed split ratios can accumulate floating-point rounding error, so
+// neighbour checks allow a tiny tolerance before rejecting a candidate.
+const EDGE_TOLERANCE = 1e-9;
+
 export function findAdjacentWindow(
   layout: LayoutNode[],
   fromWindowId: string,
@@ -478,22 +482,22 @@ export function findAdjacentWindow(
 
     switch (direction) {
       case "right":
-        inDirection = rect.x >= from.x + from.w;
+        inDirection = rect.x + EDGE_TOLERANCE >= from.x + from.w;
         primaryDist = rect.x - from.x;
         secondaryDist = Math.abs(rect.cy - from.cy);
         break;
       case "left":
-        inDirection = rect.x + rect.w <= from.x;
+        inDirection = rect.x + rect.w <= from.x + EDGE_TOLERANCE;
         primaryDist = from.x + from.w - (rect.x + rect.w);
         secondaryDist = Math.abs(rect.cy - from.cy);
         break;
       case "down":
-        inDirection = rect.y >= from.y + from.h;
+        inDirection = rect.y + EDGE_TOLERANCE >= from.y + from.h;
         primaryDist = rect.y - from.y;
         secondaryDist = Math.abs(rect.cx - from.cx);
         break;
       case "up":
-        inDirection = rect.y + rect.h <= from.y;
+        inDirection = rect.y + rect.h <= from.y + EDGE_TOLERANCE;
         primaryDist = from.y + from.h - (rect.y + rect.h);
         secondaryDist = Math.abs(rect.cx - from.cx);
         break;
