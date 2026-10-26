@@ -288,16 +288,21 @@ describe("the window in front", () => {
     }
   });
 
-  /** Render the two windows side by side, as the dock lays them out. */
-  function renderWindows() {
-    const elements = [
-      ["left", { left: 0, right: 100 }],
-      ["right", { left: 104, right: 200 }],
-    ].map(([id, x]) => {
+  /** Render the two windows where the dock lays them out: side by side,
+   *  or the left one stacked over the right one. */
+  function renderWindows(stacked = false) {
+    const second = stacked
+      ? { left: 0, right: 100, top: 104, bottom: 200 }
+      : { left: 104, right: 200, top: 0, bottom: 100 };
+    const elements = (
+      [
+        ["left", { left: 0, right: 100, top: 0, bottom: 100 }],
+        ["right", second],
+      ] as const
+    ).map(([id, rect]) => {
       const element = document.createElement("div");
-      element.setAttribute("data-dockable-window-id", id as string);
-      element.getBoundingClientRect = () =>
-        ({ ...(x as object), top: 0, bottom: 100 }) as DOMRect;
+      element.setAttribute("data-dockable-window-id", id);
+      element.getBoundingClientRect = () => rect as DOMRect;
       document.body.appendChild(element);
       return element;
     });
@@ -336,6 +341,24 @@ describe("the window in front", () => {
       live.focusWindow("right");
       expect(live.activeWindowId()).toBe("right");
       live.focusWindow("left");
+      expect(live.activeWindowId()).toBe("left");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("moves up and down between stacked windows, never sideways", () => {
+    const live = splitLayout();
+    const unmount = renderWindows(true);
+    try {
+      live.focusWindow("up");
+      live.focusWindow("right");
+      expect(live.activeWindowId()).toBe("left");
+      live.focusWindow("down");
+      expect(live.activeWindowId()).toBe("right");
+      live.focusWindow("left");
+      expect(live.activeWindowId()).toBe("right");
+      live.focusWindow("up");
       expect(live.activeWindowId()).toBe("left");
     } finally {
       unmount();
