@@ -218,6 +218,54 @@ export function useDockableTabs(
     dockableHotkeyOptions,
   );
 
+  useHotkey(
+    "Mod+[",
+    () => {
+      tabs.focusWindow("prev");
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    "Mod+]",
+    () => {
+      tabs.focusWindow("next");
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    "Mod+Alt+ArrowUp",
+    () => {
+      tabs.focusWindow("up");
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    "Mod+Alt+ArrowDown",
+    () => {
+      tabs.focusWindow("down");
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    "Mod+Alt+ArrowLeft",
+    () => {
+      tabs.focusWindow("left");
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    "Mod+Alt+ArrowRight",
+    () => {
+      tabs.focusWindow("right");
+    },
+    dockableHotkeyOptions,
+  );
+
   /** Move the selection `offset` tabs along the active window, wrapping. */
   const selectTabByOffset = useCallback(
     (offset: number) => {

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLayout } from "@/modules/layout";
 import { createTabs, type TabsApi, type TabsDeps } from "@/modules/tabs";
+import { requestTabFocus } from "@/modules/tabs/tab-controllers";
 import { memoryUrlState } from "@/testing/test-core";
 
 const calls = vi.hoisted((): string[] => []);
@@ -34,6 +35,7 @@ vi.mock("@/modules/tabs/tab-controllers", () => ({
   revealTabMatch: vi.fn(),
   searchTab: vi.fn(),
   requestTabFocus: vi.fn(),
+  setActiveTab: vi.fn(),
   grantTabFocusHandoff: vi.fn(),
 }));
 
@@ -283,6 +285,60 @@ describe("the window in front", () => {
       expect(live.activeTabId()).toBe("agent:t1");
     } finally {
       left.remove();
+    }
+  });
+
+  /** Render the two windows side by side, as the dock lays them out. */
+  function renderWindows() {
+    const elements = [
+      ["left", { left: 0, right: 100 }],
+      ["right", { left: 104, right: 200 }],
+    ].map(([id, x]) => {
+      const element = document.createElement("div");
+      element.setAttribute("data-dockable-window-id", id as string);
+      element.getBoundingClientRect = () =>
+        ({ ...(x as object), top: 0, bottom: 100 }) as DOMRect;
+      document.body.appendChild(element);
+      return element;
+    });
+    return () => elements.forEach((element) => element.remove());
+  }
+
+  it("steps to the next and previous window, wrapping", () => {
+    const live = splitLayout();
+    const unmount = renderWindows();
+    try {
+      live.focusWindow("next");
+      expect(live.activeWindowId()).toBe("right");
+      expect(requestTabFocus).toHaveBeenLastCalledWith("agent:t1", {
+        when: "immediate",
+        reason: "pane-navigation",
+        steal: true,
+      });
+      live.focusWindow("next");
+      expect(live.activeWindowId()).toBe("left");
+      live.focusWindow("prev");
+      expect(live.activeWindowId()).toBe("right");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("moves to the window on screen in a direction, if there is one", () => {
+    const live = splitLayout();
+    const unmount = renderWindows();
+    try {
+      live.focusWindow("left");
+      live.focusWindow("up");
+      live.focusWindow("down");
+      expect(live.activeWindowId()).toBe("left");
+      expect(requestTabFocus).not.toHaveBeenCalled();
+      live.focusWindow("right");
+      expect(live.activeWindowId()).toBe("right");
+      live.focusWindow("left");
+      expect(live.activeWindowId()).toBe("left");
+    } finally {
+      unmount();
     }
   });
 });

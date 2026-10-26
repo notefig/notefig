@@ -317,4 +317,71 @@ test.describe("Focus Management", () => {
       .poll(async () => getWindowEditorText(page, "window-right"))
       .toContain("delta content for tab d");
   });
+
+  test("pane hotkeys move focus between dock windows @smoke", async ({
+    page,
+  }) => {
+    const twoWindowLayout = [
+      {
+        type: "Panel",
+        id: "panel-root",
+        orientation: "row",
+        size: 1,
+        children: [
+          {
+            type: "Window",
+            id: "window-left",
+            children: [`${WORKSPACE_PATH}/tab-a.md`],
+            selected: `${WORKSPACE_PATH}/tab-a.md`,
+            size: 0.5,
+          },
+          {
+            type: "Window",
+            id: "window-right",
+            children: [`${WORKSPACE_PATH}/tab-c.md`],
+            selected: `${WORKSPACE_PATH}/tab-c.md`,
+            size: 0.5,
+          },
+        ],
+      },
+    ];
+    const encodedLayout = encodeURIComponent(JSON.stringify(twoWindowLayout));
+    await page.goto(`/?layout=${encodedLayout}&sidebarView=files`);
+    await waitForFileTree(page, "tab-a.md");
+
+    const focusedWindow = () =>
+      page.evaluate(
+        () =>
+          document.activeElement
+            ?.closest("[data-dockable-window-id]")
+            ?.getAttribute("data-dockable-window-id") ?? null,
+      );
+
+    await page
+      .locator('[data-dockable-window-id="window-left"] [role="textbox"]:visible')
+      .first()
+      .click();
+    await expect.poll(focusedWindow).toBe("window-left");
+
+    await page.keyboard.press("Control+]");
+    await expect.poll(focusedWindow).toBe("window-right");
+    expect(await isEditorFocused(page)).toBe(true);
+
+    await page.keyboard.press("Control+]");
+    await expect.poll(focusedWindow).toBe("window-left");
+
+    await page.keyboard.press("Control+[");
+    await expect.poll(focusedWindow).toBe("window-right");
+
+    await page.keyboard.press("Control+Alt+ArrowLeft");
+    await expect.poll(focusedWindow).toBe("window-left");
+
+    // Nothing sits above the left window: focus stays put.
+    await page.keyboard.press("Control+Alt+ArrowUp");
+    await page.waitForTimeout(250);
+    expect(await focusedWindow()).toBe("window-left");
+
+    await page.keyboard.press("Control+Alt+ArrowRight");
+    await expect.poll(focusedWindow).toBe("window-right");
+  });
 });

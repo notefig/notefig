@@ -95,6 +95,42 @@ export const HOTKEY_CATALOG: HotkeyEntry[] = [
     labelKey: "selectTabByNumber",
     group: "tabs",
   },
+  {
+    id: "previousPane",
+    binding: "Mod+[",
+    labelKey: "previousPane",
+    group: "tabs",
+  },
+  {
+    id: "nextPane",
+    binding: "Mod+]",
+    labelKey: "nextPane",
+    group: "tabs",
+  },
+  {
+    id: "focusPaneUp",
+    binding: "Mod+Alt+ArrowUp",
+    labelKey: "focusPaneUp",
+    group: "tabs",
+  },
+  {
+    id: "focusPaneDown",
+    binding: "Mod+Alt+ArrowDown",
+    labelKey: "focusPaneDown",
+    group: "tabs",
+  },
+  {
+    id: "focusPaneLeft",
+    binding: "Mod+Alt+ArrowLeft",
+    labelKey: "focusPaneLeft",
+    group: "tabs",
+  },
+  {
+    id: "focusPaneRight",
+    binding: "Mod+Alt+ArrowRight",
+    labelKey: "focusPaneRight",
+    group: "tabs",
+  },
 
   // src/hooks/use-workspace-commands.ts
   {
