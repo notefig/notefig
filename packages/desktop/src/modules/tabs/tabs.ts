@@ -59,6 +59,7 @@ import {
   requestTabFocus,
   revealTabMatch,
   searchTab,
+  setActiveTab,
   type TabSearchMatch,
   type TabSearchOptions,
 } from "@/modules/tabs/tab-controllers";
@@ -283,6 +284,11 @@ export interface TabsApi {
   activeWindowId(): string | null;
   /** The active window's tabs, in order. */
   activeWindowTabs(): string[];
+  /**
+   * Bring another window forward and focus its selected tab: the next or
+   * previous one in the dock, or the nearest one on screen in a direction.
+   */
+  focusWindow(to: WindowStep): void;
   /** Called when the layout or the focused window changes. */
   subscribe(listener: () => void): () => void;
 }
@@ -295,6 +301,60 @@ declare module "@notefig/core" {
 }
 
 const WINDOW_ID_ATTRIBUTE = "data-dockable-window-id";
+
+export type WindowStep = "next" | "prev" | "up" | "down" | "left" | "right";
+
+type Direction = Exclude<WindowStep, "next" | "prev">;
+type PlacedWindow = { id: string; rect: DOMRect };
+
+/** How far `rect` lies past `from` towards `to`, and how much of their
+ *  span across that direction they share. */
+function separation(from: DOMRect, rect: DOMRect, to: Direction) {
+  const gap = {
+    up: from.top - rect.bottom,
+    down: rect.top - from.bottom,
+    left: from.left - rect.right,
+    right: rect.left - from.right,
+  }[to];
+  const overlap =
+    to === "left" || to === "right"
+      ? Math.min(from.bottom, rect.bottom) - Math.max(from.top, rect.top)
+      : Math.min(from.right, rect.right) - Math.max(from.left, rect.left);
+  return { gap, overlap };
+}
+
+/** The nearest window past `from`'s edge towards `to` that shares some of
+ *  its span, so up and down never jump sideways. */
+function nearestToward(
+  from: DOMRect,
+  windows: PlacedWindow[],
+  to: Direction,
+): string | null {
+  let best: { id: string; gap: number } | null = null;
+  for (const { id, rect } of windows) {
+    const { gap, overlap } = separation(from, rect, to);
+    if (gap < -1 || overlap <= 0) continue;
+    if (!best || gap < best.gap) best = { id, gap };
+  }
+  return best?.id ?? null;
+}
+
+/** The window `to` steps to from `fromId`, read off the rendered dock. */
+function windowAt(fromId: string, to: WindowStep): string | null {
+  const windows = [
+    ...document.querySelectorAll<HTMLElement>(`[${WINDOW_ID_ATTRIBUTE}]`),
+  ].map((element) => ({
+    id: element.dataset.dockableWindowId ?? "",
+    rect: element.getBoundingClientRect(),
+  }));
+  const index = windows.findIndex((window) => window.id === fromId);
+  if (index === -1 || windows.length < 2) return null;
+  if (to === "next" || to === "prev") {
+    const step = to === "next" ? 1 : -1;
+    return windows[(index + step + windows.length) % windows.length].id;
+  }
+  return nearestToward(windows[index].rect, windows, to);
+}
 
 function windowIdOf(element: Element | null): string | null {
   return (
@@ -528,6 +588,22 @@ export function createTabs({
     activeTabId: () => activeWindow()?.selected ?? layout.selectedTabId(),
     activeWindowId: () => activeWindow()?.id ?? null,
     activeWindowTabs: () => activeWindow()?.children ?? [],
+    focusWindow(to) {
+      const current = activeWindow();
+      const targetId = current && windowAt(current.id, to);
+      const target = targetId && findWindowById(layout.read(), targetId);
+      if (!target) return;
+      focusedWindow.set(target.id);
+      if (!target.selected) return;
+      // The arbiter only focuses the active tab; tell it before asking.
+      setActiveTab(target.selected);
+      // A pane switch is an explicit gesture: it may take focus from text.
+      tabs.focus(target.selected, {
+        when: "immediate",
+        reason: "pane-navigation",
+        steal: true,
+      });
+    },
     subscribe(listener) {
       const offLayout = layout.subscribe(listener);
       const offFocus = focusedWindow.subscribe(listener);
