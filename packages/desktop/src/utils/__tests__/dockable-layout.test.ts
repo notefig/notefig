@@ -428,4 +428,41 @@ describe("window navigation", () => {
     expect(findAdjacentWindow(layout, "left", "right")?.id).toBe("right");
     expect(findAdjacentWindow(layout, "right", "left")?.id).toBe("left");
   });
+
+  it("does not navigate up or down into panes that are only beside the current pane", () => {
+    const win = (id: string): LayoutNode => ({
+      type: "Window",
+      id,
+      children: [`${id}.md`],
+      selected: `${id}.md`,
+      size: 1,
+    });
+    const layout: LayoutNode[] = [
+      {
+        type: "Panel",
+        id: "root",
+        orientation: "row",
+        size: 1,
+        children: [
+          {
+            type: "Panel",
+            id: "left-col",
+            orientation: "column",
+            size: 1,
+            children: [win("top-left"), win("bottom-left")],
+          },
+          win("right"),
+        ],
+      },
+    ];
+    // The right pane spans the full height; there is nothing directly
+    // above or below it, so vertical arrows should not jump sideways.
+    expect(findAdjacentWindow(layout, "right", "up")).toBeNull();
+    expect(findAdjacentWindow(layout, "right", "down")).toBeNull();
+    // Horizontal movement from the stacked panes should still reach right.
+    expect(findAdjacentWindow(layout, "top-left", "right")?.id).toBe("right");
+    expect(findAdjacentWindow(layout, "bottom-left", "right")?.id).toBe(
+      "right",
+    );
+  });
 });

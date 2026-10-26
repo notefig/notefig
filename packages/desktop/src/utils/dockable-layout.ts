@@ -478,22 +478,22 @@ export function findAdjacentWindow(
 
     switch (direction) {
       case "right":
-        inDirection = rect.x > from.x;
+        inDirection = rect.x >= from.x + from.w;
         primaryDist = rect.x - from.x;
         secondaryDist = Math.abs(rect.cy - from.cy);
         break;
       case "left":
-        inDirection = rect.x + rect.w < from.x + from.w;
+        inDirection = rect.x + rect.w <= from.x;
         primaryDist = from.x + from.w - (rect.x + rect.w);
         secondaryDist = Math.abs(rect.cy - from.cy);
         break;
       case "down":
-        inDirection = rect.y > from.y;
+        inDirection = rect.y >= from.y + from.h;
         primaryDist = rect.y - from.y;
         secondaryDist = Math.abs(rect.cx - from.cx);
         break;
       case "up":
-        inDirection = rect.y + rect.h < from.y + from.h;
+        inDirection = rect.y + rect.h <= from.y;
         primaryDist = from.y + from.h - (rect.y + rect.h);
         secondaryDist = Math.abs(rect.cx - from.cx);
         break;
