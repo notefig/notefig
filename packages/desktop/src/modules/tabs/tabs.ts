@@ -24,14 +24,18 @@ import {
   findLayoutSelectedTab,
 } from "@/utils/layout-codec";
 import {
+  collectWindows,
+  findAdjacentWindow,
   findFirstWindow,
   findWindowById,
+  findWindowByOffset,
   findWindowContainingTab,
   openFileInLayout,
   removeTabFromLayout,
   renameTabInLayout,
   selectTabInLayout,
   type OpenFileIntent,
+  type PaneDirection,
 } from "@/utils/dockable-layout";
 import type { LayoutApi } from "@/modules/layout";
 import type { FocusTiming } from "@/utils/focus-arbiter";
@@ -59,6 +63,7 @@ import {
   requestTabFocus,
   revealTabMatch,
   searchTab,
+  setActiveTab,
   type TabSearchMatch,
   type TabSearchOptions,
 } from "@/modules/tabs/tab-controllers";
@@ -283,6 +288,12 @@ export interface TabsApi {
   activeWindowId(): string | null;
   /** The active window's tabs, in order. */
   activeWindowTabs(): string[];
+  /** Move focus to the next visible window/pane (Mod+]). */
+  focusNextWindow(): void;
+  /** Move focus to the previous visible window/pane (Mod+[). */
+  focusPrevWindow(): void;
+  /** Move focus to the visible window in a cardinal direction. */
+  focusWindow(direction: PaneDirection): void;
   /** Called when the layout or the focused window changes. */
   subscribe(listener: () => void): () => void;
 }
@@ -419,6 +430,23 @@ export function createTabs({
     if (window) focusedWindow.set(window.id);
   };
 
+  /** Bring a window forward and ask its selected tab to take focus. Used
+   *  by pane-switching shortcuts: an explicit user gesture, so the focus
+   *  claim may steal from a live text entry. */
+  const activateWindow = (windowId: string) => {
+    const windowNode = findWindowById(layout.read(), windowId);
+    if (!windowNode) return;
+    focusedWindow.set(windowId);
+    if (windowNode.selected) {
+      setActiveTab(windowNode.selected);
+      requestTabFocus(windowNode.selected, {
+        when: "immediate",
+        reason: "pane-navigation",
+        steal: true,
+      });
+    }
+  };
+
   const tabs: TabsApi = {
     open(tabId, options = {}) {
       // Only file tabs are gated on the editor's format support; the other
@@ -528,6 +556,28 @@ export function createTabs({
     activeTabId: () => activeWindow()?.selected ?? layout.selectedTabId(),
     activeWindowId: () => activeWindow()?.id ?? null,
     activeWindowTabs: () => activeWindow()?.children ?? [],
+    focusNextWindow() {
+      const current = activeWindow();
+      const next = current
+        ? findWindowByOffset(layout.read(), current.id, 1)
+        : (collectWindows(layout.read())[0] ?? null);
+      if (next) activateWindow(next.id);
+    },
+    focusPrevWindow() {
+      const current = activeWindow();
+      const next = current
+        ? findWindowByOffset(layout.read(), current.id, -1)
+        : (collectWindows(layout.read())[0] ?? null);
+      if (next) activateWindow(next.id);
+    },
+    focusWindow(direction: PaneDirection) {
+      const currentId = activeWindow()?.id ?? null;
+      const layoutNodes = layout.read();
+      const next = currentId
+        ? findAdjacentWindow(layoutNodes, currentId, direction)
+        : (collectWindows(layoutNodes)[0] ?? null);
+      if (next) activateWindow(next.id);
+    },
     subscribe(listener) {
       const offLayout = layout.subscribe(listener);
       const offFocus = focusedWindow.subscribe(listener);

@@ -10,7 +10,10 @@ import { useCore } from "@notefig/core/react";
 import type { LayoutNode } from "@/components/dockable";
 import { useLayout } from "@/modules/layout/react";
 import type { OpenTabOptions } from "@/modules/tabs";
-import { getTabSelectedText, setActiveTab } from "@/modules/tabs/tab-controllers";
+import {
+  getTabSelectedText,
+  setActiveTab,
+} from "@/modules/tabs/tab-controllers";
 import type { FileTreeNode } from "@/utils/fs";
 
 export interface UseDockableTabsOptions {
@@ -214,6 +217,54 @@ export function useDockableTabs(
     { key: "9", mod: true },
     () => {
       selectTabAtIndex(8);
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    "Mod+[",
+    () => {
+      tabs.focusPrevWindow();
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    "Mod+]",
+    () => {
+      tabs.focusNextWindow();
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    "Mod+Alt+ArrowUp",
+    () => {
+      tabs.focusWindow("up");
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    "Mod+Alt+ArrowDown",
+    () => {
+      tabs.focusWindow("down");
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    "Mod+Alt+ArrowLeft",
+    () => {
+      tabs.focusWindow("left");
+    },
+    dockableHotkeyOptions,
+  );
+
+  useHotkey(
+    "Mod+Alt+ArrowRight",
+    () => {
+      tabs.focusWindow("right");
     },
     dockableHotkeyOptions,
   );

@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { LayoutNode } from "@/components/dockable";
 import {
   addTabToLayout,
+  assignWindowRects,
+  collectWindows,
   createInitialLayout,
+  findAdjacentWindow,
   findWindowContainingTab,
+  findWindowByOffset,
   openFileInLayout,
   openTabInWindow,
   removeTabFromLayout,
@@ -244,9 +248,9 @@ describe("dockable-layout", () => {
     });
     const stillLeft = findWindowContainingTab(reopened, "agent:task_1");
     expect(stillLeft?.id).toBe("window-left");
-    expect(
-      stillLeft?.children.filter((id) => id === "agent:task_1"),
-    ).toEqual(["agent:task_1"]);
+    expect(stillLeft?.children.filter((id) => id === "agent:task_1")).toEqual([
+      "agent:task_1",
+    ]);
   });
 
   it("removing a window's only agent tab collapses the window", () => {
@@ -307,5 +311,121 @@ describe("dockable-layout", () => {
     const layout = createInitialLayout("only.md");
     const next = removeTabFromLayout(layout, "only.md");
     expect(next).toEqual([]);
+  });
+});
+
+describe("window navigation", () => {
+  function grid2x2(): LayoutNode[] {
+    const win = (id: string): LayoutNode => ({
+      type: "Window",
+      id,
+      children: [`${id}.md`],
+      selected: `${id}.md`,
+      size: 1,
+    });
+    return [
+      {
+        type: "Panel",
+        id: "root",
+        orientation: "row",
+        size: 1,
+        children: [
+          {
+            type: "Panel",
+            id: "left-col",
+            orientation: "column",
+            size: 1,
+            children: [win("tl"), win("bl")],
+          },
+          {
+            type: "Panel",
+            id: "right-col",
+            orientation: "column",
+            size: 1,
+            children: [win("tr"), win("br")],
+          },
+        ],
+      },
+    ];
+  }
+
+  it("collects windows in depth-first order", () => {
+    expect(collectWindows(grid2x2()).map((w) => w.id)).toEqual([
+      "tl",
+      "bl",
+      "tr",
+      "br",
+    ]);
+  });
+
+  it("assigns normalized rectangles from panel splits", () => {
+    const rects = assignWindowRects(grid2x2());
+    const tl = rects.find((r) => r.id === "tl")!;
+    const br = rects.find((r) => r.id === "br")!;
+    expect(tl.x).toBe(0);
+    expect(tl.y).toBe(0);
+    expect(tl.w).toBe(0.5);
+    expect(tl.h).toBe(0.5);
+    expect(br.x).toBe(0.5);
+    expect(br.y).toBe(0.5);
+    expect(br.w).toBe(0.5);
+    expect(br.h).toBe(0.5);
+  });
+
+  it("finds the next window by offset, wrapping forward", () => {
+    const next = findWindowByOffset(grid2x2(), "bl", 1);
+    expect(next?.id).toBe("tr");
+  });
+
+  it("finds the previous window by offset, wrapping backward", () => {
+    const prev = findWindowByOffset(grid2x2(), "tl", -1);
+    expect(prev?.id).toBe("br");
+  });
+
+  it("navigates right to the adjacent column", () => {
+    expect(findAdjacentWindow(grid2x2(), "tl", "right")?.id).toBe("tr");
+    expect(findAdjacentWindow(grid2x2(), "bl", "right")?.id).toBe("br");
+  });
+
+  it("navigates left to the adjacent column", () => {
+    expect(findAdjacentWindow(grid2x2(), "tr", "left")?.id).toBe("tl");
+    expect(findAdjacentWindow(grid2x2(), "br", "left")?.id).toBe("bl");
+  });
+
+  it("navigates down to the row below", () => {
+    expect(findAdjacentWindow(grid2x2(), "tl", "down")?.id).toBe("bl");
+    expect(findAdjacentWindow(grid2x2(), "tr", "down")?.id).toBe("br");
+  });
+
+  it("navigates up to the row above", () => {
+    expect(findAdjacentWindow(grid2x2(), "bl", "up")?.id).toBe("tl");
+    expect(findAdjacentWindow(grid2x2(), "br", "up")?.id).toBe("tr");
+  });
+
+  it("returns null when there is only one window", () => {
+    const layout = createInitialLayout("only.md");
+    expect(findWindowByOffset(layout, "editor-window", 1)).toBeNull();
+    expect(findAdjacentWindow(layout, "editor-window", "right")).toBeNull();
+  });
+
+  it("navigates a flat row of windows left and right", () => {
+    const layout: LayoutNode[] = [
+      {
+        type: "Window",
+        id: "left",
+        children: ["a.md"],
+        selected: "a.md",
+        size: 1,
+      },
+      {
+        type: "Window",
+        id: "right",
+        children: ["b.md"],
+        selected: "b.md",
+        size: 1,
+      },
+    ];
+    expect(findAdjacentWindow(layout, "left", "right")?.id).toBe("right");
+    expect(findAdjacentWindow(layout, "right", "left")?.id).toBe("left");
   });
 });

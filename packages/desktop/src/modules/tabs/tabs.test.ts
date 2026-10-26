@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLayout } from "@/modules/layout";
 import { createTabs, type TabsApi, type TabsDeps } from "@/modules/tabs";
+import { requestTabFocus, setActiveTab } from "@/modules/tabs/tab-controllers";
 import { memoryUrlState } from "@/testing/test-core";
 
 const calls = vi.hoisted((): string[] => []);
@@ -34,6 +35,7 @@ vi.mock("@/modules/tabs/tab-controllers", () => ({
   revealTabMatch: vi.fn(),
   searchTab: vi.fn(),
   requestTabFocus: vi.fn(),
+  setActiveTab: vi.fn(),
   grantTabFocusHandoff: vi.fn(),
 }));
 
@@ -84,7 +86,11 @@ beforeEach(() => {
   const layout = createLayout(memoryUrlState());
   tabs = createTabs({
     layout,
-    focusedWindow: { get: () => null, set: () => {}, subscribe: () => () => {} },
+    focusedWindow: {
+      get: () => null,
+      set: () => {},
+      subscribe: () => () => {},
+    },
     canOpenFile: () => true,
     editors: {
       goTo: vi.fn(async () => true),
@@ -197,7 +203,11 @@ describe("tabs.renameOpenFile", () => {
     const layout = createLayout(memoryUrlState());
     const live = createTabs({
       layout,
-      focusedWindow: { get: () => null, set: () => {}, subscribe: () => () => {} },
+      focusedWindow: {
+        get: () => null,
+        set: () => {},
+        subscribe: () => () => {},
+      },
       canOpenFile: () => true,
       editors: {
         goTo: vi.fn(async () => true),
@@ -244,8 +254,18 @@ describe("the window in front", () => {
         id: "root",
         direction: "row",
         children: [
-          { type: "Window", id: "left", children: ["/ws/a.md"], selected: "/ws/a.md" },
-          { type: "Window", id: "right", children: ["agent:t1"], selected: "agent:t1" },
+          {
+            type: "Window",
+            id: "left",
+            children: ["/ws/a.md"],
+            selected: "/ws/a.md",
+          },
+          {
+            type: "Window",
+            id: "right",
+            children: ["agent:t1"],
+            selected: "agent:t1",
+          },
         ],
       } as never,
     ]);
@@ -284,5 +304,116 @@ describe("the window in front", () => {
     } finally {
       left.remove();
     }
+  });
+});
+
+describe("tabs pane navigation", () => {
+  /** Two windows side by side: a document left, a session's chat right. */
+  function splitTwoPanes(): { tabs: TabsApi; front: string | null } {
+    let front: string | null = "left";
+    const layout = createLayout(memoryUrlState());
+    const live = createTabs({
+      layout,
+      focusedWindow: {
+        get: () => front,
+        set: (id) => {
+          front = id;
+        },
+        subscribe: () => () => {},
+      },
+      canOpenFile: () => true,
+      editors: {
+        goTo: vi.fn(async () => true),
+        markdownEditor: () => undefined,
+      },
+      documents,
+    });
+    layout.update([
+      {
+        type: "Panel",
+        id: "root",
+        orientation: "row",
+        children: [
+          {
+            type: "Window",
+            id: "left",
+            children: ["/ws/a.md"],
+            selected: "/ws/a.md",
+          },
+          {
+            type: "Window",
+            id: "right",
+            children: ["/ws/b.md"],
+            selected: "/ws/b.md",
+          },
+        ],
+      } as never,
+    ]);
+    return { tabs: live, front };
+  }
+
+  beforeEach(() => {
+    vi.mocked(requestTabFocus).mockClear();
+    vi.mocked(setActiveTab).mockClear();
+  });
+
+  it("focusNextWindow cycles to the next pane", () => {
+    const { tabs } = splitTwoPanes();
+    tabs.focusNextWindow();
+    expect(tabs.activeWindowId()).toBe("right");
+    expect(setActiveTab).toHaveBeenCalledWith("/ws/b.md");
+    expect(requestTabFocus).toHaveBeenCalledWith("/ws/b.md", {
+      when: "immediate",
+      reason: "pane-navigation",
+      steal: true,
+    });
+  });
+
+  it("focusPrevWindow cycles to the previous pane", () => {
+    const result = splitTwoPanes();
+    result.tabs.focusPrevWindow();
+    expect(result.tabs.activeWindowId()).toBe("right");
+  });
+
+  it("focusWindow moves to the pane in the given direction", () => {
+    const { tabs } = splitTwoPanes();
+    tabs.focusWindow("right");
+    expect(tabs.activeWindowId()).toBe("right");
+    tabs.focusWindow("left");
+    expect(tabs.activeWindowId()).toBe("left");
+  });
+
+  it("does nothing when the window is alone", () => {
+    const layout = createLayout(memoryUrlState());
+    let front: string | null = "only";
+    const live = createTabs({
+      layout,
+      focusedWindow: {
+        get: () => front,
+        set: (id) => {
+          front = id;
+        },
+        subscribe: () => () => {},
+      },
+      canOpenFile: () => true,
+      editors: {
+        goTo: vi.fn(async () => true),
+        markdownEditor: () => undefined,
+      },
+      documents,
+    });
+    layout.update([
+      {
+        type: "Window",
+        id: "only",
+        children: ["/ws/a.md"],
+        selected: "/ws/a.md",
+      } as never,
+    ]);
+
+    live.focusNextWindow();
+    live.focusWindow("left");
+    expect(front).toBe("only");
+    expect(requestTabFocus).not.toHaveBeenCalled();
   });
 });

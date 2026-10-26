@@ -1,6 +1,18 @@
 import type { LayoutNode } from "@/components/dockable";
 import type { WindowNode } from "@/components/dockable/utils/serializeLayout";
 
+export type PaneDirection = "up" | "down" | "left" | "right";
+
+export interface WindowRect {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  cx: number;
+  cy: number;
+}
+
 export type OpenFileIntent = "replace" | "new-tab";
 
 export interface OpenFileInLayoutOptions {
@@ -306,4 +318,209 @@ export function removeTabFromLayout(
   }
 
   return walk(layout);
+}
+
+// ---------------------------------------------------------------------------
+// Window/pane navigation helpers
+// ---------------------------------------------------------------------------
+
+/** Return every window in depth-first (render) order. */
+export function collectWindows(nodes: LayoutNode[]): WindowNode[] {
+  const windows: WindowNode[] = [];
+  for (const node of nodes) {
+    if (node.type === "Window") {
+      windows.push(node);
+    } else if (node.type === "Panel") {
+      windows.push(...collectWindows(node.children));
+    }
+  }
+  return windows;
+}
+
+function totalSizeOf(nodes: LayoutNode[]): number {
+  return nodes.reduce((sum, node) => sum + (node.size ?? 1), 0);
+}
+
+function sizeRatio(node: LayoutNode, totalSize: number, count: number): number {
+  return totalSize === 0 ? 1 / count : (node.size ?? 1) / totalSize;
+}
+
+/** Split children horizontally and recurse or record a window. */
+function assignRowRects(
+  nodes: LayoutNode[],
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  rects: WindowRect[],
+): void {
+  const totalSize = totalSizeOf(nodes);
+  let offset = 0;
+
+  for (const node of nodes) {
+    const childW = sizeRatio(node, totalSize, nodes.length) * w;
+    if (node.type === "Window") {
+      const left = x + offset;
+      rects.push({
+        id: node.id,
+        x: left,
+        y,
+        w: childW,
+        h,
+        cx: left + childW / 2,
+        cy: y + h / 2,
+      });
+    } else {
+      const childOrientation = node.orientation ?? "column";
+      assignRects(
+        node.children,
+        childOrientation,
+        x + offset,
+        y,
+        childW,
+        h,
+        rects,
+      );
+    }
+    offset += childW;
+  }
+}
+
+/** Split children vertically and recurse or record a window. */
+function assignColumnRects(
+  nodes: LayoutNode[],
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  rects: WindowRect[],
+): void {
+  const totalSize = totalSizeOf(nodes);
+  let offset = 0;
+
+  for (const node of nodes) {
+    const childH = sizeRatio(node, totalSize, nodes.length) * h;
+    if (node.type === "Window") {
+      const top = y + offset;
+      rects.push({
+        id: node.id,
+        x,
+        y: top,
+        w,
+        h: childH,
+        cx: x + w / 2,
+        cy: top + childH / 2,
+      });
+    } else {
+      const childOrientation = node.orientation ?? "row";
+      assignRects(
+        node.children,
+        childOrientation,
+        x,
+        y + offset,
+        w,
+        childH,
+        rects,
+      );
+    }
+    offset += childH;
+  }
+}
+
+function assignRects(
+  nodes: LayoutNode[],
+  parentOrientation: "row" | "column",
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  rects: WindowRect[],
+): void {
+  if (nodes.length === 0 || w <= 0 || h <= 0) return;
+  if (parentOrientation === "row") {
+    assignRowRects(nodes, x, y, w, h, rects);
+  } else {
+    assignColumnRects(nodes, x, y, w, h, rects);
+  }
+}
+
+/** Assign each window a normalized rectangle derived from panel splits. */
+export function assignWindowRects(layout: LayoutNode[]): WindowRect[] {
+  const rects: WindowRect[] = [];
+  assignRects(layout, "row", 0, 0, 1, 1, rects);
+  return rects;
+}
+
+/**
+ * Find the window adjacent to `fromWindowId` in a cardinal direction.
+ * Windows are given normalized rectangles from panel splits; navigation
+ * picks the nearest in-bounds window, penalising perpendicular offset so
+ * directly-adjacent panes win over diagonally-placed ones.
+ */
+export function findAdjacentWindow(
+  layout: LayoutNode[],
+  fromWindowId: string,
+  direction: PaneDirection,
+): WindowNode | null {
+  const rects = assignWindowRects(layout);
+  const from = rects.find((rect) => rect.id === fromWindowId);
+  if (!from) return null;
+
+  let best: WindowRect | null = null;
+  let bestScore = Infinity;
+
+  for (const rect of rects) {
+    if (rect.id === fromWindowId) continue;
+
+    let inDirection = false;
+    let primaryDist = 0;
+    let secondaryDist = 0;
+
+    switch (direction) {
+      case "right":
+        inDirection = rect.x > from.x;
+        primaryDist = rect.x - from.x;
+        secondaryDist = Math.abs(rect.cy - from.cy);
+        break;
+      case "left":
+        inDirection = rect.x + rect.w < from.x + from.w;
+        primaryDist = from.x + from.w - (rect.x + rect.w);
+        secondaryDist = Math.abs(rect.cy - from.cy);
+        break;
+      case "down":
+        inDirection = rect.y > from.y;
+        primaryDist = rect.y - from.y;
+        secondaryDist = Math.abs(rect.cx - from.cx);
+        break;
+      case "up":
+        inDirection = rect.y + rect.h < from.y + from.h;
+        primaryDist = from.y + from.h - (rect.y + rect.h);
+        secondaryDist = Math.abs(rect.cx - from.cx);
+        break;
+    }
+
+    if (!inDirection) continue;
+    const score = primaryDist + secondaryDist * 2;
+    if (score < bestScore) {
+      bestScore = score;
+      best = rect;
+    }
+  }
+
+  if (!best) return null;
+  return findWindowById(layout, best.id);
+}
+
+/** Cycle through windows in depth-first order. */
+export function findWindowByOffset(
+  layout: LayoutNode[],
+  fromWindowId: string,
+  offset: number,
+): WindowNode | null {
+  const windows = collectWindows(layout);
+  if (windows.length <= 1) return null;
+  const index = windows.findIndex((w) => w.id === fromWindowId);
+  const start = index >= 0 ? index : 0;
+  const nextIndex = (start + offset + windows.length) % windows.length;
+  return windows[nextIndex];
 }
