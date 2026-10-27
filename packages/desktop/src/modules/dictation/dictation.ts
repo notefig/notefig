@@ -320,10 +320,13 @@ export function createDictation(deps: DictationDeps): DictationApi {
   };
 
   /** Ends `current`, if it's still the dictation in progress. */
-  /** Closes the mic once it has gone unused for `warmMs`. */
+  /** Closes the mic once it has gone unused for `warmMs` — never under a
+   *  dictation in progress. */
   const closeLater = () => {
     if (micClose) clearTimeout(micClose);
-    micClose = setTimeout(closeMic, warmMs);
+    micClose = setTimeout(() => {
+      if (!run) closeMic();
+    }, warmMs);
   };
 
   /** Everything the mic heard up to now, in: its last batch is still in
@@ -364,7 +367,11 @@ export function createDictation(deps: DictationDeps): DictationApi {
       return end(current, error);
     }
     // Cancelled while it opened: opening cleared the close `end` set up.
-    if (current.cancelled) return closeLater();
+    // (Unless a newer dictation has the mic now.)
+    if (current.cancelled) {
+      if (!run) closeLater();
+      return;
+    }
     const heard = preroll;
     preroll = [];
     heard.forEach(onAudio);

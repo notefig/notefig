@@ -308,6 +308,32 @@ describe("dictation", () => {
     expect(dictation.state().status).toBe("idle");
   });
 
+  it("keeps the mic for a dictation started while a cancelled one was opening it", async () => {
+    vi.useFakeTimers();
+    const first = fakeTarget();
+    let micOpens: (() => void)[] = [];
+    dictation = createDictation({
+      engine,
+      openMicrophone: () => new Promise((resolve) => micOpens.push(() => resolve(microphone.mic))),
+      enabled: async () => true,
+      holdKey: "ControlRight",
+      warmMs: 50,
+    });
+    dictation.attach(first.target);
+    const cancelled = dictation.press();
+    await vi.advanceTimersByTimeAsync(0);
+    dictation.cancel();
+    const second = dictation.press();
+    await vi.advanceTimersByTimeAsync(0);
+    micOpens.forEach((open) => open());
+    micOpens = [];
+    await Promise.all([cancelled, second]);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(dictation.state().status).toBe("listening");
+    expect(microphone.mic.closed).toBe(false);
+    dictation.cancel();
+  });
+
   it("waits for the mic's last batch before finishing", async () => {
     const { target, events } = fakeTarget();
     dictation.attach(target);
