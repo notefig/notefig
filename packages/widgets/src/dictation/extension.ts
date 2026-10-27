@@ -71,9 +71,11 @@ function createGhost(host: DictationHost) {
   const settled = document.createTextNode("");
   const live = document.createElement("span");
   live.className = "shimmer text-muted-foreground";
-  const wave = document.createElement("canvas");
-  wave.className =
-    "dictation-wave ms-[0.3em] me-[0.1em] inline-block size-[1.45em] align-[-0.35em] text-muted-foreground";
+  const wave = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  wave.setAttribute(
+    "class",
+    "dictation-wave ms-[0.3em] me-[0.1em] inline-block size-[1.45em] align-[-0.35em] text-muted-foreground",
+  );
   const stop = mountVoiceWave(wave, { level: host.level });
   el.append(lead, settled, live, wave);
   return {

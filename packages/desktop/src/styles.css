@@ -768,8 +768,8 @@ file-tree-container:focus-visible {
 /* In a document the wave trails the words, inline. A composer (the chat
    box, a prompt widget's draft) shows its wave in its own chrome instead:
    in the action button, in the harness logo's place. There the icon and
-   the wave share one grid cell and cross-fade — scale and blur with the
-   fade, so one seems to turn into the other. Visibility flips at the end
+   the wave share one grid cell and cross-fade, scaling as they fade, so
+   one seems to turn into the other. Visibility flips at the end
    of a fade out (and at once on a fade in), so the hidden one is gone for
    clicks, tests and the wave's own animation loop. */
 .prompt-editor .dictation-wave {
@@ -786,7 +786,6 @@ file-tree-container:focus-visible {
   transition:
     opacity 180ms ease,
     transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    filter 180ms ease,
     visibility 0s linear 280ms;
 }
 
@@ -794,7 +793,6 @@ file-tree-container:focus-visible {
 :is([data-type="ai-prompt"], [data-dictation-scope]):has(.dictation-ghost) .dictation-swap > .dictation-idle-only {
   opacity: 0;
   transform: scale(0.5);
-  filter: blur(2px);
   visibility: hidden;
 }
 
@@ -802,7 +800,6 @@ file-tree-container:focus-visible {
 .dictation-swap > .dictation-idle-only {
   opacity: 1;
   transform: none;
-  filter: none;
   visibility: visible;
   transition-delay: 0s;
 }

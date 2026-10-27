@@ -1,11 +1,8 @@
-// Voice wave: the "listening" counterpart of the thinking orb
-// (orb-loader.tsx), drawn in the same language — dots on a small canvas,
-// inked in the canvas's CSS `currentColor` at varying opacity, so it takes
-// text color classes and themes for free. Five dotted columns rise and fall
-// with the microphone's level; a slow sweep shades them like the orb's
-// depth, and with no input they keep breathing low so an open mic never
-// looks dead. Few, large dots: it has to read at 14–24px. Animates only while visible; reduced-motion users get a
-// static frame.
+// Voice wave: five rounded bars that rise and fall with the microphone's
+// level. Vector (SVG) and solid `currentColor`, so it's sharp at any size and
+// takes text color classes and themes for free. With no input the bars keep
+// breathing low, so an open mic never looks dead. Animates only while
+// visible; reduced-motion users get a still frame.
 //
 // Framework-free at its core (`mountVoiceWave`), because the editor draws it
 // inside a ProseMirror decoration; `VoiceWave` wraps it for React.
@@ -13,11 +10,17 @@
 import { useEffect, useRef } from "react";
 import { cn } from "./utils";
 
-/** The tuned canvas size the constants below are baked for (CSS-scaled). */
-const CANVAS_PX = 20;
-const COLUMNS = 5;
-const COLUMN_GAP = 3.5;
-const DOT_GAP = 2.25;
+const SVG_NS = "http://www.w3.org/2000/svg";
+/** The viewBox is VIEW × VIEW; the bars are laid out in its units. */
+const VIEW = 20;
+const BARS = 5;
+const BAR_WIDTH = 2.4;
+const BAR_GAP = 1.5;
+/** Shortest a bar gets: a dot. */
+const MIN_HEIGHT = BAR_WIDTH;
+const MAX_HEIGHT = 16;
+/** The middle bars reach higher than the outer ones. */
+const REACH = [0.55, 0.8, 1, 0.8, 0.55];
 /** ~30 fps: plenty for a wave this size. */
 const FRAME_MS = 32;
 
@@ -38,69 +41,42 @@ function noise(seed: number, x: number): number {
   return hash(i) + (hash(i + 1) - hash(i)) * s;
 }
 
-/** One frame: each column's half-height from the eased level, then its dots. */
-function drawWave(ctx: CanvasRenderingContext2D, t: number, heard: number[]): void {
-  const mid = CANVAS_PX / 2;
-  const left = mid - ((COLUMNS - 1) * COLUMN_GAP) / 2;
-  for (let c = 0; c < COLUMNS; c++) {
-    const fromCenter = (c - (COLUMNS - 1) / 2) / ((COLUMNS - 1) / 2);
-    const envelope = Math.exp(-fromCenter * fromCenter * 1.6);
-    const breath = 0.2 + 0.08 * Math.sin(t * 2.1 - c * 0.75);
-    const voice = heard[c] * envelope * (0.55 + 0.45 * noise(c, t * 5.5));
-    const half = (CANVAS_PX / 2 - 1.4) * Math.min(1, breath + voice);
-    // The sweep: a band of fuller ink travelling across the columns.
-    const depth = 0.5 + 0.5 * Math.sin(t * 2.6 - c * 0.9);
-    const x = left + c * COLUMN_GAP;
-    const steps = Math.max(0, Math.floor(half / DOT_GAP));
-    for (let s = -steps; s <= steps; s++) {
-      const tip = steps === 0 ? 0 : Math.abs(s) / steps;
-      ctx.globalAlpha = (1 - 0.55 * tip) * (0.55 + 0.45 * depth);
-      ctx.beginPath();
-      ctx.arc(x, mid + s * DOT_GAP, 1.05 - 0.35 * tip, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-  ctx.globalAlpha = 1;
-}
-
 /**
- * Animates the wave on `canvas` until the returned function is called, or
- * until the canvas, once in the document, leaves it (so a canvas handed to
+ * Animates the wave in `svg` until the returned function is called, or
+ * until the element, once in the document, leaves it (so one handed to
  * ProseMirror as a widget needs no teardown). It draws at ~30 fps and only
- * while it can be seen — on screen, tab visible, not `visibility: hidden` —
- * and reads styles (its ink color, its visibility) rarely, never per frame:
- * a style read can force the whole page's style recalc while the editor
- * is changing under it.
+ * while it can be seen — on screen, tab visible, not `visibility: hidden`.
  */
-export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOptions = {}): () => void {
-  const dpr = Math.min(2, (typeof devicePixelRatio !== "undefined" && devicePixelRatio) || 1);
-  canvas.width = Math.round(CANVAS_PX * dpr);
-  canvas.height = Math.round(CANVAS_PX * dpr);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return () => {};
+export function mountVoiceWave(svg: SVGSVGElement, options: VoiceWaveOptions = {}): () => void {
+  svg.setAttribute("viewBox", `0 0 ${VIEW} ${VIEW}`);
+  svg.setAttribute("fill", "currentColor");
+  // Its own bars only, if it was mounted before (React remounts in dev).
+  svg.replaceChildren();
+  const left = (VIEW - (BARS * BAR_WIDTH + (BARS - 1) * BAR_GAP)) / 2;
+  const bars = REACH.map((_, b) => {
+    const bar = document.createElementNS(SVG_NS, "rect");
+    bar.setAttribute("x", String(left + b * (BAR_WIDTH + BAR_GAP)));
+    bar.setAttribute("width", String(BAR_WIDTH));
+    bar.setAttribute("rx", String(BAR_WIDTH / 2));
+    svg.append(bar);
+    return bar;
+  });
 
-  // Per-column level, eased: quick to rise with a syllable, slower to fall.
-  const heard = new Array<number>(COLUMNS).fill(0);
+  // Per-bar level, eased: quick to rise with a syllable, slower to fall.
+  const heard = new Array<number>(BARS).fill(0);
   let elapsed = 600;
-  let ink = "";
-  let inkAt = -Infinity;
   const frame = (dt: number) => {
     const level = Math.min(1, Math.max(0, options.level?.() ?? 0));
-    for (let c = 0; c < COLUMNS; c++) {
-      const target = level * (0.75 + 0.25 * noise(c + 11, elapsed / 180));
-      heard[c] += (target - heard[c]) * Math.min(1, dt / (target > heard[c] ? 60 : 220));
-    }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, CANVAS_PX, CANVAS_PX);
-    // Only once it's in the page: a canvas not yet attached (the editor
-    // builds its wave before ProseMirror places it) has no color to read,
-    // and caching that would leave the first second blank.
-    if ((!ink || elapsed - inkAt > 1000) && canvas.isConnected) {
-      ink = getComputedStyle(canvas).color;
-      inkAt = elapsed;
-    }
-    ctx.fillStyle = ink;
-    drawWave(ctx, elapsed / 1000, heard);
+    const t = elapsed / 1000;
+    bars.forEach((bar, b) => {
+      const target = level * (0.6 + 0.4 * noise(b + 11, elapsed / 140));
+      heard[b] += (target - heard[b]) * Math.min(1, dt / (target > heard[b] ? 50 : 200));
+      const breath = 0.08 + 0.06 * Math.sin(t * 2.4 - b * 0.8);
+      const reach = Math.min(1, breath + heard[b]) * REACH[b];
+      const height = MIN_HEIGHT + (MAX_HEIGHT - MIN_HEIGHT) * reach;
+      bar.setAttribute("y", ((VIEW - height) / 2).toFixed(2));
+      bar.setAttribute("height", height.toFixed(2));
+    });
   };
   frame(0);
   if (typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -123,27 +99,25 @@ export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOpti
   let visible = true;
   let attached = false;
   let poll: ReturnType<typeof setTimeout> | undefined;
-  // `visibility: hidden` (a cross-fade's resting state) keeps the canvas in
+  // `visibility: hidden` (a cross-fade's resting state) keeps the element in
   // layout, so the observer still calls it visible: check it ourselves, when
   // a cross-fade starts or ends, and as a backstop once a second.
-  const styleHidden = () => canvas.checkVisibility?.({ visibilityProperty: true }) === false;
+  const styleHidden = () => svg.checkVisibility?.({ visibilityProperty: true }) === false;
   const sync = () => {
     clearTimeout(poll);
-    if (canvas.isConnected) attached = true;
+    if (svg.isConnected) attached = true;
     else if (attached) return stop();
     const hidden = styleHidden();
     const should = visible && !hidden && document.visibilityState !== "hidden";
     if (should && !running) {
       running = true;
-      // Drawn at once, not a frame later: it's showing now.
-      frame(0);
       last = performance.now();
       raf = requestAnimationFrame(loop);
     } else if (!should && running) {
       running = false;
       cancelAnimationFrame(raf);
     }
-    // Also while hidden or offscreen: a canvas removed then fires nothing
+    // Also while hidden or offscreen: an element removed then fires nothing
     // else, and this is how it notices and lets go.
     poll = setTimeout(sync, 1000);
   };
@@ -154,10 +128,10 @@ export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOpti
           sync();
         })
       : null;
-  io?.observe(canvas);
+  io?.observe(svg);
   document.addEventListener("visibilitychange", sync);
-  canvas.addEventListener("transitionrun", sync);
-  canvas.addEventListener("transitionend", sync);
+  svg.addEventListener("transitionrun", sync);
+  svg.addEventListener("transitionend", sync);
   if (!io) sync();
   function stop() {
     running = false;
@@ -165,19 +139,19 @@ export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOpti
     clearTimeout(poll);
     io?.disconnect();
     document.removeEventListener("visibilitychange", sync);
-    canvas.removeEventListener("transitionrun", sync);
-    canvas.removeEventListener("transitionend", sync);
+    svg.removeEventListener("transitionrun", sync);
+    svg.removeEventListener("transitionend", sync);
   }
   return stop;
 }
 
-/** A `<canvas>` with the wave on it, for React. */
+/** An `<svg>` with the wave in it, for React. */
 export function VoiceWave({
   level,
   size = "0.875rem",
   className,
 }: VoiceWaveOptions & { size?: number | string; className?: string }) {
-  const ref = useRef<HTMLCanvasElement | null>(null);
+  const ref = useRef<SVGSVGElement | null>(null);
   const levelRef = useRef(level);
   levelRef.current = level;
   useEffect(
@@ -185,7 +159,7 @@ export function VoiceWave({
     [],
   );
   return (
-    <canvas
+    <svg
       ref={ref}
       role="img"
       aria-label="Listening"

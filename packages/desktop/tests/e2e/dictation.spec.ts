@@ -139,22 +139,14 @@ test.describe("dictation", () => {
 
     await dictate(page, async () => {
       // The wave shows the moment the key is down, trailing the words.
-      const wave = ghost(page).locator("canvas.dictation-wave");
+      const wave = ghost(page).locator("svg.dictation-wave");
       await expect(wave).toBeVisible();
-      // And drawn at once, in the text's color, not blank for its first second.
-      await expect
-        .poll(() =>
-          wave.evaluate((c: HTMLCanvasElement) => {
-            const ink = getComputedStyle(c).color.match(/\d+/g)!.slice(0, 3).map(Number);
-            const px = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
-            for (let i = 0; i < px.length; i += 4) {
-              if (px[i + 3] > 128 && ink.every((v, k) => Math.abs(px[i + k] - v) < 8)) return true;
-            }
-            return false;
-          }),
-          { timeout: 500 },
-        )
-        .toBe(true);
+      // Five bars, moving.
+      const bars = wave.locator("rect");
+      await expect(bars).toHaveCount(5);
+      const middle = () => bars.nth(2).getAttribute("height");
+      const first = await middle();
+      await expect.poll(middle, { timeout: 2_000 }).not.toBe(first);
       await expectLiveWords(page);
       expect(await editor.textContent()).not.toMatch(SPOKEN);
     });
@@ -183,7 +175,7 @@ test.describe("dictation", () => {
 
     const picker = widget.getByRole("button", { name: "Choose harness" });
     const logo = picker.locator(".dictation-idle-only");
-    const wave = picker.locator("canvas.dictation-active-only");
+    const wave = picker.locator("svg.dictation-active-only");
     await expect(logo).toBeVisible();
     await expect(wave).toBeHidden();
 
@@ -218,7 +210,7 @@ test.describe("dictation", () => {
 
     const mark = widget.locator("[data-widget-response] .dictation-swap").first();
     const logo = mark.locator(".dictation-idle-only");
-    const wave = mark.locator("canvas.dictation-active-only");
+    const wave = mark.locator("svg.dictation-active-only");
     await expect(logo).toBeVisible();
     await expect(wave).toBeHidden();
 
@@ -244,7 +236,7 @@ test.describe("dictation", () => {
 
     const send = page.getByRole("button", { name: "Send" });
     const arrow = send.locator(".dictation-idle-only");
-    const wave = send.locator("canvas.dictation-active-only");
+    const wave = send.locator("svg.dictation-active-only");
     await expect(arrow).toBeVisible();
 
     await dictate(page, async () => {
