@@ -22,8 +22,10 @@ const SHORT = { sampleRate: RATE, pauseMs: 400, minPhraseMs: 2000, maxPhraseMs: 
 
 function fakeMic() {
   let listener: ((s: Float32Array) => void) | null = null;
-  const mic: Microphone & { closed: boolean } = {
+  const mic: Microphone & { closed: boolean; working: boolean } = {
     closed: false,
+    working: true,
+    live: () => mic.working && !mic.closed,
     onAudio(l) {
       listener = l;
       return () => (listener = null);
@@ -356,6 +358,79 @@ describe("dictation", () => {
     expect(microphone.mic.closed).toBe(false);
     await vi.advanceTimersByTimeAsync(60);
     expect(microphone.mic.closed).toBe(true);
+  });
+
+  it("opens a fresh mic when the warm one stopped working", async () => {
+    let opened = 0;
+    let current = fakeMic();
+    const { target, events } = fakeTarget();
+    dictation = createDictation({
+      engine,
+      openMicrophone: async () => {
+        opened++;
+        current = fakeMic();
+        return current.mic;
+      },
+      enabled: async () => true,
+      holdKey: "ControlRight",
+    });
+    dictation.attach(target);
+    await dictation.press();
+    current.say(speech(500));
+    await dictation.release();
+    expect(opened).toBe(1);
+
+    // Interrupted while the app was in the background.
+    const stale = current;
+    stale.mic.working = false;
+    heard = ["Again."];
+    await dictation.press();
+    expect(opened).toBe(2);
+    await vi.waitFor(() => expect(stale.mic.closed).toBe(true));
+    current.say(speech(1000));
+    await dictation.release();
+    expect(events.at(-1)).toBe("commit:Again.");
+  });
+
+  it("says so when the mic sends no sound at all", async () => {
+    vi.useFakeTimers();
+    const { target, events } = fakeTarget();
+    dictation.attach(target);
+    await dictation.press();
+    expect(dictation.hearing()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(dictation.state()).toEqual({ status: "error", error: "The microphone isn't sending any sound." });
+    expect(events).toEqual(["cancel"]);
+    await vi.waitFor(() => expect(microphone.mic.closed).toBe(true));
+  });
+
+  it("is hearing once sound arrives, and the watchdog stands down", async () => {
+    vi.useFakeTimers();
+    const { target } = fakeTarget();
+    dictation.attach(target);
+    await dictation.press();
+    microphone.say(new Float32Array(640));
+    expect(dictation.hearing()).toBe(true);
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(dictation.state().status).toBe("listening");
+    await dictation.release();
+    expect(dictation.hearing()).toBe(false);
+  });
+
+  it("lets go of the warm mic when the app is hidden", async () => {
+    const { target } = fakeTarget();
+    dictation.attach(target);
+    const stop = dictation.listen();
+    await dictation.press();
+    microphone.say(speech(500));
+    await dictation.release();
+    expect(microphone.mic.closed).toBe(false);
+
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => expect(microphone.mic.closed).toBe(true));
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    stop();
   });
 
   it("follows the right-hand hold key: down, up, and Escape", async () => {

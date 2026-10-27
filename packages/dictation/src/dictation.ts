@@ -83,6 +83,9 @@ const LIVE_STEP_SAMPLES = ms(250);
 /** A speaker this quiet after new words gets a guess at once, so the guess
  *  is usually complete by the time they let go of the key. */
 const SETTLE_QUIET_MS = 150;
+/** A mic that sends nothing for this long after it opens isn't working. */
+const NO_SOUND_MS = 1500;
+const NO_SOUND_ERROR = "The microphone isn't sending any sound.";
 
 type Platform = ReturnType<typeof detectPlatform>;
 
@@ -162,7 +165,14 @@ function createRun(insertion: DictationInsertion, engine: DictationEngine) {
   /** The latest guess at the phrase in progress, and how much audio it heard. */
   let lastGuess: { text: string; raw: string; heard: number; at: number } | null = null;
   /** `releasing` from key up; `released` once the mic's last audio is in. */
-  const run = { releasing: false, released: false, cancelled: false, error: null as unknown };
+  const run = {
+    releasing: false,
+    released: false,
+    cancelled: false,
+    error: null as unknown,
+    /** Sound has reached this dictation (the mic is working). */
+    hearing: false,
+  };
   const open = () => !run.released && !run.cancelled && !run.error;
   /** Guesses stop at key up: the final decode is next. */
   const mayGuess = () => open() && !run.releasing;
@@ -269,6 +279,8 @@ export function createDictation(deps: DictationDeps): DictationApi {
   let run: Run | null = null;
   let opening: Promise<void> = Promise.resolve();
   let mic: Promise<Microphone> | null = null;
+  /** The mic once it has opened. */
+  let micOpen: Microphone | null = null;
   let micClose: ReturnType<typeof setTimeout> | null = null;
   let preroll: Float32Array[] = [];
   let level = 0;
@@ -281,12 +293,14 @@ export function createDictation(deps: DictationDeps): DictationApi {
   const closeMic = () => {
     const closing = mic;
     mic = null;
+    micOpen = null;
     preroll = [];
     void closing?.then((m) => m.close(), () => {});
   };
 
   const onAudio = (samples: Float32Array) => {
     if (run && !run.released && !run.cancelled) {
+      run.hearing = true;
       level = loudness(samples);
       run.hear(samples);
       return;
@@ -301,9 +315,13 @@ export function createDictation(deps: DictationDeps): DictationApi {
   const openMic = () => {
     if (micClose) clearTimeout(micClose);
     micClose = null;
+    // A mic kept warm is reused only while it still works; one that went
+    // quiet behind our back is replaced, not trusted.
+    if (micOpen && !micOpen.live()) closeMic();
     if (!mic) {
       const pending = deps.openMicrophone().then((m) => {
         m.onAudio(onAudio);
+        if (mic === pending) micOpen = m;
         return m;
       });
       mic = pending;
@@ -314,7 +332,6 @@ export function createDictation(deps: DictationDeps): DictationApi {
     return mic;
   };
 
-  /** Ends `current`, if it's still the dictation in progress. */
   /** Closes the mic once it has gone unused for `warmMs` — never under a
    *  dictation in progress. */
   const closeLater = () => {
@@ -331,6 +348,7 @@ export function createDictation(deps: DictationDeps): DictationApi {
     if (open) await Promise.race([open.flush(), new Promise((r) => setTimeout(r, 150))]);
   };
 
+  /** Ends `current`, if it's still the dictation in progress. */
   const end = (current: Run, error?: unknown) => {
     if (run !== current) return;
     run = null;
@@ -371,6 +389,11 @@ export function createDictation(deps: DictationDeps): DictationApi {
     preroll = [];
     heard.forEach(onAudio);
     if (!current.released) setState({ status: "listening" });
+    // Saying nothing is fine; a mic that sends nothing at all is not, and
+    // must say so rather than leave the speaker talking to no one.
+    setTimeout(() => {
+      if (run === current && !current.hearing && !current.cancelled) end(current, new Error(NO_SOUND_ERROR));
+    }, NO_SOUND_MS);
   };
 
   const api: DictationApi = {
@@ -384,6 +407,7 @@ export function createDictation(deps: DictationDeps): DictationApi {
     },
 
     level: () => level,
+    hearing: () => run?.hearing === true && !run.released,
     state: () => state,
 
     subscribe(listener) {
@@ -453,9 +477,16 @@ export function createDictation(deps: DictationDeps): DictationApi {
         api.cancel();
       };
       window.addEventListener("keydown", onEscape, true);
+      // Out of sight, the mic is let go: nobody dictates into a hidden app,
+      // and audio kept open there is what the webview interrupts.
+      const onHidden = () => {
+        if (document.visibilityState === "hidden" && !run) closeMic();
+      };
+      document.addEventListener("visibilitychange", onHidden);
       return () => {
         holding.unsubscribe();
         window.removeEventListener("keydown", onEscape, true);
+        document.removeEventListener("visibilitychange", onHidden);
         api.cancel();
         if (micClose) clearTimeout(micClose);
         closeMic();

@@ -41,20 +41,40 @@ const HINT = "or hold right Ctrl to talk";
 /** What the specs reach on the page: the stand-in mic, and the app's core. */
 type Window_ = Window & {
   __say: () => Promise<void>;
+  /** The AudioContexts the app made (the mic's), and the streams it got. */
+  __appContexts: AudioContext[];
+  __streams: MediaStream[];
   __notefigCore: {
     kv: { write(namespace: string, key: string, value: unknown): Promise<void> };
     dictation: { warm(): Promise<void> };
   };
 };
 
-/** Replaces the microphone with one that plays CLIP on `__say()`, or one
- *  the user refused. */
-async function fakeMicrophone(page: Page, { refused = false } = {}) {
+/**
+ * Replaces the microphone with one that plays CLIP on `__say()`, or one
+ * the user refused. `dead`: the app's audio never runs (its AudioContext
+ * stays suspended), as when the webview won't start audio.
+ */
+async function fakeMicrophone(page: Page, { refused = false, dead = false } = {}) {
   await page.addInitScript(
-    ({ clip, refused }) => {
+    ({ clip, refused, dead }) => {
+      const w = window as unknown as Window_;
+      const Native = window.AudioContext;
+      w.__appContexts = [];
+      w.__streams = [];
+      window.AudioContext = class extends Native {
+        constructor(options?: AudioContextOptions) {
+          super(options);
+          w.__appContexts.push(this);
+          if (dead) {
+            void this.suspend();
+            this.resume = () => new Promise(() => {});
+          }
+        }
+      };
       navigator.mediaDevices.getUserMedia = async () => {
         if (refused) throw new DOMException("Permission denied", "NotAllowedError");
-        const context = new AudioContext();
+        const context = new Native();
         const bytes = Uint8Array.from(atob(clip), (c) => c.charCodeAt(0));
         const buffer = await context.decodeAudioData(bytes.buffer);
         const destination = context.createMediaStreamDestination();
@@ -66,10 +86,11 @@ async function fakeMicrophone(page: Page, { refused = false } = {}) {
             source.onended = () => resolve();
             source.start();
           });
+        w.__streams.push(destination.stream);
         return destination.stream;
       };
     },
-    { clip: CLIP, refused },
+    { clip: CLIP, refused, dead },
   );
 }
 
@@ -80,9 +101,19 @@ const ghost = (page: Page) => page.locator(".dictation-ghost");
  * runs with the key down once the mic is open; the sentence is still being
  * spoken while it runs, and the key stays down until it returns.
  */
-async function dictate(page: Page, whileListening: () => Promise<void> = async () => {}) {
+async function dictate(
+  page: Page,
+  whileListening: () => Promise<void> = async () => {},
+  { freshMic = false } = {},
+) {
+  const streams = await page.evaluate(() => (window as unknown as Window_).__streams?.length ?? 0);
   await page.keyboard.down("ControlRight");
-  await page.waitForFunction(() => "__say" in window, undefined, { timeout: 15_000 });
+  // A fresh mic: speak into the one the app opens now, not the last one.
+  await page.waitForFunction(
+    (fresh) => "__say" in window && (!fresh || (window as unknown as Window_).__streams.length > fresh),
+    freshMic ? streams : 0,
+    { timeout: 15_000 },
+  );
   const speaking = page.evaluate(() => (window as unknown as Window_).__say());
   await whileListening();
   await speaking;
@@ -251,6 +282,61 @@ test.describe("dictation", () => {
     await expect(box).toContainText(SPOKEN, { timeout: 60_000 });
     await expect(arrow).toBeVisible();
     await expect(wave).toBeHidden();
+  });
+
+  // A mic kept open between dictations can go bad without saying so: the
+  // webview interrupts its audio while the app is in the background, or
+  // the system takes the device. The next dictation must not trust it.
+  for (const [breakage, breakMic, freshMic] of [
+    [
+      // It's asked to run again. (Pressed while still suspended, the mic
+      // is replaced instead, as for an ended track.)
+      "its audio was suspended",
+      async () => {
+        const contexts = (window as unknown as Window_).__appContexts;
+        await Promise.all(contexts.map((c) => c.suspend()));
+        while (contexts.some((c) => c.state !== "running")) await new Promise((r) => setTimeout(r, 20));
+      },
+      false,
+    ],
+    [
+      // It's replaced.
+      "its track ended",
+      () => (window as unknown as Window_).__streams.forEach((s) => s.getTracks().forEach((t) => t.stop())),
+      true,
+    ],
+  ] as const) {
+    test(`the next dictation still hears you when the warm mic's ${breakage.slice(4)}`, async ({ page }) => {
+      await setupTestDatabase(page, "dictation-stale");
+      await fakeMicrophone(page);
+      await startMockSession(page, "/workspace/dictation-stale");
+      await warmModel(page);
+      const box = composer(page);
+      await box.click();
+      await dictate(page);
+      const said = async () => ((await box.textContent()) ?? "").match(/feature today/gi)?.length ?? 0;
+      // Landed (not only previewed): the next press starts a new dictation.
+      await expect(ghost(page)).toHaveCount(0, { timeout: 60_000 });
+      expect(await said()).toBe(1);
+
+      await page.evaluate(breakMic);
+      await dictate(page, undefined, { freshMic });
+      await expect(ghost(page)).toHaveCount(0, { timeout: 60_000 });
+      expect(await said()).toBe(2);
+    });
+  }
+
+  test("a mic that sends no sound says so", async ({ page }) => {
+    await setupTestDatabase(page, "dictation-dead");
+    await fakeMicrophone(page, { dead: true });
+    await startMockSession(page, "/workspace/dictation-dead");
+    const box = composer(page);
+    await box.click();
+    await page.keyboard.down("ControlRight");
+    await expect(page.getByText("The microphone isn't sending any sound")).toBeVisible({ timeout: 15_000 });
+    await page.keyboard.up("ControlRight");
+    await expect(ghost(page)).toHaveCount(0);
+    await expect(box).toHaveText("");
   });
 
   test("off in settings: no hint, and the key does nothing", async ({ page }) => {

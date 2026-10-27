@@ -76,7 +76,7 @@ function createGhost(host: DictationHost) {
     "class",
     "dictation-wave ms-[0.3em] me-[0.1em] inline-block size-[1.45em] align-[-0.35em] text-muted-foreground",
   );
-  const stop = mountVoiceWave(wave, { level: host.level });
+  const stop = mountVoiceWave(wave, { level: host.level, hearing: host.hearing });
   el.append(lead, settled, live, wave);
   return {
     el,

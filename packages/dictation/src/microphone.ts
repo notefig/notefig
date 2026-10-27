@@ -14,12 +14,22 @@ export interface Microphone {
   onAudio(listener: (samples: Float32Array) => void): () => void;
   /** Resolves once audio held back for batching has been delivered. */
   flush(): Promise<void>;
+  /**
+   * Whether it still works: its audio is running, its track is live, and
+   * sound came in lately. A mic kept open between dictations can stop
+   * without a word — the webview interrupts audio while the app is in the
+   * background, the system hands the device to another app — and then
+   * delivers nothing.
+   */
+  live(): boolean;
   close(): void;
 }
 
 export type OpenMicrophone = () => Promise<Microphone>;
 
 const TARGET_RATE = 16_000;
+/** Audio arrives every ~40 ms while it runs; this long without is stopped. */
+const QUIET_MS = 500;
 
 /** Hands audio over in ~40 ms batches rather than every 128-sample render
  *  quantum: a few dozen messages a second for the main thread, not 375. */
@@ -88,7 +98,15 @@ export const openBrowserMicrophone: OpenMicrophone = async () => {
     audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true },
   });
   const context = new AudioContext();
+  // Audio may start suspended (no user gesture: the hold key is a modifier)
+  // or be interrupted later; ask it to run, without waiting on a refusal.
+  const resume = () =>
+    Promise.race([context.resume().catch(() => {}), new Promise((r) => setTimeout(r, 300))]);
+  context.onstatechange = () => {
+    if (context.state !== "running" && context.state !== "closed") void resume();
+  };
   try {
+    if (context.state !== "running") await resume();
     const moduleUrl = URL.createObjectURL(new Blob([TAP_WORKLET], { type: "text/javascript" }));
     await context.audioWorklet.addModule(moduleUrl);
     URL.revokeObjectURL(moduleUrl);
@@ -100,10 +118,13 @@ export const openBrowserMicrophone: OpenMicrophone = async () => {
   const tap = new AudioWorkletNode(context, "dictation-tap");
   context.createMediaStreamSource(stream).connect(tap);
   const resample = createResampler(context.sampleRate);
+  const [track] = stream.getAudioTracks();
+  let heardAt = performance.now();
   const listeners = new Set<(samples: Float32Array) => void>();
   const flushed: (() => void)[] = [];
   tap.port.onmessage = (event: MessageEvent<Float32Array | "flushed">) => {
     if (event.data === "flushed") return flushed.shift()?.();
+    heardAt = performance.now();
     const samples = resample(event.data);
     if (samples.length) listeners.forEach((l) => l(samples));
   };
@@ -118,7 +139,13 @@ export const openBrowserMicrophone: OpenMicrophone = async () => {
         tap.port.postMessage("flush");
       });
     },
+    live: () =>
+      context.state === "running" &&
+      track?.readyState === "live" &&
+      !track.muted &&
+      performance.now() - heardAt < QUIET_MS,
     close() {
+      context.onstatechange = null;
       flushed.splice(0).forEach((resolve) => resolve());
       listeners.clear();
       tap.port.onmessage = null;

@@ -18,6 +18,7 @@ function setup(html: string) {
           return () => targets.splice(targets.indexOf(target), 1);
         },
         level: () => 0,
+        hearing: () => true,
       }),
     ],
     content: html,

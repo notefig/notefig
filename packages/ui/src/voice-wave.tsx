@@ -1,7 +1,8 @@
 // Voice wave: five rounded bars that rise and fall with the microphone's
 // level. Vector (SVG) and solid `currentColor`, so it's sharp at any size and
-// takes text color classes and themes for free. With no input the bars keep
-// breathing low, so an open mic never looks dead. Animates only while
+// takes text color classes and themes for free. Until sound reaches the mic
+// the bars sit still as dots; from then on, with no input, they keep
+// breathing low, so a working mic never looks dead. Animates only while
 // visible; reduced-motion users get a still frame.
 //
 // Framework-free at its core (`mountVoiceWave`), because the editor draws it
@@ -27,6 +28,8 @@ const FRAME_MS = 32;
 export interface VoiceWaveOptions {
   /** The input level now, 0–1; read every frame. Absent: breathing only. */
   level?: () => number;
+  /** Whether sound is reaching the mic yet; read every frame. Absent: yes. */
+  hearing?: () => boolean;
 }
 
 /** Smooth, deterministic noise in [0, 1) along one axis. */
@@ -66,12 +69,13 @@ export function mountVoiceWave(svg: SVGSVGElement, options: VoiceWaveOptions = {
   const heard = new Array<number>(BARS).fill(0);
   let elapsed = 600;
   const frame = (dt: number) => {
-    const level = Math.min(1, Math.max(0, options.level?.() ?? 0));
+    const hearing = options.hearing?.() ?? true;
+    const level = hearing ? Math.min(1, Math.max(0, options.level?.() ?? 0)) : 0;
     const t = elapsed / 1000;
     bars.forEach((bar, b) => {
       const target = level * (0.6 + 0.4 * noise(b + 11, elapsed / 140));
       heard[b] += (target - heard[b]) * Math.min(1, dt / (target > heard[b] ? 50 : 200));
-      const breath = 0.08 + 0.06 * Math.sin(t * 2.4 - b * 0.8);
+      const breath = hearing ? 0.08 + 0.06 * Math.sin(t * 2.4 - b * 0.8) : 0;
       const reach = Math.min(1, breath + heard[b]) * REACH[b];
       const height = MIN_HEIGHT + (MAX_HEIGHT - MIN_HEIGHT) * reach;
       bar.setAttribute("y", ((VIEW - height) / 2).toFixed(2));
@@ -148,14 +152,21 @@ export function mountVoiceWave(svg: SVGSVGElement, options: VoiceWaveOptions = {
 /** An `<svg>` with the wave in it, for React. */
 export function VoiceWave({
   level,
+  hearing,
   size = "0.875rem",
   className,
 }: VoiceWaveOptions & { size?: number | string; className?: string }) {
   const ref = useRef<SVGSVGElement | null>(null);
-  const levelRef = useRef(level);
-  levelRef.current = level;
+  const latest = useRef({ level, hearing });
+  latest.current = { level, hearing };
   useEffect(
-    () => (ref.current ? mountVoiceWave(ref.current, { level: () => levelRef.current?.() ?? 0 }) : undefined),
+    () =>
+      ref.current
+        ? mountVoiceWave(ref.current, {
+            level: () => latest.current.level?.() ?? 0,
+            hearing: () => latest.current.hearing?.() ?? true,
+          })
+        : undefined,
     [],
   );
   return (

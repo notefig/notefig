@@ -24,10 +24,14 @@ export interface DictationTarget {
 }
 
 /** What the app hands the extension: where targets register, and the
- *  microphone's level (0–1) for the wave. */
+ *  microphone's state for the wave. */
 export interface DictationHost {
   attach(target: DictationTarget): () => void;
+  /** Its level now, 0–1. */
   level(): number;
+  /** Whether sound is reaching it yet: a mic takes a moment to open, and
+   *  until then nothing said is heard. */
+  hearing(): boolean;
 }
 
 /**

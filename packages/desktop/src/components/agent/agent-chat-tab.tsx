@@ -1387,7 +1387,7 @@ function ComposerActionButton({
         <ArrowUp className="dictation-idle-only" />
       )}
       {dictation && (
-        <VoiceWave level={dictation.level} size="1.25rem" className="dictation-active-only" />
+        <VoiceWave level={dictation.level} hearing={dictation.hearing} size="1.25rem" className="dictation-active-only" />
       )}
     </Button>
   );
