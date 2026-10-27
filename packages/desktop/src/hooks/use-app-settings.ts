@@ -22,6 +22,11 @@ export interface AppSettings {
    * instead; scratchpads are then only ever opened deliberately.
    */
   scratchpadOnStartup: boolean;
+  /**
+   * Push-to-talk dictation (modules/dictation), which reads this key from
+   * the same namespace itself.
+   */
+  dictationEnabled: boolean;
   telemetryConsentVersion: number;
   telemetryInstallId: string | null;
   /**
@@ -38,6 +43,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   analyticsEnabled: true,
   autoUpdateEnabled: true,
   scratchpadOnStartup: true,
+  dictationEnabled: true,
   telemetryConsentVersion: 0,
   telemetryInstallId: null,
   lastSeenVersion: null,

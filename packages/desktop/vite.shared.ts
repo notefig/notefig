@@ -144,10 +144,13 @@ export const sharedOptimizeDeps = {
   // production build emits the asset correctly either way.
   // @pierre/trees, @pierre/diffs: pre-bundling bypasses transform hooks,
   // which would skip flattenPierreShadowCss in dev.
+  // onnxruntime-web (the dictation worker): same failure as the SQLite
+  // package — it locates its .wasm/.mjs siblings relative to itself.
   exclude: [
     "@tanstack/browser-db-sqlite-persistence",
     "@pierre/trees",
     "@pierre/diffs",
+    "onnxruntime-web",
   ],
   // An excluded package's imports are served raw, so its CommonJS-only
   // dependency needs pre-bundling explicitly or its default import breaks

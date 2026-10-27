@@ -20,6 +20,7 @@ import { treeInlineEditModule } from "@/modules/tree-inline-edit";
 import { sharedSessionsModule } from "@/modules/shared-sessions";
 import { treeExpansionModule } from "@/modules/tree-expansion";
 import { telemetryModule } from "@/modules/telemetry";
+import { dictationModule } from "@/modules/dictation";
 import { documentsModule } from "@/modules/documents";
 import { editorsModule } from "@/modules/editors";
 import { filesModule } from "@/modules/files";
@@ -101,6 +102,9 @@ export function desktopModules(): AnyModule[] {
     harnessProbeModule,
     tunnelModule,
     telemetryModule,
+    // Push-to-talk into the editors, on the bundled model. The model ships
+    // with this build only, so the marketing site leaves it out.
+    dictationModule,
   ];
 }
 

@@ -11,3 +11,5 @@ packages/desktop/plate-reference/
 # packages/desktop/scripts/build-sidecars.mjs
 packages/desktop/src-tauri/binaries/
 sidecars/*/.build/
+
+packages/desktop/public/dictation/

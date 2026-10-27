@@ -194,6 +194,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The dictation model is fetched by the Vite build (scripts/fetch-dictation-model.mjs);
+      # cached so a run doesn't download its 132 MB again.
+      - name: Cache dictation model
+        uses: actions/cache@v4
+        with:
+          path: packages/desktop/node_modules/.cache/dictation-model
+          key: ${{ runner.os }}-dictation-model-${{ hashFiles('packages/desktop/scripts/fetch-dictation-model.mjs') }}
+
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
@@ -304,6 +312,14 @@ jobs:
       - name: Build test shim
         working-directory: packages/desktop/src-tauri
         run: cargo build -p test-shim
+
+      # The dictation model is fetched by the Vite build (scripts/fetch-dictation-model.mjs);
+      # cached so a run doesn't download its 132 MB again.
+      - name: Cache dictation model
+        uses: actions/cache@v4
+        with:
+          path: packages/desktop/node_modules/.cache/dictation-model
+          key: ${{ runner.os }}-dictation-model-${{ hashFiles('packages/desktop/scripts/fetch-dictation-model.mjs') }}
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4

@@ -752,3 +752,63 @@ file-tree-container:focus,
 file-tree-container:focus-visible {
   outline: none;
 }
+
+/* Dictation (modules/dictation, widgets/src/dictation). While someone
+   dictates, the editor carries a `.dictation-ghost` decoration at the caret;
+   everything here keys off it. Unlayered, so Tailwind's display utilities
+   can't outrank the swaps. */
+
+/* The words being heard take the placeholder's place: the ghost is a
+   decoration, so the editor still counts as empty and would paint both. */
+.prompt-editor .ProseMirror:has(.dictation-ghost) p.is-editor-empty:first-child::before,
+[data-prompt-draft][data-empty="true"]:has(.dictation-ghost)::before {
+  content: none;
+}
+
+/* In a document the wave trails the words, inline. A composer (the chat
+   box, a prompt widget's draft) shows its wave in its own chrome instead:
+   in the action button, in the harness logo's place. There the icon and
+   the wave share one grid cell and cross-fade — scale and blur with the
+   fade, so one seems to turn into the other. Visibility flips at the end
+   of a fade out (and at once on a fade in), so the hidden one is gone for
+   clicks, tests and the wave's own animation loop. */
+.prompt-editor .dictation-wave {
+  display: none;
+}
+
+.dictation-swap {
+  display: inline-grid;
+  place-items: center;
+}
+
+.dictation-swap > * {
+  grid-area: 1 / 1;
+  transition:
+    opacity 180ms ease,
+    transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    filter 180ms ease,
+    visibility 0s linear 280ms;
+}
+
+.dictation-swap > .dictation-active-only,
+:is([data-type="ai-prompt"], [data-dictation-scope]):has(.dictation-ghost) .dictation-swap > .dictation-idle-only {
+  opacity: 0;
+  transform: scale(0.5);
+  filter: blur(2px);
+  visibility: hidden;
+}
+
+:is([data-type="ai-prompt"], [data-dictation-scope]):has(.dictation-ghost) .dictation-swap > .dictation-active-only,
+.dictation-swap > .dictation-idle-only {
+  opacity: 1;
+  transform: none;
+  filter: none;
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+/* The chat's send button is disabled on an empty draft, and the draft is
+   empty until the words land; the wave inside it shouldn't look disabled. */
+[data-dictation-scope]:has(.dictation-ghost) button:disabled:has(.dictation-active-only) {
+  opacity: 1;
+}

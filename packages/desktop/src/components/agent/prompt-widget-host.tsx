@@ -45,6 +45,7 @@ import { path as pathutil, relativeTreePath } from "@/utils/path";
 import { AuthCard } from "./auth-card";
 import { PermissionCard } from "./permission-card";
 import { formatTimeAgo } from "@/utils/format";
+import { useDictationKey } from "@/modules/dictation/react";
 
 /** Does this tree-domain token name a real file in the workspace? The
  *  workspace path must stay byte-identical to the collection's workspacePath
@@ -366,6 +367,9 @@ export function usePromptWidgetHost(): PromptWidgetHost {
           when: "when-mounted",
         }),
 
+      // Absent in roots without the dictation module (the marketing site).
+      dictation: core.dictation,
+      useDictationKey,
       slots,
     }),
     // Empty on purpose — see the identity note above. Everything that

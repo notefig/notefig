@@ -1,0 +1,125 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { Editor } from "@tiptap/core";
+import StarterKit from "@tiptap/starter-kit";
+import { dictationExtension, fitDictation, type DictationTarget } from "./extension";
+
+let editor: Editor | null = null;
+afterEach(() => editor?.destroy());
+
+function setup(html: string) {
+  const targets: DictationTarget[] = [];
+  editor = new Editor({
+    extensions: [
+      StarterKit,
+      dictationExtension({
+        attach(target) {
+          targets.push(target);
+          return () => targets.splice(targets.indexOf(target), 1);
+        },
+        level: () => 0,
+      }),
+    ],
+    content: html,
+  });
+  return { editor, targets };
+}
+
+const ghost = () => editor!.view.dom.querySelector(".dictation-ghost");
+
+describe("dictationExtension", () => {
+  it("registers the editor as a target while it lives", () => {
+    const { targets } = setup("<p>Hi</p>");
+    expect(targets).toHaveLength(1);
+    editor!.destroy();
+    editor = null;
+    expect(targets).toHaveLength(0);
+  });
+
+  it("shows the words so far as ghost text that isn't in the document", () => {
+    const { editor, targets } = setup("<p>Notes</p>");
+    editor.commands.setTextSelection(6);
+    const insertion = targets[0].begin()!;
+    insertion.preview("So far", "so good");
+    expect(ghost()?.textContent).toBe(" So far so good");
+    expect(ghost()?.querySelector(".shimmer")?.textContent).toBe(" so good");
+    expect(editor.getText()).toBe("Notes");
+    insertion.cancel();
+    expect(ghost()).toBeNull();
+    expect(editor.getText()).toBe("Notes");
+  });
+
+  it("updates the words in place, with the wave after them", () => {
+    const { editor, targets } = setup("<p>Notes</p>");
+    editor.commands.setTextSelection(6);
+    const insertion = targets[0].begin()!;
+    const first = ghost();
+    insertion.preview("", "so");
+    insertion.preview("", "so far");
+    // The same element throughout, so the shimmer and the wave don't restart.
+    expect(ghost()).toBe(first);
+    expect(ghost()?.lastElementChild?.classList.contains("dictation-wave")).toBe(true);
+    insertion.cancel();
+  });
+
+  it("inserts the final text in one undo step and puts the caret after it", () => {
+    const { editor, targets } = setup("<p>Meeting notes.</p>");
+    editor.commands.setTextSelection(15);
+    const insertion = targets[0].begin()!;
+    insertion.preview("", "Then ship");
+    insertion.commit("Then ship it.");
+    expect(editor.getText()).toBe("Meeting notes. Then ship it.");
+    expect(ghost()).toBeNull();
+    expect(editor.state.selection.from).toBe(15 + " Then ship it.".length);
+    editor.commands.undo();
+    expect(editor.getText()).toBe("Meeting notes.");
+  });
+
+  it("lands where it began even after edits before it", () => {
+    const { editor, targets } = setup("<p>end</p>");
+    editor.commands.setTextSelection(4);
+    const insertion = targets[0].begin()!;
+    editor.commands.insertContentAt(1, "the ");
+    insertion.commit("Of it.");
+    expect(editor.getText()).toBe("the end of it.");
+  });
+
+  it("lands at the caret when the document is replaced underneath it", () => {
+    const { editor, targets } = setup("<p>Notes</p><p>Today:</p>");
+    editor.commands.setTextSelection(14);
+    const insertion = targets[0].begin()!;
+    // A reload from disk: the whole document swapped, caret put back.
+    editor.chain().setContent("<p>Notes</p><p>Today:</p>").setTextSelection(14).run();
+    insertion.commit("Ship it.");
+    expect(editor.getHTML()).toBe("<p>Notes</p><p>Today: Ship it.</p>");
+  });
+
+  it("does nothing in a read-only editor", () => {
+    const { editor, targets } = setup("<p>Locked</p>");
+    editor.setEditable(false);
+    expect(targets[0].begin()).toBeNull();
+  });
+});
+
+describe("fitDictation", () => {
+  it("starts a sentence as spoken at the start of a block", () => {
+    expect(fitDictation("", "", "Hello there.")).toBe("Hello there.");
+  });
+
+  it("adds a space after a previous sentence", () => {
+    expect(fitDictation("Done.", "", "Next one.")).toBe(" Next one.");
+  });
+
+  it("lowercases the first word mid-sentence but keeps I", () => {
+    expect(fitDictation("We should ", "", "Ship it.")).toBe("ship it.");
+    expect(fitDictation("and then ", "", "I left.")).toBe("I left.");
+  });
+
+  it("drops the closing period and adds a space before a following word", () => {
+    expect(fitDictation("We ", "will see", "Really")).toBe("really ");
+    expect(fitDictation("We ", "will see", "Really.")).toBe("really ");
+  });
+
+  it("inserts nothing for silence", () => {
+    expect(fitDictation("x", "y", "  ")).toBe("");
+  });
+});

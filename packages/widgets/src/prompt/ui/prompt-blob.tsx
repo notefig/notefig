@@ -28,6 +28,7 @@ import { TextSelection } from "@tiptap/pm/state";
 import { Button } from "@notefig/ui/button";
 import { Checkbox } from "@notefig/ui/checkbox";
 import { OrbLoader } from "@notefig/ui/orb-loader";
+import { VoiceWave } from "@notefig/ui/voice-wave";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1511,6 +1512,7 @@ function DraftRow({
   focusComposer: () => void;
 }) {
   const { t } = useTranslation();
+  const placeholder = useDraftPlaceholder(phase);
   const composing = phase === "composing";
   const open = editable ?? takesTyping(phase);
   return (
@@ -1543,7 +1545,7 @@ function DraftRow({
           // nothing — keys, IME, spellcheck, a stray click — edits it.
           contentEditable={open ? undefined : false}
           data-empty={empty ? "true" : "false"}
-          data-placeholder={t(draftPlaceholderKey(phase))}
+          data-placeholder={placeholder}
           className={cn(
             "prompt-editor relative min-w-0 flex-1 whitespace-pre-wrap break-words",
             composing ? "pt-1 pb-1.5 text-sm" : "text-xs",
@@ -1567,6 +1569,15 @@ function DraftRow({
 function draftPlaceholderKey(phase: BlobPhase) {
   if (phase === "composing") return "promptBlobPlaceholder";
   return phase === "needs-answer" ? "promptBlobAnswer" : "promptBlobReply";
+}
+
+/** The draft's placeholder; with dictation on, the same sentence also says
+ *  which key to hold (e.g. "right ⌥"). */
+function useDraftPlaceholder(phase: BlobPhase): string {
+  const { t } = useTranslation();
+  const dictationKey = usePromptWidgetHost().useDictationKey?.();
+  const key = draftPlaceholderKey(phase);
+  return dictationKey ? t(`${key}Dictation`, { key: dictationKey }) : t(key);
 }
 
 /**
@@ -1652,11 +1663,16 @@ function SessionControl({
         <Button
           variant="ghost"
           size="icon"
-          className="size-7 shrink-0 cursor-pointer rounded-lg text-muted-foreground"
+          className="dictation-swap size-7 shrink-0 cursor-pointer rounded-lg text-muted-foreground"
           title={t("agentChooseHarness")}
           aria-label={t("agentChooseHarness")}
         >
-          <HarnessLogo harnessId={triggerHarnessId} />
+          {/* While someone dictates into this draft, the wave stands in for
+              the logo (styles.css cross-fades them on the dictation ghost). */}
+          <HarnessLogo harnessId={triggerHarnessId} className="dictation-idle-only" />
+          {host.dictation && (
+            <VoiceWave level={host.dictation.level} size="1.05rem" className="dictation-active-only text-foreground" />
+          )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

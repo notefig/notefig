@@ -12,6 +12,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { usePromptWidgetHost } from "../host-context";
 import type { PromptWidgetHost } from "../host";
 import { promptMentionNode } from "./mention-node";
+import { dictationExtension } from "../../dictation/extension";
 import {
   DRAFT_TEXT_SERIALIZERS,
   draftToDoc,
@@ -97,6 +98,8 @@ function promptExtensions(
         render: renderer,
       }),
     }),
+    // Push-to-talk, where the app offers it.
+    ...(host.dictation ? [dictationExtension(host.dictation)] : []),
   ];
 }
 

@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import pkg from "./package.json";
+import { fetchDictationModel } from "./scripts/fetch-dictation-model.mjs";
 import {
   sharedBuildPlugins,
   sharedOptimizeDeps,
@@ -20,9 +21,18 @@ const latestReleaseNotes = fs.existsSync(latestReleaseNotesFile)
   ? fs.readFileSync(latestReleaseNotesFile, "utf8")
   : "";
 
+// The dictation model ships in the bundle (public/dictation/, gitignored).
+// Making sure it's there before every dev server and build covers `npm run
+// dev`, `tauri dev/build`, the web deploy and the e2e server alike. Kept out
+// of vite.shared so the marketing site never carries it.
+const dictationModel: Plugin = {
+  name: "dictation-model",
+  buildStart: () => fetchDictationModel(),
+};
+
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
-  plugins: sharedBuildPlugins(),
+  plugins: [...sharedBuildPlugins(), dictationModel],
 
   // The e2e shim boots its own Vite server (playwright.shim.config.ts, and
   // ad-hoc runs with VITE_TEST_BACKEND set) while `tauri dev` may be live.

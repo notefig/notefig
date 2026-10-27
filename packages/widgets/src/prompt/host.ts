@@ -28,6 +28,7 @@ import type {
   AgentTurn,
 } from "@notefig/shared/agent";
 import type { DirectiveSource } from "./composer/mention-suggestion";
+import type { DictationHost } from "../dictation/extension";
 
 /** Where in the document a widget's prompt was sent from. */
 export interface WidgetPromptTarget {
@@ -189,4 +190,11 @@ export interface PromptWidgetHost {
     DirectiveIcon: ComponentType<{ namespace: string; className?: string }>;
     HarnessLogo: ComponentType<{ harnessId: string; className?: string }>;
   };
+
+  /** Push-to-talk into the composer: the app's dictation service, where it
+   *  has one. */
+  dictation?: DictationHost;
+  /** The hold key's name ("right ⌥") while dictation is on: the draft's
+   *  placeholder then says how to talk. */
+  useDictationKey?(): string | null;
 }

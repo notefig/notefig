@@ -45,7 +45,12 @@ import {
   type AgentTaskRow,
   type AgentTurn,
 } from "@/modules/agents/react";
-import { PromptEditor, type PromptEditorHandle } from "@notefig/widgets";
+import {
+  PromptEditor,
+  type PromptEditorHandle,
+} from "@notefig/widgets";
+import { VoiceWave } from "@notefig/ui/voice-wave";
+import { useDictationKey } from "@/modules/dictation/react";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { promptToSend } from "./prompt-widget-host";
 import { PermissionCard } from "./permission-card";
@@ -1268,8 +1273,14 @@ export function PromptBox({
   const { t } = useTranslation();
   const harnessLabel = useHarnessLabels()(harnessId);
   const sessionUsage = useTaskRow(taskId)?.usage;
+  const dictationKey = useDictationKey();
   return (
-    <div className="pointer-events-auto rounded-2xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40">
+    // A dictation scope: while someone dictates into the composer, the
+    // action button shows the voice wave (styles.css).
+    <div
+      data-dictation-scope=""
+      className="pointer-events-auto rounded-2xl border border-border bg-card shadow-lg shadow-black/5 dark:shadow-black/40"
+    >
       <PromptEditor
         ref={composerRef}
         workspacePath={workspacePath}
@@ -1294,7 +1305,11 @@ export function PromptBox({
           return true;
         }}
         placeholder={
-          disabled ? t("agentLoadingSession") : t("agentPromptPlaceholder")
+          disabled
+            ? t("agentLoadingSession")
+            : dictationKey
+              ? t("agentPromptPlaceholderDictation", { key: dictationKey })
+              : t("agentPromptPlaceholder")
         }
         className="min-h-[2.75rem] w-full px-4 pt-3 text-sm"
       />
@@ -1344,6 +1359,7 @@ function ComposerActionButton({
   onStop: () => void;
 }) {
   const { t } = useTranslation();
+  const { dictation } = useCore() as { dictation?: ReturnType<typeof useCore>["dictation"] };
   const button = deriveComposerButton({
     isRunning,
     draftEmpty,
@@ -1361,14 +1377,17 @@ function ComposerActionButton({
       variant={button.mode === "stop" ? "outline" : "default"}
       onClick={button.mode === "stop" ? onStop : onSend}
       disabled={!button.enabled}
-      className="size-9 rounded-xl"
+      className="dictation-swap size-9 rounded-xl"
       title={label}
       aria-label={label}
     >
       {button.mode === "stop" ? (
-        <Square className="fill-current" />
+        <Square className="dictation-idle-only fill-current" />
       ) : (
-        <ArrowUp />
+        <ArrowUp className="dictation-idle-only" />
+      )}
+      {dictation && (
+        <VoiceWave level={dictation.level} size="1.25rem" className="dictation-active-only" />
       )}
     </Button>
   );
