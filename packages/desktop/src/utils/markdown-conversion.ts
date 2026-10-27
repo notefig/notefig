@@ -16,7 +16,7 @@ import {
   createWorkerClient,
   WorkerRpcError,
   type WorkerClient,
-} from "@/workers/worker-rpc";
+} from "@notefig/worker";
 
 export interface SerializedDoc {
   markdown: string;

@@ -3,7 +3,7 @@
  * lazily-booted worker for all repos, serving `@notefig/git`'s worker API. The CPU-heavy side
  * (statusMatrix's worktree hashing, packfile parsing, index rewrites) runs
  * in the worker; its filesystem access is served back to this thread over
- * worker-rpc's host channel, since Tauri `invoke` and the browser adapters
+ * @notefig/worker's host channel, since Tauri `invoke` and the browser adapters
  * only exist here.
  *
  * Deliberately no inline fallback (the in-process `IsomorphicGitService`
@@ -36,7 +36,7 @@ import {
   createWorkerClient,
   serveWorkerHost,
   type WorkerClient,
-} from "@/workers/worker-rpc";
+} from "@notefig/worker";
 import { platformModule } from "@/core/services";
 
 /** Mapped alias: interfaces don't satisfy `WorkerApi`'s index constraint. */

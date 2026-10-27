@@ -92,6 +92,16 @@ export function workspaceSourceAliases(dirname: string) {
       find: /^@notefig\/core\/react$/,
       replacement: path.resolve(dirname, "../core/src/react.tsx"),
     },
+    // @notefig/dictation and @notefig/worker are source-only too: TS with
+    // no build of their own.
+    {
+      find: /^@notefig\/dictation$/,
+      replacement: path.resolve(dirname, "../dictation/src/index.ts"),
+    },
+    {
+      find: /^@notefig\/worker$/,
+      replacement: path.resolve(dirname, "../worker/src/index.ts"),
+    },
     // @notefig/ui and @notefig/widgets are source-only (no dist at all):
     // they ship .tsx, which only a bundler can consume. Subpath imports
     // (@notefig/ui/button) map straight onto the file tree; extensions are
@@ -144,10 +154,13 @@ export const sharedOptimizeDeps = {
   // production build emits the asset correctly either way.
   // @pierre/trees, @pierre/diffs: pre-bundling bypasses transform hooks,
   // which would skip flattenPierreShadowCss in dev.
+  // onnxruntime-web (the dictation worker): same failure as the SQLite
+  // package — it locates its .wasm/.mjs siblings relative to itself.
   exclude: [
     "@tanstack/browser-db-sqlite-persistence",
     "@pierre/trees",
     "@pierre/diffs",
+    "onnxruntime-web",
   ],
   // An excluded package's imports are served raw, so its CommonJS-only
   // dependency needs pre-bundling explicitly or its default import breaks

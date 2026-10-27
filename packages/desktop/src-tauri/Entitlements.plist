@@ -5,11 +5,15 @@
   its sidecars). Release builds run under the hardened runtime, which denies
   JIT memory by default; the bundled Claude adapter is Node (V8), which aborts
   at startup without it ("Failed to reserve virtual memory for CodeRange").
-  MET-211. Keep this minimal: allow-jit is all V8 needs.
+  MET-211. Keep this minimal: allow-jit is all V8 needs, and audio-input is
+  what lets the hardened runtime open the microphone for dictation (the
+  webview's getUserMedia; see Info.plist for the prompt's wording).
 -->
 <plist version="1.0">
 <dict>
   <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
   <true/>
 </dict>
 </plist>

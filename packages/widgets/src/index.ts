@@ -147,6 +147,10 @@ export {
   type MinimapSource,
 } from "./minimap/contract";
 
+/** Dictation: the editor end of push-to-talk (`@notefig/dictation` is the
+ *  service and its contract). */
+export { dictationExtension } from "./dictation/extension";
+
 /**
  * The translation keys this package resolves — the host application owns the
  * strings, and asserts against this list that it defines every one.

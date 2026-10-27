@@ -20,8 +20,10 @@ import {
   revealWidget,
   widgetMinimapExtension,
   PageLinkSuggestion,
+  dictationExtension,
   type PromptWidgetsApi,
 } from "@notefig/widgets";
+import type { DictationHost } from "@notefig/dictation";
 import {
   closeDocumentSync,
   flushDocumentSync,
@@ -305,6 +307,7 @@ function createMarkdownInstance(
   basePath: string | undefined,
   fs: EditorFs,
   prompts: PromptWidgetsApi | undefined,
+  dictation: DictationHost | undefined,
 ): MarkdownInstance {
   const workspaceRoot = basePath || getDirectoryPath(filePath);
 
@@ -338,6 +341,9 @@ function createMarkdownInstance(
     // The document minimap rail (MET-172) — mounts its own UI inside the
     // editor's scroll container; registering it is the installation.
     widgetMinimapExtension({ prompts }),
+    // Push-to-talk lands here (and in this document's prompt-widget drafts);
+    // absent in roots without the dictation module (the marketing site).
+    ...(dictation ? [dictationExtension(dictation)] : []),
   ];
 
   const editor = new Editor({
@@ -512,6 +518,8 @@ interface MarkdownConfig {
   /** Every prompt widget's state (`core.promptWidgets`), handed to the
    *  document's widgets. Editors built without it get an inert one. */
   prompts?: PromptWidgetsApi;
+  /** `core.dictation`, when the root has it. */
+  dictation?: DictationHost;
 }
 
 interface ImageConfig {
@@ -577,6 +585,7 @@ export function getOrCreateEditor(
         config.basePath,
         fs,
         config.prompts,
+        config.dictation,
       );
       break;
     case "image":

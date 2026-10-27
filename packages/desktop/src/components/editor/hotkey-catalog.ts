@@ -7,6 +7,8 @@
  * become user-editable — is a rewire of the call sites rather than a rewrite of
  * this file.
  */
+import { dictationHoldKey, holdKeyLabel } from "@notefig/dictation";
+
 export type HotkeyGroup = "general" | "tabs" | "editing";
 
 export interface HotkeyEntry {
@@ -18,6 +20,9 @@ export interface HotkeyEntry {
    * bindings (⌘1 through ⌘9). Rendered as `<binding> – <bindingEnd>`.
    */
   bindingEnd?: string;
+  /** Shown as is instead of the formatted binding: a key held on its own
+   *  (one side's modifier) has no chord notation. */
+  display?: string;
   /** i18n key under `hotkeyLabels`. */
   labelKey: string;
   group: HotkeyGroup;
@@ -153,4 +158,12 @@ export const HOTKEY_CATALOG: HotkeyEntry[] = [
   },
   { id: "undo", binding: "Mod+Z", labelKey: "undo", group: "editing" },
   { id: "redo", binding: "Mod+Shift+Z", labelKey: "redo", group: "editing" },
+  // @notefig/dictation (hold to talk, release to insert)
+  {
+    id: "dictate",
+    binding: dictationHoldKey() === "AltRight" ? "Alt" : "Control",
+    display: `Hold ${holdKeyLabel(dictationHoldKey())}`,
+    labelKey: "dictate",
+    group: "editing",
+  },
 ];

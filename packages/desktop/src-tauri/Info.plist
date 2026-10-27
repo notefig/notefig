@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged by Tauri into the app's generated Info.plist. The microphone prompt
+  macOS shows the first time dictation runs uses this wording; without it the
+  system refuses the microphone outright.
+-->
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Notefig uses the microphone only while you hold the dictation key. Speech is turned into text on this Mac; audio never leaves it.</string>
+</dict>
+</plist>

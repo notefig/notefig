@@ -1,0 +1,1 @@
+export { dictationModule } from "./dictation";

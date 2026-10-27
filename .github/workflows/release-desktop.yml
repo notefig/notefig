@@ -166,6 +166,14 @@ jobs:
         working-directory: packages/desktop
         run: npm install
 
+      # The dictation model is fetched by the Vite build (scripts/fetch-dictation-model.mjs);
+      # cached so a run doesn't download its 132 MB again.
+      - name: Cache dictation model
+        uses: actions/cache@v4
+        with:
+          path: packages/desktop/node_modules/.cache/dictation-model
+          key: ${{ runner.os }}-dictation-model-${{ hashFiles('packages/desktop/scripts/fetch-dictation-model.mjs') }}
+
       - name: Build web version
         working-directory: packages/desktop
         env:
@@ -266,6 +274,14 @@ jobs:
       - name: Install frontend dependencies
         working-directory: packages/desktop
         run: npm install
+
+      # The dictation model is fetched by the Vite build (scripts/fetch-dictation-model.mjs);
+      # cached so a run doesn't download its 132 MB again.
+      - name: Cache dictation model
+        uses: actions/cache@v4
+        with:
+          path: packages/desktop/node_modules/.cache/dictation-model
+          key: ${{ runner.os }}-dictation-model-${{ hashFiles('packages/desktop/scripts/fetch-dictation-model.mjs') }}
 
       # MET-210: compile the bundled ACP adapter sidecar for THIS leg's
       # target as a Node single-executable application (the runner's Node is

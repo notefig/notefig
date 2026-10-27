@@ -38,7 +38,8 @@ export function TextEditor({
   contentError,
   initialDoc,
 }: TextEditorProps) {
-  const { platform, editors, turnWrites, tabs, promptWidgets } = useCore();
+  const { platform, editors, turnWrites, tabs, promptWidgets, dictation } =
+    useCore();
   const { fs } = platform;
   const instance = getOrCreateEditor(
     editors,
@@ -48,6 +49,7 @@ export function TextEditor({
       content: initialDoc,
       basePath,
       prompts: promptWidgets,
+      dictation,
     },
     fs,
   );

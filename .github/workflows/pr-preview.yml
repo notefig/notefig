@@ -59,6 +59,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The dictation model is fetched by the Vite build (scripts/fetch-dictation-model.mjs);
+      # cached so a run doesn't download its 132 MB again.
+      - name: Cache dictation model
+        uses: actions/cache@v4
+        with:
+          path: packages/desktop/node_modules/.cache/dictation-model
+          key: ${{ runner.os }}-dictation-model-${{ hashFiles('packages/desktop/scripts/fetch-dictation-model.mjs') }}
+
       # No PostHog key (previews stay out of analytics) and no support URL (the support Worker only answers the app's
       # own origins).
       - name: Build the web app

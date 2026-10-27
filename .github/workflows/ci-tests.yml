@@ -177,6 +177,13 @@ jobs:
       - name: Typecheck and test Core
         run: npm run build -w packages/core && npm run test -w packages/core
 
+      # Dictation's engine and service, and the worker messaging every
+      # package's workers use; both source-only.
+      - name: Typecheck and test Dictation and Worker
+        run: |
+          npm run build -w packages/dictation && npm run test -w packages/dictation
+          npm run build -w packages/worker && npm run test -w packages/worker
+
   test-desktop-e2e:
     name: Test Desktop
     runs-on: ubuntu-latest
@@ -193,6 +200,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # The dictation model is fetched by the Vite build (scripts/fetch-dictation-model.mjs);
+      # cached so a run doesn't download its 132 MB again.
+      - name: Cache dictation model
+        uses: actions/cache@v4
+        with:
+          path: packages/desktop/node_modules/.cache/dictation-model
+          key: ${{ runner.os }}-dictation-model-${{ hashFiles('packages/desktop/scripts/fetch-dictation-model.mjs') }}
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
@@ -304,6 +319,14 @@ jobs:
       - name: Build test shim
         working-directory: packages/desktop/src-tauri
         run: cargo build -p test-shim
+
+      # The dictation model is fetched by the Vite build (scripts/fetch-dictation-model.mjs);
+      # cached so a run doesn't download its 132 MB again.
+      - name: Cache dictation model
+        uses: actions/cache@v4
+        with:
+          path: packages/desktop/node_modules/.cache/dictation-model
+          key: ${{ runner.os }}-dictation-model-${{ hashFiles('packages/desktop/scripts/fetch-dictation-model.mjs') }}
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4

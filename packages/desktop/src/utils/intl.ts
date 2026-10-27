@@ -173,6 +173,10 @@ i18n
           scratchpadOnStartup: "Scratchpad on startup",
           scratchpadOnStartupDesc:
             "Open a scratchpad when you enter a project with nothing open.",
+          dictation: "Dictation",
+          dictationDesc:
+            "Hold {{key}} while you talk to type into a document or a prompt. Audio never leaves your device.",
+          dictationFailed: "Dictation didn't work: {{reason}}",
           automaticUpdates: "Automatic updates",
           automaticUpdatesDesc:
             "Download updates in the background and notify you when they're ready to install.",
@@ -365,6 +369,7 @@ i18n
             searchInAllFiles: "Find in all files",
             undo: "Undo",
             redo: "Redo",
+            dictate: "Dictate",
           },
 
           // Command Keywords
@@ -586,6 +591,8 @@ i18n
           agentRemoveFromQueue: "Remove from queue",
           agentScrollToEnd: "Scroll to end",
           agentPromptPlaceholder: "Ask anything, @models, /prompts …",
+          agentPromptPlaceholderDictation:
+            "Ask anything, @models, /prompts — or hold {{key}} to talk",
           agentLoadingSession: "Loading session…",
           agentChangeSetting: "Change {{name}}",
           agentSettingSwitchFailed: "Couldn't switch {{name}}: {{error}}",
@@ -605,7 +612,9 @@ i18n
           agentContentOfType: "{{type}} content",
 
           // Agent UI — inline prompt blob (in the markdown editor)
-          promptBlobPlaceholder: "Ask AI — edit this doc, or any other…",
+          promptBlobPlaceholder: "Prompt to edit this doc, or any other…",
+          promptBlobPlaceholderDictation:
+            "Prompt to edit this doc, or hold {{key}} to talk",
           promptBlobQueued: "Queued",
           promptBlobQueuedAhead: "Queued · {{count}} ahead",
           promptBlobReferenceRemove: "Remove reference",
@@ -619,7 +628,10 @@ i18n
           promptBlobStopToRemove: "Stop the agent to remove this prompt",
           promptBlobOpenChat: "Open chat",
           promptBlobReply: "Reply…",
+          promptBlobReplyDictation: "Reply, or hold {{key}} to talk…",
           promptBlobAnswer: "↑ to pick, or type an answer…",
+          promptBlobAnswerDictation:
+            "↑ to pick, type, or hold {{key}} to answer…",
           promptBlobShowMore: "Show more",
           promptBlobShowLess: "Show less",
           promptBlobIssue: "Issue",

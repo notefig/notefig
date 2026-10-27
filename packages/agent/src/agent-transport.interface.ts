@@ -6,7 +6,7 @@ import type { McpServer } from "@notefig/shared/agent";
  * (TauriStdioTransport); web tunnels the identical newline-delimited JSON-RPC
  * byte stream to a `notefig agent` worker (TunnelTransport, over the
  * encrypted tunnel — packages/shared/src/tunnel); tests use an in-memory
- * pair (LoopbackTransport). Mirrors how worker-rpc.ts gives one typed promise API
+ * pair (LoopbackTransport). Mirrors how @notefig/worker gives one typed promise API
  * over any message port. The task's app-tools MCP server rides the separate
  * `McpEndpoint` seam below — it multiplexes several harness-spawned
  * connections, so it is deliberately not a line channel. Both factories

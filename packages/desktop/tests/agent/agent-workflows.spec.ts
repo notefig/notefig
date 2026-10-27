@@ -675,7 +675,7 @@ test.describe("agent workflows", () => {
 
       // Reply continuation: the same hole, now a reply.
       const draft = widget.locator("[data-prompt-draft]");
-      await expect(draft).toHaveAttribute("data-placeholder", "Reply…");
+      await expect(draft).toHaveAttribute("data-placeholder", "Reply, or hold right Ctrl to talk…");
       await draft.click();
       await page.keyboard.type(promptTextOf(recording, 1));
       await page.keyboard.press("Enter");

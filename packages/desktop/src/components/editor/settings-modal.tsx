@@ -49,6 +49,7 @@ import {
 import { useCore } from "@notefig/core/react";
 import { RELEASE_NOTES_TAB_ID } from "@/modules/tabs";
 import { useFocusedWorkspace } from "@/modules/workspaces/react";
+import { dictationHoldKey, holdKeyLabel } from "@notefig/dictation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useAppUpdater,
@@ -317,6 +318,7 @@ function GeneralSettings({
       </SettingRow>
 
       <ScratchpadOnStartupToggle />
+      <DictationToggle />
 
       <div className="pt-4">
         <h2 className="text-lg font-semibold mb-1">{t("advanced")}</h2>
@@ -568,9 +570,11 @@ function HotkeysSettings() {
 
 function HotkeyRow({ entry }: { entry: HotkeyEntry }) {
   const { t } = useTranslation();
-  const chord = entry.bindingEnd
-    ? `${formatForDisplay(entry.binding)} – ${formatForDisplay(entry.bindingEnd)}`
-    : formatForDisplay(entry.binding);
+  const chord =
+    entry.display ??
+    (entry.bindingEnd
+      ? `${formatForDisplay(entry.binding)} – ${formatForDisplay(entry.bindingEnd)}`
+      : formatForDisplay(entry.binding));
 
   return (
     <div className="flex items-center justify-between gap-4 px-3 py-2">
@@ -664,6 +668,23 @@ function ScratchpadOnStartupToggle() {
         onCheckedChange={(checked) =>
           setSetting("scratchpadOnStartup", checked)
         }
+      />
+    </SettingRow>
+  );
+}
+
+function DictationToggle() {
+  const { t } = useTranslation();
+  const { settings, setSetting, isReady } = useAppSettings();
+  return (
+    <SettingRow
+      title={t("dictation")}
+      description={t("dictationDesc", { key: holdKeyLabel(dictationHoldKey()) })}
+    >
+      <Switch
+        checked={settings.dictationEnabled}
+        disabled={!isReady}
+        onCheckedChange={(checked) => setSetting("dictationEnabled", checked)}
       />
     </SettingRow>
   );

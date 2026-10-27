@@ -31,6 +31,7 @@
       "@notefig/core": ["../core/src/index.ts"],
       "@notefig/core/react": ["../core/src/react.tsx"],
       "@notefig/ui/*": ["../ui/src/*"],
+      "@notefig/dictation": ["../dictation/src/index.ts"],
       "@notefig/widgets": ["../widgets/src/index.ts"],
       "@notefig/widgets/*": ["../widgets/src/*"],
       // This package nests @types/react 19 (for Next), but the desktop app
