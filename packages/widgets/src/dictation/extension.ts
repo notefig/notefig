@@ -66,11 +66,8 @@ function createGhost(host: DictationHost) {
   el.className = "dictation-ghost pointer-events-none text-muted-foreground";
   el.setAttribute("aria-hidden", "true");
   const words = document.createTextNode("");
-  const wave = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  wave.setAttribute(
-    "class",
-    "dictation-wave ms-[0.3em] me-[0.1em] inline-block size-[1.45em] align-[-0.35em]",
-  );
+  const wave = document.createElement("canvas");
+  wave.className = "dictation-wave ms-[0.3em] me-[0.1em] inline-block size-[1.45em] align-[-0.35em]";
   const stop = mountVoiceWave(wave, { level: host.level, hearing: host.hearing });
   el.append(words, wave);
   return {
@@ -165,6 +162,11 @@ export function dictationExtension(host: DictationHost) {
             },
           },
           props: {
+            // While someone dictates, the editor says so: styles.css hides
+            // its caret (the wave marks where the words go; a caret beside
+            // words that keep changing only jumps about) and its placeholder.
+            attributes: (state): Record<string, string> =>
+              dictationKey.getState(state) ? { "data-dictating": "" } : {},
             decorations(state) {
               const ghost = dictationKey.getState(state);
               if (!ghost) return null;

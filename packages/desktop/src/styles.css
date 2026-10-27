@@ -758,9 +758,15 @@ file-tree-container:focus-visible {
    everything here keys off it. Unlayered, so Tailwind's display utilities
    can't outrank the swaps. */
 
+/* The wave marks where the words go; the caret stays put beside words that
+   keep changing, so it's hidden rather than left to jump about. */
+.ProseMirror[data-dictating] {
+  caret-color: transparent;
+}
+
 /* The words being heard take the placeholder's place: the ghost is a
    decoration, so the editor still counts as empty and would paint both. */
-.prompt-editor .ProseMirror:has(.dictation-ghost) p.is-editor-empty:first-child::before,
+.prompt-editor .ProseMirror[data-dictating] p.is-editor-empty:first-child::before,
 [data-prompt-draft][data-empty="true"]:has(.dictation-ghost)::before {
   content: none;
 }

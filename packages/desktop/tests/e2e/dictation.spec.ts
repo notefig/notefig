@@ -169,20 +169,47 @@ test.describe("dictation", () => {
 
     await dictate(page, async () => {
       // The wave shows the moment the key is down, trailing the words.
-      const wave = ghost(page).locator("svg.dictation-wave");
+      const wave = ghost(page).locator("canvas.dictation-wave");
       await expect(wave).toBeVisible();
-      // Five bars, moving.
-      const bars = wave.locator("rect");
-      await expect(bars).toHaveCount(5);
-      const middle = () => bars.nth(2).getAttribute("height");
-      const first = await middle();
-      await expect.poll(middle, { timeout: 2_000 }).not.toBe(first);
+      // Drawn at the screen's own pixels (sharp), and moving.
+      const pixels = () =>
+        wave.evaluate((c: HTMLCanvasElement) => {
+          const { width } = c.getBoundingClientRect();
+          const sharp = c.width === Math.round(width * devicePixelRatio);
+          const data = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+          let ink = 0;
+          for (let i = 3; i < data.length; i += 4) ink += data[i];
+          return { sharp, ink };
+        });
+      const first = await pixels();
+      expect(first.sharp).toBe(true);
+      await expect.poll(async () => (await pixels()).ink, { timeout: 2_000 }).not.toBe(first.ink);
+      // The caret is hidden: the wave marks where the words go.
+      await expect(editor).toHaveAttribute("data-dictating", "");
+      await expect(editor).toHaveCSS("caret-color", "rgba(0, 0, 0, 0)");
+      // The editor's DOM holds still between updates of the words: the wave
+      // animates without touching it (each change costs a style and layout
+      // pass, and a caret repaint in WebKit).
+      const changes = await editor.evaluate(
+        (el) =>
+          new Promise<number>((resolve) => {
+            let count = 0;
+            const observer = new MutationObserver((records) => (count += records.length));
+            observer.observe(el, { subtree: true, childList: true, characterData: true, attributes: true });
+            setTimeout(() => {
+              observer.disconnect();
+              resolve(count);
+            }, 1000);
+          }),
+      );
+      expect(changes).toBeLessThan(15);
       await expectLiveWords(page);
       expect(await editor.textContent()).not.toMatch(SPOKEN);
     });
 
     await expect(today).toContainText(SPOKEN, { timeout: 60_000 });
     await expect(ghost(page)).toHaveCount(0);
+    await expect(editor).not.toHaveAttribute("data-dictating");
     await page.keyboard.press("Control+Z");
     await expect(editor).not.toContainText(SPOKEN);
     await expect(today).toHaveText("Today:");
@@ -205,7 +232,7 @@ test.describe("dictation", () => {
 
     const picker = widget.getByRole("button", { name: "Choose harness" });
     const logo = picker.locator(".dictation-idle-only");
-    const wave = picker.locator("svg.dictation-active-only");
+    const wave = picker.locator("canvas.dictation-active-only");
     await expect(logo).toBeVisible();
     await expect(wave).toBeHidden();
 
@@ -240,7 +267,7 @@ test.describe("dictation", () => {
 
     const mark = widget.locator("[data-widget-response] .dictation-swap").first();
     const logo = mark.locator(".dictation-idle-only");
-    const wave = mark.locator("svg.dictation-active-only");
+    const wave = mark.locator("canvas.dictation-active-only");
     await expect(logo).toBeVisible();
     await expect(wave).toBeHidden();
 
@@ -266,7 +293,7 @@ test.describe("dictation", () => {
 
     const send = page.getByRole("button", { name: "Send" });
     const arrow = send.locator(".dictation-idle-only");
-    const wave = send.locator("svg.dictation-active-only");
+    const wave = send.locator("canvas.dictation-active-only");
     await expect(arrow).toBeVisible();
 
     await dictate(page, async () => {
