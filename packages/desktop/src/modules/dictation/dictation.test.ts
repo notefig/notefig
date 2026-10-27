@@ -5,6 +5,7 @@ import {
   dictationHoldKey,
   holdKeyLabel,
   joinPhrases,
+  splitGuess,
   type DictationApi,
 } from "./dictation";
 import type { Microphone } from "./microphone";
@@ -16,6 +17,8 @@ const RATE = 16_000;
 const speech = (ms: number) =>
   Float32Array.from({ length: (RATE * ms) / 1000 }, (_, i) => 0.2 * Math.sin(i * 0.3));
 const silence = (ms: number) => new Float32Array((RATE * ms) / 1000);
+/** Short phrases, for segmenter tests that shouldn't need minutes of audio. */
+const SHORT = { sampleRate: RATE, pauseMs: 400, minPhraseMs: 2000, maxPhraseMs: 5000 };
 
 function fakeMic() {
   let listener: ((s: Float32Array) => void) | null = null;
@@ -90,11 +93,11 @@ describe("dictation", () => {
   it("decodes phrases at pauses while talking and joins them on release", async () => {
     const { target, events } = fakeTarget();
     dictation.attach(target);
-    // The cut phrase is 2.7 s (speech plus half the pause); live guesses
+    // The cut phrase is ~4.76 s (speech plus half the pause); live guesses
     // and the tail are shorter.
     let cut = false;
     engine.transcribe.mockImplementation(async (samples: Float32Array) => {
-      if (!cut && samples.length > 2.6 * RATE) {
+      if (!cut && samples.length > 4.6 * RATE) {
         cut = true;
         return "We should refactor";
       }
@@ -102,8 +105,8 @@ describe("dictation", () => {
     });
 
     await dictation.press();
-    microphone.say(speech(2500));
-    microphone.say(silence(600));
+    microphone.say(speech(4500));
+    microphone.say(silence(700));
     await vi.waitFor(() => expect(events).toContain("preview:We should refactor|"));
     microphone.say(speech(1500));
     await dictation.release();
@@ -122,7 +125,8 @@ describe("dictation", () => {
     microphone.say(speech(600));
     await vi.waitFor(() => expect(events).toContain("preview:|We"));
     microphone.say(speech(600));
-    await vi.waitFor(() => expect(events).toContain("preview:|We should"));
+    // "We" held still between guesses, so it reads plain; "should" shimmers.
+    await vi.waitFor(() => expect(events).toContain("preview:We|should"));
     await dictation.release();
     expect(events.at(-1)).toBe("commit:We should");
   });
@@ -138,9 +142,42 @@ describe("dictation", () => {
       microphone.say(speech(300));
       await vi.waitFor(() => expect(engine.transcribe).toHaveBeenCalledTimes(i + 1));
     }
-    await vi.waitFor(() => expect(events).toContain("preview:|We should"));
-    expect(events.filter((e) => e.startsWith("preview:"))).toEqual(["preview:|We", "preview:|We should"]);
+    await vi.waitFor(() => expect(events).toContain("preview:We|should"));
+    expect(events.filter((e) => e.startsWith("preview:"))).toEqual(["preview:|We", "preview:We|should"]);
     dictation.cancel();
+  });
+
+  it("lets go straight to the last guess when nothing was said after it", async () => {
+    const { target, events } = fakeTarget();
+    dictation.attach(target);
+    engine.transcribe.mockResolvedValue("Ship it.");
+
+    await dictation.press();
+    microphone.say(speech(1000));
+    await vi.waitFor(() => expect(events).toContain("preview:|Ship it"));
+    microphone.say(silence(300));
+    const calls = engine.transcribe.mock.calls.length;
+    await dictation.release();
+    // No second decode of the same speech: the guess, as the model wrote it.
+    expect(engine.transcribe.mock.calls.length).toBe(calls);
+    expect(events.at(-1)).toBe("commit:Ship it.");
+  });
+
+  it("decodes the rest on release when there was speech after the last guess", async () => {
+    const { target, events } = fakeTarget();
+    dictation.attach(target);
+    engine.transcribe.mockImplementation(async (samples: Float32Array) =>
+      samples.length > 1.5 * RATE ? "Ship it today." : "Ship it",
+    );
+
+    await dictation.press();
+    microphone.say(speech(1000));
+    await vi.waitFor(() => expect(events).toContain("preview:|Ship it"));
+    // Too soon for another guess, so only the release hears these words.
+    microphone.say(speech(150));
+    microphone.say(speech(700));
+    await dictation.release();
+    expect(events.at(-1)).toBe("commit:Ship it today.");
   });
 
   it("drops a live guess that a phrase cut has overtaken", async () => {
@@ -153,9 +190,9 @@ describe("dictation", () => {
       .mockResolvedValue("");
 
     await dictation.press();
-    microphone.say(speech(2500));
+    microphone.say(speech(4500));
     await vi.waitFor(() => expect(engine.transcribe).toHaveBeenCalledTimes(1));
-    microphone.say(silence(600));
+    microphone.say(silence(700));
     finishLive("stale guess");
     await dictation.release();
     expect(events).not.toContain("preview:|stale guess");
@@ -294,9 +331,26 @@ describe("hold key", () => {
   });
 });
 
+describe("splitGuess", () => {
+  it("keeps the words two guesses agree on steady, and the rest changing", () => {
+    expect(splitGuess("We should ship", "We should shop the")).toEqual({ steady: "We should", changing: "shop the" });
+  });
+
+  it("keeps the last word changing even when nothing moved", () => {
+    expect(splitGuess("We should", "We should")).toEqual({ steady: "We", changing: "should" });
+    expect(splitGuess("", "We")).toEqual({ steady: "", changing: "We" });
+  });
+});
+
 describe("joinPhrases", () => {
   it("joins phrases into one sentence where no sentence ended", () => {
     expect(joinPhrases(["So the plan", "Is to ship.", "Then rest."])).toBe("So the plan is to ship. Then rest.");
+  });
+
+  it("drops the period a cut left mid-sentence", () => {
+    expect(joinPhrases(["We want it to feel instant.", "which means fast."])).toBe(
+      "We want it to feel instant which means fast.",
+    );
   });
 
   it("drops a phrase that is only punctuation", () => {
@@ -306,7 +360,7 @@ describe("joinPhrases", () => {
 
 describe("segmenter", () => {
   it("cuts a phrase in the middle of a long enough pause", () => {
-    const segmenter = createSegmenter();
+    const segmenter = createSegmenter(SHORT);
     expect(segmenter.push(speech(2500))).toEqual([]);
     const [phrase] = segmenter.push(silence(500));
     expect(phrase.length / RATE).toBeCloseTo(2.5 + 0.2, 1);
@@ -315,7 +369,7 @@ describe("segmenter", () => {
   });
 
   it("doesn't decode a silent tail after the last phrase", async () => {
-    const segmenter = createSegmenter();
+    const segmenter = createSegmenter(SHORT);
     segmenter.push(speech(2500));
     segmenter.push(silence(500));
     expect(segmenter.hasSpeech()).toBe(false);
@@ -324,16 +378,22 @@ describe("segmenter", () => {
   });
 
   it("doesn't cut a short phrase or silence alone", () => {
-    const segmenter = createSegmenter();
+    const segmenter = createSegmenter(SHORT);
     expect(segmenter.push(speech(800))).toEqual([]);
     expect(segmenter.push(silence(600))).toEqual([]);
-    const quiet = createSegmenter();
+    const quiet = createSegmenter(SHORT);
     expect(quiet.push(silence(3000))).toEqual([]);
   });
 
-  it("cuts a phrase that runs on past the limit", () => {
+  it("cuts a phrase that runs on past the limit at its quietest recent moment", () => {
     const segmenter = createSegmenter({ sampleRate: RATE, pauseMs: 400, minPhraseMs: 2000, maxPhraseMs: 5000 });
-    expect(segmenter.push(speech(5000))).toHaveLength(1);
+    // A 100 ms dip between "words" 4 s in, too short to be a pause.
+    expect(segmenter.push(speech(4000))).toEqual([]);
+    expect(segmenter.push(silence(100))).toEqual([]);
+    const [phrase] = segmenter.push(speech(1000));
+    // Cut inside the dip, not at the 5 s mark mid-"word".
+    expect(phrase.length / RATE).toBeGreaterThanOrEqual(4.0);
+    expect(phrase.length / RATE).toBeLessThanOrEqual(4.1);
   });
 });
 
@@ -344,6 +404,11 @@ describe("resampler", () => {
     const total = out.reduce((n, o) => n + o.length, 0);
     expect(total).toBe(Math.floor(256 / 3));
     expect(out[1][0]).toBeCloseTo(0.5);
+  });
+
+  it("handles frames of any size, as the worklet batches them", () => {
+    const resample = createResampler(48_000);
+    expect(resample(new Float32Array(4096)).length + resample(new Float32Array(1)).length).toBe(1365);
   });
 
   it("handles 44.1 kHz", () => {

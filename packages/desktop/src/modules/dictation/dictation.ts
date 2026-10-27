@@ -85,6 +85,9 @@ const MIN_TAIL_SAMPLES = ms(300);
 /** The live phrase is first decoded at this length, then after each step. */
 const MIN_LIVE_SAMPLES = ms(300);
 const LIVE_STEP_SAMPLES = ms(250);
+/** A speaker this quiet after new words gets a guess at once, so the guess
+ *  is usually complete by the time they let go of the key. */
+const SETTLE_QUIET_MS = 150;
 
 type Platform = ReturnType<typeof detectPlatform>;
 
@@ -104,12 +107,19 @@ export function holdKeyLabel(key: DictationHoldKey, platform: Platform = detectP
 
 const hasWords = (text: string) => /[\p{L}\p{N}]/u.test(text);
 
-/** Joins phrases decoded one by one as if they had been one sentence; a
- *  phrase that came back as bare punctuation (a breath, a click) is dropped. */
+/**
+ * Joins phrases decoded one by one as if they had been one sentence. A
+ * phrase that came back as bare punctuation (a breath, a click) is dropped,
+ * and a period before a phrase the model began in lowercase was the cut's,
+ * not the speaker's: the model ends every clip it hears with one.
+ */
 export function joinPhrases(phrases: string[]): string {
   return phrases
     .filter(hasWords)
-    .reduce((text, phrase) => text + fitDictation(text, "", phrase), "")
+    .reduce((text, phrase) => {
+      const base = /^[a-z]/.test(phrase.trim()) ? text.replace(/\.$/, "") : text;
+      return base + fitDictation(base, "", phrase);
+    }, "")
     .trim();
 }
 
@@ -124,9 +134,25 @@ function loudness(samples: Float32Array): number {
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
+ * Splits a live guess for display: the words it shares with the guess
+ * before it have held still and read as plain text; only the words still
+ * changing shimmer (at least the last one, while the phrase goes on). Less
+ * moving text is calmer to read and cheaper to paint.
+ */
+export function splitGuess(previous: string, text: string): { steady: string; changing: string } {
+  const before = previous.split(" ");
+  const words = text.split(" ");
+  let same = 0;
+  while (same < words.length - 1 && words[same] === before[same]) same++;
+  return { steady: words.slice(0, same).join(" "), changing: words.slice(same).join(" ") };
+}
+
+/**
  * One dictation, key down to key up: cuts phrases at pauses and decodes
  * them in order, slips live guesses at the phrase in progress in between,
- * and joins the result. Decodes run one after another, as the worker does.
+ * and joins the result. Decodes run one after another, as the worker does,
+ * so guesses back off to leave it room: each waits at least half again as
+ * long as the last one took.
  */
 function createRun(insertion: DictationInsertion, engine: DictationEngine) {
   const segmenter = createSegmenter();
@@ -137,6 +163,9 @@ function createRun(insertion: DictationInsertion, engine: DictationEngine) {
   let queued = 0;
   let guessing = false;
   let sinceGuess = 0;
+  let guessGap = LIVE_STEP_SAMPLES;
+  /** The latest guess at the phrase in progress, and how much audio it heard. */
+  let lastGuess: { text: string; raw: string; heard: number; at: number } | null = null;
   const run = { released: false, cancelled: false, error: null as unknown };
   const open = () => !run.released && !run.cancelled && !run.error;
 
@@ -164,9 +193,15 @@ function createRun(insertion: DictationInsertion, engine: DictationEngine) {
     });
   };
 
+  /** The speaker has paused after words the last guess didn't hear. */
+  const paused = () =>
+    segmenter.quietMs() >= SETTLE_QUIET_MS &&
+    segmenter.speechAfter(lastGuess?.at === cuts ? lastGuess.heard : 0);
+
   /** The phrase still being spoken, again from its start, when the worker is free. */
   const guess = () => {
-    if (!open() || guessing || queued > 0 || sinceGuess < LIVE_STEP_SAMPLES) return;
+    if (!open() || guessing || queued > 0) return;
+    if (sinceGuess < guessGap && !paused()) return;
     const audio = segmenter.peek();
     if (audio.length < MIN_LIVE_SAMPLES || !segmenter.hasSpeech()) return;
     const at = cuts;
@@ -174,15 +209,21 @@ function createRun(insertion: DictationInsertion, engine: DictationEngine) {
     guessing = true;
     queue(async () => {
       try {
+        // A guess still waiting when the key comes up is skipped.
         if (!open()) return;
-        const text = await engine.transcribe(audio);
+        const started = performance.now();
+        const raw = await engine.transcribe(audio);
+        // The model ends whatever it hears with a period; mid-phrase that's
+        // only where the audio stopped so far.
+        const text = raw.replace(/\.$/, "");
+        guessGap = Math.max(LIVE_STEP_SAMPLES, ms(1.5 * (performance.now() - started)));
         // Shown words are only ever replaced by other words: a guess that
         // came back empty (a breath, a lone ".") leaves the last one up, so
-        // nothing blinks out and back. The model ends whatever it hears
-        // with a period; mid-phrase that's only where the audio stopped.
-        if (open() && cuts === at && hasWords(text)) {
-          insertion.preview(joinPhrases(phrases), text.replace(/\.$/, ""));
-        }
+        // nothing blinks out and back.
+        if (run.cancelled || cuts !== at || !hasWords(text)) return;
+        const { steady, changing } = splitGuess(lastGuess?.at === at ? lastGuess.text : "", text);
+        lastGuess = { text, raw, heard: audio.length, at };
+        if (open()) insertion.preview(joinPhrases([...phrases, steady]), changing);
       } catch {
         // A failed guess isn't a failed dictation: the phrase decode of the
         // same audio reports it if the model is really down.
@@ -200,11 +241,19 @@ function createRun(insertion: DictationInsertion, engine: DictationEngine) {
       for (const phrase of segmenter.push(samples)) decodePhrase(phrase);
       guess();
     },
-    /** Decodes what's left and resolves with the whole text. */
+    /**
+     * Decodes what's left and resolves with the whole text. When the last
+     * guess already heard all of the speech in the final phrase (the
+     * speaker stopped, then let go), it is that phrase: decoding the same
+     * audio again would only make the release wait.
+     */
     async finish(): Promise<string> {
-      const speech = segmenter.hasSpeech();
+      await decoding;
+      const guessed = lastGuess?.at === cuts ? lastGuess : null;
+      const fresh = guessed ? segmenter.speechAfter(guessed.heard) : segmenter.hasSpeech();
       const tail = segmenter.flush();
-      if (speech && tail.length >= MIN_TAIL_SAMPLES) decodePhrase(tail, false);
+      if (guessed && !fresh) phrases.push(guessed.raw);
+      else if (fresh && tail.length >= MIN_TAIL_SAMPLES) decodePhrase(tail, false);
       await decoding;
       if (run.error) throw run.error;
       return joinPhrases(phrases);

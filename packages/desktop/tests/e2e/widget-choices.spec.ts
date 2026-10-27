@@ -93,7 +93,11 @@ test.describe("prompt widget choices", () => {
     await expect(widget).toContainText("Which tier should the section lead with?");
     await expect(widget).not.toContainText("Question");
     await expect(widget.locator("[data-choice-option]")).toHaveCount(2);
-    await expect(draft(widget)).toHaveAttribute("data-placeholder", "↑ to pick, or type an answer…");
+    await expect(draft(widget)).toHaveAttribute(
+      "data-placeholder",
+      // Dictation is on by default, so the hint names the hold key too.
+      "↑ to pick, type, or hold right Ctrl to answer…",
+    );
     await stop(page, headless);
 
     await option(widget, "Enterprise").click();

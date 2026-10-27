@@ -18,6 +18,8 @@ const CANVAS_PX = 20;
 const COLUMNS = 5;
 const COLUMN_GAP = 3.5;
 const DOT_GAP = 2.25;
+/** ~30 fps: plenty for a wave this size. */
+const FRAME_MS = 32;
 
 export interface VoiceWaveOptions {
   /** The input level now, 0–1; read every frame. Absent: breathing only. */
@@ -64,9 +66,11 @@ function drawWave(ctx: CanvasRenderingContext2D, t: number, heard: number[]): vo
 /**
  * Animates the wave on `canvas` until the returned function is called, or
  * until the canvas, once in the document, leaves it (so a canvas handed to
- * ProseMirror as a widget needs no teardown). The loop runs only while the
- * canvas is on screen and the tab is visible: a `display: none` wave costs
- * nothing.
+ * ProseMirror as a widget needs no teardown). It draws at ~30 fps and only
+ * while it can be seen — on screen, tab visible, not `visibility: hidden` —
+ * and reads styles (its ink color, its visibility) rarely, never per frame:
+ * a style read can force the whole page's style recalc while the editor
+ * is changing under it.
  */
 export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOptions = {}): () => void {
   const dpr = Math.min(2, (typeof devicePixelRatio !== "undefined" && devicePixelRatio) || 1);
@@ -78,6 +82,8 @@ export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOpti
   // Per-column level, eased: quick to rise with a syllable, slower to fall.
   const heard = new Array<number>(COLUMNS).fill(0);
   let elapsed = 600;
+  let ink = "";
+  let inkAt = -Infinity;
   const frame = (dt: number) => {
     const level = Math.min(1, Math.max(0, options.level?.() ?? 0));
     for (let c = 0; c < COLUMNS; c++) {
@@ -86,7 +92,11 @@ export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOpti
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, CANVAS_PX, CANVAS_PX);
-    ctx.fillStyle = getComputedStyle(canvas).color;
+    if (elapsed - inkAt > 1000) {
+      ink = getComputedStyle(canvas).color;
+      inkAt = elapsed;
+    }
+    ctx.fillStyle = ink;
     drawWave(ctx, elapsed / 1000, heard);
   };
   frame(0);
@@ -100,18 +110,19 @@ export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOpti
   const loop = () => {
     const now = performance.now();
     const dt = now - last;
-    last = now;
-    elapsed += dt;
-    frame(dt);
-    if (!running) return;
-    if (styleHidden()) sync();
-    else raf = requestAnimationFrame(loop);
+    if (dt >= FRAME_MS) {
+      last = now;
+      elapsed += dt;
+      frame(dt);
+    }
+    if (running) raf = requestAnimationFrame(loop);
   };
   let visible = true;
   let attached = false;
   let poll: ReturnType<typeof setTimeout> | undefined;
   // `visibility: hidden` (a cross-fade's resting state) keeps the canvas in
-  // layout, so the observer still calls it visible: check it ourselves.
+  // layout, so the observer still calls it visible: check it ourselves, when
+  // a cross-fade starts or ends, and as a backstop once a second.
   const styleHidden = () => canvas.checkVisibility?.({ visibilityProperty: true }) === false;
   const sync = () => {
     clearTimeout(poll);
@@ -127,8 +138,7 @@ export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOpti
       running = false;
       cancelAnimationFrame(raf);
     }
-    // Nothing announces a style change: look again shortly.
-    if (visible && hidden) poll = setTimeout(sync, 200);
+    if (visible) poll = setTimeout(sync, 1000);
   };
   const io =
     typeof IntersectionObserver !== "undefined"
@@ -139,6 +149,8 @@ export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOpti
       : null;
   io?.observe(canvas);
   document.addEventListener("visibilitychange", sync);
+  canvas.addEventListener("transitionrun", sync);
+  canvas.addEventListener("transitionend", sync);
   if (!io) sync();
   function stop() {
     running = false;
@@ -146,6 +158,8 @@ export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOpti
     clearTimeout(poll);
     io?.disconnect();
     document.removeEventListener("visibilitychange", sync);
+    canvas.removeEventListener("transitionrun", sync);
+    canvas.removeEventListener("transitionend", sync);
   }
   return stop;
 }

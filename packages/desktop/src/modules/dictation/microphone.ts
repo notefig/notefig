@@ -19,10 +19,23 @@ export type OpenMicrophone = () => Promise<Microphone>;
 
 const TARGET_RATE = 16_000;
 
+/** Hands audio over in ~40 ms batches rather than every 128-sample render
+ *  quantum: a few dozen messages a second for the main thread, not 375. */
 const TAP_WORKLET = `class DictationTap extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.buffer = new Float32Array(2048);
+    this.filled = 0;
+  }
   process(inputs) {
     const channel = inputs[0] && inputs[0][0];
-    if (channel) this.port.postMessage(channel.slice(0));
+    if (!channel) return true;
+    if (this.filled + channel.length > this.buffer.length) {
+      this.port.postMessage(this.buffer.slice(0, this.filled));
+      this.filled = 0;
+    }
+    this.buffer.set(channel, this.filled);
+    this.filled += channel.length;
     return true;
   }
 }
@@ -36,22 +49,26 @@ registerProcessor("dictation-tap", DictationTap);`;
 export function createResampler(inputRate: number, outputRate = TARGET_RATE) {
   const step = inputRate / outputRate;
   let position = 0; // fractional input index where the next output starts
-  let carry: number[] = [];
+  let carry = new Float32Array(0);
   return (input: Float32Array): Float32Array => {
-    const samples = carry.length ? Float32Array.from([...carry, ...input]) : input;
-    const out: number[] = [];
-    while (position + step <= samples.length) {
+    let samples = input;
+    if (carry.length) {
+      samples = new Float32Array(carry.length + input.length);
+      samples.set(carry);
+      samples.set(input, carry.length);
+    }
+    const out = new Float32Array(Math.max(0, Math.floor((samples.length - position) / step)));
+    for (let o = 0; o < out.length; o++, position += step) {
       const start = Math.floor(position);
       const end = Math.floor(position + step);
       let sum = 0;
       for (let i = start; i < end; i++) sum += samples[i];
-      out.push(sum / Math.max(1, end - start));
-      position += step;
+      out[o] = sum / Math.max(1, end - start);
     }
     const consumed = Math.floor(position);
-    carry = Array.from(samples.subarray(consumed));
+    carry = samples.slice(consumed);
     position -= consumed;
-    return Float32Array.from(out);
+    return out;
   };
 }
 
