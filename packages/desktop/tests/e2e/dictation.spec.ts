@@ -29,7 +29,14 @@ const CLIP = readFileSync(join(here, "fixtures", "dictation.wav")).toString("bas
 const SPOKEN = /dictation feature today/i;
 const HINT = "or hold right Ctrl to talk";
 
-type Window_ = Window & { __say: () => Promise<void>; __notefigCore: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+/** What the specs reach on the page: the stand-in mic, and the app's core. */
+type Window_ = Window & {
+  __say: () => Promise<void>;
+  __notefigCore: {
+    kv: { write(namespace: string, key: string, value: unknown): Promise<void> };
+    dictation: { warm(): Promise<void> };
+  };
+};
 
 /** Replaces the microphone with one that plays CLIP on `__say()`, or one
  *  the user refused. */

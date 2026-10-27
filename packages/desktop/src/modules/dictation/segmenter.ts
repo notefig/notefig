@@ -114,7 +114,14 @@ export function createSegmenter(options: SegmenterOptions = DEFAULT_SEGMENTER): 
       // Cut in the middle of the pause: both phrases keep some silence.
       return takePhrase(frames.length - Math.floor(silentRun / 2));
     }
-    if (frames.length >= toFrames(options.maxPhraseMs)) return takePhrase(quietestRecent());
+    if (frames.length >= toFrames(options.maxPhraseMs)) {
+      // Nothing said all this while: let the silence go rather than decode it.
+      if (!hasSpeech()) {
+        frames = frames.slice(-toFrames(options.pauseMs));
+        return null;
+      }
+      return takePhrase(quietestRecent());
+    }
     return null;
   };
 

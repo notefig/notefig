@@ -138,7 +138,9 @@ export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOpti
       running = false;
       cancelAnimationFrame(raf);
     }
-    if (visible) poll = setTimeout(sync, 1000);
+    // Also while hidden or offscreen: a canvas removed then fires nothing
+    // else, and this is how it notices and lets go.
+    poll = setTimeout(sync, 1000);
   };
   const io =
     typeof IntersectionObserver !== "undefined"

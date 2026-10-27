@@ -12,6 +12,8 @@
 export interface Microphone {
   /** Subscribes to 16 kHz mono audio; returns the unsubscribe. */
   onAudio(listener: (samples: Float32Array) => void): () => void;
+  /** Resolves once audio held back for batching has been delivered. */
+  flush(): Promise<void>;
   close(): void;
 }
 
@@ -26,6 +28,12 @@ const TAP_WORKLET = `class DictationTap extends AudioWorkletProcessor {
     super();
     this.buffer = new Float32Array(2048);
     this.filled = 0;
+    // "flush": send what's held, then say so (port order is kept).
+    this.port.onmessage = () => {
+      if (this.filled) this.port.postMessage(this.buffer.slice(0, this.filled));
+      this.filled = 0;
+      this.port.postMessage("flushed");
+    };
   }
   process(inputs) {
     const channel = inputs[0] && inputs[0][0];
@@ -93,7 +101,9 @@ export const openBrowserMicrophone: OpenMicrophone = async () => {
   context.createMediaStreamSource(stream).connect(tap);
   const resample = createResampler(context.sampleRate);
   const listeners = new Set<(samples: Float32Array) => void>();
-  tap.port.onmessage = (event: MessageEvent<Float32Array>) => {
+  const flushed: (() => void)[] = [];
+  tap.port.onmessage = (event: MessageEvent<Float32Array | "flushed">) => {
+    if (event.data === "flushed") return flushed.shift()?.();
     const samples = resample(event.data);
     if (samples.length) listeners.forEach((l) => l(samples));
   };
@@ -102,7 +112,14 @@ export const openBrowserMicrophone: OpenMicrophone = async () => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    flush() {
+      return new Promise<void>((resolve) => {
+        flushed.push(resolve);
+        tap.port.postMessage("flush");
+      });
+    },
     close() {
+      flushed.splice(0).forEach((resolve) => resolve());
       listeners.clear();
       tap.port.onmessage = null;
       stream.getTracks().forEach((t) => t.stop());

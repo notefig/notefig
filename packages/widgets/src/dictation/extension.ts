@@ -109,11 +109,11 @@ function createGhost(host: DictationHost) {
   const wave = document.createElement("canvas");
   wave.className =
     "dictation-wave ms-[0.3em] me-[0.1em] inline-block size-[1.45em] align-[-0.35em] text-muted-foreground";
-  // Stops itself once the ghost leaves the document.
-  mountVoiceWave(wave, { level: host.level });
+  const stop = mountVoiceWave(wave, { level: host.level });
   el.append(lead, settled, live, wave);
   return {
     el,
+    stop,
     render(ghost: GhostState, spaceBefore: boolean) {
       lead.data = spaceBefore && (ghost.settled || ghost.live) ? " " : "";
       settled.data = ghost.settled;
@@ -163,11 +163,13 @@ export function dictationExtension(host: DictationHost) {
   let lastId = 0;
   // Each editor view's ghost for the dictation in progress (by ghost id).
   const ghosts = new WeakMap<EditorView, { id: number } & ReturnType<typeof createGhost>>();
+  const stopping = new WeakMap<Node, () => void>();
   const ghostFor = (view: EditorView, ghost: GhostState) => {
     let entry = ghosts.get(view);
     if (entry?.id !== ghost.id) {
       entry = { id: ghost.id, ...createGhost(host) };
       ghosts.set(view, entry);
+      stopping.set(entry.el, entry.stop);
     }
     entry.render(ghost, leadingSpace(view.state, ghost));
     return entry.el;
@@ -190,8 +192,12 @@ export function dictationExtension(host: DictationHost) {
               // went away (the document was replaced: reloaded from disk),
               // it lands at the caret instead, not wherever the mapping
               // collapsed to.
-              const from = tr.mapping.mapResult(ghost.from, -1);
-              const to = tr.mapping.mapResult(ghost.to, 1);
+              // Text inserted right at its edges stays outside it: a caret
+              // stays a caret, a selection doesn't grow — or the commit
+              // would replace what someone typed meanwhile.
+              const collapsed = ghost.from === ghost.to;
+              const from = tr.mapping.mapResult(ghost.from, collapsed ? -1 : 1);
+              const to = collapsed ? from : tr.mapping.mapResult(ghost.to, -1);
               if (from.deleted && to.deleted) {
                 return { ...ghost, from: state.selection.from, to: state.selection.to };
               }
@@ -209,6 +215,8 @@ export function dictationExtension(host: DictationHost) {
                   side: 1,
                   key: `dictation-${ghost.id}`,
                   ignoreSelection: true,
+                  // The ghost is gone for good: stop its wave.
+                  destroy: (node) => stopping.get(node)?.(),
                 }),
               ]);
             },

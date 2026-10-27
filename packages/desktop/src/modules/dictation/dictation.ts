@@ -166,8 +166,11 @@ function createRun(insertion: DictationInsertion, engine: DictationEngine) {
   let guessGap = LIVE_STEP_SAMPLES;
   /** The latest guess at the phrase in progress, and how much audio it heard. */
   let lastGuess: { text: string; raw: string; heard: number; at: number } | null = null;
-  const run = { released: false, cancelled: false, error: null as unknown };
+  /** `releasing` from key up; `released` once the mic's last audio is in. */
+  const run = { releasing: false, released: false, cancelled: false, error: null as unknown };
   const open = () => !run.released && !run.cancelled && !run.error;
+  /** Guesses stop at key up: the final decode is next. */
+  const mayGuess = () => open() && !run.releasing;
 
   const queue = (job: () => Promise<void>) => {
     decoding = decoding.then(job);
@@ -200,7 +203,7 @@ function createRun(insertion: DictationInsertion, engine: DictationEngine) {
 
   /** The phrase still being spoken, again from its start, when the worker is free. */
   const guess = () => {
-    if (!open() || guessing || queued > 0) return;
+    if (!mayGuess() || guessing || queued > 0) return;
     if (sinceGuess < guessGap && !paused()) return;
     const audio = segmenter.peek();
     if (audio.length < MIN_LIVE_SAMPLES || !segmenter.hasSpeech()) return;
@@ -210,7 +213,7 @@ function createRun(insertion: DictationInsertion, engine: DictationEngine) {
     queue(async () => {
       try {
         // A guess still waiting when the key comes up is skipped.
-        if (!open()) return;
+        if (!mayGuess()) return;
         const started = performance.now();
         const raw = await engine.transcribe(audio);
         // The model ends whatever it hears with a period; mid-phrase that's
@@ -317,13 +320,25 @@ export function createDictation(deps: DictationDeps): DictationApi {
   };
 
   /** Ends `current`, if it's still the dictation in progress. */
+  /** Closes the mic once it has gone unused for `warmMs`. */
+  const closeLater = () => {
+    if (micClose) clearTimeout(micClose);
+    micClose = setTimeout(closeMic, warmMs);
+  };
+
+  /** Everything the mic heard up to now, in: its last batch is still in
+   *  the worklet when the key comes up. */
+  const flushMic = async () => {
+    const open = await mic?.catch(() => null);
+    if (open) await Promise.race([open.flush(), new Promise((r) => setTimeout(r, 150))]);
+  };
+
   const end = (current: Run, error?: unknown) => {
     if (run !== current) return;
     run = null;
     level = 0;
     if (error === undefined) {
-      if (micClose) clearTimeout(micClose);
-      micClose = setTimeout(closeMic, warmMs);
+      closeLater();
       setState({ status: "idle" });
     } else {
       current.insertion.cancel();
@@ -333,7 +348,10 @@ export function createDictation(deps: DictationDeps): DictationApi {
   };
 
   const start = async (current: Run) => {
-    if (!(await deps.enabled())) {
+    const enabled = await deps.enabled();
+    // Cancelled meanwhile: `end` already ran, and no mic is open.
+    if (current.cancelled) return;
+    if (!enabled) {
       current.cancelled = true;
       current.insertion.cancel();
       return end(current);
@@ -345,7 +363,8 @@ export function createDictation(deps: DictationDeps): DictationApi {
     } catch (error) {
       return end(current, error);
     }
-    if (current.cancelled) return;
+    // Cancelled while it opened: opening cleared the close `end` set up.
+    if (current.cancelled) return closeLater();
     const heard = preroll;
     preroll = [];
     heard.forEach(onAudio);
@@ -383,12 +402,14 @@ export function createDictation(deps: DictationDeps): DictationApi {
 
     async release() {
       const current = run;
-      if (!current || current.released || current.cancelled) return;
-      current.released = true;
-      level = 0;
+      if (!current || current.releasing || current.cancelled) return;
+      current.releasing = true;
       setState({ status: "finishing" });
       await opening;
       if (run !== current || current.cancelled) return;
+      await flushMic();
+      current.released = true;
+      level = 0;
       try {
         const text = await current.finish();
         if (current.cancelled) return;

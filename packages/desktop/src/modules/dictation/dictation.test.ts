@@ -28,6 +28,7 @@ function fakeMic() {
       listener = l;
       return () => (listener = null);
     },
+    flush: async () => {},
     close() {
       mic.closed = true;
     },
@@ -281,6 +282,45 @@ describe("dictation", () => {
     expect(dictation.state()).toEqual({ status: "error", error: "model failed" });
   });
 
+  it("closes the mic when a dictation is cancelled while it starts", async () => {
+    vi.useFakeTimers();
+    const { target } = fakeTarget();
+    let settingRead: (on: boolean) => void = () => {};
+    let opened = 0;
+    dictation = createDictation({
+      engine,
+      openMicrophone: async () => {
+        opened++;
+        return microphone.mic;
+      },
+      enabled: () => new Promise((resolve) => (settingRead = resolve)),
+      holdKey: "ControlRight",
+      warmMs: 50,
+    });
+    dictation.attach(target);
+    const pressing = dictation.press();
+    dictation.cancel();
+    settingRead(true);
+    await pressing;
+    await vi.advanceTimersByTimeAsync(60);
+    // Never opened, or opened and closed again: not left open.
+    expect(opened === 0 || microphone.mic.closed).toBe(true);
+    expect(dictation.state().status).toBe("idle");
+  });
+
+  it("waits for the mic's last batch before finishing", async () => {
+    const { target, events } = fakeTarget();
+    dictation.attach(target);
+    engine.transcribe.mockImplementation(async (samples: Float32Array) =>
+      samples.length > 0.9 * RATE ? "Every word." : "Every",
+    );
+    microphone.mic.flush = async () => microphone.say(speech(500));
+    await dictation.press();
+    microphone.say(speech(600));
+    await dictation.release();
+    expect(events.at(-1)).toBe("commit:Every word.");
+  });
+
   it("keeps the mic warm briefly after a dictation, then closes it", async () => {
     vi.useFakeTimers();
     const { target } = fakeTarget();
@@ -383,6 +423,13 @@ describe("segmenter", () => {
     expect(segmenter.push(silence(600))).toEqual([]);
     const quiet = createSegmenter(SHORT);
     expect(quiet.push(silence(3000))).toEqual([]);
+  });
+
+  it("lets a long silence go at the limit instead of cutting it as a phrase", () => {
+    const segmenter = createSegmenter(SHORT);
+    expect(segmenter.push(silence(6000))).toEqual([]);
+    expect(segmenter.hasSpeech()).toBe(false);
+    expect(segmenter.peek().length / RATE).toBeLessThan(2);
   });
 
   it("cuts a phrase that runs on past the limit at its quietest recent moment", () => {

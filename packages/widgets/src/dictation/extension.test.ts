@@ -83,6 +83,25 @@ describe("dictationExtension", () => {
     expect(editor.getText()).toBe("the end of it.");
   });
 
+  it("keeps what was typed at the dictation point while dictating", () => {
+    const { editor, targets } = setup("<p>Today:</p>");
+    editor.commands.setTextSelection(7);
+    const insertion = targets[0].begin()!;
+    editor.commands.insertContentAt(7, " typed");
+    insertion.commit("Spoken.");
+    expect(editor.getText()).toBe("Today: Spoken typed");
+  });
+
+  it("doesn't grow a selection being dictated over with edits at its edges", () => {
+    const { editor, targets } = setup("<p>one two three</p>");
+    editor.commands.setTextSelection({ from: 5, to: 8 });
+    const insertion = targets[0].begin()!;
+    editor.commands.insertContentAt(8, "!");
+    editor.commands.insertContentAt(5, "~");
+    insertion.commit("2");
+    expect(editor.getText()).toBe("one ~ 2! three");
+  });
+
   it("lands at the caret when the document is replaced underneath it", () => {
     const { editor, targets } = setup("<p>Notes</p><p>Today:</p>");
     editor.commands.setTextSelection(14);
