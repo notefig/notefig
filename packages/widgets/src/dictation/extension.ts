@@ -2,9 +2,8 @@
  * Dictation in a Tiptap editor: the place speech lands. The app's dictation
  * service owns the microphone, the model and the hold key; an editor with
  * this extension only offers itself as a target (`host.attach`) and, while
- * someone dictates into it, shows the words so far at the caret — phrases
- * already settled as plain text, the phrase still being spoken shimmering as
- * it's re-heard — and then inserts the final text.
+ * someone dictates into it, shows the words so far at the caret, muted
+ * while they can still change, and then inserts the final text.
  *
  * The contract with the service (`DictationHost` and the targets it
  * takes) is `@notefig/dictation`'s.
@@ -30,8 +29,7 @@ interface GhostState {
   id: number;
   from: number;
   to: number;
-  settled: string;
-  live: string;
+  text: string;
 }
 
 type GhostMeta = { set: GhostState } | { clear: true };
@@ -53,38 +51,33 @@ const leadingSpace = (state: EditorState, ghost: GhostState) => {
 };
 
 /**
- * The words so far at the caret, then the voice wave. Settled phrases read
- * as ordinary text; the live one shimmers like streaming agent output (the
- * app's `.shimmer`). The wave trails the words, at the edge where they grow,
- * so the text starts exactly where it will land and nothing moves when the
- * ghost gives way to it. Built once per dictation and updated in place: a
- * fresh element per update would restart the shimmer and the wave.
+ * The words so far at the caret, then the voice wave. They're muted until
+ * they're committed, when they turn into ordinary text. The wave trails the
+ * words, at the edge where they grow, so the text starts exactly where it
+ * will land and nothing moves when the ghost gives way to it. Built once per
+ * dictation and updated in place: a fresh element per update would restart
+ * the wave.
  *
  * While it shows, the editor's placeholder is hidden, and the composers
  * show their wave in their own chrome instead (styles.css).
  */
 function createGhost(host: DictationHost) {
   const el = document.createElement("span");
-  el.className = "dictation-ghost pointer-events-none";
+  el.className = "dictation-ghost pointer-events-none text-muted-foreground";
   el.setAttribute("aria-hidden", "true");
-  const lead = document.createTextNode("");
-  const settled = document.createTextNode("");
-  const live = document.createElement("span");
-  live.className = "shimmer text-muted-foreground";
+  const words = document.createTextNode("");
   const wave = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   wave.setAttribute(
     "class",
-    "dictation-wave ms-[0.3em] me-[0.1em] inline-block size-[1.45em] align-[-0.35em] text-muted-foreground",
+    "dictation-wave ms-[0.3em] me-[0.1em] inline-block size-[1.45em] align-[-0.35em]",
   );
   const stop = mountVoiceWave(wave, { level: host.level, hearing: host.hearing });
-  el.append(lead, settled, live, wave);
+  el.append(words, wave);
   return {
     el,
     stop,
     render(ghost: GhostState, spaceBefore: boolean) {
-      lead.data = spaceBefore && (ghost.settled || ghost.live) ? " " : "";
-      settled.data = ghost.settled;
-      live.textContent = ghost.settled && ghost.live ? ` ${ghost.live}` : ghost.live;
+      words.data = spaceBefore && ghost.text ? ` ${ghost.text}` : ghost.text;
     },
   };
 }
@@ -98,12 +91,12 @@ function createTarget(view: EditorView, nextId: () => number): DictationTarget {
     begin() {
       if (!view.editable) return null;
       const { from, to } = view.state.selection;
-      dispatchGhost({ set: { id: nextId(), from, to, settled: "", live: "" } });
+      dispatchGhost({ set: { id: nextId(), from, to, text: "" } });
       const ghost = () => dictationKey.getState(view.state);
       return {
-        preview(settled, live) {
+        preview(text) {
           const current = ghost();
-          if (current) dispatchGhost({ set: { ...current, settled, live } });
+          if (current) dispatchGhost({ set: { ...current, text } });
         },
         commit(text) {
           const current = ghost();

@@ -7,9 +7,9 @@
 
 /** One dictation into one editor, from key down to commit or cancel. */
 export interface DictationInsertion {
-  /** The words heard so far: `settled` phrases won't change; `live` is the
-   *  phrase still being spoken, re-heard as it goes. */
-  preview(settled: string, live: string): void;
+  /** The words heard so far. Not final: the phrase still being spoken is
+   *  re-heard as it goes. */
+  preview(text: string): void;
   /** Insert the final text where the dictation began. */
   commit(text: string): void;
   /** Drop the ghost; nothing is inserted. */

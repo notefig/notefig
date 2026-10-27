@@ -122,11 +122,10 @@ async function dictate(
   await page.keyboard.up("ControlRight");
 }
 
-/** Words stream in while the key is down: the phrase being spoken
- *  shimmers. Needs the model warm — on a cold start the first phrase can
- *  settle before the model is up, and then it shows as plain text. */
+/** Words stream in while the key is down, muted until they're committed. */
 async function expectLiveWords(page: Page) {
-  await expect(ghost(page).locator(".shimmer")).toHaveText(/\w+/, { timeout: 30_000 });
+  await expect(ghost(page)).toHaveText(/\w+/, { timeout: 30_000 });
+  await expect(ghost(page)).toHaveClass(/text-muted-foreground/);
 }
 
 /** Loads the model the way a returning user's app does after startup. */

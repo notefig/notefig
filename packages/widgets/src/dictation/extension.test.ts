@@ -41,9 +41,8 @@ describe("dictationExtension", () => {
     const { editor, targets } = setup("<p>Notes</p>");
     editor.commands.setTextSelection(6);
     const insertion = targets[0].begin()!;
-    insertion.preview("So far", "so good");
+    insertion.preview("So far so good");
     expect(ghost()?.textContent).toBe(" So far so good");
-    expect(ghost()?.querySelector(".shimmer")?.textContent).toBe(" so good");
     expect(editor.getText()).toBe("Notes");
     insertion.cancel();
     expect(ghost()).toBeNull();
@@ -55,9 +54,9 @@ describe("dictationExtension", () => {
     editor.commands.setTextSelection(6);
     const insertion = targets[0].begin()!;
     const first = ghost();
-    insertion.preview("", "so");
-    insertion.preview("", "so far");
-    // The same element throughout, so the shimmer and the wave don't restart.
+    insertion.preview("so");
+    insertion.preview("so far");
+    // The same element throughout, so the wave doesn't restart.
     expect(ghost()).toBe(first);
     expect(ghost()?.lastElementChild?.classList.contains("dictation-wave")).toBe(true);
     insertion.cancel();
@@ -67,7 +66,7 @@ describe("dictationExtension", () => {
     const { editor, targets } = setup("<p>Meeting notes.</p>");
     editor.commands.setTextSelection(15);
     const insertion = targets[0].begin()!;
-    insertion.preview("", "Then ship");
+    insertion.preview("Then ship");
     insertion.commit("Then ship it.");
     expect(editor.getText()).toBe("Meeting notes. Then ship it.");
     expect(ghost()).toBeNull();

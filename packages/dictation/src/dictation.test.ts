@@ -4,7 +4,6 @@ import {
   dictationHoldKey,
   holdKeyLabel,
   joinPhrases,
-  splitGuess,
   type DictationApi,
   type DictationEngine,
 } from "./dictation";
@@ -41,7 +40,7 @@ function fakeMic() {
 function fakeTarget(focused = true) {
   const events: string[] = [];
   const insertion: DictationInsertion = {
-    preview: (settled, live) => events.push(`preview:${settled}|${live}`),
+    preview: (text) => events.push(`preview:${text}`),
     commit: (text) => events.push(`commit:${text}`),
     cancel: () => events.push("cancel"),
   };
@@ -110,7 +109,7 @@ describe("dictation", () => {
     await dictation.press();
     microphone.say(speech(4500));
     microphone.say(silence(700));
-    await vi.waitFor(() => expect(events).toContain("preview:We should refactor|"));
+    await vi.waitFor(() => expect(events).toContain("preview:We should refactor"));
     microphone.say(speech(1500));
     await dictation.release();
 
@@ -126,10 +125,9 @@ describe("dictation", () => {
 
     await dictation.press();
     microphone.say(speech(600));
-    await vi.waitFor(() => expect(events).toContain("preview:|We"));
+    await vi.waitFor(() => expect(events).toContain("preview:We"));
     microphone.say(speech(600));
-    // "We" held still between guesses, so it reads plain; "should" shimmers.
-    await vi.waitFor(() => expect(events).toContain("preview:We|should"));
+    await vi.waitFor(() => expect(events).toContain("preview:We should"));
     await dictation.release();
     expect(events.at(-1)).toBe("commit:We should");
   });
@@ -145,8 +143,8 @@ describe("dictation", () => {
       microphone.say(speech(300));
       await vi.waitFor(() => expect(engine.transcribe).toHaveBeenCalledTimes(i + 1));
     }
-    await vi.waitFor(() => expect(events).toContain("preview:We|should"));
-    expect(events.filter((e) => e.startsWith("preview:"))).toEqual(["preview:|We", "preview:We|should"]);
+    await vi.waitFor(() => expect(events).toContain("preview:We should"));
+    expect(events.filter((e) => e.startsWith("preview:"))).toEqual(["preview:We", "preview:We should"]);
     dictation.cancel();
   });
 
@@ -157,7 +155,7 @@ describe("dictation", () => {
 
     await dictation.press();
     microphone.say(speech(1000));
-    await vi.waitFor(() => expect(events).toContain("preview:|Ship it"));
+    await vi.waitFor(() => expect(events).toContain("preview:Ship it"));
     microphone.say(silence(300));
     const calls = engine.transcribe.mock.calls.length;
     await dictation.release();
@@ -175,7 +173,7 @@ describe("dictation", () => {
 
     await dictation.press();
     microphone.say(speech(1000));
-    await vi.waitFor(() => expect(events).toContain("preview:|Ship it"));
+    await vi.waitFor(() => expect(events).toContain("preview:Ship it"));
     // Too soon for another guess, so only the release hears these words.
     microphone.say(speech(150));
     microphone.say(speech(700));
@@ -198,7 +196,7 @@ describe("dictation", () => {
     microphone.say(silence(700));
     finishLive("stale guess");
     await dictation.release();
-    expect(events).not.toContain("preview:|stale guess");
+    expect(events).not.toContain("preview:stale guess");
     expect(events.at(-1)).toBe("commit:Settled phrase.");
   });
 
@@ -469,17 +467,6 @@ describe("hold key", () => {
     expect(dictationHoldKey("linux")).toBe("ControlRight");
     expect(holdKeyLabel("AltRight", "mac")).toBe("right ⌥");
     expect(holdKeyLabel("ControlRight", "windows")).toBe("right Ctrl");
-  });
-});
-
-describe("splitGuess", () => {
-  it("keeps the words two guesses agree on steady, and the rest changing", () => {
-    expect(splitGuess("We should ship", "We should shop the")).toEqual({ steady: "We should", changing: "shop the" });
-  });
-
-  it("keeps the last word changing even when nothing moved", () => {
-    expect(splitGuess("We should", "We should")).toEqual({ steady: "We", changing: "should" });
-    expect(splitGuess("", "We")).toEqual({ steady: "", changing: "We" });
   });
 });
 

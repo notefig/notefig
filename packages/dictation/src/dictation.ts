@@ -9,8 +9,8 @@
  * Text streams while the speaker talks. Speech is split at their pauses;
  * each finished phrase is decoded once and settles. In between, whenever the
  * worker is free, the phrase still being spoken is decoded again from its
- * start, so the editor shows it growing (shimmering, since it can still
- * change). Releasing the key only waits for the last phrase.
+ * start, so the editor shows it growing. Releasing the key only waits for
+ * the last phrase.
  */
 import {
   detectPlatform,
@@ -131,19 +131,6 @@ function loudness(samples: Float32Array): number {
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/**
- * Splits a live guess for display: the words it shares with the guess
- * before it have held still and read as plain text; only the words still
- * changing shimmer (at least the last one, while the phrase goes on). Less
- * moving text is calmer to read and cheaper to paint.
- */
-export function splitGuess(previous: string, text: string): { steady: string; changing: string } {
-  const before = previous.split(" ");
-  const words = text.split(" ");
-  let same = 0;
-  while (same < words.length - 1 && words[same] === before[same]) same++;
-  return { steady: words.slice(0, same).join(" "), changing: words.slice(same).join(" ") };
-}
 
 /**
  * One dictation, key down to key up: cuts phrases at pauses and decodes
@@ -163,7 +150,7 @@ function createRun(insertion: DictationInsertion, engine: DictationEngine) {
   let sinceGuess = 0;
   let guessGap = LIVE_STEP_SAMPLES;
   /** The latest guess at the phrase in progress, and how much audio it heard. */
-  let lastGuess: { text: string; raw: string; heard: number; at: number } | null = null;
+  let lastGuess: { raw: string; heard: number; at: number } | null = null;
   /** `releasing` from key up; `released` once the mic's last audio is in. */
   const run = {
     releasing: false,
@@ -192,7 +179,7 @@ function createRun(insertion: DictationInsertion, engine: DictationEngine) {
         if (run.cancelled) return;
         phrases.push(text);
         // The settled phrase takes the live guess's place in one update.
-        if (preview && hasWords(text)) insertion.preview(joinPhrases(phrases), "");
+        if (preview && hasWords(text)) insertion.preview(joinPhrases(phrases));
       } catch (error) {
         run.error = error;
       } finally {
@@ -229,9 +216,8 @@ function createRun(insertion: DictationInsertion, engine: DictationEngine) {
         // came back empty (a breath, a lone ".") leaves the last one up, so
         // nothing blinks out and back.
         if (run.cancelled || cuts !== at || !hasWords(text)) return;
-        const { steady, changing } = splitGuess(lastGuess?.at === at ? lastGuess.text : "", text);
-        lastGuess = { text, raw, heard: audio.length, at };
-        if (open()) insertion.preview(joinPhrases([...phrases, steady]), changing);
+        lastGuess = { raw, heard: audio.length, at };
+        if (open()) insertion.preview(joinPhrases([...phrases, text]));
       } catch {
         // A failed guess isn't a failed dictation: the phrase decode of the
         // same audio reports it if the model is really down.
