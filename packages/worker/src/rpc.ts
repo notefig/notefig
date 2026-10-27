@@ -96,7 +96,16 @@ export interface WorkerClientHandle<T extends WorkerApi> {
 
 export function createWorkerClient<T extends WorkerApi>(
   worker: Worker,
-  { readyTimeoutMs = 8000 }: { readyTimeoutMs?: number } = {},
+  {
+    readyTimeoutMs = 8000,
+    onDead,
+  }: {
+    readyTimeoutMs?: number;
+    /** Called once when the worker crashes or is terminated, at once and
+     *  not only at the next call: a caller that keeps a worker around can
+     *  drop it before anything else is asked of it. */
+    onDead?: (error: WorkerRpcError) => void;
+  } = {},
 ): WorkerClientHandle<T> {
   let nextId = 1;
   let dead = false;
@@ -127,12 +136,14 @@ export function createWorkerClient<T extends WorkerApi>(
   );
 
   const failAll = (message: string) => {
+    const wasDead = dead;
     dead = true;
     Effect.runFork(Fiber.interrupt(readyTimer));
     const error = () => Effect.fail(new WorkerRpcError(message, true));
     Deferred.unsafeDone(ready, error());
     for (const deferred of pending.values()) Deferred.unsafeDone(deferred, error());
     pending.clear();
+    if (!wasDead) onDead?.(new WorkerRpcError(message, true));
   };
 
   worker.onmessage = (event: MessageEvent) => {

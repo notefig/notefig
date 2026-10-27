@@ -4,7 +4,7 @@
  * first call and then keeps the model loaded; one that dies (a crash, or
  * memory pressure) fails what it was doing and is replaced on the next call.
  */
-import { createWorkerClient, WorkerRpcError, type WorkerClient } from "@notefig/worker";
+import { createWorkerClient, type WorkerClient } from "@notefig/worker";
 import type { DictationEngine } from "../dictation";
 
 /** What the worker serves. Declared here rather than taken off the worker,
@@ -15,10 +15,14 @@ export type DictationWorkerApi = {
   transcribe(samples: Float32Array): Promise<string>;
 };
 
-/** A worker with the model loaded; on any failure, it is stopped. */
-async function startWorker(modelUrl: string): Promise<WorkerClient<DictationWorkerApi>> {
+/** A worker with the model loaded; on any failure, it is stopped. `onDead`
+ *  hears of its death whenever it comes, even between calls. */
+async function startWorker(
+  modelUrl: string,
+  onDead: () => void,
+): Promise<WorkerClient<DictationWorkerApi>> {
   const worker = new Worker(new URL("./dictation.worker.ts", import.meta.url), { type: "module" });
-  const { client, ready, terminate } = createWorkerClient<DictationWorkerApi>(worker);
+  const { client, ready, terminate } = createWorkerClient<DictationWorkerApi>(worker, { onDead });
   try {
     await ready;
     await client.load(modelUrl);
@@ -35,12 +39,14 @@ export function createWorkerEngine(modelUrl: string): DictationEngine {
 
   const worker = () => {
     if (!started) {
-      const starting = startWorker(modelUrl);
-      started = starting;
-      // A failed start doesn't pin the rejection: the next call retries.
-      starting.catch(() => {
+      // A worker that dies, or fails to start, is forgotten at once: the
+      // next call (the next dictation's warm-up, say) starts a fresh one.
+      const forget = () => {
         if (started === starting) started = null;
-      });
+      };
+      const starting = startWorker(modelUrl, forget);
+      started = starting;
+      starting.catch(forget);
     }
     return started;
   };
@@ -50,14 +56,8 @@ export function createWorkerEngine(modelUrl: string): DictationEngine {
       await worker();
     },
     async transcribe(samples) {
-      const current = worker();
-      const client = await current;
-      try {
-        return await client.transcribe(samples);
-      } catch (error) {
-        if (error instanceof WorkerRpcError && error.workerDead && started === current) started = null;
-        throw error;
-      }
+      const client = await worker();
+      return client.transcribe(samples);
     },
   };
 }

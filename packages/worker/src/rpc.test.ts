@@ -145,6 +145,21 @@ describe("worker-rpc", () => {
     await expect(client.echo("y")).rejects.toMatchObject({ workerDead: true });
   });
 
+  it("tells onDead once when the worker crashes, with nothing in flight", async () => {
+    const { worker, scope } = linkedPair();
+    serve(scope, demoApi);
+    const deaths: unknown[] = [];
+    const { ready, terminate } = createWorkerClient<DemoApi>(worker as never, {
+      onDead: (error) => deaths.push(error),
+    });
+    await ready;
+
+    worker.onerror?.({ message: "segfault" });
+    terminate();
+    expect(deaths).toHaveLength(1);
+    expect(deaths[0]).toMatchObject({ workerDead: true, message: "Worker crashed: segfault" });
+  });
+
   it("terminate() kills the worker and fails outstanding work", async () => {
     const { worker, scope } = linkedPair();
     serve(scope, demoApi);

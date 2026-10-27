@@ -68,6 +68,18 @@ describe("createWorkerEngine", () => {
     expect(FakeWorker.started).toHaveLength(2);
   });
 
+  it("replaces a worker that died between dictations before the next one", async () => {
+    const engine = createWorkerEngine("https://app/dictation/");
+    await engine.load();
+    FakeWorker.started[0].onerror?.({ message: "out of memory" });
+
+    // The next dictation's warm-up starts a fresh worker, so its decode
+    // doesn't land on the dead one.
+    await engine.load();
+    expect(FakeWorker.started).toHaveLength(2);
+    await expect(engine.transcribe(new Float32Array(4))).resolves.toBe("hi");
+  });
+
   it("keeps the worker after a call that merely failed", async () => {
     const engine = createWorkerEngine("https://app/dictation/");
     await engine.load();
