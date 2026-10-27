@@ -1628,7 +1628,7 @@ function HarnessMark({
   return (
     <span className="dictation-swap size-3 [grid-template:0.75rem/0.75rem]">
       <HarnessLogo harnessId={harnessId} className="dictation-idle-only size-3" />
-      <VoiceWave level={host.dictation.level} size="0.95rem" className="dictation-active-only text-foreground" />
+      <VoiceWave level={host.dictation.level} size="0.95rem" className="dictation-active-only" />
     </span>
   );
 }
@@ -1680,7 +1680,7 @@ function SessionControl({
               the logo (styles.css cross-fades them on the dictation ghost). */}
           <HarnessLogo harnessId={triggerHarnessId} className="dictation-idle-only" />
           {host.dictation && (
-            <VoiceWave level={host.dictation.level} size="1.05rem" className="dictation-active-only text-foreground" />
+            <VoiceWave level={host.dictation.level} size="1.05rem" className="dictation-active-only" />
           )}
         </Button>
       </DropdownMenuTrigger>
