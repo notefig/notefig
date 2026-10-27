@@ -50,6 +50,9 @@
       "@notefig/dictation": [
         "../dictation/src/index.ts"
       ],
+      "@notefig/worker": [
+        "../worker/src/index.ts"
+      ],
       "@notefig/ui/*": [
         "../ui/src/*"
       ],

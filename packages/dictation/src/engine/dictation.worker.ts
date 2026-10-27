@@ -3,16 +3,14 @@
  * onnxruntime-web on one WebAssembly thread — the app isn't cross-origin
  * isolated (that would break remote images in notes), and one thread decodes
  * a 12 s clip in about a second.
- *
- * Its two calls arrive as `WorkerRequest`s and are answered with a
- * `WorkerResponse` (protocol.ts; worker-engine.ts is the other end).
  */
 import * as ort from "onnxruntime-web/wasm";
 import wasmUrl from "onnxruntime-web/ort-wasm-simd-threaded.wasm?url";
+import { exposeWorkerApi } from "@notefig/worker";
 import { greedyCtc, parseTokens, type Vocabulary } from "./ctc";
 import { loadBundledModel } from "./load-model";
 import { createLogMel } from "./log-mel";
-import type { WorkerRequest, WorkerResponse } from "./protocol";
+import type { DictationWorkerApi } from "./worker-engine";
 
 ort.env.wasm.numThreads = 1;
 ort.env.wasm.wasmPaths = { wasm: wasmUrl };
@@ -41,14 +39,4 @@ async function load(modelUrl: string): Promise<void> {
   await transcribe(new Float32Array(16_000));
 }
 
-self.onmessage = async ({ data: request }: MessageEvent<WorkerRequest>) => {
-  let response: WorkerResponse;
-  try {
-    if (request.method === "load") await load(request.modelUrl);
-    const text = request.method === "transcribe" ? await transcribe(request.samples) : undefined;
-    response = { id: request.id, ok: true, text };
-  } catch (error) {
-    response = { id: request.id, ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
-  self.postMessage(response);
-};
+exposeWorkerApi({ load, transcribe } satisfies DictationWorkerApi);

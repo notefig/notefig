@@ -1,7 +1,7 @@
 /**
  * Git worker entry: `@notefig/git`'s worker runtime plus the pieces only
  * this app can supply — the fs storage host (proxied to the main thread
- * over worker-rpc's host channel, since Tauri `invoke` and the browser
+ * over @notefig/worker's host channel, since Tauri `invoke` and the browser
  * adapters only exist there), the `FsError` revive for host failures, and
  * the RPC transport. The wiring modules load inside the async thunk, after
  * the runtime pins the init message's globals: `utils/path` (in their
@@ -12,7 +12,7 @@
 import { startGitWorker } from "@notefig/git";
 import type { FileSystemErrorType } from "@/adapters/platform-adapter.interface";
 import type { GitHostFs } from "@/adapters/git-storage-host";
-import type { WorkerApi } from "./worker-rpc";
+import type { WorkerApi } from "@notefig/worker";
 
 /** Wire form of a main-thread FsError; see git-worker-client's serializer. */
 interface SerializedHostFsError {
@@ -35,7 +35,7 @@ startGitWorker(async () => {
   ] = await Promise.all([
     import("@/adapters/git-storage-host"),
     import("@/adapters/platform-adapter.interface"),
-    import("./worker-rpc"),
+    import("@notefig/worker"),
   ]);
 
   const hostFs = createHostClient<GitHostFs>((error) => {

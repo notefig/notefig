@@ -4,7 +4,7 @@ import {
   exposeWorkerApi,
   WorkerRpcError,
   type WorkerApi,
-} from "../worker-rpc";
+} from "./rpc";
 
 /**
  * Behavioral net for worker-rpc (MET-72 spike). The module had no direct

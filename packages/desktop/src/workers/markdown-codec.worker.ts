@@ -8,7 +8,7 @@
 import { installWorkerDomShim } from "./worker-dom-shim";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { renderMarkdownHtml } from "@/utils/markdown-html";
-import { exposeWorkerApi } from "./worker-rpc";
+import { exposeWorkerApi } from "@notefig/worker";
 import type { JSONContent } from "@tiptap/core";
 
 installWorkerDomShim();

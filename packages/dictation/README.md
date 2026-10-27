@@ -12,7 +12,8 @@ here talks to a server.
   the caret. The Tiptap implementation is `dictationExtension` in
   `@notefig/widgets`.
 - **The engine** ([`src/engine/`](src/engine)): `createWorkerEngine(modelUrl)`
-  runs Parakeet TDT-CTC 110M with onnxruntime-web in a worker of its own. It
+  runs Parakeet TDT-CTC 110M with onnxruntime-web in a worker of its own,
+  reached through `@notefig/worker`. It
   computes NeMo log-mel features, decodes them with greedy CTC, and checks the
   bundled model as it loads it.
 

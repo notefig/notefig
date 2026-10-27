@@ -34,6 +34,7 @@
     "@notefig/dictation": "*",
     "@notefig/ui": "*",
     "@notefig/widgets": "*",
+    "@notefig/worker": "*",
     "@pierre/diffs": "^1.3.6",
     "@pierre/icons": "^0.7.1",
     "@pierre/trees": "^1.0.0-beta.6",

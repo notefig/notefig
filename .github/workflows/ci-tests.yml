@@ -177,9 +177,12 @@ jobs:
       - name: Typecheck and test Core
         run: npm run build -w packages/core && npm run test -w packages/core
 
-      # Dictation's engine and service, also source-only.
-      - name: Typecheck and test Dictation
-        run: npm run build -w packages/dictation && npm run test -w packages/dictation
+      # Dictation's engine and service, and the worker messaging every
+      # package's workers use; both source-only.
+      - name: Typecheck and test Dictation and Worker
+        run: |
+          npm run build -w packages/dictation && npm run test -w packages/dictation
+          npm run build -w packages/worker && npm run test -w packages/worker
 
   test-desktop-e2e:
     name: Test Desktop

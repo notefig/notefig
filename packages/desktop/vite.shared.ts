@@ -92,10 +92,15 @@ export function workspaceSourceAliases(dirname: string) {
       find: /^@notefig\/core\/react$/,
       replacement: path.resolve(dirname, "../core/src/react.tsx"),
     },
-    // @notefig/dictation is source-only too: TS with no build of its own.
+    // @notefig/dictation and @notefig/worker are source-only too: TS with
+    // no build of their own.
     {
       find: /^@notefig\/dictation$/,
       replacement: path.resolve(dirname, "../dictation/src/index.ts"),
+    },
+    {
+      find: /^@notefig\/worker$/,
+      replacement: path.resolve(dirname, "../worker/src/index.ts"),
     },
     // @notefig/ui and @notefig/widgets are source-only (no dist at all):
     // they ship .tsx, which only a bundler can consume. Subpath imports
