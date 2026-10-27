@@ -18,7 +18,16 @@ import {
   setupTestDatabase,
   waitForFileTree,
 } from "../setup/test-helpers";
-import { composer, startMockSession } from "../agent/agent-helpers";
+import {
+  composer,
+  loadRecording,
+  openDocument,
+  promptTextOf,
+  replayRecording,
+  sendWidgetPrompt,
+  startMockSession,
+  summonWidget,
+} from "../agent/agent-helpers";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** "We should ship the dictation feature today, and review it tomorrow."
@@ -130,7 +139,22 @@ test.describe("dictation", () => {
 
     await dictate(page, async () => {
       // The wave shows the moment the key is down, trailing the words.
-      await expect(ghost(page).locator("canvas.dictation-wave")).toBeVisible();
+      const wave = ghost(page).locator("canvas.dictation-wave");
+      await expect(wave).toBeVisible();
+      // And drawn at once, in the text's color, not blank for its first second.
+      await expect
+        .poll(() =>
+          wave.evaluate((c: HTMLCanvasElement) => {
+            const ink = getComputedStyle(c).color.match(/\d+/g)!.slice(0, 3).map(Number);
+            const px = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+            for (let i = 0; i < px.length; i += 4) {
+              if (px[i + 3] > 128 && ink.every((v, k) => Math.abs(px[i + k] - v) < 8)) return true;
+            }
+            return false;
+          }),
+          { timeout: 500 },
+        )
+        .toBe(true);
       await expectLiveWords(page);
       expect(await editor.textContent()).not.toMatch(SPOKEN);
     });
@@ -170,6 +194,37 @@ test.describe("dictation", () => {
       // The composer shows its own wave: none inline among the words.
       await expect(ghost(page).locator(".dictation-wave")).toBeHidden();
       // Cold model here: words arrive, live or already settled.
+      await expect(ghost(page)).toHaveText(/\w+/, { timeout: 30_000 });
+    });
+
+    await expect(draft).toContainText(SPOKEN, { timeout: 60_000 });
+    await expect(logo).toBeVisible();
+    await expect(wave).toBeHidden();
+  });
+
+  test("into a prompt widget's reply: the wave in the answer's harness logo", async ({ page }) => {
+    await setupTestDatabase(page, "dictation-reply");
+    await fakeMicrophone(page);
+    const editor = await openDocument(page, "/workspace/dictation-reply", "notes.md", "para one\n");
+    const recording = loadRecording("widget-answer.json");
+    await replayRecording(page, recording);
+    const widget = await summonWidget(page, editor);
+    await sendWidgetPrompt(page, widget, promptTextOf(recording, 0));
+    await expect(widget.locator("[data-blob-phase]")).toHaveAttribute("data-blob-phase", "done", {
+      timeout: 30_000,
+    });
+    const draft = widget.locator("[data-prompt-draft]");
+    await draft.click();
+
+    const mark = widget.locator("[data-widget-response] .dictation-swap").first();
+    const logo = mark.locator(".dictation-idle-only");
+    const wave = mark.locator("canvas.dictation-active-only");
+    await expect(logo).toBeVisible();
+    await expect(wave).toBeHidden();
+
+    await dictate(page, async () => {
+      await expect(wave).toBeVisible();
+      await expect(logo).toBeHidden();
       await expect(ghost(page)).toHaveText(/\w+/, { timeout: 30_000 });
     });
 

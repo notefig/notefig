@@ -92,7 +92,10 @@ export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOpti
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, CANVAS_PX, CANVAS_PX);
-    if (elapsed - inkAt > 1000) {
+    // Only once it's in the page: a canvas not yet attached (the editor
+    // builds its wave before ProseMirror places it) has no color to read,
+    // and caching that would leave the first second blank.
+    if ((!ink || elapsed - inkAt > 1000) && canvas.isConnected) {
       ink = getComputedStyle(canvas).color;
       inkAt = elapsed;
     }
@@ -132,6 +135,8 @@ export function mountVoiceWave(canvas: HTMLCanvasElement, options: VoiceWaveOpti
     const should = visible && !hidden && document.visibilityState !== "hidden";
     if (should && !running) {
       running = true;
+      // Drawn at once, not a frame later: it's showing now.
+      frame(0);
       last = performance.now();
       raf = requestAnimationFrame(loop);
     } else if (!should && running) {

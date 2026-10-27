@@ -1607,7 +1607,10 @@ function useTargetHarnessId(
 
 /** What leads a response's heading: the logo of the harness that answered.
  *  Read off the bound task's own row: the picker's list drops a session
- *  once it is cancelled or failed, and the answer still came from it. */
+ *  once it is cancelled or failed, and the answer still came from it.
+ *  While someone dictates a reply, the wave stands in for it, as it does
+ *  for the picker's logo on a fresh prompt; the cell keeps the logo's size,
+ *  so the heading doesn't move. */
 function HarnessMark({
   task,
   workspacePath,
@@ -1617,10 +1620,16 @@ function HarnessMark({
   workspacePath: string;
   boundTaskId: string | null;
 }) {
-  const { HarnessLogo } = usePromptWidgetHost().slots;
+  const host = usePromptWidgetHost();
+  const { HarnessLogo } = host.slots;
   const target = useTargetHarnessId(workspacePath, boundTaskId);
+  const harnessId = task?.harnessId ?? target;
+  if (!host.dictation) return <HarnessLogo harnessId={harnessId} className="size-3" />;
   return (
-    <HarnessLogo harnessId={task?.harnessId ?? target} className="size-3" />
+    <span className="dictation-swap size-3 [grid-template:0.75rem/0.75rem]">
+      <HarnessLogo harnessId={harnessId} className="dictation-idle-only size-3" />
+      <VoiceWave level={host.dictation.level} size="0.95rem" className="dictation-active-only text-foreground" />
+    </span>
   );
 }
 
