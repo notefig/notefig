@@ -11,10 +11,12 @@ here talks to a server.
   themselves as targets, and `fitDictation` fits the text to the words around
   the caret. The Tiptap implementation is `dictationExtension` in
   `@notefig/widgets`.
-- **The engine** (`@notefig/dictation/engine`): NeMo log-mel features, greedy
-  CTC decoding, and the bundled model's checked loader. These are what a
-  worker needs to run Parakeet TDT-CTC 110M with onnxruntime-web.
+- **The engine** ([`src/engine/`](src/engine)): `createWorkerEngine(modelUrl)`
+  runs Parakeet TDT-CTC 110M with onnxruntime-web in a worker of its own. It
+  computes NeMo log-mel features, decodes them with greedy CTC, and checks the
+  bundled model as it loads it.
 
-The app wires it up in `packages/desktop/src/modules/dictation/` (the core
-module, the worker and the settings). `packages/desktop/scripts/fetch-dictation-model.mjs`
-puts the model in the bundle.
+The app wires it up in `packages/desktop/src/modules/dictation/`: the core
+module, the user's settings, and where the model is served from.
+`packages/desktop/scripts/fetch-dictation-model.mjs` puts the model in the
+bundle.

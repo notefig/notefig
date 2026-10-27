@@ -7,10 +7,6 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./engine": {
-      "types": "./src/engine/index.ts",
-      "default": "./src/engine/index.ts"
     }
   },
   "scripts": {
@@ -18,7 +14,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tanstack/hotkeys": "^0.4.2"
+    "@tanstack/hotkeys": "^0.4.2",
+    "onnxruntime-web": "1.30.0"
   },
   "devDependencies": {
     "happy-dom": "^20.8.4",

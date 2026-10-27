@@ -1,21 +1,22 @@
 /**
  * Push-to-talk dictation as the app has it (`core.dictation`): the service
- * from `@notefig/dictation`, handed the browser microphone, the bundled
- * model in a worker, the user's setting and the platform's hold key, and
- * started for the life of the app. Editors attach through the Tiptap
+ * from `@notefig/dictation`, handed the browser microphone, the model the
+ * app bundles (`public/dictation/`, scripts/fetch-dictation-model.mjs), the
+ * user's setting and the platform's hold key, and started for the life of
+ * the app. Editors attach through the Tiptap
  * extension in `@notefig/widgets`.
  */
 import { toast } from "sonner";
 import { defineModule } from "@notefig/core";
 import {
   createDictation,
+  createWorkerEngine,
   dictationHoldKey,
   openBrowserMicrophone,
   type DictationApi,
 } from "@notefig/dictation";
 import { kvModule } from "@/modules/kv";
 import i18n from "@/utils/intl";
-import { createWorkerEngine } from "./worker-engine";
 
 declare module "@notefig/core" {
   interface CoreModules {
@@ -37,7 +38,7 @@ export const dictationModule = defineModule({
   register: (ctx) => {
     const kv = ctx.use("kv");
     return createDictation({
-      engine: createWorkerEngine(new URL(import.meta.env.BASE_URL, window.location.origin).href),
+      engine: createWorkerEngine(new URL(`${import.meta.env.BASE_URL}dictation/`, window.location.origin).href),
       openMicrophone: openBrowserMicrophone,
       enabled: async () => (await kv.read<boolean>(SETTINGS, "dictationEnabled")) ?? true,
       onDictated: () => void kv.write(SETTINGS, "dictationUsed", true),

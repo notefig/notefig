@@ -50,9 +50,6 @@
       "@notefig/dictation": [
         "../dictation/src/index.ts"
       ],
-      "@notefig/dictation/engine": [
-        "../dictation/src/engine/index.ts"
-      ],
       "@notefig/ui/*": [
         "../ui/src/*"
       ],

@@ -97,10 +97,6 @@ export function workspaceSourceAliases(dirname: string) {
       find: /^@notefig\/dictation$/,
       replacement: path.resolve(dirname, "../dictation/src/index.ts"),
     },
-    {
-      find: /^@notefig\/dictation\/engine$/,
-      replacement: path.resolve(dirname, "../dictation/src/engine/index.ts"),
-    },
     // @notefig/ui and @notefig/widgets are source-only (no dist at all):
     // they ship .tsx, which only a bundler can consume. Subpath imports
     // (@notefig/ui/button) map straight onto the file tree; extensions are

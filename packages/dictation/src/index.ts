@@ -9,6 +9,7 @@ export {
   type DictationState,
   type DictationStatus,
 } from "./dictation";
+export { createWorkerEngine } from "./engine/worker-engine";
 export { openBrowserMicrophone, type Microphone, type OpenMicrophone } from "./microphone";
 export {
   fitDictation,
