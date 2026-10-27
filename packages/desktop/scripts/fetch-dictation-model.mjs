@@ -1,7 +1,7 @@
 // Put the dictation model in the bundle: `public/dictation/`, which Vite
 // copies into `dist/` for both the Tauri app and the web build. The model is
 // NVIDIA's Parakeet TDT-CTC 110M (CC-BY-4.0) in sherpa-onnx's int8 ONNX
-// export, run in the browser by modules/dictation/engine.
+// export, run in the browser by @notefig/dictation/engine.
 //
 //   node scripts/fetch-dictation-model.mjs [--force]
 //

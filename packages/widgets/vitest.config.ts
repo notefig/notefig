@@ -22,6 +22,10 @@ export default defineConfig({
         replacement: path.resolve(__dirname, "../shared/src/$1/index.ts"),
       },
       {
+        find: /^@notefig\/dictation$/,
+        replacement: path.resolve(__dirname, "../dictation/src/index.ts"),
+      },
+      {
         find: /^@notefig\/ui\/(.*)$/,
         replacement: path.resolve(__dirname, "../ui/src/$1"),
       },

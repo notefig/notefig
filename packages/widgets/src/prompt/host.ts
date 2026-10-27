@@ -28,7 +28,7 @@ import type {
   AgentTurn,
 } from "@notefig/shared/agent";
 import type { DirectiveSource } from "./composer/mention-suggestion";
-import type { DictationHost } from "../dictation/extension";
+import type { DictationHost } from "@notefig/dictation";
 
 /** Where in the document a widget's prompt was sent from. */
 export interface WidgetPromptTarget {

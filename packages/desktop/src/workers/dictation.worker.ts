@@ -6,9 +6,13 @@
  */
 import * as ort from "onnxruntime-web/wasm";
 import wasmUrl from "onnxruntime-web/ort-wasm-simd-threaded.wasm?url";
-import { greedyCtc, parseTokens, type Vocabulary } from "@/modules/dictation/engine/ctc";
-import { loadBundledModel } from "@/modules/dictation/engine/load-model";
-import { createLogMel } from "@/modules/dictation/engine/log-mel";
+import {
+  createLogMel,
+  greedyCtc,
+  loadBundledModel,
+  parseTokens,
+  type Vocabulary,
+} from "@notefig/dictation/engine";
 import { exposeWorkerApi } from "./worker-rpc";
 
 ort.env.wasm.numThreads = 1;

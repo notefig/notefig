@@ -18,7 +18,8 @@
       // breaks a fresh checkout. @notefig/ui ships no dist at all (.tsx).
       "@notefig/shared": ["../shared/src/index.ts"],
       "@notefig/shared/*": ["../shared/src/*/index.ts"],
-      "@notefig/ui/*": ["../ui/src/*"]
+      "@notefig/ui/*": ["../ui/src/*"],
+      "@notefig/dictation": ["../dictation/src/index.ts"]
     }
   },
   "include": ["src"]

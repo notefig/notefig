@@ -6,6 +6,9 @@
  * already settled as plain text, the phrase still being spoken shimmering as
  * it's re-heard — and then inserts the final text.
  *
+ * The contract with the service (`DictationHost` and the targets it
+ * takes) is `@notefig/dictation`'s.
+ *
  * The ghost is a decoration, never part of the document, so it can't be
  * saved, synced or undone. The final text goes in as one transaction, so one
  * undo removes the whole dictation.
@@ -14,32 +17,13 @@ import { Extension } from "@tiptap/core";
 import type { EditorState } from "@tiptap/pm/state";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
+import {
+  fitDictation,
+  type DictationHost,
+  type DictationInsertion,
+  type DictationTarget,
+} from "@notefig/dictation";
 import { mountVoiceWave } from "@notefig/ui/voice-wave";
-
-/** One dictation into one editor, from key down to commit or cancel. */
-export interface DictationInsertion {
-  /** The words heard so far: `settled` phrases won't change; `live` is the
-   *  phrase still being spoken, re-heard as it goes. */
-  preview(settled: string, live: string): void;
-  /** Insert the final text where the dictation began. */
-  commit(text: string): void;
-  /** Drop the ghost; nothing is inserted. */
-  cancel(): void;
-}
-
-/** An editor that can take dictation. */
-export interface DictationTarget {
-  hasFocus(): boolean;
-  /** Starts a dictation at the selection; null when the editor isn't editable. */
-  begin(): DictationInsertion | null;
-}
-
-/** What the app hands the extension: where targets register, and the
- *  microphone's level (0–1) for the wave. */
-export interface DictationHost {
-  attach(target: DictationTarget): () => void;
-  level(): number;
-}
 
 interface GhostState {
   /** One per dictation: its DOM is built once and updated in place. */
@@ -53,25 +37,6 @@ interface GhostState {
 type GhostMeta = { set: GhostState } | { clear: true };
 
 const dictationKey = new PluginKey<GhostState | null>("dictation");
-
-/**
- * Fits dictated `text` between what's before and after the caret in its
- * block: a space on either side where words would otherwise touch, a
- * lowercase first word mid-sentence, no closing period when the sentence
- * carries on after it.
- */
-export function fitDictation(before: string, after: string, text: string): string {
-  let fitted = text.trim();
-  if (!fitted) return "";
-  const midSentence = before.trim() !== "" && !/[.!?:]\s*$/.test(before);
-  if (midSentence && /^[A-Z][a-z]/.test(fitted) && !/^I\b/.test(fitted)) {
-    fitted = fitted[0].toLowerCase() + fitted.slice(1);
-  }
-  if (/^\s*[a-z]/.test(after)) fitted = fitted.replace(/\.$/, "");
-  if (before !== "" && !/\s$/.test(before)) fitted = ` ${fitted}`;
-  if (/^[\p{L}\p{N}]/u.test(after)) fitted = `${fitted} `;
-  return fitted;
-}
 
 function textAround(state: EditorState, from: number, to: number) {
   const $from = state.doc.resolve(from);

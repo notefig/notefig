@@ -21,9 +21,9 @@ import {
   widgetMinimapExtension,
   PageLinkSuggestion,
   dictationExtension,
-  type DictationHost,
   type PromptWidgetsApi,
 } from "@notefig/widgets";
+import type { DictationHost } from "@notefig/dictation";
 import {
   closeDocumentSync,
   flushDocumentSync,

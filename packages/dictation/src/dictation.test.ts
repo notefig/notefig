@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DictationInsertion, DictationTarget } from "@notefig/widgets";
 import {
   createDictation,
   dictationHoldKey,
@@ -7,11 +6,12 @@ import {
   joinPhrases,
   splitGuess,
   type DictationApi,
+  type DictationEngine,
 } from "./dictation";
 import type { Microphone } from "./microphone";
 import { createResampler } from "./microphone";
 import { createSegmenter } from "./segmenter";
-import type { DictationEngine } from "./worker-engine";
+import type { DictationInsertion, DictationTarget } from "./target";
 
 const RATE = 16_000;
 const speech = (ms: number) =>

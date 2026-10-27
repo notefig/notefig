@@ -7,7 +7,7 @@
  * become user-editable — is a rewire of the call sites rather than a rewrite of
  * this file.
  */
-import { dictationHoldKey, holdKeyLabel } from "@/modules/dictation";
+import { dictationHoldKey, holdKeyLabel } from "@notefig/dictation";
 
 export type HotkeyGroup = "general" | "tabs" | "editing";
 
@@ -158,7 +158,7 @@ export const HOTKEY_CATALOG: HotkeyEntry[] = [
   },
   { id: "undo", binding: "Mod+Z", labelKey: "undo", group: "editing" },
   { id: "redo", binding: "Mod+Shift+Z", labelKey: "redo", group: "editing" },
-  // src/modules/dictation/dictation.ts (hold to talk, release to insert)
+  // @notefig/dictation (hold to talk, release to insert)
   {
     id: "dictate",
     binding: dictationHoldKey() === "AltRight" ? "Alt" : "Control",

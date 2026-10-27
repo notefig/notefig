@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
-import { dictationExtension, fitDictation, type DictationTarget } from "./extension";
+import type { DictationTarget } from "@notefig/dictation";
+import { dictationExtension } from "./extension";
 
 let editor: Editor | null = null;
 afterEach(() => editor?.destroy());
@@ -116,29 +117,5 @@ describe("dictationExtension", () => {
     const { editor, targets } = setup("<p>Locked</p>");
     editor.setEditable(false);
     expect(targets[0].begin()).toBeNull();
-  });
-});
-
-describe("fitDictation", () => {
-  it("starts a sentence as spoken at the start of a block", () => {
-    expect(fitDictation("", "", "Hello there.")).toBe("Hello there.");
-  });
-
-  it("adds a space after a previous sentence", () => {
-    expect(fitDictation("Done.", "", "Next one.")).toBe(" Next one.");
-  });
-
-  it("lowercases the first word mid-sentence but keeps I", () => {
-    expect(fitDictation("We should ", "", "Ship it.")).toBe("ship it.");
-    expect(fitDictation("and then ", "", "I left.")).toBe("I left.");
-  });
-
-  it("drops the closing period and adds a space before a following word", () => {
-    expect(fitDictation("We ", "will see", "Really")).toBe("really ");
-    expect(fitDictation("We ", "will see", "Really.")).toBe("really ");
-  });
-
-  it("inserts nothing for silence", () => {
-    expect(fitDictation("x", "y", "  ")).toBe("");
   });
 });

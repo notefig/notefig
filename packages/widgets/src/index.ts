@@ -147,14 +147,9 @@ export {
   type MinimapSource,
 } from "./minimap/contract";
 
-/** Dictation: the editor end of push-to-talk; the app owns mic and model. */
-export {
-  dictationExtension,
-  fitDictation,
-  type DictationHost,
-  type DictationInsertion,
-  type DictationTarget,
-} from "./dictation/extension";
+/** Dictation: the editor end of push-to-talk (`@notefig/dictation` is the
+ *  service and its contract). */
+export { dictationExtension } from "./dictation/extension";
 
 /**
  * The translation keys this package resolves — the host application owns the

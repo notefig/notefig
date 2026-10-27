@@ -1,1 +1,1 @@
-export * from "./dictation";
+export { dictationModule } from "./dictation";

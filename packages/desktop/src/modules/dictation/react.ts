@@ -3,8 +3,8 @@
  * placeholders ("… or hold right ⌥ to talk"), while dictation is on.
  */
 import { useCore } from "@notefig/core/react";
+import { holdKeyLabel } from "@notefig/dictation";
 import { useAppSettings } from "@/hooks/use-app-settings";
-import { holdKeyLabel } from "./dictation";
 
 export function useDictationKey(): string | null {
   // Absent in roots without the dictation module (the marketing site).

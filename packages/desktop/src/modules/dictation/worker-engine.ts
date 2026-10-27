@@ -3,14 +3,9 @@
  * workers/dictation.worker.ts. The worker starts on the first dictation and
  * then keeps the model loaded; one that dies is replaced on the next call.
  */
+import type { DictationEngine } from "@notefig/dictation";
 import type { DictationWorkerRpc } from "@/workers/dictation.worker";
 import { createWorkerClient, WorkerRpcError, type WorkerClient } from "@/workers/worker-rpc";
-
-export interface DictationEngine {
-  /** Loads the bundled model; cheap once loaded. */
-  load(): Promise<void>;
-  transcribe(samples: Float32Array): Promise<string>;
-}
 
 /** Where Vite serves `public/dictation/` from, relative to the app's base. */
 const MODEL_PATH = "dictation/";
