@@ -175,7 +175,7 @@ i18n
             "Open a scratchpad when you enter a project with nothing open.",
           dictation: "Dictation",
           dictationDesc:
-            "Hold {{key}} while you talk to type into a document or a prompt. Speech is turned into text on this device by NVIDIA's Parakeet model (CC-BY-4.0); audio never leaves it.",
+            "Hold {{key}} while you talk to type into a document or a prompt. Audio never leaves your device.",
           dictationFailed: "Dictation didn't work: {{reason}}",
           automaticUpdates: "Automatic updates",
           automaticUpdatesDesc:
@@ -612,9 +612,9 @@ i18n
           agentContentOfType: "{{type}} content",
 
           // Agent UI — inline prompt blob (in the markdown editor)
-          promptBlobPlaceholder: "Ask AI — edit this doc, or any other…",
+          promptBlobPlaceholder: "Prompt to edit this doc, or any other…",
           promptBlobPlaceholderDictation:
-            "Ask AI to edit this doc or any other — or hold {{key}} to talk",
+            "Prompt to edit this doc, or hold {{key}} to talk",
           promptBlobQueued: "Queued",
           promptBlobQueuedAhead: "Queued · {{count}} ahead",
           promptBlobReferenceRemove: "Remove reference",
@@ -630,7 +630,8 @@ i18n
           promptBlobReply: "Reply…",
           promptBlobReplyDictation: "Reply, or hold {{key}} to talk…",
           promptBlobAnswer: "↑ to pick, or type an answer…",
-          promptBlobAnswerDictation: "↑ to pick, type, or hold {{key}} to answer…",
+          promptBlobAnswerDictation:
+            "↑ to pick, type, or hold {{key}} to answer…",
           promptBlobShowMore: "Show more",
           promptBlobShowLess: "Show less",
           promptBlobIssue: "Issue",
