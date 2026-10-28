@@ -75,7 +75,7 @@ export function codeDiff(): Plugin<CodeDiffState> {
   return new Plugin({
     key,
     state: {
-      init: (_config, { doc }) => ({ editing: null, decorations: decorate(doc, null) }),
+      init: (_config, { doc }): CodeDiffState => ({ editing: null, decorations: decorate(doc, null) }),
       apply: (tr, previous, _old, state) => {
         const editing = tr.selectionSet || previous.editing !== null ? editingAt(state) : null;
         if (!tr.docChanged && editing === previous.editing) return previous;

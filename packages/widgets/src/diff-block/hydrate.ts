@@ -44,7 +44,9 @@ export function createDiffBlockHydrator(): DiffBlockHydrator {
       }
       for (const code of root.querySelectorAll(`pre > code[class^="${CLASS_PREFIX}diff:"]`)) {
         const language = code.className.split(" ")[0].slice(CLASS_PREFIX.length);
-        const text = code.textContent ?? "";
+        // markdown-it ends every fence's text with a newline the source
+        // (and the editor's code block) doesn't have.
+        const text = (code.textContent ?? "").replace(/\n$/, "");
         const block = parseDiffBlock(language, text);
         if (!block) continue;
         const key = `${language}\n${text}`;

@@ -27,6 +27,17 @@ describe("createDiffBlockHydrator", () => {
     hydrator.destroy();
   });
 
+  it("reads a fence without the newline markdown-it ends it with", async () => {
+    const hydrator = createDiffBlockHydrator();
+    render(fence("diff:ts", "a\n=======\nb"));
+    hydrator.hydrate(root);
+    // One line added, not a blank one after it.
+    const shadow = diffs()[0].querySelector("diffs-container")!.shadowRoot!;
+    const added = () => shadow.querySelectorAll('[data-line-type="change-addition"]:not([data-column-number])').length;
+    await expect.poll(added).toBe(1);
+    hydrator.destroy();
+  });
+
   it("moves a kept block's diff into new HTML, and frees one the HTML dropped", () => {
     const hydrator = createDiffBlockHydrator();
     render(DIFF);

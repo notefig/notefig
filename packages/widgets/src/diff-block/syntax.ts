@@ -44,8 +44,7 @@ export function diffTarget(language: string): Pick<DiffBlock, "path" | "language
  *  then shown as the code it is, not as a guess at a change. */
 export function parseDiffBlock(language: string | null | undefined, text: string): DiffBlock | null {
   if (!isDiffLanguage(language)) return null;
-  // Rendered markdown keeps the fence's last newline; the editor doesn't.
-  const lines = text.replace(/\n$/, "").split("\n");
+  const lines = text.split("\n");
   const at = lines.findIndex((line) => line.trimEnd() === SEPARATOR);
   if (at === -1) return null;
   // Both sides end in a newline, so a last line that is the same on both

@@ -25,8 +25,8 @@ describe("diff block syntax", () => {
     });
   });
 
-  it("reads rendered markdown's trailing newline the same as the editor's text", () => {
-    expect(parseDiffBlock("diff:ts", "a\n=======\nb\n")).toEqual(parseDiffBlock("diff:ts", "a\n=======\nb"));
+  it("keeps a trailing blank line, a change of its own", () => {
+    expect(parseDiffBlock("diff:ts", "a\n=======\na\n")).toMatchObject({ before: "a\n", after: "a\n\n" });
   });
 
   it("splits at the first separator; the side before it may be empty", () => {
