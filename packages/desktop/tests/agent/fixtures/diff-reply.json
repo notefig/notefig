@@ -23,7 +23,7 @@
             "sessionUpdate": "agent_message_chunk",
             "content": {
               "type": "text",
-              "text": "Rename the greeting:\n\n```diff:src/greet."
+              "text": "Rename the greeting:\n\n```ts diff=src/greet."
             }
           },
           "at": 100

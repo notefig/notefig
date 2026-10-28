@@ -1,18 +1,17 @@
 /**
- * Diff blocks in the editor. A code block whose language is `diff:…`
- * (./syntax.ts) is drawn as its diff (./view.ts) while the selection is
- * elsewhere, and shown as the code block it is — its source, the language
- * picker — once the selection moves into it (a click on the diff moves it
- * there), until it leaves. A caret that is only left there — where a
- * document opens, after an edit elsewhere — draws it. Presentation only:
- * the node stays a codeBlock, so the markdown round-trip and history never
- * hear of diffs.
+ * Diff blocks in the editor. A code block with a diff (./schema.ts) is drawn
+ * as one (./element.ts) while the selection is elsewhere, and shown as the
+ * code block it is — its highlighted source, the language picker — once the
+ * selection moves into it (a click on the diff moves it there), until it
+ * leaves. A caret that is only left there — where a document opens, after
+ * an edit elsewhere — draws it. Presentation only: the markdown round-trip
+ * and history never hear of it.
  */
 import { Plugin, PluginKey, TextSelection, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { isDiffLanguage, parseDiffBlock, type DiffBlock } from "./syntax";
-import { mountDiffView } from "./view";
+import { createDiffBlockElement } from "./element";
+import { parseDiffSides } from "./syntax";
 
 interface CodeDiffState {
   /** Where the diff block being edited starts, if one is. */
@@ -22,48 +21,45 @@ interface CodeDiffState {
 
 const key = new PluginKey<CodeDiffState>("codeDiff");
 
+const diffOf = (node: PMNode): string | null =>
+  node.type.name === "codeBlock" ? (node.attrs.diff as string | null) : null;
+
 function editingAt({ selection: { $from, $to } }: EditorState): number | null {
-  const block = $from.parent;
-  if (block.type.name !== "codeBlock" || !isDiffLanguage(block.attrs.language as string | null)) return null;
-  return $from.sameParent($to) ? $from.before() : null;
+  return diffOf($from.parent) !== null && $from.sameParent($to) ? $from.before() : null;
 }
 
 export function codeDiff(): Plugin<CodeDiffState> {
   // An edit leaves every block it didn't touch the same node.
-  const parsed = new WeakMap<PMNode, DiffBlock | null>();
-  const destroys = new WeakMap<Node, () => void>();
+  const drawable = new WeakMap<PMNode, boolean>();
 
-  const draw = (block: DiffBlock) => (view: EditorView, getPos: () => number | undefined) => {
-    const { host, destroy } = mountDiffView(block);
-    destroys.set(host, destroy);
-    host.contentEditable = "false";
-    host.addEventListener("click", () => {
+  const draw = (node: PMNode) => (view: EditorView, getPos: () => number | undefined) => {
+    const element = createDiffBlockElement(node.attrs.language as string | null, diffOf(node)!, node.textContent);
+    element.contentEditable = "false";
+    element.addEventListener("click", () => {
       const at = getPos();
       // A drag that selected some of the diff is a copy, not a way in.
       if (!view.editable || at === undefined || document.getSelection()?.toString()) return;
       view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at + 1)));
       view.focus();
     });
-    return host;
+    return element;
   };
 
   const decorate = (doc: PMNode, editing: number | null) => {
     const decorations: Decoration[] = [];
     doc.descendants((node, pos) => {
       if (node.type.name !== "codeBlock") return !node.isTextblock;
-      const language = node.attrs.language as string | null;
-      if (pos === editing || !isDiffLanguage(language)) return false;
-      if (!parsed.has(node)) parsed.set(node, parseDiffBlock(language, node.textContent));
-      const block = parsed.get(node);
-      if (!block) return false;
+      const diff = diffOf(node);
+      if (pos === editing || diff === null) return false;
+      if (!drawable.has(node)) drawable.set(node, parseDiffSides(node.textContent) !== null);
+      if (!drawable.get(node)) return false;
       decorations.push(
-        Decoration.widget(pos, draw(block), {
+        Decoration.widget(pos, draw(node), {
           side: -1,
           // The same diff for the same source: a redraw only when it changes.
-          key: `${language}\n${node.textContent}`,
+          key: `${node.attrs.language}\n${diff}\n${node.textContent}`,
           ignoreSelection: true,
           stopEvent: () => true,
-          destroy: (host) => destroys.get(host)?.(),
         }),
         Decoration.node(pos, pos + node.nodeSize, { style: "display: none" }),
       );

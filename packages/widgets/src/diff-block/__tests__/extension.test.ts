@@ -3,25 +3,34 @@ import { Editor, Extension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { TextSelection } from "@tiptap/pm/state";
 import { codeDiff } from "../extension";
+import { DiffCodeBlock } from "../schema";
 
 let editor: Editor | null = null;
 afterEach(() => {
+  editor?.view.dom.parentElement?.remove();
   editor?.destroy();
   editor = null;
 });
 
-const DIFF = '<pre><code class="language-diff:ts">const a = 1;\n=======\nconst a = 2;</code></pre>';
+const DIFF = '<pre><code class="language-ts" data-diff="">const a = 1;\n=======\nconst a = 2;</code></pre>';
 
 function mount(content: string) {
   editor = new Editor({
-    extensions: [StarterKit, Extension.create({ name: "codeDiff", addProseMirrorPlugins: () => [codeDiff()] })],
+    // On the page: a diff draws once it is.
+    element: document.body.appendChild(document.createElement("div")),
+    extensions: [
+      StarterKit.configure({ codeBlock: false }),
+      DiffCodeBlock,
+      Extension.create({ name: "codeDiff", addProseMirrorPlugins: () => [codeDiff()] }),
+    ],
     content,
   });
   return editor;
 }
 
-const diffs = () => editor!.view.dom.querySelectorAll(".diff-block diffs-container");
-const pres = () => [...editor!.view.dom.querySelectorAll("pre")];
+const diffs = () => editor!.view.dom.querySelectorAll("notefig-diff-block");
+/** The code blocks' own, not the ones the diffs hold. */
+const pres = () => [...editor!.view.dom.querySelectorAll(":scope > pre")] as HTMLElement[];
 const hidden = (pre: HTMLElement) => pre.style.display === "none";
 
 /** The position of the first code block. */
@@ -45,10 +54,10 @@ describe("codeDiff", () => {
     expect(diffs()).toHaveLength(1);
     expect(hidden(pres()[0])).toBe(true);
     // Drawn once the language loads; each line's number and its code.
-    const lines = () => [...diffs()[0].shadowRoot!.querySelectorAll("[data-line-type]")];
+    const lines = () => [...diffs()[0].querySelector("diffs-container")!.shadowRoot!.querySelectorAll("[data-line-type]:not([data-column-number])")];
     await expect
       .poll(() => lines().map((line) => line.getAttribute("data-line-type")))
-      .toEqual(["change-deletion", "change-addition", "change-deletion", "change-addition"]);
+      .toEqual(["change-deletion", "change-addition"]);
   });
 
   it("shows the source while the selection is in it, and the diff again after", () => {
@@ -87,17 +96,17 @@ describe("codeDiff", () => {
   it("puts the caret in the source on a click, where the editor is editable", () => {
     mount(`<p>Before</p>${DIFF}`);
     editor!.setEditable(false);
-    (diffs()[0].parentElement as HTMLElement).click();
+    (diffs()[0] as HTMLElement).click();
     expect(diffs()).toHaveLength(1);
 
     editor!.setEditable(true);
-    (diffs()[0].parentElement as HTMLElement).click();
+    (diffs()[0] as HTMLElement).click();
     expect(editor!.state.selection.from).toBe(codeBlockAt() + 1);
     expect(diffs()).toHaveLength(0);
   });
 
   it("leaves other code blocks, and a diff block with no separator, as code", () => {
-    mount('<pre><code class="language-ts">const a = 1;</code></pre><pre><code class="language-diff:ts">const a = 1;</code></pre>');
+    mount('<pre><code class="language-ts">a\n=======\nb</code></pre><pre><code class="language-ts" data-diff="">const a = 1;</code></pre>');
     expect(diffs()).toHaveLength(0);
     expect(pres().some(hidden)).toBe(false);
   });

@@ -1,5 +1,5 @@
 /**
- * An agent's diff block in the chat (```diff:…, see
+ * An agent's diff block in the chat (```ts diff=…, see
  * @notefig/widgets/diff-block): the reply streams in, and the block is
  * drawn as a diff, with its file's name and its changed lines.
  *
@@ -26,7 +26,7 @@ test("a reply's diff block is drawn as a diff", async ({ page }) => {
   const reply = entries(page, "assistant").last();
   await expect(reply).toContainText("That's the only change.");
   await expect(reply.locator(".rendered > pre")).toHaveCount(0);
-  const diff = reply.locator(".diff-block diffs-container");
+  const diff = reply.locator("notefig-diff-block diffs-container");
   await expect(diff).toHaveCount(1);
   await expect(diff.locator("[data-title]")).toHaveText("src/greet.ts");
   await expect(diff.locator('[data-line-type="change-deletion"]:not([data-column-number])').first()).toContainText("hi ${name}");

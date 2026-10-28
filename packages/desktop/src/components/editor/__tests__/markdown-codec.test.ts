@@ -54,6 +54,10 @@ export const fixtures: string[] = [
   "1. one\n2. two\n3. three",
   "```ts\nconst x = 1;\n```",
   "```\nplain text\n```",
+  // Diff blocks: the diff rides beside the language.
+  "```ts diff=src/a.ts\nconst a = 1;\n=======\nconst a = 2;\n```",
+  "```python diff\nx = 1\n=======\nx = 2\n\n```",
+  "```diff\n-a\n+b\n```",
   "- [ ] todo",
   "- [x] done",
   "- [ ] first\n- [x] second\n- [ ] third",
@@ -145,6 +149,15 @@ describe("codec ↔ editor equivalence", () => {
     const editor = createEditor("");
     editor.commands.insertTable({ rows: 2, cols: 2, withHeaderRow: true });
     expect(codec.serialize(editor.getJSON())).toBe(getMarkdown(editor));
+  });
+
+  it("keeps a diff block's diff through a round trip", () => {
+    for (const md of ["```ts diff=src/a.ts\na\n=======\nb\n```", "```python diff\nx\n=======\ny\n```"]) {
+      const doc = codec.parse(md);
+      expect(doc.content?.[0]).toMatchObject({ type: "codeBlock", attrs: { diff: expect.any(String) } });
+      expect(codec.serialize(doc)).toBe(md);
+    }
+    expect(codec.parse("```diff\n-a\n```").content?.[0].attrs).toMatchObject({ language: "diff", diff: null });
   });
 
   it("hash matches hash.ts", () => {

@@ -82,5 +82,7 @@ describe("codec under linkedom shim (worker environment)", () => {
     const { renderMarkdownHtml } = await import("../../utils/markdown-html");
     expect(renderMarkdownHtml("**bold**")).toContain("<strong>bold</strong>");
     expect(renderMarkdownHtml("<img src=x>")).not.toContain("<img src");
+    // A diff fence comes out as the element that draws it.
+    expect(renderMarkdownHtml("```ts diff\na\n=======\nb\n```")).toMatch(/^<notefig-diff-block><pre><code data-diff=""/);
   });
 });

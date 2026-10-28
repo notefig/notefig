@@ -5,11 +5,13 @@
  */
 
 import MarkdownIt from "markdown-it";
+import { drawnDiffFences } from "@notefig/widgets/diff-block/markdown";
 
 // html: false keeps raw HTML in model output escaped (rendered as text), so
 // no sanitizer pass is needed; breaks matches the chat's old pre-wrap feel
-// where a single newline was a visible line break.
-const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
+// where a single newline was a visible line break. A diff fence comes out
+// as the element that draws it.
+const md = new MarkdownIt({ html: false, linkify: true, breaks: true }).use(drawnDiffFences);
 
 export function renderMarkdownHtml(text: string): string {
   return md.render(text);

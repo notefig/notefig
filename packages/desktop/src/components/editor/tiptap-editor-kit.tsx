@@ -33,10 +33,9 @@ export const MarkdownImage = MarkdownImageBase.extend({
 
 /**
  * Code blocks, highlighted like the code viewer (`codeHighlight`), with a
- * language picker, and drawn as diffs when their language is `diff:…`
- * (`codeDiff`). Schema is unchanged (CodeBlock's own attrs/parsing), so
- * this is presentation only — the worker's markdown round-trip is
- * unaffected.
+ * language picker, and drawn as diffs when they hold one (`codeDiff`). The
+ * schema, the `diff` attribute included, is the worker's (CodeBlock), so
+ * this is presentation only.
  */
 export const MarkdownCodeBlock = CodeBlock.extend({
   addProseMirrorPlugins() {
