@@ -1,0 +1,68 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-10-28T00:00:00.000Z",
+  "harnessId": "claude-code",
+  "taskId": "task_fixture_diff",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_diff",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Suggest a better greeting"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "Rename the greeting:\n\n```diff:src/greet."
+            }
+          },
+          "at": 100
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "ts\nexport function greet(name: string) {\n  return `hi ${name}`;\n}\n=======\nexport function greet(name: string) {\n  return `hello, ${name}`;\n}\n```\n"
+            }
+          },
+          "at": 200
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "\nThat's th"
+            }
+          },
+          "at": 300
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {
+              "type": "text",
+              "text": "e only change."
+            }
+          },
+          "at": 400
+        }
+      ],
+      "stopReason": "end_turn"
+    }
+  ]
+}

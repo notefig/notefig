@@ -58,6 +58,7 @@ frames.
 | `turn-error.json` | A turn that errors mid-stream |
 | `auth-required.json` | Logged-out harness: turn 1 errors "Authentication required", turn 2 (the retry) succeeds |
 | `changed-files.json` | One tool call with three diffs (one new file), a terminal-content tool |
+| `diff-reply.json` | A reply streamed in chunks that suggests a change as a diff block (`diff:src/greet.ts`) |
 | `streaming-slow.json` | A long stream with 150 ms gaps — replay at `speed: 1` to interrupt/queue |
 | `unknown-updates.json` | `available_commands_update` / `current_mode_update` (task-row state) and `session_info_update` (stored as an entry, never rendered) |
 | `file-write.json` | The agent writes an open document via `fs/write_text_file` |

@@ -25,6 +25,7 @@ import type { AgentStore } from "../agent-collections";
 import { toolRegistry, getTool } from "../tools";
 import { serverInstructions } from "../mcp-instructions";
 import { WIDGET_RESPONSE_KINDS } from "@notefig/shared/agent";
+import { DIFF_BLOCK_GUIDE } from "@notefig/widgets/diff-block/syntax";
 import i18n from "@/utils/intl";
 import { createLayout } from "@/modules/layout";
 import { memoryUrlState } from "@/testing/test-core";
@@ -141,6 +142,8 @@ describe("createMcpRequestHandler", () => {
       "you MUST deliver your final response by calling `widget_respond`",
     );
     expect(instructions).toContain("do NOT call `widget_respond`");
+    // Changes are shown as diff blocks, which every markdown surface draws.
+    expect(instructions).toContain(DIFF_BLOCK_GUIDE);
     // Every response kind is named; the tool's description says when.
     for (const kind of Object.keys(WIDGET_RESPONSE_KINDS)) {
       expect(instructions).toContain(kind);

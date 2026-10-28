@@ -4,12 +4,15 @@
  * Each token carries both themes' colours (`color`, `--shiki-dark`); the
  * stylesheet shows the dark one under `.dark`, so switching theme
  * re-tokenizes nothing. A language loads in the background, and its blocks
- * are coloured when it lands; one Shiki doesn't know stays plain.
+ * are coloured when it lands; one Shiki doesn't know stays plain. A diff
+ * block's source is coloured in its code's language.
  */
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { getHighlighterIfLoaded, getSharedHighlighter } from "@pierre/diffs";
+import { diffTarget, isDiffLanguage } from "./diff-block/syntax";
+import { diffBlockLanguage } from "./diff-block/view";
 
 const THEMES = { light: "pierre-light", dark: "pierre-dark" } as const;
 /** Past this a block stays plain: tokenizing it on every keystroke in it
@@ -22,11 +25,16 @@ const loads = new Map<string, Promise<boolean>>();
 
 type Token = [from: number, to: number, style: string];
 
+function languageOf(node: PMNode): string | null {
+  const language = node.attrs.language as string | null;
+  return isDiffLanguage(language) ? diffBlockLanguage(diffTarget(language)) : language;
+}
+
 /** A block's coloured tokens, offsets from its start; none until its
  *  language and both themes are loaded — the highlighter is shared, so
  *  another user may have loaded the language without them. */
 function tokensOf(node: PMNode): Token[] {
-  const lang = node.attrs.language as string | null;
+  const lang = languageOf(node);
   const highlighter = getHighlighterIfLoaded();
   if (!lang || !highlighter?.getLoadedLanguages().includes(lang)) return [];
   const themes = highlighter.getLoadedThemes();
@@ -79,7 +87,7 @@ export function codeHighlight(): Plugin {
       const load = () =>
         view.state.doc.descendants((node) => {
           if (node.type.name !== "codeBlock") return true;
-          const lang = node.attrs.language as string | null;
+          const lang = languageOf(node);
           if (lang && !awaited.has(lang)) {
             awaited.add(lang);
             if (!loads.has(lang)) {

@@ -1,5 +1,6 @@
 import { toolRegistry } from "./tools";
 import { WIDGET_RESPONSE_KINDS } from "@notefig/shared/agent";
+import { DIFF_BLOCK_GUIDE } from "@notefig/widgets/diff-block/syntax";
 
 /**
  * MCP's `tools/list` schema is enough for the model to call a tool
@@ -52,6 +53,7 @@ export function serverInstructions(): string {
     `doc" expects you to edit the document, not to describe the edit, unless ` +
     `the user is asking a question, or the request could mean different ` +
     `things and the document doesn't settle which: then ask with a choice ` +
-    `before editing.`
+    `before editing. ` +
+    DIFF_BLOCK_GUIDE
   );
 }

@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+// By path, not through the barrel: @pierre/diffs registers custom elements
+// on import, and the barrel also loads in the markdown worker, which has none.
+import { createDiffBlockHydrator } from "@notefig/widgets/diff-block/hydrate";
 import { renderMarkdown } from "@/utils/markdown-conversion";
 import { cn } from "@notefig/ui/utils";
 import { useCore } from "@notefig/core/react";
@@ -96,6 +99,8 @@ function useMarkdownHtml(text: string): string | null {
  * site sets (foreground in chat, amber for widget issue text) instead of
  * the plugin's gray scale. One delegated click listener routes links out
  * through the platform opener — an in-app anchor would navigate the webview.
+ * Diff blocks (```diff:…) are drawn as diffs once their HTML is in, before
+ * it paints.
  */
 export function Markdown({
   text,
@@ -106,8 +111,17 @@ export function Markdown({
 }) {
   const html = useMarkdownHtml(text);
   const { ui } = useCore().platform;
+  const ref = useRef<HTMLDivElement>(null);
+  // One object per HTML: React rewrites innerHTML whenever this object is
+  // new, which would wipe the drawn diffs (and any text selection) on every
+  // re-render.
+  const inner = useMemo(() => ({ __html: html ?? "" }), [html]);
+  const [diffs] = useState(createDiffBlockHydrator);
+  useLayoutEffect(() => diffs.hydrate(ref.current!), [diffs, inner]);
+  useEffect(() => () => diffs.destroy(), [diffs]);
   return (
     <div
+      ref={ref}
       className={cn(
         "rendered rendered-sm dark:rendered-invert max-w-none break-words",
         // WebKit's UA sheet gives editable content `line-break:
@@ -135,7 +149,7 @@ export function Markdown({
         event.preventDefault();
         ui.openExternal(anchor.href);
       }}
-      dangerouslySetInnerHTML={{ __html: html ?? "" }}
+      dangerouslySetInnerHTML={inner}
     />
   );
 }

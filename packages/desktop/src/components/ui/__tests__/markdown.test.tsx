@@ -78,4 +78,21 @@ describe("Markdown", () => {
     render("cached **hit**");
     expect(container!.querySelector("strong")?.textContent).toBe("hit");
   });
+
+  it("draws a diff block as a diff, and puts its fence back on unmount", async () => {
+    await renderResolved("Change:\n\n```diff:ts\nconst a = 1;\n=======\nconst a = 2;\n```\n");
+    const diff = container!.querySelector(".rendered > .diff-block");
+    expect(diff?.querySelector("diffs-container")).not.toBeNull();
+    expect(container!.querySelector("pre")).toBeNull();
+    // A re-render of the same reply keeps the drawn diff.
+    act(() =>
+      root!.render(
+        createElement(CoreProvider, {
+          core,
+          children: createElement(Markdown, { text: "Change:\n\n```diff:ts\nconst a = 1;\n=======\nconst a = 2;\n```\n" }),
+        }),
+      ),
+    );
+    expect(container!.querySelector(".diff-block")).toBe(diff);
+  });
 });

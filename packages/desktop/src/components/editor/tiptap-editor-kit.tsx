@@ -10,6 +10,7 @@ import { widgetRendererNodes, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
 // on import, and the barrel also loads in the markdown worker, which has none.
 import { codeHighlight } from "@notefig/widgets/code-highlight";
 import { codeLanguagePicker } from "@notefig/widgets/code-language";
+import { codeDiff } from "@notefig/widgets/diff-block/extension";
 import {
   createSchemaExtensions,
   MarkdownImageBase,
@@ -31,14 +32,15 @@ export const MarkdownImage = MarkdownImageBase.extend({
 });
 
 /**
- * Code blocks, highlighted like the code viewer (`codeHighlight`) and with a
- * language picker. Schema is unchanged (CodeBlock's own attrs/parsing), so
+ * Code blocks, highlighted like the code viewer (`codeHighlight`), with a
+ * language picker, and drawn as diffs when their language is `diff:…`
+ * (`codeDiff`). Schema is unchanged (CodeBlock's own attrs/parsing), so
  * this is presentation only — the worker's markdown round-trip is
  * unaffected.
  */
 export const MarkdownCodeBlock = CodeBlock.extend({
   addProseMirrorPlugins() {
-    return [...(this.parent?.() ?? []), codeHighlight(), codeLanguagePicker()];
+    return [...(this.parent?.() ?? []), codeHighlight(), codeLanguagePicker(), codeDiff()];
   },
 });
 
