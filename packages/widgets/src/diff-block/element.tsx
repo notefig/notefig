@@ -9,31 +9,57 @@
  * Which workspace a relative path is in is the page's to say: the nearest
  * `data-workspace-path`, the element's own included.
  */
+import type { ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { useTranslation } from "react-i18next";
-import { Pencil } from "lucide-react";
-import { DiffCard, type DiffFile } from "./card";
+import type { FileDiffMetadata } from "@pierre/diffs";
+import { DiffCard, diffControls, type DiffFile } from "./card";
 import { parseDiffBlock } from "./patch";
 import { DIFF_BLOCK_TAG, DIFF_DATA_ATTRIBUTE } from "./syntax";
 
 const LANGUAGE_PREFIX = "language-";
 export const WORKSPACE_ATTRIBUTE = "data-workspace-path";
 
-/** What only the app knows: which files exist, and how one opens. */
+/** What only the app knows: which files exist, how one opens, and how its
+ *  type is drawn. */
 export interface DiffBlockHost {
   /** The file `path` (absolute, or relative to `workspacePath`) names. */
   resolveFile(workspacePath: string | null, path: string): DiffFile;
+  FileIcon?: ComponentType<{ path: string; className?: string }>;
 }
 
-/** The element; the editor hands it a way into the block's source. */
+/** The element; the editor hands it a way into the block's source, and
+ *  says when the keys are on it. */
 export interface DiffBlockElement extends HTMLElement {
   onEdit?: () => void;
+  /** The keys are on the card: its controls show their digits. */
+  keys: boolean;
+  /** Runs the card's `index`th control (diffControls); false when it has
+   *  none there, or isn't drawn. */
+  runControl(index: number): boolean;
 }
 
 function elementClass(host: DiffBlockHost | null) {
   return class extends HTMLElement implements DiffBlockElement {
     onEdit?: () => void;
-    #drawn: { frame: HTMLElement; pre: HTMLElement; root: Root } | null = null;
+    #keys = false;
+    #drawn: { frame: HTMLElement; pre: HTMLElement; root: Root; diff: FileDiffMetadata; file: DiffFile } | null = null;
+
+    get keys() {
+      return this.#keys;
+    }
+
+    set keys(keys: boolean) {
+      if (keys === this.#keys) return;
+      this.#keys = keys;
+      this.#render();
+    }
+
+    runControl(index: number): boolean {
+      if (!this.#drawn) return false;
+      const control = diffControls(this.onEdit, this.#drawn.file)[index];
+      control?.();
+      return control !== undefined;
+    }
 
     connectedCallback() {
       // Once its children are in: a parser may connect it before them.
@@ -56,9 +82,23 @@ function elementClass(host: DiffBlockHost | null) {
       pre.hidden = true;
       this.classList.add("block");
       this.append(frame);
-      const root = createRoot(frame);
-      root.render(<DiffCard diff={diff} file={file} actions={this.onEdit && <EditButton onEdit={this.onEdit} />} />);
-      this.#drawn = { frame, pre, root };
+      this.#drawn = { frame, pre, root: createRoot(frame), diff, file };
+      this.#render();
+    }
+
+    #render() {
+      if (!this.#drawn) return;
+      const { root, diff, file } = this.#drawn;
+      const { FileIcon } = host ?? {};
+      root.render(
+        <DiffCard
+          diff={diff}
+          file={file}
+          icon={FileIcon && <FileIcon path={file.label} className="size-3.5 shrink-0" />}
+          onEdit={this.onEdit}
+          keys={this.#keys}
+        />,
+      );
     }
 
     disconnectedCallback() {
@@ -71,22 +111,6 @@ function elementClass(host: DiffBlockHost | null) {
       queueMicrotask(() => root.unmount());
     }
   };
-}
-
-function EditButton({ onEdit }: { onEdit: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <button
-      type="button"
-      title={t("diffBlockEdit")}
-      aria-label={t("diffBlockEdit")}
-      data-diff-edit
-      className="flex cursor-pointer items-center rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
-      onClick={onEdit}
-    >
-      <Pencil className="size-3.5" />
-    </button>
-  );
 }
 
 /** Lets the page draw diff blocks; the app does it once, at boot, with what

@@ -55,7 +55,8 @@ function press(key: string) {
   editor!.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
 }
 
-const selected = () => pres()[0].hasAttribute("data-diff-selected");
+const selected = () => diffs()[0].hasAttribute("data-selected");
+const keysOn = () => (diffs()[0] as DiffBlockElement).keys;
 const blockSelected = () => {
   const { selection } = editor!.state;
   return selection instanceof NodeSelection && selection.from === codeBlockAt();
@@ -105,6 +106,21 @@ describe("codeDiff", () => {
     expect(captureSelectionReference(editor!.state)?.text).toMatch(/^efore\n--- a\.ts[^]*\+const a = 2;$/);
   });
 
+  it("puts the keys on the block selected alone: a digit runs its control", async () => {
+    mount(`<p>Before</p>${DIFF}<p>After</p>`);
+    await Promise.resolve(); // drawn
+    select(codeBlockAt() + 1);
+    expect(keysOn()).toBe(true);
+    press("1");
+    expect(diffs()).toHaveLength(0);
+    expect(hidden(pres()[0])).toBe(false);
+
+    // A range through it tints it, but the keys stay with the text.
+    select(2, codeBlockAt() + 4);
+    expect(selected()).toBe(true);
+    expect(keysOn()).toBe(false);
+  });
+
   it("edits the selected block on Enter, until Escape selects it again", () => {
     mount(`<p>Before</p>${DIFF}<p>After</p>`);
     const drawn = diffs()[0];
@@ -146,6 +162,20 @@ describe("codeDiff", () => {
     select(2);
     editor!.commands.insertContent("x");
     expect(diffs()[0]).toBe(drawn);
+  });
+
+  it("marks the document with the workspace its diffs' paths are in", () => {
+    editor = new Editor({
+      element: document.body.appendChild(document.createElement("div")),
+      extensions: [
+        StarterKit.configure({ codeBlock: false }),
+        DiffCodeBlock,
+        Extension.create({ name: "codeDiff", addProseMirrorPlugins: () => [codeDiff({ workspacePath: "/ws" })] }),
+      ],
+      content: DIFF,
+    });
+    expect(editor.view.dom.getAttribute("data-workspace-path")).toBe("/ws");
+    expect(editor.view.dom.getAttribute("role")).toBe("textbox");
   });
 
   it("offers editing only where the editor is editable", () => {

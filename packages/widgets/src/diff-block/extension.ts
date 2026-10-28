@@ -4,7 +4,9 @@
  * prompt widget is:
  *
  * 1. Selected: a click on the card, an arrow onto it, or a selection that
- *    takes it in — the card wears the selection's tint. No selection end
+ *    takes it in — the card wears the selection's tint. Selected alone,
+ *    the keys are on it: its controls show their digits, and a digit runs
+ *    one, as the prompt widget's choices do. No selection end
  *    rests in its hidden source: one that would takes in the whole block,
  *    and one that would be all inside it selects the block. So a reference
  *    to a selection (the prompt widget's) holds the whole diff, or none.
@@ -18,7 +20,7 @@
 import { NodeSelection, Plugin, PluginKey, TextSelection, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { createDiffBlockElement, WORKSPACE_ATTRIBUTE } from "./element";
+import { createDiffBlockElement, WORKSPACE_ATTRIBUTE, type DiffBlockElement } from "./element";
 import { parseDiffBlock } from "./patch";
 import { DIFF_BLOCK_TAG } from "./syntax";
 
@@ -66,7 +68,6 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
   const draw = (node: PMNode) => (view: EditorView, getPos: () => number | undefined) => {
     const element = createDiffBlockElement(node.attrs.language as string | null, node.textContent);
     element.contentEditable = "false";
-    if (workspacePath) element.setAttribute(WORKSPACE_ATTRIBUTE, workspacePath);
     positions.set(element, getPos);
     if (view.editable) {
       element.onEdit = () => {
@@ -78,14 +79,11 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
   };
 
   const decorate = (state: EditorState, editing: number | null) => {
-    const { from, to, empty } = state.selection;
     const decorations: Decoration[] = [];
     state.doc.descendants((node, pos) => {
       if (node.type.name !== "codeBlock") return !node.isTextblock;
       if (pos === editing || !isDrawn(node)) return false;
       const end = pos + node.nodeSize;
-      // All of its source: rule 1 rests a selection's ends just inside it.
-      const selected = !empty && from <= pos + 1 && to >= end - 1;
       decorations.push(
         Decoration.widget(pos, draw(node), {
           side: -1,
@@ -94,7 +92,7 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
           ignoreSelection: true,
           stopEvent: () => true,
         }),
-        Decoration.node(pos, end, { style: "display: none", ...(selected && { "data-diff-selected": "" }) }),
+        Decoration.node(pos, end, { style: "display: none" }),
       );
       return false;
     });
@@ -131,6 +129,36 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
     const head = to !== undefined ? to + 1 : view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
     if (head === undefined) return;
     view.dispatch(state.tr.setSelection(TextSelection.between(state.doc.resolve(anchor), state.doc.resolve(head))));
+  };
+
+  /** The drawn cards, each with its block's position. */
+  const cards = function* (view: EditorView) {
+    for (const element of view.dom.querySelectorAll<DiffBlockElement>(DIFF_BLOCK_TAG)) {
+      const at = positions.get(element)?.();
+      const node = at === undefined ? null : view.state.doc.nodeAt(at);
+      if (node) yield { element, from: at!, to: at! + node.nodeSize };
+    }
+  };
+
+  /** Rule 1's look: a card wears the tint while a selection takes its
+   *  block in, and the keys are on it while it is the block selected. */
+  const markSelection = (view: EditorView) => {
+    const { selection } = view.state;
+    for (const { element, from, to } of cards(view)) {
+      // All of its source: rule 1 rests a selection's ends just inside it.
+      element.toggleAttribute("data-selected", !selection.empty && selection.from <= from + 1 && selection.to >= to - 1);
+      element.keys = selection instanceof NodeSelection && selection.from === from;
+    }
+  };
+
+  /** A digit on the selected block runs its card's control. */
+  const runControl = (view: EditorView, index: number) => {
+    const { selection } = view.state;
+    if (!(selection instanceof NodeSelection)) return false;
+    for (const { element, from } of cards(view)) {
+      if (from === selection.from) return element.runControl(index);
+    }
+    return false;
   };
 
   /** Rule 2: Enter on a selected block edits it. */
@@ -217,7 +245,9 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
       // Capture: the card stops its events from reaching the editor.
       document.addEventListener("mousedown", onMouseDown, true);
       document.addEventListener("mouseup", onMouseUp, true);
+      markSelection(view);
       return {
+        update: markSelection,
         destroy: () => {
           document.removeEventListener("mousedown", onMouseDown, true);
           document.removeEventListener("mouseup", onMouseUp, true);
@@ -226,11 +256,15 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
     },
 
     props: {
+      // The document's workspace, for every diff in it — the cards above
+      // and those in its widgets' responses alike.
+      attributes: workspacePath ? { [WORKSPACE_ATTRIBUTE]: workspacePath } : {},
       decorations: (state) => key.getState(state)?.decorations,
       handleKeyDown: (view, event) => {
         if (event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return false;
         if (event.key === "Enter") return editSelected(view);
         if (event.key === "Escape") return leaveEditing(view);
+        if (/^[1-9]$/.test(event.key)) return runControl(view, Number(event.key) - 1);
         const towards = ARROWS[event.key];
         return towards ? selectAcross(view, towards) : false;
       },

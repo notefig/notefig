@@ -2,12 +2,13 @@
  * Diff blocks (```ts diff) draw themselves wherever the page holds one —
  * documents, chat replies, an agent's edits in its transcript — once their
  * element is defined (@notefig/widgets/diff-block/element), with what only
- * the app knows: which workspace file a block's path names, and how to
- * open it.
+ * the app knows: which workspace file a block's path names, how to open
+ * it, and its type's icon (the file tree's).
  */
 import { defineModule } from "@notefig/core";
 import { defineDiffBlockElement, type DiffBlockHost } from "@notefig/widgets/diff-block/element";
 import type { DiffFile } from "@notefig/widgets/diff-block/card";
+import { FileTypeIcon } from "@/components/editor/file-type-icon";
 import { tabsModule } from "@/modules/tabs";
 import { workspacesModule } from "@/modules/workspaces";
 import { path as pathutil, relativeTreePath } from "@/utils/path";
@@ -31,6 +32,7 @@ export const diffBlocksModule = defineModule({
         if (row?.type !== "file") return { label };
         return { label, open: () => void tabs.open(absolute, { intent: "new-tab" }) };
       },
+      FileIcon: FileTypeIcon,
     };
     defineDiffBlockElement(host);
   },

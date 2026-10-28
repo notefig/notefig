@@ -32,20 +32,19 @@ export function diffStats(diff: FileDiffMetadata): { added: number; removed: num
   return { added, removed };
 }
 
-const withNewline = (text: string) => (text && !text.endsWith("\n") ? `${text}\n` : text);
-
 /**
  * A block's body for a change given as its two texts — what an agent's edit
  * reports: `before` null for a new file, and `line` where the texts start
  * in it, when they are an excerpt.
  */
 export function patchOf(path: string, before: string | null, after: string, line = 1): string {
-  const patch = createTwoFilesPatch(
-    before === null ? "/dev/null" : path,
-    path,
-    withNewline(before ?? ""),
-    withNewline(after),
-  );
+  // An excerpt — neither side ending its line — is lines out of a file,
+  // not its end: ended alike, so no "no newline at end of file" shows. A
+  // side that ends its line keeps the other as it is, so a change to the
+  // file's last newline still shows.
+  const excerpt = !(before ?? "").endsWith("\n") && !after.endsWith("\n");
+  const end = (text: string) => (excerpt && text ? `${text}\n` : text);
+  const patch = createTwoFilesPatch(before === null ? "/dev/null" : path, path, end(before ?? ""), end(after));
   const shift = line - 1;
   return patch
     .slice(patch.indexOf("--- "))

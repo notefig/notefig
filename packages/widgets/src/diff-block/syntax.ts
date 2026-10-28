@@ -49,6 +49,7 @@ export const DIFF_BLOCK_GUIDE =
   "code block whose info string is the language followed by `diff` (```ts diff), " +
   "holding a unified diff of one file as `git diff` prints it: the `---` and `+++` " +
   "lines naming the file (`--- /dev/null` for a new one), then `@@ -start,count " +
-  "+start,count @@` hunks of context, `-` and `+` lines. Notefig draws it as a " +
+  "+start,count @@` hunks of context, `-` and `+` lines, numbered from where " +
+  "those lines are in the file (read it first), not from 1. Notefig draws it as a " +
   "diff with the file's name. Use one block per file, keep to the lines around " +
   "the change, and prefer it to two separate code blocks or a plain ```diff block.";

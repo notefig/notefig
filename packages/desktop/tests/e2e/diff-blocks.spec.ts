@@ -35,7 +35,7 @@ async function openChange(page: Page, workspace: string, name: string) {
     card: editor.locator("notefig-diff-block [data-diff-card]"),
     diff: editor.locator("notefig-diff-block diffs-container"),
     source: editor.locator("> pre"),
-    selected: editor.locator("> pre[data-diff-selected]"),
+    selected: editor.locator("notefig-diff-block[data-selected]"),
   };
 }
 
@@ -67,12 +67,21 @@ test("a diff block is drawn as its card, selected as one, and edited when asked 
   await page.evaluate(() => document.documentElement.classList.remove("dark"));
   await expect.poll(scheme).not.toContain("dark");
 
-  // A click selects it; it stays drawn.
+  // A click selects it; it stays drawn, and the keys are on it: each
+  // control shows its digit, as a prompt's choices do.
+  const keys = card.locator("[data-diff-key]");
+  await expect(keys).toHaveCount(0);
   await diff.locator(line("addition")).first().click();
   await expect(selected).toHaveCount(1);
   await expect(source).toBeHidden();
+  await expect(keys).toHaveText(["1", "2"]);
+  await expect(card.locator("[data-diff-edit] [data-diff-key]")).toHaveText("2");
 
-  // Enter edits it; Escape selects it again, the edit drawn.
+  // 2 edits it, as Enter does; Escape selects it again, the edit drawn.
+  await page.keyboard.press("2");
+  await expect(source).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(selected).toHaveCount(1);
   await page.keyboard.press("Enter");
   await expect(source).toBeVisible();
   await expect(diff).toHaveCount(0);
@@ -133,7 +142,12 @@ test("a diff block links its file, and a selection takes it in whole as a refere
   expect(reference).toContain("efore.");
   expect(reference).toContain('+const greeting = "hello";');
 
-  // Its header names the workspace file, and opens it.
-  await card.getByRole("button", { name: /greet\.ts/ }).click();
-  await expect(page.locator('[data-testid="tab-bar"]')).toContainText("greet.ts");
+  // Its header names the workspace file, with the file's type icon, and
+  // opens it: a click, or its digit while the block is selected.
+  await expect(card.locator("svg use")).toHaveAttribute("href", /#/);
+  const tabBar = page.locator('[data-testid="tab-bar"]');
+  await diff.locator(line("addition")).first().click();
+  await expect(selected).toHaveCount(1);
+  await page.keyboard.press("1");
+  await expect(tabBar).toContainText("greet.ts");
 });

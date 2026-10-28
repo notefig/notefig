@@ -12,7 +12,8 @@
  * host stops asking for the OS's.
  */
 import { useEffect, useRef, type ReactNode } from "react";
-import { FileDiff as FileDiffIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { FileDiff as FileDiffIcon, Pencil } from "lucide-react";
 import { FileDiff, type FileDiffMetadata } from "@pierre/diffs";
 import { cn } from "@notefig/ui/utils";
 import { diffStats } from "./patch";
@@ -48,39 +49,85 @@ export interface DiffFile {
   open?: () => void;
 }
 
+/** What the card's header can do, numbered left to right as it shows
+ *  them — opening its file where it is one, then editing the block where
+ *  it can be edited. The keys and the header both number them from this. */
+export function diffControls(onEdit: (() => void) | undefined, file: DiffFile): (() => void)[] {
+  return [file.open, onEdit].filter((control): control is () => void => control !== undefined);
+}
+
 export function DiffCard({
   diff,
   file,
-  actions,
+  icon,
+  onEdit,
+  keys = false,
   className,
 }: {
   diff: FileDiffMetadata;
   file: DiffFile;
-  /** The header's trailing buttons. */
-  actions?: ReactNode;
+  /** The file's type icon; a generic diff glyph without one. */
+  icon?: ReactNode;
+  /** Shows the block's source, where it has one to edit. */
+  onEdit?: () => void;
+  /** The keys are on the card: each control shows the digit that runs it. */
+  keys?: boolean;
   className?: string;
 }) {
+  const { t } = useTranslation();
   const { added, removed } = diffStats(diff);
   const slash = file.label.lastIndexOf("/");
+  const controls = diffControls(onEdit, file);
+  const digit = (control: (() => void) | undefined) => {
+    const index = control ? controls.indexOf(control) : -1;
+    return keys && index >= 0 && index < 9 ? <Kbd>{index + 1}</Kbd> : null;
+  };
   return (
     <div
       className={cn("not-prose w-full select-text overflow-hidden rounded-lg border border-border/60 bg-card/80 text-xs", className)}
       data-diff-card
     >
       <div className="flex h-7 items-center gap-1.5 border-b border-border/60 pl-2.5 pr-1 text-muted-foreground">
-        <FileDiffIcon className="size-3.5 shrink-0" />
+        {icon ?? <FileDiffIcon className="size-3.5 shrink-0" />}
         {file.label && (
           <FileLabel open={file.open}>
             <span>{file.label.slice(0, slash + 1)}</span>
             <span className="font-medium text-foreground">{file.label.slice(slash + 1)}</span>
           </FileLabel>
         )}
+        {digit(file.open)}
         {added > 0 && <span className="shrink-0 tabular-nums text-success">+{added}</span>}
         {removed > 0 && <span className="shrink-0 tabular-nums text-destructive">−{removed}</span>}
-        <span className="ml-auto flex shrink-0 items-center">{actions}</span>
+        {onEdit && (
+          <button
+            type="button"
+            title={t("diffBlockEdit")}
+            aria-label={t("diffBlockEdit")}
+            aria-keyshortcuts={keys ? String(controls.indexOf(onEdit) + 1) : undefined}
+            data-diff-edit
+            className="ml-auto flex shrink-0 cursor-pointer items-center gap-1 rounded p-1 transition-colors hover:text-foreground"
+            onClick={onEdit}
+          >
+            <Pencil className="size-3.5" />
+            {digit(onEdit)}
+          </button>
+        )}
       </div>
       <DiffBody diff={diff} />
     </div>
+  );
+}
+
+/** A control's digit, as the prompt widget's choices show theirs — on a
+ *  keycap here, where it sits beside the line counts' numbers. */
+function Kbd({ children }: { children: ReactNode }) {
+  return (
+    <kbd
+      className="shrink-0 rounded-[3px] border border-border px-1 font-sans text-[0.625rem] leading-[1.4] text-muted-foreground"
+      data-diff-key
+    >
+      {children}
+    </kbd>
   );
 }
 

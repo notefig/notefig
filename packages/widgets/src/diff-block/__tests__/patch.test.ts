@@ -25,6 +25,11 @@ describe("patchOf", () => {
     expect(diffStats(parseDiffBlock(null, patch)!)).toEqual({ added: 1, removed: 1 });
   });
 
+  it("shows a change to the file's last newline", () => {
+    const patch = patchOf("/ws/a.ts", "a", "a\n");
+    expect(parseDiffBlock(null, patch)).not.toBeNull();
+  });
+
   it("writes a new file against /dev/null", () => {
     const patch = patchOf("/ws/b.ts", null, "a\nb");
     expect(patch.split("\n").slice(0, 3)).toEqual(["--- /dev/null", "+++ /ws/b.ts", "@@ -0,0 +1,2 @@"]);

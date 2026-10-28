@@ -44,6 +44,18 @@ describe("<notefig-diff-block>", () => {
     root.remove();
   });
 
+  it("numbers its lines from the hunk's header", async () => {
+    const root = render("```ts diff\n--- a.ts\n+++ a.ts\n@@ -41,2 +41,2 @@\n keep\n-old\n+new\n```\n");
+    const numbers = () =>
+      [...(root.querySelector("diffs-container")?.shadowRoot?.querySelectorAll("[data-column-number]") ?? [])].map((cell) =>
+        cell.textContent?.trim(),
+      );
+    await expect.poll(numbers).toContain("42");
+    expect(numbers()).toContain("41");
+    expect(numbers()).not.toContain("1");
+    root.remove();
+  });
+
   it("stays the code it holds when Pierre finds no hunks in it", async () => {
     const root = render("```ts diff\n-a\n+b\n```\n");
     await Promise.resolve();
