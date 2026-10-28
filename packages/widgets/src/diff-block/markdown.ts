@@ -3,16 +3,15 @@
  * string's first word, the language. Worker-safe: no DOM.
  */
 import type MarkdownIt from "markdown-it";
-import { DIFF_BLOCK_TAG, DIFF_DATA_ATTRIBUTE, diffOfInfo } from "./syntax";
+import { DIFF_BLOCK_TAG, DIFF_DATA_ATTRIBUTE, isDiffInfo } from "./syntax";
 
-/** Keeps a fence's diff on its `<code>`, where the editor's parse reads it
+/** Marks a diff fence's `<code>`, where the editor's parse reads it
  *  (./schema.ts). */
 export function diffFences(md: MarkdownIt): void {
   md.core.ruler.push("diff_fences", (state) => {
     for (const token of state.tokens) {
       if (token.type !== "fence") continue;
-      const diff = diffOfInfo(token.info);
-      if (diff !== null) token.attrSet(DIFF_DATA_ATTRIBUTE, diff);
+      if (isDiffInfo(token.info)) token.attrSet(DIFF_DATA_ATTRIBUTE, "");
     }
   });
 }

@@ -23,7 +23,7 @@
             "sessionUpdate": "agent_message_chunk",
             "content": {
               "type": "text",
-              "text": "Rename the greeting:\n\n```ts diff=src/greet."
+              "text": "Rename the greeting:\n\n```ts diff\ndiff --git a/src/greet.ts b/src/greet."
             }
           },
           "at": 100
@@ -34,7 +34,7 @@
             "sessionUpdate": "agent_message_chunk",
             "content": {
               "type": "text",
-              "text": "ts\nexport function greet(name: string) {\n  return `hi ${name}`;\n}\n=======\nexport function greet(name: string) {\n  return `hello, ${name}`;\n}\n```\n"
+              "text": "ts\n--- a/src/greet.ts\n+++ b/src/greet.ts\n@@ -1,3 +1,3 @@\n export function greet(name: string) {\n-  return `hi ${name}`;\n+  return `hello, ${name}`;\n }\n```\n"
             }
           },
           "at": 200

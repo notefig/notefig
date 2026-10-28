@@ -12,7 +12,8 @@ afterEach(() => {
   editor = null;
 });
 
-const DIFF = '<pre><code class="language-ts" data-diff="">const a = 1;\n=======\nconst a = 2;</code></pre>';
+const DIFF =
+  '<pre><code class="language-ts" data-diff="">--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;</code></pre>';
 
 function mount(content: string) {
   editor = new Editor({
@@ -105,8 +106,11 @@ describe("codeDiff", () => {
     expect(diffs()).toHaveLength(0);
   });
 
-  it("leaves other code blocks, and a diff block with no separator, as code", () => {
-    mount('<pre><code class="language-ts">a\n=======\nb</code></pre><pre><code class="language-ts" data-diff="">const a = 1;</code></pre>');
+  it("leaves other code blocks, and a diff block with no hunks, as code", () => {
+    mount(
+      '<pre><code class="language-ts">--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-a\n+b</code></pre>' +
+        '<pre><code class="language-ts" data-diff="">-a\n+b</code></pre>',
+    );
     expect(diffs()).toHaveLength(0);
     expect(pres().some(hidden)).toBe(false);
   });

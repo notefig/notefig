@@ -1,7 +1,7 @@
 /**
- * The code block, with its diff (./syntax.ts) an attribute beside its
- * language: null for plain code, "" for a diff of no named file, else the
- * file's path. Worker-safe: the markdown codec builds its schema from this.
+ * The code block, with whether it is a diff (./syntax.ts) an attribute
+ * beside its language. Worker-safe: the markdown codec builds its schema
+ * from this.
  */
 import CodeBlock from "@tiptap/extension-code-block";
 import type { Node as PMNode } from "@tiptap/pm/model";
@@ -21,10 +21,10 @@ export const DiffCodeBlock = CodeBlock.extend({
     return {
       ...this.parent?.(),
       diff: {
-        default: null,
+        default: false,
         parseHTML: (pre: HTMLElement) =>
-          pre.getAttribute(DIFF_DATA_ATTRIBUTE) ?? pre.querySelector("code")?.getAttribute(DIFF_DATA_ATTRIBUTE) ?? null,
-        renderHTML: ({ diff }: { diff: string | null }) => (diff === null ? {} : { [DIFF_DATA_ATTRIBUTE]: diff }),
+          pre.hasAttribute(DIFF_DATA_ATTRIBUTE) || !!pre.querySelector("code")?.hasAttribute(DIFF_DATA_ATTRIBUTE),
+        renderHTML: ({ diff }: { diff: boolean }) => (diff ? { [DIFF_DATA_ATTRIBUTE]: "" } : {}),
       },
     };
   },
@@ -35,9 +35,9 @@ export const DiffCodeBlock = CodeBlock.extend({
     return {
       markdown: {
         serialize(state: MarkdownState, node: PMNode) {
-          const { language, diff } = node.attrs as { language: string | null; diff: string | null };
+          const { language, diff } = node.attrs as { language: string | null; diff: boolean };
           // A diff needs a language before it: a lone ```diff is that language.
-          state.write("```" + (language || (diff === null ? "" : "text")) + diffInfo(diff) + "\n");
+          state.write("```" + (language || (diff ? "text" : "")) + diffInfo(diff) + "\n");
           state.text(node.textContent, false);
           state.ensureNewLine();
           state.write("```");

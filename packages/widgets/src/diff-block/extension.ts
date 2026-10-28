@@ -10,8 +10,7 @@
 import { Plugin, PluginKey, TextSelection, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { createDiffBlockElement } from "./element";
-import { parseDiffSides } from "./syntax";
+import { createDiffBlockElement, parseDiffBlock } from "./element";
 
 interface CodeDiffState {
   /** Where the diff block being edited starts, if one is. */
@@ -21,11 +20,10 @@ interface CodeDiffState {
 
 const key = new PluginKey<CodeDiffState>("codeDiff");
 
-const diffOf = (node: PMNode): string | null =>
-  node.type.name === "codeBlock" ? (node.attrs.diff as string | null) : null;
+const isDiff = (node: PMNode): boolean => node.type.name === "codeBlock" && node.attrs.diff === true;
 
 function editingAt({ selection: { $from, $to } }: EditorState): number | null {
-  return diffOf($from.parent) !== null && $from.sameParent($to) ? $from.before() : null;
+  return isDiff($from.parent) && $from.sameParent($to) ? $from.before() : null;
 }
 
 export function codeDiff(): Plugin<CodeDiffState> {
@@ -33,7 +31,7 @@ export function codeDiff(): Plugin<CodeDiffState> {
   const drawable = new WeakMap<PMNode, boolean>();
 
   const draw = (node: PMNode) => (view: EditorView, getPos: () => number | undefined) => {
-    const element = createDiffBlockElement(node.attrs.language as string | null, diffOf(node)!, node.textContent);
+    const element = createDiffBlockElement(node.attrs.language as string | null, node.textContent);
     element.contentEditable = "false";
     element.addEventListener("click", () => {
       const at = getPos();
@@ -49,15 +47,15 @@ export function codeDiff(): Plugin<CodeDiffState> {
     const decorations: Decoration[] = [];
     doc.descendants((node, pos) => {
       if (node.type.name !== "codeBlock") return !node.isTextblock;
-      const diff = diffOf(node);
-      if (pos === editing || diff === null) return false;
-      if (!drawable.has(node)) drawable.set(node, parseDiffSides(node.textContent) !== null);
+      if (pos === editing || !isDiff(node)) return false;
+      const language = node.attrs.language as string | null;
+      if (!drawable.has(node)) drawable.set(node, parseDiffBlock(language, node.textContent) !== null);
       if (!drawable.get(node)) return false;
       decorations.push(
         Decoration.widget(pos, draw(node), {
           side: -1,
           // The same diff for the same source: a redraw only when it changes.
-          key: `${node.attrs.language}\n${diff}\n${node.textContent}`,
+          key: `${language}\n${node.textContent}`,
           ignoreSelection: true,
           stopEvent: () => true,
         }),

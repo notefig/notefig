@@ -1,5 +1,5 @@
 /**
- * A diff block in a document (```ts diff=…, see @notefig/widgets/diff-block)
+ * A diff block in a document (```ts diff, see @notefig/widgets/diff-block)
  * is drawn as its diff, shown as its source while the caret is in it, and
  * saved as the code block it is.
  */
@@ -13,7 +13,9 @@ import {
   waitForContentSaved,
 } from "../setup/test-helpers";
 
-const BLOCK = "```ts diff=src/greet.ts\nconst greeting = \"hi\";\n=======\nconst greeting = \"hello\";\n```";
+const PATCH = (before: string) =>
+  `--- src/greet.ts\n+++ src/greet.ts\n@@ -1 +1 @@\n-${before}\n+const greeting = "hello";`;
+const BLOCK = `\`\`\`ts diff\n${PATCH('const greeting = "hi";')}\n\`\`\``;
 
 test("a diff block is drawn as a diff, and edited as its source @smoke", async ({ page }) => {
   const workspace = "/workspace/diff-blocks";
@@ -54,9 +56,10 @@ test("a diff block is drawn as a diff, and edited as its source @smoke", async (
   await diff.click();
   await expect(source).toBeVisible();
   await expect(diff).toHaveCount(0);
-  await expect(source).toContainText("=======");
+  await expect(source).toContainText("@@ -1 +1 @@");
 
   // An edit there is drawn when the caret leaves.
+  for (let line = 0; line < 3; line++) await page.keyboard.press("ArrowDown");
   await page.keyboard.press("End");
   await page.keyboard.type(" // was hi");
   await editor.getByText("After.").click();
@@ -65,6 +68,6 @@ test("a diff block is drawn as a diff, and edited as its source @smoke", async (
   await waitForContentSaved(
     page,
     `${workspace}/change.md`,
-    "```ts diff=src/greet.ts\nconst greeting = \"hi\"; // was hi\n=======\nconst greeting = \"hello\";\n```",
+    `\`\`\`ts diff\n${PATCH('const greeting = "hi"; // was hi')}\n\`\`\``,
   );
 });

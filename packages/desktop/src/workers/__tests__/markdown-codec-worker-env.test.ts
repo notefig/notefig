@@ -83,6 +83,6 @@ describe("codec under linkedom shim (worker environment)", () => {
     expect(renderMarkdownHtml("**bold**")).toContain("<strong>bold</strong>");
     expect(renderMarkdownHtml("<img src=x>")).not.toContain("<img src");
     // A diff fence comes out as the element that draws it.
-    expect(renderMarkdownHtml("```ts diff\na\n=======\nb\n```")).toMatch(/^<notefig-diff-block><pre><code data-diff=""/);
+    expect(renderMarkdownHtml("```ts diff\n--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-a\n+b\n```")).toMatch(/^<notefig-diff-block><pre><code data-diff=""/);
   });
 });

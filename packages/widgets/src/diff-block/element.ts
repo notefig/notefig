@@ -1,20 +1,20 @@
 /**
  * `<notefig-diff-block>`: draws the diff block it holds, a `<pre><code>` in
- * the block's language with its diff (./syntax.ts) as `data-diff`, with
+ * the block's language marked `data-diff` (./syntax.ts), with
  * `@pierre/diffs` — the library the code viewer is built on, highlighting
  * with the Shiki document code blocks share. Rendered markdown holds one per
  * diff fence (./markdown.ts), so chat and widget responses need no code of
  * their own; the editor draws its diff blocks with one (./extension.ts).
  *
- * Side by side where it is wide enough for both, and has both; one unified
- * column otherwise. Wrapped, never scrolled sideways. It follows the app's theme with no code: Pierre's colours
- * are `light-dark()` pairs, picked by the page's `color-scheme` (dark under
- * `html.dark`), once its host stops asking for the OS's. A block with no
- * separator stays the code it holds.
+ * Side by side where it is wide enough and the change has both sides; one
+ * unified column otherwise. Wrapped, never scrolled sideways. It follows the
+ * app's theme with no code: Pierre's colours are `light-dark()` pairs, picked
+ * by the page's `color-scheme` (dark under `html.dark`), once its host stops
+ * asking for the OS's. A body Pierre finds no hunks in stays the code it is.
  */
-import { FileDiff, type SupportedLanguages } from "@pierre/diffs";
+import { FileDiff, processFile, type FileDiffMetadata, type SupportedLanguages } from "@pierre/diffs";
 import { bundledLanguages } from "shiki";
-import { DIFF_BLOCK_TAG, DIFF_DATA_ATTRIBUTE, parseDiffSides } from "./syntax";
+import { DIFF_BLOCK_TAG, DIFF_DATA_ATTRIBUTE } from "./syntax";
 
 const LANGUAGE_PREFIX = "language-";
 /** The narrowest a block shows its sides side by side at. */
@@ -36,10 +36,19 @@ const CSS = `
 }
 `;
 
-/** The Shiki language of a block's code: "text" for one Shiki doesn't know
- *  — Pierre would load it, and reject. */
-export function diffBlockLanguage(language: string | null): SupportedLanguages {
-  return (language && Object.prototype.hasOwnProperty.call(bundledLanguages, language) ? language : "text") as SupportedLanguages;
+/** The block's language, where Shiki knows it (Pierre would load another,
+ *  and reject); else Pierre infers one from the file's name. */
+function diffBlockLanguage(language: string | null): SupportedLanguages | undefined {
+  const known = language && language !== "text" && Object.prototype.hasOwnProperty.call(bundledLanguages, language);
+  return known ? (language as SupportedLanguages) : undefined;
+}
+
+/** A block's unified diff as Pierre reads it, or null when it has no hunks. */
+export function parseDiffBlock(language: string | null, text: string): FileDiffMetadata | null {
+  const parsed = processFile(text);
+  if (!parsed?.hunks.length) return null;
+  const lang = diffBlockLanguage(language);
+  return lang ? { ...parsed, lang } : parsed;
 }
 
 class DiffBlockElement extends HTMLElement {
@@ -54,29 +63,25 @@ class DiffBlockElement extends HTMLElement {
 
   #draw() {
     const code = this.querySelector("pre > code");
-    const sides = code && parseDiffSides(code.textContent ?? "");
-    if (!code || !sides || this.#drawn) return;
-    const pre = code.parentElement!;
-    const file = code.getAttribute(DIFF_DATA_ATTRIBUTE) ?? "";
+    if (!code || this.#drawn) return;
     const language = [...code.classList].find((name) => name.startsWith(LANGUAGE_PREFIX));
-    const lang = diffBlockLanguage(language?.slice(LANGUAGE_PREFIX.length) ?? null);
+    const fileDiff = parseDiffBlock(language?.slice(LANGUAGE_PREFIX.length) ?? null, code.textContent ?? "");
+    if (!fileDiff) return;
+    const pre = code.parentElement!;
     const frame = document.createElement("div");
     // select-text: the app turns selection off everywhere it isn't asked
     // for; Pierre keeps its gutters unselectable, so a copy is the code alone.
     frame.className = "select-text my-2 overflow-hidden rounded-md border border-border text-[0.8571429em]";
-    const options = { overflow: "wrap", disableFileHeader: !file, unsafeCSS: CSS } as const;
-    const canSplit = sides.before !== "" && sides.after !== "";
+    const options = { overflow: "wrap", disableFileHeader: !fileDiff.name, unsafeCSS: CSS } as const;
+    const changed = (side: "additionLines" | "deletionLines") => fileDiff.hunks.some((hunk) => hunk[side] > 0);
+    const canSplit = changed("additionLines") && changed("deletionLines");
     const styleAt = (width: number): "split" | "unified" => (canSplit && width >= SPLIT_MIN_WIDTH ? "split" : "unified");
     pre.hidden = true;
     this.classList.add("block");
     this.append(frame);
     let style = styleAt(this.clientWidth);
     const diff = new FileDiff({ ...options, diffStyle: style });
-    diff.render({
-      oldFile: { name: file, contents: sides.before, lang },
-      newFile: { name: file, contents: sides.after, lang },
-      containerWrapper: frame,
-    });
+    diff.render({ fileDiff, containerWrapper: frame });
     const resizes = new ResizeObserver(([entry]) => {
       const next = styleAt(entry.contentRect.width);
       if (next === style) return;
@@ -105,13 +110,13 @@ export function defineDiffBlockElement(): void {
 }
 
 /** The element for a block, as rendered markdown holds one. */
-export function createDiffBlockElement(language: string | null, diff: string, text: string): HTMLElement {
+export function createDiffBlockElement(language: string | null, text: string): HTMLElement {
   defineDiffBlockElement();
   const element = document.createElement(DIFF_BLOCK_TAG);
   const pre = element.appendChild(document.createElement("pre"));
   const code = pre.appendChild(document.createElement("code"));
   if (language) code.className = LANGUAGE_PREFIX + language;
-  code.setAttribute(DIFF_DATA_ATTRIBUTE, diff);
+  code.setAttribute(DIFF_DATA_ATTRIBUTE, "");
   code.textContent = text;
   return element;
 }

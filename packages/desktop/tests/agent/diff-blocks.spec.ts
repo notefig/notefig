@@ -1,5 +1,5 @@
 /**
- * An agent's diff block in the chat (```ts diff=…, see
+ * An agent's diff block in the chat (```ts diff, see
  * @notefig/widgets/diff-block): the reply streams in, and the block is
  * drawn as a diff, with its file's name and its changed lines.
  *
