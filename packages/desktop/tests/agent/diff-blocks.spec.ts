@@ -28,7 +28,7 @@ test("a reply's diff block is drawn as a diff", async ({ page }) => {
   await expect(reply.locator(".rendered > pre")).toHaveCount(0);
   const diff = reply.locator("notefig-diff-block diffs-container");
   await expect(diff).toHaveCount(1);
-  await expect(diff.locator("[data-title]")).toHaveText("src/greet.ts");
+  await expect(reply.locator("notefig-diff-block [data-diff-card]")).toContainText("src/greet.ts");
   await expect(diff.locator('[data-line-type="change-deletion"]:not([data-column-number])').first()).toContainText("hi ${name}");
   await expect(diff.locator('[data-line-type="change-addition"]:not([data-column-number])').first()).toContainText("hello, ${name}");
 });

@@ -1,4 +1,8 @@
 import { Extension } from "@tiptap/core";
+import type { CodeBlockOptions } from "@tiptap/extension-code-block";
+
+/** Its diff blocks' paths are in `workspaceRoot`'s workspace. */
+type MarkdownCodeBlockOptions = CodeBlockOptions & { workspaceRoot: string | null };
 import { Plugin } from "@tiptap/pm/state";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -37,9 +41,17 @@ export const MarkdownImage = MarkdownImageBase.extend({
  * schema, the `diff` attribute included, is the worker's (CodeBlock), so
  * this is presentation only.
  */
-export const MarkdownCodeBlock = CodeBlock.extend({
+export const MarkdownCodeBlock = CodeBlock.extend<MarkdownCodeBlockOptions>({
+  addOptions() {
+    return { ...this.parent!(), workspaceRoot: null };
+  },
   addProseMirrorPlugins() {
-    return [...(this.parent?.() ?? []), codeHighlight(), codeLanguagePicker(), codeDiff()];
+    return [
+      ...(this.parent?.() ?? []),
+      codeHighlight(),
+      codeLanguagePicker(),
+      codeDiff({ workspacePath: this.options.workspaceRoot }),
+    ];
   },
 });
 

@@ -38,6 +38,10 @@ export function diffInfo(diff: boolean): string {
   return diff ? ` ${ATTRIBUTE}` : "";
 }
 
+/** The translation keys the card resolves; the app asserts it defines them
+ *  (see ../prompt/i18n-keys.ts for why). */
+export const DIFF_BLOCK_I18N_KEYS = ["diffBlockEdit"] as const;
+
 /** How an agent writes one; its MCP instructions carry this. */
 export const DIFF_BLOCK_GUIDE =
   "To show a change to code or text (one you propose, or a before and after), " +

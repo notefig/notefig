@@ -1,9 +1,11 @@
 /**
  * A diff block in a document (```ts diff, see @notefig/widgets/diff-block)
- * is drawn as its diff, shown as its source while the caret is in it, and
- * saved as the code block it is.
+ * is drawn as its card, is one thing to the selection — a click or an
+ * arrow selects it, a selection takes it in whole — and is edited as its
+ * source only when asked (Enter, its Edit button), then saved as the code
+ * block it is.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import {
   setupTestDatabase,
   openWorkspace,
@@ -17,23 +19,36 @@ const PATCH = (before: string) =>
   `--- src/greet.ts\n+++ src/greet.ts\n@@ -1 +1 @@\n-${before}\n+const greeting = "hello";`;
 const BLOCK = `\`\`\`ts diff\n${PATCH('const greeting = "hi";')}\n\`\`\``;
 
-test("a diff block is drawn as a diff, and edited as its source @smoke", async ({ page }) => {
-  const workspace = "/workspace/diff-blocks";
-  await setupTestDatabase(page, "diff-blocks");
+async function openChange(page: Page, workspace: string, name: string) {
+  await setupTestDatabase(page, name);
   await openWorkspace(page, workspace);
   await seedTestFiles(page, [
-    { path: `${workspace}/change.md`, content: `# Change\n\n${BLOCK}\n\nAfter.\n`, type: "file" },
+    { path: `${workspace}/change.md`, content: `# Change\n\nBefore.\n\n${BLOCK}\n\nAfter.\n`, type: "file" },
+    { path: `${workspace}/src/greet.ts`, content: 'const greeting = "hi";\n', type: "file" },
   ]);
   await page.reload();
   await waitForFileTree(page, "change.md");
   await openFileInTree(page, "change.md");
-
   const editor = page.locator(".ProseMirror");
-  const diff = editor.locator("notefig-diff-block diffs-container");
-  const source = editor.locator("> pre");
-  await expect(diff.locator("[data-title]")).toHaveText("src/greet.ts");
-  await expect(diff.locator('[data-line-type="change-deletion"]:not([data-column-number])').first()).toContainText('"hi"');
-  await expect(diff.locator('[data-line-type="change-addition"]:not([data-column-number])').first()).toContainText('"hello"');
+  return {
+    editor,
+    card: editor.locator("notefig-diff-block [data-diff-card]"),
+    diff: editor.locator("notefig-diff-block diffs-container"),
+    source: editor.locator("> pre"),
+    selected: editor.locator("> pre[data-diff-selected]"),
+  };
+}
+
+const line = (type: "deletion" | "addition") => `[data-line-type="change-${type}"]:not([data-column-number])`;
+
+test("a diff block is drawn as its card, selected as one, and edited when asked @smoke", async ({ page }) => {
+  const workspace = "/workspace/diff-blocks";
+  const { editor, card, diff, source, selected } = await openChange(page, workspace, "diff-blocks");
+
+  await expect(card).toContainText("src/greet.ts");
+  await expect(card).toContainText("+1");
+  await expect(diff.locator(line("deletion")).first()).toContainText('"hi"');
+  await expect(diff.locator(line("addition")).first()).toContainText('"hello"');
   await expect(source).toBeHidden();
 
   // Side by side where there is room for both sides, one column where not.
@@ -46,28 +61,79 @@ test("a diff block is drawn as a diff, and edited as its source @smoke", async (
   await expect(layout).toHaveAttribute("data-diff-type", "split");
 
   // The app's theme, not the OS's: the e2e browser prefers light.
-  const title = diff.locator("[data-title]");
+  const scheme = () => diff.evaluate((element) => getComputedStyle(element).colorScheme);
   await page.evaluate(() => document.documentElement.classList.add("dark"));
-  await expect(title).toHaveCSS("color", "rgb(250, 250, 250)");
+  await expect.poll(scheme).toContain("dark");
   await page.evaluate(() => document.documentElement.classList.remove("dark"));
-  await expect(title).toHaveCSS("color", "rgb(10, 10, 10)");
+  await expect.poll(scheme).not.toContain("dark");
 
-  // A click on it is a way into its source.
-  await diff.click();
+  // A click selects it; it stays drawn.
+  await diff.locator(line("addition")).first().click();
+  await expect(selected).toHaveCount(1);
+  await expect(source).toBeHidden();
+
+  // Enter edits it; Escape selects it again, the edit drawn.
+  await page.keyboard.press("Enter");
   await expect(source).toBeVisible();
   await expect(diff).toHaveCount(0);
   await expect(source).toContainText("@@ -1 +1 @@");
-
-  // An edit there is drawn when the caret leaves.
-  for (let line = 0; line < 3; line++) await page.keyboard.press("ArrowDown");
+  for (let row = 0; row < 3; row++) await page.keyboard.press("ArrowDown");
   await page.keyboard.press("End");
   await page.keyboard.type(" // was hi");
-  await editor.getByText("After.").click();
+  await page.keyboard.press("Escape");
   await expect(source).toBeHidden();
-  await expect(diff.locator('[data-line-type="change-deletion"]:not([data-column-number])').first()).toContainText("// was hi");
+  await expect(selected).toHaveCount(1);
+  await expect(diff.locator(line("deletion")).first()).toContainText("// was hi");
   await waitForContentSaved(
     page,
     `${workspace}/change.md`,
     `\`\`\`ts diff\n${PATCH('const greeting = "hi"; // was hi')}\n\`\`\``,
   );
+
+  // An arrow off the line above selects it, rather than skipping it.
+  await editor.getByText("Before.").click();
+  await expect(selected).toHaveCount(0);
+  await page.keyboard.press("End");
+  await page.keyboard.press("ArrowDown");
+  await expect(selected).toHaveCount(1);
+
+  // Its Edit button is the other way in; leaving draws it again.
+  await card.locator("[data-diff-edit]").click();
+  await expect(source).toBeVisible();
+  await editor.getByText("After.").click();
+  await expect(source).toBeHidden();
+  await expect(selected).toHaveCount(0);
+});
+
+test("a diff block links its file, and a selection takes it in whole as a reference", async ({ page }) => {
+  const { editor, card, diff, selected } = await openChange(page, "/workspace/diff-links", "diff-links");
+
+  // A drag from the text into the diff takes the whole block in.
+  const from = await editor.getByText("Before.").boundingBox();
+  const to = await diff.locator(line("deletion")).first().boundingBox();
+  await page.mouse.move(from!.x + 2, from!.y + from!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect(selected).toHaveCount(1);
+
+  // "/" over it summons a prompt referencing the selection, diff and all.
+  await page.keyboard.type("/");
+  await expect(editor.locator('[data-type="ai-prompt"]')).toHaveCount(1);
+  const reference = await page.evaluate(() => {
+    const { editor: tiptap } = document.querySelector(".ProseMirror") as unknown as {
+      editor: { state: { doc: { descendants(f: (node: { type: { name: string }; attrs: Record<string, unknown> }) => void): void } } };
+    };
+    let text: string | null = null;
+    tiptap.state.doc.descendants((node) => {
+      if (node.type.name === "aiPrompt") text = (node.attrs.reference as { text: string } | null)?.text ?? null;
+    });
+    return text;
+  });
+  expect(reference).toContain("efore.");
+  expect(reference).toContain('+const greeting = "hello";');
+
+  // Its header names the workspace file, and opens it.
+  await card.getByRole("button", { name: /greet\.ts/ }).click();
+  await expect(page.locator('[data-testid="tab-bar"]')).toContainText("greet.ts");
 });

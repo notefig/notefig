@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { PROMPT_WIDGET_I18N_KEYS } from "@notefig/widgets";
+import { DIFF_BLOCK_I18N_KEYS } from "@notefig/widgets/diff-block/syntax";
 import i18n from "@/utils/intl";
 
 describe("prompt widget translations", () => {
@@ -17,5 +18,9 @@ describe("prompt widget translations", () => {
       (key) => !i18n.exists(key, { lng: "en" }),
     );
     expect(missing).toEqual([]);
+  });
+
+  it("defines every key the diff block's card resolves", () => {
+    expect(DIFF_BLOCK_I18N_KEYS.filter((key) => !i18n.exists(key, { lng: "en" }))).toEqual([]);
   });
 });

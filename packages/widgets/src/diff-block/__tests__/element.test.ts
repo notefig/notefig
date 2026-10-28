@@ -1,66 +1,66 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import MarkdownIt from "markdown-it";
 import { drawnDiffFences } from "../markdown";
-import { defineDiffBlockElement, parseDiffBlock } from "../element";
+import { defineDiffBlockElement } from "../element";
 
 const md = new MarkdownIt().use(drawnDiffFences);
 const PATCH = "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,2 @@\n const a = 1;\n-const b = 2;\n+const b = 3;";
 
-/** Rendered as chat renders it, once its diffs are drawn. */
-async function render(markdown: string) {
+/** Rendered as chat renders it, inside a workspace's view. */
+function render(markdown: string) {
   const root = document.createElement("div");
+  root.setAttribute("data-workspace-path", "/ws");
   document.body.append(root);
   root.innerHTML = md.render(markdown);
-  await Promise.resolve();
   return root;
 }
 
-const lineTypes = (root: HTMLElement) =>
-  [...root.querySelector("diffs-container")!.shadowRoot!.querySelectorAll("[data-line-type]:not([data-column-number])")].map(
+const card = (root: Element) => root.querySelector("[data-diff-card]");
+const lineTypes = (root: Element) =>
+  [...(root.querySelector("diffs-container")?.shadowRoot?.querySelectorAll("[data-line-type]:not([data-column-number])") ?? [])].map(
     (line) => line.getAttribute("data-line-type"),
   );
 
-describe("parseDiffBlock", () => {
-  it("reads a unified diff as Pierre does, in the block's language", () => {
-    const diff = parseDiffBlock("ts", `diff --git a/src/a.ts b/src/a.ts\n${PATCH}`)!;
-    expect(diff).toMatchObject({ name: "src/a.ts", lang: "ts", hunks: [expect.anything()] });
-    // Pierre infers one from the name for a language Shiki doesn't know.
-    expect(parseDiffBlock("nope", PATCH)!.lang).toBeUndefined();
-  });
-
-  it("is null for a body with no hunks", () => {
-    expect(parseDiffBlock("ts", "-const b = 2;\n+const b = 3;")).toBeNull();
-    expect(parseDiffBlock("ts", "const a = 1;")).toBeNull();
-  });
-});
-
 describe("<notefig-diff-block>", () => {
-  beforeAll(defineDiffBlockElement);
+  const resolved: [string | null, string][] = [];
+  beforeAll(() =>
+    defineDiffBlockElement({
+      resolveFile: (workspace, path) => {
+        resolved.push([workspace, path]);
+        return { label: path };
+      },
+    }),
+  );
 
-  it("draws the patch it holds as a diff, its file as the header", async () => {
-    const root = await render(`\`\`\`ts diff\ndiff --git a/src/a.ts b/src/a.ts\n${PATCH}\n\`\`\`\n`);
-    expect(root.querySelector("pre")!.hidden).toBe(true);
+  it("draws the patch it holds as its card, the file named in its header", async () => {
+    const root = render(`\`\`\`ts diff\ndiff --git a/src/a.ts b/src/a.ts\n${PATCH}\n\`\`\`\n`);
     await expect.poll(() => lineTypes(root)).toEqual(["context", "change-deletion", "change-addition"]);
-    expect(root.querySelector("diffs-container")!.shadowRoot!.textContent).toContain("src/a.ts");
+    expect(root.querySelector("pre")!.hidden).toBe(true);
+    expect(card(root)!.textContent).toContain("src/a.ts");
+    expect(card(root)!.textContent).toContain("+1");
+    expect(card(root)!.textContent).toContain("−1");
+    // Asked of the host from the workspace its page shows.
+    expect(resolved).toContainEqual(["/ws", "src/a.ts"]);
     root.remove();
   });
 
   it("stays the code it holds when Pierre finds no hunks in it", async () => {
-    const root = await render("```ts diff\n-a\n+b\n```\n");
-    expect(root.querySelector("diffs-container")).toBeNull();
+    const root = render("```ts diff\n-a\n+b\n```\n");
+    await Promise.resolve();
+    expect(card(root)).toBeNull();
     expect(root.querySelector("pre")!.hidden).toBe(false);
     root.remove();
   });
 
-  it("frees its diff when it leaves the page, and draws again when back", async () => {
-    const root = await render(`\`\`\`ts diff\n${PATCH}\n\`\`\`\n`);
+  it("frees its card when it leaves the page, and draws again when back", async () => {
+    const root = render(`\`\`\`ts diff\n${PATCH}\n\`\`\`\n`);
     const element = root.firstElementChild!;
+    await expect.poll(() => card(element)).not.toBeNull();
     element.remove();
-    expect(element.querySelector("diffs-container")).toBeNull();
+    expect(card(element)).toBeNull();
     expect(element.querySelector("pre")!.hidden).toBe(false);
     root.append(element);
-    await Promise.resolve();
-    expect(element.querySelectorAll("diffs-container")).toHaveLength(1);
+    await expect.poll(() => element.querySelectorAll("[data-diff-card]").length).toBe(1);
     root.remove();
   });
 });

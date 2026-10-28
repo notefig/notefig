@@ -73,6 +73,7 @@ import { useAgentTabController } from "./agent-tab-controller";
 import { requestTabFocus } from "@/modules/tabs/tab-controllers";
 import { agentTabId } from "@/modules/tabs/tab-id";
 import { CopyTextButton, renderPromptToolCall } from "@notefig/widgets";
+import { renderDiffToolCall } from "@notefig/widgets/diff-block/transcript";
 import { splitLeadingQuote } from "@/modules/agents/agents";
 
 /**
@@ -164,6 +165,8 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
       ref={rootRef}
       tabIndex={-1}
       className="relative flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden outline-none"
+      // Where the paths in its diff blocks are (diff-block/element.tsx).
+      data-workspace-path={taskRow.workspacePath}
     >
       <Transcript
         taskId={taskId}
@@ -743,10 +746,11 @@ export const EntryView = memo(function EntryView({
 }) {
   if (entry.type === "tool_call") {
     if (!entry.toolCall) return null;
-    // The prompt widget's tools read as the widget renders them — it owns
-    // the card (pure call, safe in render); the transcript only frames it
-    // with its tool-call attributes. Null falls through to the generic line.
-    const widgetCard = renderPromptToolCall(entry.toolCall);
+    // The prompt widget's tools read as the widget renders them, and file
+    // edits as diff blocks — each owns its card (pure calls, safe in
+    // render); the transcript only frames it with its tool-call attributes.
+    // Null falls through to the generic line.
+    const widgetCard = renderPromptToolCall(entry.toolCall) ?? renderDiffToolCall(entry.toolCall);
     if (widgetCard) {
       return (
         <div
@@ -963,8 +967,7 @@ function ThoughtEntry({ text }: { text?: string }) {
 }
 
 /**
- * One tool call, opencode-style (MET-94 follow-up): calls with file diffs
- * get the changed-files treatment; everything else is a flat line — bold
+ * One tool call, opencode-style (MET-94 follow-up): a flat line — bold
  * title, muted one-line preview (command, path, or raw input) — that
  * expands in place to the output/input blocks. No card chrome: tool calls
  * are peers of flat text, not framed widgets.
@@ -973,10 +976,6 @@ function ToolCallCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   const status: ToolCallStatus = call.status ?? "pending";
   const title = call.title ?? call.kind ?? "other";
   const content = call.content ?? [];
-  const diffs = content.filter(
-    (item): item is Extract<ToolCallContent, { type: "diff" }> =>
-      item.type === "diff",
-  );
 
   const rawInput = call.rawInput;
   const failed = status === "failed";
@@ -991,19 +990,6 @@ function ToolCallCard({ toolCall: call }: { toolCall: ToolCallUpdate }) {
   // a boolean is an explicit user toggle that then sticks.
   const [override, setOverride] = useState<boolean | null>(null);
   const open = override ?? failed;
-
-  // The hook above must precede this branch: a streamed tool call GAINS diff
-  // content mid-flight (pending → completed), and an early return above any
-  // hook would shrink the hook count across renders and tear the tab down.
-  if (diffs.length > 0) {
-    return (
-      <ChangedFilesCard
-        diffs={diffs}
-        status={status}
-        title={call.title ?? undefined}
-      />
-    );
-  }
 
   return (
     <div
@@ -1073,98 +1059,6 @@ function toolPreview(call: ToolCallUpdate): string {
   const path = call.locations?.[0]?.path;
   if (path) return path;
   return call.rawInput ? rawInputPreview(call.rawInput) : "";
-}
-
-/**
- * The diff-bearing call's special face (kept from the card era, restyled):
- * a "N changed files" headline with total +/− line counts, then one row
- * per file — dimmed directory, bold basename, per-file counts — each
- * expanding to its diff text in place.
- */
-function ChangedFilesCard({
-  diffs,
-  status,
-  title,
-}: {
-  diffs: Extract<ToolCallContent, { type: "diff" }>[];
-  status: ToolCallStatus;
-  title?: string;
-}) {
-  const { t } = useTranslation();
-  const [openIndex, setOpenIndex] = useState<number | null>(null);
-  const counts = diffs.map((diff) => ({
-    added: diff.newText ? diff.newText.split("\n").length : 0,
-    removed: diff.oldText != null ? diff.oldText.split("\n").length : 0,
-  }));
-  const totalAdded = counts.reduce((sum, c) => sum + c.added, 0);
-  const totalRemoved = counts.reduce((sum, c) => sum + c.removed, 0);
-  const inFlight = status === "pending" || status === "in_progress";
-
-  return (
-    <div
-      className="w-full text-xs"
-      data-tool-call
-      data-tool-title={title}
-      data-tool-status={status}
-      data-tool-diffs={diffs.length}
-    >
-      <div className="flex items-center gap-2">
-        <span
-          className={cn(
-            "min-w-0 truncate font-semibold",
-            inFlight && "shimmer text-muted-foreground",
-          )}
-        >
-          {t("agentChangedFiles", { count: diffs.length })}
-        </span>
-        <span className="text-success">+{totalAdded}</span>
-        {totalRemoved > 0 && (
-          <span className="text-destructive">−{totalRemoved}</span>
-        )}
-      </div>
-      <div className="mt-1.5 divide-y divide-border/60 overflow-hidden rounded-lg border border-border">
-        {diffs.map((diff, i) => {
-          const slash = diff.path.lastIndexOf("/");
-          const dir = slash >= 0 ? diff.path.slice(0, slash + 1) : "";
-          const base = slash >= 0 ? diff.path.slice(slash + 1) : diff.path;
-          const open = openIndex === i;
-          return (
-            <div key={`${diff.path}-${i}`} data-diff-path={diff.path}>
-              <button
-                type="button"
-                onClick={() => setOpenIndex(open ? null : i)}
-                className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted/40"
-              >
-                <span className="min-w-0 flex-1 truncate">
-                  <span className="text-muted-foreground">{dir}</span>
-                  <span className="font-semibold">{base}</span>
-                </span>
-                <span className="shrink-0 text-success">
-                  +{counts[i].added}
-                </span>
-                {diff.oldText != null && (
-                  <span className="shrink-0 text-destructive">
-                    −{counts[i].removed}
-                  </span>
-                )}
-                <ChevronRight
-                  className={cn(
-                    "size-3.5 shrink-0 text-muted-foreground transition-transform",
-                    open && "rotate-90",
-                  )}
-                />
-              </button>
-              {open && (
-                <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all border-t border-border/60 p-2 font-mono text-[0.6875rem]">
-                  {diff.newText}
-                </pre>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 function ToolStatusIcon({ status }: { status: ToolCallStatus }) {

@@ -1,9 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { Editor, Extension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
-import { TextSelection } from "@tiptap/pm/state";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { codeDiff } from "../extension";
 import { DiffCodeBlock } from "../schema";
+import type { DiffBlockElement } from "../element";
+import { captureSelectionReference } from "../../prompt/doc-helpers";
 
 let editor: Editor | null = null;
 afterEach(() => {
@@ -44,43 +46,95 @@ function codeBlockAt(): number {
   return at;
 }
 
-function select(pos: number) {
+function select(anchor: number, head = anchor) {
   const { state, view } = editor!;
-  view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, pos)));
+  view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, anchor, head)));
 }
 
+function press(key: string) {
+  editor!.view.dom.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+}
+
+const selected = () => pres()[0].hasAttribute("data-diff-selected");
+const blockSelected = () => {
+  const { selection } = editor!.state;
+  return selection instanceof NodeSelection && selection.from === codeBlockAt();
+};
+
 describe("codeDiff", () => {
-  it("draws a diff block as its diff in place of its source", async () => {
+  it("draws a diff block as its card in place of its source", async () => {
     mount(`<p>Before</p>${DIFF}`);
     expect(diffs()).toHaveLength(1);
     expect(hidden(pres()[0])).toBe(true);
-    // Drawn once the language loads; each line's number and its code.
-    const lines = () => [...diffs()[0].querySelector("diffs-container")!.shadowRoot!.querySelectorAll("[data-line-type]:not([data-column-number])")];
+    const lines = () => [
+      ...(diffs()[0].querySelector("diffs-container")?.shadowRoot?.querySelectorAll("[data-line-type]:not([data-column-number])") ?? []),
+    ];
     await expect
       .poll(() => lines().map((line) => line.getAttribute("data-line-type")))
       .toEqual(["change-deletion", "change-addition"]);
   });
 
-  it("shows the source while the selection is in it, and the diff again after", () => {
-    mount(`<p>Before</p>${DIFF}`);
+  it("selects the block a caret would land in, and wears the tint", () => {
+    mount(`<p>Before</p>${DIFF}<p>After</p>`);
+    select(codeBlockAt() + 3);
+    expect(blockSelected()).toBe(true);
+    expect(selected()).toBe(true);
+    expect(diffs()).toHaveLength(1);
+    select(1);
+    expect(selected()).toBe(false);
+  });
+
+  it("grows a selection that ends in a block to take the whole block in", () => {
+    mount(`<p>Before</p>${DIFF}<p>After</p>`);
+    const block = codeBlockAt();
+    const end = block + editor!.state.doc.nodeAt(block)!.nodeSize;
+    select(2, block + 4);
+    expect(editor!.state.selection.to).toBe(end - 1);
+    expect(selected()).toBe(true);
+    // Backwards, from the line after.
+    select(end + 2, block + 4);
+    expect(editor!.state.selection.from).toBe(block + 1);
+    expect(selected()).toBe(true);
+  });
+
+  it("references a selected block whole, or a range taking it in", () => {
+    mount(`<p>Before</p>${DIFF}<p>After</p>`);
+    select(codeBlockAt() + 1);
+    expect(captureSelectionReference(editor!.state)?.text).toBe(editor!.state.doc.nodeAt(codeBlockAt())!.textContent);
+    select(2, codeBlockAt() + 4);
+    expect(captureSelectionReference(editor!.state)?.text).toMatch(/^efore\n--- a\.ts[^]*\+const a = 2;$/);
+  });
+
+  it("edits the selected block on Enter, until Escape selects it again", () => {
+    mount(`<p>Before</p>${DIFF}<p>After</p>`);
     const drawn = diffs()[0];
     select(codeBlockAt() + 1);
+    press("Enter");
     expect(diffs()).toHaveLength(0);
     expect(hidden(pres()[0])).toBe(false);
+    expect(editor!.state.selection.from).toBe(codeBlockAt() + 1);
 
     // An edit in the source redraws nothing while it is shown.
     editor!.commands.insertContent("x");
     expect(diffs()).toHaveLength(0);
 
-    select(1);
+    press("Escape");
+    expect(blockSelected()).toBe(true);
     expect(diffs()).toHaveLength(1);
     expect(diffs()[0]).not.toBe(drawn);
+  });
+
+  it("leaves editing when the selection leaves the block", () => {
+    mount(`<p>Before</p>${DIFF}`);
+    (diffs()[0] as DiffBlockElement).onEdit!();
+    expect(diffs()).toHaveLength(0);
+    select(1);
+    expect(diffs()).toHaveLength(1);
     expect(hidden(pres()[0])).toBe(true);
   });
 
   it("draws a diff the document opens with the caret in", () => {
     mount(DIFF);
-    expect(editor!.state.selection.$from.parent.type.name).toBe("codeBlock");
     expect(diffs()).toHaveLength(1);
     editor!.commands.setContent(`${DIFF}<p>After</p>`);
     expect(diffs()).toHaveLength(1);
@@ -94,16 +148,21 @@ describe("codeDiff", () => {
     expect(diffs()[0]).toBe(drawn);
   });
 
-  it("puts the caret in the source on a click, where the editor is editable", () => {
+  it("offers editing only where the editor is editable", () => {
     mount(`<p>Before</p>${DIFF}`);
-    editor!.setEditable(false);
-    (diffs()[0] as HTMLElement).click();
-    expect(diffs()).toHaveLength(1);
-
-    editor!.setEditable(true);
-    (diffs()[0] as HTMLElement).click();
-    expect(editor!.state.selection.from).toBe(codeBlockAt() + 1);
-    expect(diffs()).toHaveLength(0);
+    expect((diffs()[0] as DiffBlockElement).onEdit).toBeTypeOf("function");
+    editor!.destroy();
+    editor = new Editor({
+      element: document.body.appendChild(document.createElement("div")),
+      extensions: [
+        StarterKit.configure({ codeBlock: false }),
+        DiffCodeBlock,
+        Extension.create({ name: "codeDiff", addProseMirrorPlugins: () => [codeDiff()] }),
+      ],
+      content: `<p>Before</p>${DIFF}`,
+      editable: false,
+    });
+    expect((diffs()[0] as DiffBlockElement).onEdit).toBeUndefined();
   });
 
   it("leaves other code blocks, and a diff block with no hunks, as code", () => {

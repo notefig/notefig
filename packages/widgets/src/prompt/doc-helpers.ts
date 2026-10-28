@@ -277,16 +277,23 @@ export interface PromptReference {
 export const MAX_REFERENCE_CHARS = 8000;
 
 /** The current selection as a reference, or null when there is nothing
- *  worth referencing (collapsed, or whitespace-only). */
+ *  worth referencing (collapsed, or whitespace-only). A selected block of
+ *  text counts — a diff block is selected whole (diff-block/extension.ts). */
 export function captureSelectionReference(
   state: EditorState,
 ): PromptReference | null {
   const { selection } = state;
-  if (!(selection instanceof TextSelection) || selection.empty) return null;
+  if (!referencable(selection)) return null;
   const { from, to } = selection;
   const text = state.doc.textBetween(from, to, "\n");
   if (!text.trim()) return null;
   return { text: text.slice(0, MAX_REFERENCE_CHARS), from, to };
+}
+
+function referencable(selection: EditorState["selection"]): boolean {
+  if (selection.empty) return false;
+  if (selection instanceof TextSelection) return true;
+  return selection instanceof NodeSelection && selection.node.isTextblock;
 }
 
 /**
@@ -304,7 +311,9 @@ export function selectionSummonTr(
 ): Transaction | null {
   const reference = captureSelectionReference(state);
   if (!reference) return null;
-  const { $to } = state.selection;
+  // The end of what is selected: inside a selected block, not after it.
+  const { selection } = state;
+  const $to = selection instanceof NodeSelection ? state.doc.resolve(selection.to - 1) : selection.$to;
   if ($to.depth < 1) return null;
   const type = state.schema.nodes[PROMPT_NODE_NAME];
   if (!type) return null;

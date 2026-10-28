@@ -521,7 +521,7 @@ function autoDirectionDecorations(doc: ProseMirrorNode): DecorationSet {
  */
 export function createSchemaExtensions(
   image: typeof MarkdownImageBase = MarkdownImageBase,
-  codeBlock: typeof CodeBlock = CodeBlock,
+  codeBlock: Node = CodeBlock,
   widgets: Node[] = widgetSchemaNodes(),
   frontmatter: typeof FrontmatterNodeBase = FrontmatterNodeBase,
 ) {
