@@ -92,8 +92,8 @@ export function DiffCard({
       className={cn("not-prose w-full select-text overflow-hidden rounded-lg border border-border/60 bg-card/80 text-xs", className)}
       data-diff-card
     >
-      <div className="flex h-7 items-center gap-1.5 border-b border-border/60 pl-2.5 pr-1 text-muted-foreground">
-        {icon ?? <FileDiffIcon className="size-3.5 shrink-0" />}
+      <div className="flex h-6 items-center gap-1.5 border-b border-border/60 pl-2.5 pr-1 text-[0.6875rem] text-muted-foreground">
+        {icon ?? <FileDiffIcon className="size-3 shrink-0" />}
         {file.label && (
           <FileLabel open={file.open} digit={digit(file.open)}>
             <span>{file.label.slice(0, slash + 1)}</span>
@@ -109,10 +109,10 @@ export function DiffCard({
             aria-label={t("diffBlockEdit")}
             aria-keyshortcuts={keys ? String(controls.indexOf(onEdit) + 1) : undefined}
             data-diff-edit
-            className="ml-auto flex shrink-0 cursor-pointer items-center gap-1 rounded p-1 transition-colors hover:text-foreground"
+            className="ml-auto flex shrink-0 cursor-pointer items-center gap-0.5 rounded p-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
             onClick={onEdit}
           >
-            <Braces className="size-3.5" />
+            <Braces className="size-3" />
             {digit(onEdit)}
           </button>
         )}
@@ -126,7 +126,7 @@ export function DiffCard({
  *  show theirs. */
 function Digit({ children }: { children: ReactNode }) {
   return (
-    <kbd className="shrink-0 font-sans text-[0.625rem]" data-diff-key>
+    <kbd className="shrink-0 font-sans text-[0.5625rem]" data-diff-key>
       {children}
     </kbd>
   );

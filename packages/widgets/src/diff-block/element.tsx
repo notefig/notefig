@@ -94,7 +94,7 @@ function elementClass(host: DiffBlockHost | null) {
         <DiffCard
           diff={diff}
           file={file}
-          icon={FileIcon && <FileIcon path={file.label} className="size-3.5 shrink-0" />}
+          icon={FileIcon && <FileIcon path={file.label} className="size-3 shrink-0" />}
           onEdit={this.onEdit}
           keys={this.#keys}
         />,
