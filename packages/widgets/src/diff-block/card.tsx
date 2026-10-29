@@ -13,7 +13,7 @@
  */
 import { useEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { FileDiff as FileDiffIcon, Pencil } from "lucide-react";
+import { Braces, FileDiff as FileDiffIcon } from "lucide-react";
 import { FileDiff, type FileDiffMetadata } from "@pierre/diffs";
 import { cn } from "@notefig/ui/utils";
 import { diffStats } from "./patch";
@@ -29,7 +29,9 @@ const FIT_COLUMNS = 80;
  * Into the shadow root's `@layer unsafe`. The colour scheme is the page's
  * (Pierre's own `light dark` follows the OS), the background the card's
  * (Pierre mixes every tint against it), and the code is sized against the
- * card as a code block's is against its `<pre>`.
+ * card as a code block's is against its `<pre>`. With Pierre's header off
+ * the code starts under the card's, so it drops the gap Pierre leaves for
+ * a header-less diff, as it does under its own.
  */
 const CSS = `
 :host {
@@ -38,6 +40,9 @@ const CSS = `
   --diffs-dark-bg: hsl(var(--card));
   --diffs-font-size: 0.8571429em;
   --diffs-line-height: 1.6667em;
+}
+[data-code] {
+  padding-top: 0;
 }
 `;
 
@@ -80,7 +85,7 @@ export function DiffCard({
   const controls = diffControls(onEdit, file);
   const digit = (control: (() => void) | undefined) => {
     const index = control ? controls.indexOf(control) : -1;
-    return keys && index >= 0 && index < 9 ? <Kbd>{index + 1}</Kbd> : null;
+    return keys && index >= 0 && index < 9 ? <Digit>{index + 1}</Digit> : null;
   };
   return (
     <div
@@ -90,12 +95,11 @@ export function DiffCard({
       <div className="flex h-7 items-center gap-1.5 border-b border-border/60 pl-2.5 pr-1 text-muted-foreground">
         {icon ?? <FileDiffIcon className="size-3.5 shrink-0" />}
         {file.label && (
-          <FileLabel open={file.open}>
+          <FileLabel open={file.open} digit={digit(file.open)}>
             <span>{file.label.slice(0, slash + 1)}</span>
             <span className="font-medium text-foreground">{file.label.slice(slash + 1)}</span>
           </FileLabel>
         )}
-        {digit(file.open)}
         {added > 0 && <span className="shrink-0 tabular-nums text-success">+{added}</span>}
         {removed > 0 && <span className="shrink-0 tabular-nums text-destructive">−{removed}</span>}
         {onEdit && (
@@ -108,7 +112,7 @@ export function DiffCard({
             className="ml-auto flex shrink-0 cursor-pointer items-center gap-1 rounded p-1 transition-colors hover:text-foreground"
             onClick={onEdit}
           >
-            <Pencil className="size-3.5" />
+            <Braces className="size-3.5" />
             {digit(onEdit)}
           </button>
         )}
@@ -118,25 +122,23 @@ export function DiffCard({
   );
 }
 
-/** A control's digit, as the prompt widget's choices show theirs — on a
- *  keycap here, where it sits beside the line counts' numbers. */
-function Kbd({ children }: { children: ReactNode }) {
+/** A control's digit, inside its control, as the prompt widget's choices
+ *  show theirs. */
+function Digit({ children }: { children: ReactNode }) {
   return (
-    <kbd
-      className="shrink-0 rounded-[3px] border border-border px-1 font-sans text-[0.625rem] leading-[1.4] text-muted-foreground"
-      data-diff-key
-    >
+    <kbd className="shrink-0 font-sans text-[0.625rem]" data-diff-key>
       {children}
     </kbd>
   );
 }
 
-function FileLabel({ open, children }: { open?: () => void; children: ReactNode }) {
+function FileLabel({ open, digit, children }: { open?: () => void; digit: ReactNode; children: ReactNode }) {
   const className = "min-w-0 truncate text-left";
   if (!open) return <span className={className}>{children}</span>;
   return (
-    <button type="button" className={cn(className, "cursor-pointer hover:underline")} onClick={open}>
-      {children}
+    <button type="button" className="flex min-w-0 cursor-pointer items-center gap-1 hover:text-foreground" onClick={open}>
+      <span className={cn(className, "hover:underline")}>{children}</span>
+      {digit}
     </button>
   );
 }
