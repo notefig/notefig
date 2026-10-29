@@ -7,14 +7,15 @@
  * (./transcript.tsx). A body Pierre finds no hunks in stays the code it is.
  *
  * Which workspace a relative path is in is the page's to say: the nearest
- * `data-workspace-path`, the element's own included.
+ * `data-workspace-path`, the element's own included. `data-collapsed` on the
+ * element starts its card closed (./card.tsx).
  */
 import type { ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { FileDiffMetadata } from "@pierre/diffs";
 import { DiffCard, diffControls, type DiffFile } from "./card";
 import { parseDiffBlock } from "./patch";
-import { DIFF_BLOCK_TAG, DIFF_DATA_ATTRIBUTE } from "./syntax";
+import { COLLAPSED_ATTRIBUTE, DIFF_BLOCK_TAG, DIFF_DATA_ATTRIBUTE } from "./syntax";
 
 const LANGUAGE_PREFIX = "language-";
 export const WORKSPACE_ATTRIBUTE = "data-workspace-path";
@@ -31,6 +32,9 @@ export interface DiffBlockHost {
  *  says when the keys are on it. */
 export interface DiffBlockElement extends HTMLElement {
   onEdit?: () => void;
+  /** Its diff, where whoever made it has read it already; else it reads
+   *  its code. */
+  diff?: FileDiffMetadata;
   /** The keys are on the card: its controls show their digits. */
   keys: boolean;
   /** Runs the card's `index`th control (diffControls); false when it has
@@ -41,6 +45,7 @@ export interface DiffBlockElement extends HTMLElement {
 function elementClass(host: DiffBlockHost | null) {
   return class extends HTMLElement implements DiffBlockElement {
     onEdit?: () => void;
+    diff?: FileDiffMetadata;
     #keys = false;
     #drawn: { frame: HTMLElement; pre: HTMLElement; root: Root; diff: FileDiffMetadata; file: DiffFile } | null = null;
 
@@ -72,7 +77,7 @@ function elementClass(host: DiffBlockHost | null) {
       const code = this.querySelector("pre > code");
       if (!code || this.#drawn) return;
       const language = [...code.classList].find((name) => name.startsWith(LANGUAGE_PREFIX));
-      const diff = parseDiffBlock(language?.slice(LANGUAGE_PREFIX.length) ?? null, code.textContent ?? "");
+      const diff = this.diff ?? parseDiffBlock(language?.slice(LANGUAGE_PREFIX.length) ?? null, code.textContent ?? "");
       if (!diff) return;
       const pre = code.parentElement!;
       const workspace = this.closest(`[${WORKSPACE_ATTRIBUTE}]`)?.getAttribute(WORKSPACE_ATTRIBUTE) ?? null;
@@ -97,6 +102,7 @@ function elementClass(host: DiffBlockHost | null) {
           icon={FileIcon && <FileIcon path={file.label} className="size-3 shrink-0" />}
           onEdit={this.onEdit}
           keys={this.#keys}
+          collapsible={this.hasAttribute(COLLAPSED_ATTRIBUTE)}
         />,
       );
     }
@@ -119,10 +125,12 @@ export function defineDiffBlockElement(host: DiffBlockHost | null = null): void 
   if (!customElements.get(DIFF_BLOCK_TAG)) customElements.define(DIFF_BLOCK_TAG, elementClass(host));
 }
 
-/** The element for a block, as rendered markdown holds one. */
-export function createDiffBlockElement(language: string | null, text: string): DiffBlockElement {
+/** The element for a block, as rendered markdown holds one; `diff`, where
+ *  the caller has read it already. */
+export function createDiffBlockElement(language: string | null, text: string, diff?: FileDiffMetadata): DiffBlockElement {
   defineDiffBlockElement();
   const element = document.createElement(DIFF_BLOCK_TAG) as DiffBlockElement;
+  element.diff = diff;
   const pre = element.appendChild(document.createElement("pre"));
   const code = pre.appendChild(document.createElement("code"));
   if (language) code.className = LANGUAGE_PREFIX + language;

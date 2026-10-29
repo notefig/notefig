@@ -5,15 +5,19 @@
  * the library the code viewer is built on, highlighting with the Shiki
  * document code blocks share.
  *
+ * A collapsible card starts as its header alone, and makes Pierre's diff
+ * only once it is opened (and drops it when closed): a transcript's many
+ * edits cost their headers until someone looks.
+ *
  * Side by side where the change has both sides and its lines fit beside
  * each other; one unified column otherwise. Wrapped, never scrolled sideways. It follows the
  * app's theme with no code: Pierre's colours are `light-dark()` pairs,
  * picked by the page's `color-scheme` (dark under `html.dark`), once its
  * host stops asking for the OS's.
  */
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Braces, FileDiff as FileDiffIcon } from "lucide-react";
+import { Braces, ChevronRight, FileDiff as FileDiffIcon } from "lucide-react";
 import { FileDiff, type FileDiffMetadata } from "@pierre/diffs";
 import { cn } from "@notefig/ui/utils";
 import { diffStats } from "./patch";
@@ -67,6 +71,7 @@ export function DiffCard({
   icon,
   onEdit,
   keys = false,
+  collapsible = false,
   className,
 }: {
   diff: FileDiffMetadata;
@@ -77,22 +82,37 @@ export function DiffCard({
   onEdit?: () => void;
   /** The keys are on the card: each control shows the digit that runs it. */
   keys?: boolean;
+  /** Starts closed, its header opening and closing it. */
+  collapsible?: boolean;
   className?: string;
 }) {
-  const { t } = useTranslation();
+  const [open, setOpen] = useState(!collapsible);
+  // The header toggles it, but for its own controls (the file link).
+  const toggleFrom = (event: MouseEvent) => {
+    if (!(event.target as Element).closest("button")) setOpen(!open);
+  };
   const { added, removed } = diffStats(diff);
   const slash = file.label.lastIndexOf("/");
   const controls = diffControls(onEdit, file);
+  /** The digit that runs a control, while the keys are on the card. */
   const digit = (control: (() => void) | undefined) => {
     const index = control ? controls.indexOf(control) : -1;
-    return keys && index >= 0 && index < 9 ? <Digit>{index + 1}</Digit> : null;
+    return keys && index >= 0 && index < 9 ? index + 1 : null;
   };
   return (
     <div
       className={cn("not-prose w-full select-text overflow-hidden rounded-lg border border-border/60 bg-card/80 text-xs", className)}
       data-diff-card
     >
-      <div className="flex h-6 items-center gap-1.5 border-b border-border/60 pl-2.5 pr-1 text-[0.6875rem] text-muted-foreground">
+      <div
+        className={cn(
+          "flex h-6 items-center gap-1.5 pl-2.5 pr-1 text-[0.6875rem] text-muted-foreground",
+          open && "border-b border-border/60",
+          collapsible && "cursor-pointer pl-1",
+        )}
+        onClick={collapsible ? toggleFrom : undefined}
+      >
+        {collapsible && <Toggle open={open} onToggle={() => setOpen(!open)} />}
         {icon ?? <FileDiffIcon className="size-3 shrink-0" />}
         {file.label && (
           <FileLabel open={file.open} digit={digit(file.open)}>
@@ -102,43 +122,66 @@ export function DiffCard({
         )}
         {added > 0 && <span className="shrink-0 tabular-nums text-success">+{added}</span>}
         {removed > 0 && <span className="shrink-0 tabular-nums text-destructive">−{removed}</span>}
-        {onEdit && (
-          <button
-            type="button"
-            title={t("diffBlockEdit")}
-            aria-label={t("diffBlockEdit")}
-            aria-keyshortcuts={keys ? String(controls.indexOf(onEdit) + 1) : undefined}
-            data-diff-edit
-            className="ml-auto flex shrink-0 cursor-pointer items-center gap-0.5 rounded p-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
-            onClick={onEdit}
-          >
-            <Braces className="size-3" />
-            {digit(onEdit)}
-          </button>
-        )}
+        {onEdit && <EditButton onEdit={onEdit} digit={digit(onEdit)} />}
       </div>
-      <DiffBody diff={diff} />
+      {open && <DiffBody diff={diff} />}
     </div>
+  );
+}
+
+/** Opens and closes a collapsible card. */
+function Toggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-label={t(open ? "diffBlockHide" : "diffBlockShow")}
+      data-diff-toggle
+      className="flex shrink-0 cursor-pointer items-center rounded p-0.5 transition-colors hover:text-foreground"
+      onClick={onToggle}
+    >
+      <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
+    </button>
+  );
+}
+
+function EditButton({ onEdit, digit }: { onEdit: () => void; digit: number | null }) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      title={t("diffBlockEdit")}
+      aria-label={t("diffBlockEdit")}
+      aria-keyshortcuts={digit === null ? undefined : String(digit)}
+      data-diff-edit
+      className="ml-auto flex shrink-0 cursor-pointer items-center gap-0.5 rounded p-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
+      onClick={onEdit}
+    >
+      <Braces className="size-3" />
+      <Digit digit={digit} />
+    </button>
   );
 }
 
 /** A control's digit, inside its control, as the prompt widget's choices
  *  show theirs. */
-function Digit({ children }: { children: ReactNode }) {
+function Digit({ digit }: { digit: number | null }) {
+  if (digit === null) return null;
   return (
     <kbd className="shrink-0 font-sans text-[0.5625rem]" data-diff-key>
-      {children}
+      {digit}
     </kbd>
   );
 }
 
-function FileLabel({ open, digit, children }: { open?: () => void; digit: ReactNode; children: ReactNode }) {
+function FileLabel({ open, digit, children }: { open?: () => void; digit: number | null; children: ReactNode }) {
   const className = "min-w-0 truncate text-left";
   if (!open) return <span className={className}>{children}</span>;
   return (
     <button type="button" className="flex min-w-0 cursor-pointer items-center gap-1 hover:text-foreground" onClick={open}>
       <span className={cn(className, "hover:underline")}>{children}</span>
-      {digit}
+      <Digit digit={digit} />
     </button>
   );
 }

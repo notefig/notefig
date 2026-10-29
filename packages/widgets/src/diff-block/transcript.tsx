@@ -1,13 +1,14 @@
 /**
  * An agent's file edits in its chat transcript, drawn as the diff blocks
  * they are: each changed file of a tool call as its card (./card.tsx),
- * through the same element a diff fence in a reply is. The chat only calls
+ * through the same element a diff fence in a reply is, closed until opened:
+ * a record of what was done, not the message. The chat only calls
  * `renderDiffToolCall`; it never learns which tools edit files.
  */
 import { createElement, type ReactElement } from "react";
 import type { ToolCallContent, ToolCallUpdate } from "@notefig/shared/agent";
 import { patchOf } from "./patch";
-import { DIFF_BLOCK_TAG, DIFF_DATA_ATTRIBUTE } from "./syntax";
+import { COLLAPSED_ATTRIBUTE, DIFF_BLOCK_TAG, DIFF_DATA_ATTRIBUTE } from "./syntax";
 
 type DiffContent = Extract<ToolCallContent, { type: "diff" }>;
 
@@ -29,7 +30,7 @@ export function renderDiffToolCall(call: ToolCallUpdate): ReactElement | null {
         // Keyed by the patch: an edit that streams in draws afresh.
         return createElement(
           DIFF_BLOCK_TAG,
-          { key: `${index}:${patch}` },
+          { key: `${index}:${patch}`, [COLLAPSED_ATTRIBUTE]: "" },
           <pre>
             <code {...{ [DIFF_DATA_ATTRIBUTE]: "" }}>{patch}</code>
           </pre>,

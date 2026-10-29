@@ -618,6 +618,8 @@ i18n
           promptBlobReferenceRemove: "Remove reference",
           promptBlobEdit: "Edit prompt",
           diffBlockEdit: "Edit diff",
+          diffBlockShow: "Show changes",
+          diffBlockHide: "Hide changes",
           promptBlobDone: "Done",
           promptBlobStopped: "Stopped",
           promptBlobFailed: "Failed.",

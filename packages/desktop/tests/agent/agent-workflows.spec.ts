@@ -137,6 +137,9 @@ test.describe("agent workflows", () => {
       await expect(files).toHaveCount(3);
       const newFile = files.filter({ hasText: "new-bar.ts" });
       await expect(newFile).toHaveCount(1);
+      // Closed until opened: no diff is made before.
+      await expect(card.locator("diffs-container")).toHaveCount(0);
+      await newFile.locator("[data-diff-toggle]").click();
       await expect(
         newFile.locator('diffs-container [data-line-type="change-addition"]:not([data-column-number])').first(),
       ).toContainText("export const bar = new Bar();");

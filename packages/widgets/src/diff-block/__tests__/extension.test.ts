@@ -34,7 +34,9 @@ function mount(content: string) {
 const diffs = () => editor!.view.dom.querySelectorAll("notefig-diff-block");
 /** The code blocks' own, not the ones the diffs hold. */
 const pres = () => [...editor!.view.dom.querySelectorAll(":scope > pre")] as HTMLElement[];
-const hidden = (pre: HTMLElement) => pre.style.display === "none";
+/** Hidden by ../extension.css, which the test DOM doesn't load: the card
+ *  just before it. */
+const hidden = (pre: HTMLElement) => pre.previousElementSibling?.localName === "notefig-diff-block";
 
 /** The position of the first code block. */
 function codeBlockAt(): number {

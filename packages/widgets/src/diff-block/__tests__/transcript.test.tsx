@@ -32,6 +32,24 @@ describe("renderDiffToolCall", () => {
     root.remove();
   });
 
+  it("starts each card closed, making its diff only once it is opened", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    await act(async () => createRoot(root).render(renderDiffToolCall(call({ content: [edit] }))!));
+    await expect.poll(() => root.querySelector("[data-diff-card]")).not.toBeNull();
+    const toggle = root.querySelector<HTMLButtonElement>("[data-diff-toggle]")!;
+    const diffs = () => root.querySelectorAll("diffs-container").length;
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(diffs()).toBe(0);
+    await act(async () => toggle.click());
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(diffs()).toBe(1);
+    // The header opens and closes it too.
+    await act(async () => root.querySelector<HTMLElement>("[data-diff-card] > div")!.click());
+    expect(diffs()).toBe(0);
+    root.remove();
+  });
+
   it("leaves a call that edits nothing, or failed, to the chat's line", () => {
     expect(renderDiffToolCall(call({ content: [{ type: "content", content: { type: "text", text: "ok" } }] }))).toBeNull();
     expect(renderDiffToolCall(call({}))).toBeNull();

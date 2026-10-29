@@ -20,11 +20,29 @@
 import { NodeSelection, Plugin, PluginKey, TextSelection, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
+import type { FileDiffMetadata } from "@pierre/diffs";
 import { createDiffBlockElement, WORKSPACE_ATTRIBUTE, type DiffBlockElement } from "./element";
 import { parseDiffBlock } from "./patch";
-import { DIFF_BLOCK_TAG } from "./syntax";
+import "./extension.css";
 
+/** A code block with a diff: where it is, and its diff as Pierre reads it
+ *  — null when it has none, and stays code. */
+interface DiffBlock {
+  from: number;
+  to: number;
+  node: PMNode;
+  diff: FileDiffMetadata | null;
+}
+
+/**
+ * What every rule below reads: the document's diff blocks, found in one walk
+ * when the document changes and kept as they are while only the selection
+ * moves. A diff is read once per block: an unchanged block is the same node,
+ * and keeps the diff it had. Nothing outlives the document — a removed
+ * block's diff goes with it, not kept for the undo history to hold.
+ */
 interface CodeDiffState {
+  blocks: readonly DiffBlock[];
   /** Where the diff block being edited starts, if one is. */
   editing: number | null;
   decorations: DecorationSet;
@@ -39,6 +57,62 @@ const ARROWS: Record<string, "up" | "down" | "left" | "right"> = {
   ArrowRight: "right",
 };
 
+/** The document's diff blocks, in order, reusing the diffs of `previous`
+ *  that are still in it. */
+function scan(doc: PMNode, previous: readonly DiffBlock[]): DiffBlock[] {
+  const known = new Map(previous.map((block) => [block.node, block.diff]));
+  const blocks: DiffBlock[] = [];
+  doc.descendants((node, pos) => {
+    if (node.type.name !== "codeBlock") return !node.isTextblock;
+    if (node.attrs.diff === true) {
+      const diff = known.has(node)
+        ? (known.get(node) ?? null)
+        : parseDiffBlock(node.attrs.language as string | null, node.textContent);
+      blocks.push({ from: pos, to: pos + node.nodeSize, node, diff });
+    }
+    return false;
+  });
+  return blocks;
+}
+
+/** The block `pos` is at or in, if any: a binary search, as blocks never
+ *  hold one another. */
+function blockAt(blocks: readonly DiffBlock[], pos: number): DiffBlock | null {
+  let low = 0;
+  let high = blocks.length - 1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    const block = blocks[middle];
+    if (pos < block.from) high = middle - 1;
+    else if (pos >= block.to) low = middle + 1;
+    else return block;
+  }
+  return null;
+}
+
+/** The blocks a range takes in any of, in order. */
+function* blocksIn(blocks: readonly DiffBlock[], from: number, to: number): Generator<DiffBlock> {
+  let low = 0;
+  let high = blocks.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (blocks[middle].to <= from) low = middle + 1;
+    else high = middle;
+  }
+  for (let index = low; index < blocks.length && blocks[index].from < to; index++) yield blocks[index];
+}
+
+/** Whether two scans found the same blocks, moved at most: then the
+ *  decorations drawing them move with them. */
+const sameBlocks = (a: readonly DiffBlock[], b: readonly DiffBlock[]) =>
+  a.length === b.length && a.every((block, index) => block.node === b[index].node);
+
+/** The drawn block that starts at `pos`, if one does. */
+function drawnFrom(state: EditorState, pos: number): DiffBlock | null {
+  const block = blockAt(key.getState(state)!.blocks, pos);
+  return block?.from === pos && block.diff ? block : null;
+}
+
 /** Shows the source of the diff block at `pos`, the caret at its start. */
 export function editDiffBlock(view: EditorView, pos: number): void {
   const { state } = view;
@@ -48,27 +122,21 @@ export function editDiffBlock(view: EditorView, pos: number): void {
 
 /** `workspacePath`: the workspace the document's diff paths are in. */
 export function codeDiff({ workspacePath = null }: { workspacePath?: string | null } = {}): Plugin<CodeDiffState> {
-  // An edit leaves every block it didn't touch the same node.
-  const drawable = new WeakMap<PMNode, boolean>();
-  const isDrawn = (node: PMNode) => {
-    if (node.type.name !== "codeBlock" || node.attrs.diff !== true) return false;
-    if (!drawable.has(node)) drawable.set(node, parseDiffBlock(node.attrs.language as string | null, node.textContent) !== null);
-    return drawable.get(node)!;
-  };
-  const positions = new WeakMap<Element, () => number | undefined>();
+  /** This editor's drawn cards, each with where its block is (for the
+   *  pointer): the card's widget adds it, and removes it when it is gone. */
+  const cards = new Map<DiffBlockElement, () => number | undefined>();
 
   /** The drawn block a position is inside, if any. */
   const drawnAround = (state: EditorState, pos: number) => {
-    const $pos = state.doc.resolve(pos);
-    if ($pos.depth === 0 || !isDrawn($pos.parent)) return null;
-    const from = $pos.before();
-    return from === key.getState(state)?.editing ? null : { from, to: $pos.after() };
+    const { blocks, editing } = key.getState(state)!;
+    const block = blockAt(blocks, pos);
+    return block?.diff && pos > block.from && block.from !== editing ? block : null;
   };
 
-  const draw = (node: PMNode) => (view: EditorView, getPos: () => number | undefined) => {
-    const element = createDiffBlockElement(node.attrs.language as string | null, node.textContent);
+  const draw = ({ node, diff }: DiffBlock) => (view: EditorView, getPos: () => number | undefined) => {
+    const element = createDiffBlockElement(node.attrs.language as string | null, node.textContent, diff ?? undefined);
     element.contentEditable = "false";
-    positions.set(element, getPos);
+    cards.set(element, getPos);
     if (view.editable) {
       element.onEdit = () => {
         const at = getPos();
@@ -78,32 +146,32 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
     return element;
   };
 
-  const decorate = (state: EditorState, editing: number | null) => {
-    const decorations: Decoration[] = [];
-    state.doc.descendants((node, pos) => {
-      if (node.type.name !== "codeBlock") return !node.isTextblock;
-      if (pos === editing || !isDrawn(node)) return false;
-      const end = pos + node.nodeSize;
-      decorations.push(
-        Decoration.widget(pos, draw(node), {
-          side: -1,
-          // The same diff for the same source: a redraw only when it changes.
-          key: `${node.attrs.language}\n${node.textContent}`,
-          ignoreSelection: true,
-          stopEvent: () => true,
-        }),
-        Decoration.node(pos, end, { style: "display: none" }),
-      );
-      return false;
-    });
-    return DecorationSet.create(state.doc, decorations);
-  };
+  const decorate = (doc: PMNode, blocks: readonly DiffBlock[], editing: number | null) =>
+    DecorationSet.create(
+      doc,
+      blocks.flatMap((block) => {
+        if (!block.diff || block.from === editing) return [];
+        // The card alone: a stylesheet hides the source after it
+        // (./extension.css), as a node decoration per block would make every
+        // update of a long document look at each of its blocks for them.
+        return [
+          Decoration.widget(block.from, draw(block), {
+            side: -1,
+            // The same diff for the same source: a redraw only when it changes.
+            key: `${block.node.attrs.language}\n${block.node.textContent}`,
+            ignoreSelection: true,
+            stopEvent: () => true,
+            destroy: (element) => cards.delete(element as DiffBlockElement),
+          }),
+        ];
+      }),
+    );
 
   /** The card in this editor an event happened on, if any. */
-  const cardAt = (view: EditorView, event: MouseEvent) =>
+  const cardAt = (event: MouseEvent) =>
     event
       .composedPath()
-      .find((target): target is Element => target instanceof Element && target.localName === DIFF_BLOCK_TAG && view.dom.contains(target)) ??
+      .find((target): target is DiffBlockElement => target instanceof Element && cards.has(target as DiffBlockElement)) ??
     null;
 
   /**
@@ -111,10 +179,10 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
    * it went down and came up on — not the DOM selection, which a browser
    * keeps out of a non-editable card (Chromium stops a drag at its edge).
    */
-  const selectFromPointer = (view: EditorView, down: Element | null, up: Element | null, event: MouseEvent) => {
+  const selectFromPointer = (view: EditorView, down: DiffBlockElement | null, up: DiffBlockElement | null, event: MouseEvent) => {
     if (!down && !up) return;
     const { state } = view;
-    const posOf = (card: Element | null) => (card ? positions.get(card)?.() : undefined);
+    const posOf = (card: DiffBlockElement | null) => (card ? cards.get(card)?.() : undefined);
     if (down && down === up) {
       // A click, or a drag within it: the block.
       const at = posOf(down);
@@ -131,40 +199,64 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
     view.dispatch(state.tr.setSelection(TextSelection.between(state.doc.resolve(anchor), state.doc.resolve(head))));
   };
 
-  /** The drawn cards, each with its block's position. */
-  const cards = function* (view: EditorView) {
-    for (const element of view.dom.querySelectorAll<DiffBlockElement>(DIFF_BLOCK_TAG)) {
-      const at = positions.get(element)?.();
-      const node = at === undefined ? null : view.state.doc.nodeAt(at);
-      if (node) yield { element, from: at!, to: at! + node.nodeSize };
-    }
+  /** The card drawing a block: its widget sits just before the block's
+   *  (hidden) source. */
+  const cardOf = (view: EditorView, block: DiffBlock) => {
+    const card = view.nodeDOM(block.from)?.previousSibling as DiffBlockElement | null | undefined;
+    return card && cards.has(card) ? card : null;
   };
 
-  /** Rule 1's look: a card wears the tint while a selection takes its
-   *  block in, and the keys are on it while it is the block selected. */
-  const markSelection = (view: EditorView) => {
+  /** The cards a selection takes the blocks of in, each with whether the
+   *  keys are on it: whether its block is the one selected. */
+  const cardsTakenIn = (view: EditorView, blocks: readonly DiffBlock[]) => {
     const { selection } = view.state;
-    for (const { element, from, to } of cards(view)) {
+    const taken = new Map<DiffBlockElement, boolean>();
+    if (selection.empty) return taken;
+    for (const block of blocksIn(blocks, selection.from, selection.to)) {
       // All of its source: rule 1 rests a selection's ends just inside it.
-      element.toggleAttribute("data-selected", !selection.empty && selection.from <= from + 1 && selection.to >= to - 1);
-      element.keys = selection instanceof NodeSelection && selection.from === from;
+      const takenIn = selection.from <= block.from + 1 && selection.to >= block.to - 1;
+      const card = takenIn && block.diff ? cardOf(view, block) : null;
+      if (card) taken.set(card, selection instanceof NodeSelection && selection.from === block.from);
     }
+    return taken;
+  };
+
+  /** The cards wearing the tint, each with whether the keys are on it. */
+  let marked = new Map<DiffBlockElement, boolean>();
+
+  /** Rule 1's look: a card wears the tint while a selection takes its
+   *  block in, and the keys are on it while it is the block selected. Only
+   *  the cards the selection takes in are looked at, and only when it or
+   *  the blocks change. */
+  const markSelection = (view: EditorView, previous?: EditorState) => {
+    const { blocks } = key.getState(view.state)!;
+    if (previous?.selection.eq(view.state.selection) && key.getState(previous)!.blocks === blocks) return;
+    const marking = cardsTakenIn(view, blocks);
+    for (const card of marked.keys()) {
+      if (marking.has(card)) continue;
+      card.removeAttribute("data-selected");
+      card.keys = false;
+    }
+    for (const [card, keys] of marking) {
+      card.setAttribute("data-selected", "");
+      card.keys = keys;
+    }
+    marked = marking;
   };
 
   /** A digit on the selected block runs its card's control. */
   const runControl = (view: EditorView, index: number) => {
     const { selection } = view.state;
     if (!(selection instanceof NodeSelection)) return false;
-    for (const { element, from } of cards(view)) {
-      if (from === selection.from) return element.runControl(index);
-    }
-    return false;
+    const block = drawnFrom(view.state, selection.from);
+    const card = block && cardOf(view, block);
+    return card ? card.runControl(index) : false;
   };
 
   /** Rule 2: Enter on a selected block edits it. */
   const editSelected = (view: EditorView) => {
     const { selection } = view.state;
-    if (!view.editable || !(selection instanceof NodeSelection) || !isDrawn(selection.node)) return false;
+    if (!view.editable || !(selection instanceof NodeSelection) || !drawnFrom(view.state, selection.from)) return false;
     editDiffBlock(view, selection.from);
     return true;
   };
@@ -188,8 +280,9 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
     const forward = towards === "down" || towards === "right";
     const $edge = state.doc.resolve(forward ? selection.$head.after() : selection.$head.before());
     const next = forward ? $edge.nodeAfter : $edge.nodeBefore;
-    if (!next || !isDrawn(next)) return false;
+    if (!next) return false;
     const at = forward ? $edge.pos : $edge.pos - next.nodeSize;
+    if (!drawnFrom(state, at)) return false;
     view.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, at)).scrollIntoView());
     return true;
   };
@@ -197,18 +290,25 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
   return new Plugin<CodeDiffState>({
     key,
     state: {
-      init: (_config, state): CodeDiffState => ({ editing: null, decorations: decorate(state, null) }),
+      init: (_config, state): CodeDiffState => {
+        const blocks = scan(state.doc, []);
+        return { blocks, editing: null, decorations: decorate(state.doc, blocks, null) };
+      },
       apply: (tr, previous, _old, state) => {
+        const blocks = tr.docChanged ? scan(state.doc, previous.blocks) : previous.blocks;
         const meta = tr.getMeta(key) as { editing: number | null } | undefined;
         let editing = meta ? meta.editing : previous.editing === null ? null : tr.mapping.map(previous.editing);
         if (editing !== null) {
-          const node = state.doc.nodeAt(editing);
+          const block = blockAt(blocks, editing);
           const { from, to } = state.selection;
-          const inside = node?.type.name === "codeBlock" && from > editing && to < editing + node.nodeSize;
-          if (!inside) editing = null;
+          if (block?.from !== editing || from <= block.from || to >= block.to) editing = null;
         }
-        if (!tr.docChanged && !tr.selectionSet && editing === previous.editing) return previous;
-        return { editing, decorations: decorate(state, editing) };
+        if (blocks === previous.blocks && editing === previous.editing) return previous;
+        const decorations =
+          editing === previous.editing && sameBlocks(blocks, previous.blocks)
+            ? previous.decorations.map(tr.mapping, tr.doc)
+            : decorate(state.doc, blocks, editing);
+        return { blocks, editing, decorations };
       },
     },
 
@@ -230,13 +330,13 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
     },
 
     view: (view) => {
-      let down: Element | null = null;
+      let down: DiffBlockElement | null = null;
       const onMouseDown = (event: MouseEvent) => {
-        down = event.button === 0 ? cardAt(view, event) : null;
+        down = event.button === 0 ? cardAt(event) : null;
       };
       const onMouseUp = (event: MouseEvent) => {
         const from = down;
-        const to = cardAt(view, event);
+        const to = cardAt(event);
         down = null;
         // Once ProseMirror has read the gesture's DOM selection, which it
         // does on this mouseup too, and would read over this.

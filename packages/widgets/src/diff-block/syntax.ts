@@ -27,6 +27,9 @@ export const DIFF_DATA_ATTRIBUTE = "data-diff";
 /** The element that draws one (./element.ts). */
 export const DIFF_BLOCK_TAG = "notefig-diff-block";
 
+/** On the element: its card starts closed, Pierre's diff made once opened. */
+export const COLLAPSED_ATTRIBUTE = "data-collapsed";
+
 /** Whether a fence's info string marks it a diff: `diff` among the words
  *  after the language (```diff alone is the unified-diff language). */
 export function isDiffInfo(info: string): boolean {
@@ -40,7 +43,7 @@ export function diffInfo(diff: boolean): string {
 
 /** The translation keys the card resolves; the app asserts it defines them
  *  (see ../prompt/i18n-keys.ts for why). */
-export const DIFF_BLOCK_I18N_KEYS = ["diffBlockEdit"] as const;
+export const DIFF_BLOCK_I18N_KEYS = ["diffBlockEdit", "diffBlockShow", "diffBlockHide"] as const;
 
 /** How an agent writes one; its MCP instructions carry this. */
 export const DIFF_BLOCK_GUIDE =
