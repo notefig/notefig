@@ -145,6 +145,27 @@ describe("codeDiff", () => {
     expect(diffs()[0]).not.toBe(drawn);
   });
 
+  it("selects the block on Backspace from the line after, or Delete from the line before", () => {
+    mount(`<p>Before</p>${DIFF}<p>After</p>`);
+    const source = editor!.state.doc.nodeAt(codeBlockAt())!.textContent;
+    const after = codeBlockAt() + editor!.state.doc.nodeAt(codeBlockAt())!.nodeSize + 1;
+    select(after);
+    press("Backspace");
+    expect(blockSelected()).toBe(true);
+    expect(editor!.state.doc.nodeAt(codeBlockAt())!.textContent).toBe(source);
+
+    select(codeBlockAt() - 1);
+    press("Delete");
+    expect(blockSelected()).toBe(true);
+
+    // An empty line goes, as it would have.
+    editor!.commands.setContent(`<p>Before</p>${DIFF}<p></p><p>After</p>`);
+    select(after);
+    press("Backspace");
+    expect(blockSelected()).toBe(true);
+    expect(editor!.state.doc.childCount).toBe(3);
+  });
+
   it("leaves editing when the selection leaves the block", () => {
     mount(`<p>Before</p>${DIFF}`);
     (diffs()[0] as DiffBlockElement).onEdit!();

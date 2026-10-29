@@ -1,7 +1,8 @@
 /**
  * A diff block in a document (```ts diff, see @notefig/widgets/diff-block)
- * is drawn as its card, is one thing to the selection — a click or an
- * arrow selects it, a selection takes it in whole — and is edited as its
+ * is drawn as its card, is one thing to the selection — an arrow or
+ * Backspace selects it, a selection takes it in whole, a click or a drag in
+ * it selects its code, not it — and is edited as its
  * source only when asked (Enter, its Edit button), then saved as the code
  * block it is.
  */
@@ -39,6 +40,13 @@ async function openChange(page: Page, workspace: string, name: string) {
   };
 }
 
+/** Selects the block by the keyboard, from the end of the line above. */
+async function selectFromAbove(page: Page) {
+  await page.locator(".ProseMirror > p", { hasText: "Before." }).click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("ArrowDown");
+}
+
 const line = (type: "deletion" | "addition") => `[data-line-type="change-${type}"]:not([data-column-number])`;
 
 test("a diff block is drawn as its card, selected as one, and edited when asked @smoke", async ({ page }) => {
@@ -67,11 +75,26 @@ test("a diff block is drawn as its card, selected as one, and edited when asked 
   await page.evaluate(() => document.documentElement.classList.remove("dark"));
   await expect.poll(scheme).not.toContain("dark");
 
-  // A click selects it; it stays drawn, and the keys are on it: each
-  // control shows its digit, as a prompt's choices do.
+  // A drag over its code is the reader's: the code is selected, not it.
   const keys = card.locator("[data-diff-key]");
+  const added = await diff.locator(line("addition")).first().boundingBox();
+  await page.mouse.move(added!.x + 2, added!.y + added!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(added!.x + added!.width - 2, added!.y + added!.height / 2, { steps: 8 });
+  await page.mouse.up();
+  const dragged = () =>
+    diff.evaluate((element) => {
+      const root = element.shadowRoot as (ShadowRoot & { getSelection?: () => Selection | null }) | null;
+      return (root?.getSelection?.() ?? document.getSelection())?.toString() ?? "";
+    });
+  await expect.poll(dragged).toContain("hello");
+  await expect(selected).toHaveCount(0);
   await expect(keys).toHaveCount(0);
-  await diff.locator(line("addition")).first().click();
+
+  // An arrow off the line above selects it, rather than skipping it; it
+  // stays drawn, and the keys are on it: each control shows its digit, as
+  // a prompt's choices do.
+  await selectFromAbove(page);
   await expect(selected).toHaveCount(1);
   await expect(source).toBeHidden();
   await expect(keys).toHaveText(["1", "2"]);
@@ -99,12 +122,14 @@ test("a diff block is drawn as its card, selected as one, and edited when asked 
     `\`\`\`ts diff\n${PATCH('const greeting = "hi"; // was hi')}\n\`\`\``,
   );
 
-  // An arrow off the line above selects it, rather than skipping it.
-  await editor.getByText("Before.").click();
+  // Backspace from the line after selects it, rather than joining the
+  // line into its source.
+  await editor.getByText("After.").click();
   await expect(selected).toHaveCount(0);
-  await page.keyboard.press("End");
-  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Home");
+  await page.keyboard.press("Backspace");
   await expect(selected).toHaveCount(1);
+  await expect(editor.getByText("After.")).toBeVisible();
 
   // Its Edit button is the other way in; leaving draws it again.
   await card.locator("[data-diff-edit]").click();
@@ -146,7 +171,7 @@ test("a diff block links its file, and a selection takes it in whole as a refere
   // opens it: a click, or its digit while the block is selected.
   await expect(card.locator("svg use")).toHaveAttribute("href", /#/);
   const tabBar = page.locator('[data-testid="tab-bar"]');
-  await diff.locator(line("addition")).first().click();
+  await selectFromAbove(page);
   await expect(selected).toHaveCount(1);
   await page.keyboard.press("1");
   await expect(tabBar).toContainText("greet.ts");

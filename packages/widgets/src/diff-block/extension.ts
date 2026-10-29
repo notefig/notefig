@@ -3,8 +3,10 @@
  * as its card (./element.tsx), and is one thing to the selection, as the
  * prompt widget is:
  *
- * 1. Selected: a click on the card, an arrow onto it, or a selection that
- *    takes it in — the card wears the selection's tint. Selected alone,
+ * 1. Selected: an arrow onto it, Backspace or Delete from the line beside
+ *    it, or a selection that takes it in — the card wears the selection's
+ *    tint. Never a click: a click or a drag in the card is the reader's, to
+ *    select the code it shows. Selected alone,
  *    the keys are on it: its controls show their digits, and a digit runs
  *    one, as the prompt widget's choices do. No selection end
  *    rests in its hidden source: one that would takes in the whole block,
@@ -50,6 +52,8 @@ interface CodeDiffState {
 }
 
 const key = new PluginKey<CodeDiffState>("codeDiff");
+
+const DELETES: Record<string, "back" | "forward"> = { Backspace: "back", Delete: "forward" };
 
 const ARROWS: Record<string, "up" | "down" | "left" | "right"> = {
   ArrowUp: "up",
@@ -188,15 +192,10 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
    * keeps out of a non-editable card (Chromium stops a drag at its edge).
    */
   const selectFromPointer = (view: EditorView, down: DiffBlockElement | null, up: DiffBlockElement | null, event: MouseEvent) => {
-    if (!down && !up) return;
+    // A click, or a drag within one card: the reader's, not the editor's.
+    if (down === up) return;
     const { state } = view;
     const posOf = (card: DiffBlockElement | null) => (card ? cards.get(card)?.() : undefined);
-    if (down && down === up) {
-      // A click, or a drag within it: the block.
-      const at = posOf(down);
-      if (at !== undefined) view.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, at)));
-      return;
-    }
     // A drag between a card and the text: its end in a card is anywhere in
     // that block, which rule 1 then grows to take the block in.
     const from = posOf(down);
@@ -295,6 +294,28 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
     return true;
   };
 
+  /** Rule 1: Backspace at the start of the line after a drawn block, or
+   *  Delete at the end of the line before one, selects it, as the prompt
+   *  widget does (an empty line goes, as it would have) — rather than
+   *  joining the line into its hidden source. */
+  const selectBeside = (view: EditorView, towards: "back" | "forward") => {
+    const { state } = view;
+    const { selection } = state;
+    if (!(selection instanceof TextSelection) || !selection.empty || selection.$head.depth === 0) return false;
+    const { $head } = selection;
+    const back = towards === "back";
+    if ($head.parentOffset !== (back ? 0 : $head.parent.content.size)) return false;
+    const $edge = state.doc.resolve(back ? $head.before() : $head.after());
+    const next = back ? $edge.nodeBefore : $edge.nodeAfter;
+    if (!next) return false;
+    const at = back ? $edge.pos - next.nodeSize : $edge.pos;
+    if (!drawnFrom(state, at)) return false;
+    const tr = state.tr;
+    if (back && $head.parent.content.size === 0) tr.delete($head.before(), $head.after());
+    view.dispatch(tr.setSelection(NodeSelection.create(tr.doc, at)).scrollIntoView());
+    return true;
+  };
+
   return new Plugin<CodeDiffState>({
     key,
     state: {
@@ -373,6 +394,8 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
         if (event.key === "Enter") return editSelected(view);
         if (event.key === "Escape") return leaveEditing(view);
         if (/^[1-9]$/.test(event.key)) return runControl(view, Number(event.key) - 1);
+        const deleting = DELETES[event.key];
+        if (deleting) return selectBeside(view, deleting);
         const towards = ARROWS[event.key];
         return towards ? selectAcross(view, towards) : false;
       },
