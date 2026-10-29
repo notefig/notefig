@@ -186,10 +186,15 @@ export const AiPromptNodeBase = Node.create({
  * A manual childNodes recursion rather than querySelectorAll (which cannot
  * select comments) or a TreeWalker (which the conversion worker's linkedom
  * shim does not expose) — plain childNodes works in both DOMs.
+ *
+ * A repeated marker (an agent rewriting the file can copy it) is dropped:
+ * every widget keys its state by blobId, so a second one would share the
+ * first's round. Only the first copy becomes a widget.
  */
 function replacePromptMarkerComments(element: HTMLElement): void {
   const COMMENT_NODE = 8;
   const ELEMENT_NODE = 1;
+  const seen = new Set<string>();
   // `Node` in this module is Tiptap's; the DOM one needs its global name.
   const walk = (parent: globalThis.Node): void => {
     // Snapshot: replaceChild mutates the live childNodes list.
@@ -203,6 +208,11 @@ function replacePromptMarkerComments(element: HTMLElement): void {
         (child as unknown as { data: string }).data ?? "",
       );
       if (!marker) continue;
+      if (seen.has(marker.blobId)) {
+        parent.removeChild(child);
+        continue;
+      }
+      seen.add(marker.blobId);
       const doc = element.ownerDocument;
       if (!doc) continue;
       const replacement = doc.createElement("div");
