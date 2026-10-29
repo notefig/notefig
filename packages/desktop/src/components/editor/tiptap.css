@@ -75,11 +75,15 @@
 /* The decoration lands on the node view's outer element. The card's tint
    is the whole look: its draft paints no text selection of its own on
    top (styles.css's draft ::selection), which would otherwise show only
-   under a range, and color the text under a keyboard selection. */
-.ProseMirror .node-aiPrompt[data-widget-selected] > [data-type="ai-prompt"] {
+   under a range, and color the text under a keyboard selection.
+   A diff block wears the same tint on its card, which its plugin marks
+   while a selection takes the block in (diff-block/extension.ts). */
+.ProseMirror .node-aiPrompt[data-widget-selected] > [data-type="ai-prompt"],
+.ProseMirror notefig-diff-block[data-selected] [data-diff-card] {
   position: relative;
 }
-.ProseMirror .node-aiPrompt[data-widget-selected] > [data-type="ai-prompt"]::after {
+.ProseMirror .node-aiPrompt[data-widget-selected] > [data-type="ai-prompt"]::after,
+.ProseMirror notefig-diff-block[data-selected] [data-diff-card]::after {
   content: "";
   position: absolute;
   inset: 0;

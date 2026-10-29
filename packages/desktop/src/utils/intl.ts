@@ -606,8 +606,6 @@ i18n
           agentStop: "Stop",
           copyMessage: "Copy message",
           copied: "Copied",
-          agentChangedFiles_one: "{{count}} changed file",
-          agentChangedFiles_other: "{{count}} changed files",
           agentTerminal: "Terminal {{id}}",
           agentContentOfType: "{{type}} content",
 
@@ -619,6 +617,9 @@ i18n
           promptBlobQueuedAhead: "Queued · {{count}} ahead",
           promptBlobReferenceRemove: "Remove reference",
           promptBlobEdit: "Edit prompt",
+          diffBlockEdit: "Edit diff",
+          diffBlockShow: "Show changes",
+          diffBlockHide: "Hide changes",
           promptBlobDone: "Done",
           promptBlobStopped: "Stopped",
           promptBlobFailed: "Failed.",

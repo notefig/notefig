@@ -55,6 +55,11 @@ export function isChoiceKind(kind: WidgetResponseKind): boolean {
  *  the agent is told to shorten it. */
 export const WIDGET_RESPONSE_LIMITS = { title: 80, question: 200, option: 60 };
 
+/** No diff block (a fence whose info string has `diff` after the language,
+ *  ```ts diff — see @notefig/widgets' diff-block/syntax.ts): a widget is too
+ *  small to read one in, so the agent is sent to put it in the document. */
+const DIFF_FENCE_ABSENT = /^(?![\s\S]*(?:^|\n) {0,3}(?:`{3,}|~{3,})[ \t]*[^\s`]+(?:[ \t]+[^\s`]+)*?[ \t]+diff(?:[ \t][^\n]*)?(?:\n|$))/;
+
 const KINDS = Object.keys(WIDGET_RESPONSE_KINDS) as [
   WidgetResponseKind,
   ...WidgetResponseKind[],
@@ -83,7 +88,14 @@ const KINDS = Object.keys(WIDGET_RESPONSE_KINDS) as [
 export const WidgetRespondInputSchema = z
   .object({
     kind: z.enum(KINDS),
-    markdown: z.string().min(1),
+    markdown: z
+      .string()
+      .min(1)
+      .regex(DIFF_FENCE_ABSENT, {
+        message:
+          "a diff block doesn't fit in a widget: write it into the document where " +
+          "the change belongs, then call again saying where it is",
+      }),
     title: z
       .string()
       .max(WIDGET_RESPONSE_LIMITS.title, shorten("a title", WIDGET_RESPONSE_LIMITS.title))

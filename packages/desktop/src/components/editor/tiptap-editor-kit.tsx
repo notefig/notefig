@@ -1,4 +1,8 @@
 import { Extension } from "@tiptap/core";
+import type { CodeBlockOptions } from "@tiptap/extension-code-block";
+
+/** Its diff blocks' paths are in `workspaceRoot`'s workspace. */
+type MarkdownCodeBlockOptions = CodeBlockOptions & { workspaceRoot: string | null };
 import { Plugin } from "@tiptap/pm/state";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -10,6 +14,7 @@ import { widgetRendererNodes, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
 // on import, and the barrel also loads in the markdown worker, which has none.
 import { codeHighlight } from "@notefig/widgets/code-highlight";
 import { codeLanguagePicker } from "@notefig/widgets/code-language";
+import { codeDiff } from "@notefig/widgets/diff-block/extension";
 import {
   createSchemaExtensions,
   MarkdownImageBase,
@@ -31,14 +36,22 @@ export const MarkdownImage = MarkdownImageBase.extend({
 });
 
 /**
- * Code blocks, highlighted like the code viewer (`codeHighlight`) and with a
- * language picker. Schema is unchanged (CodeBlock's own attrs/parsing), so
- * this is presentation only — the worker's markdown round-trip is
- * unaffected.
+ * Code blocks, highlighted like the code viewer (`codeHighlight`), with a
+ * language picker, and drawn as diffs when they hold one (`codeDiff`). The
+ * schema, the `diff` attribute included, is the worker's (CodeBlock), so
+ * this is presentation only.
  */
-export const MarkdownCodeBlock = CodeBlock.extend({
+export const MarkdownCodeBlock = CodeBlock.extend<MarkdownCodeBlockOptions>({
+  addOptions() {
+    return { ...this.parent!(), workspaceRoot: null };
+  },
   addProseMirrorPlugins() {
-    return [...(this.parent?.() ?? []), codeHighlight(), codeLanguagePicker()];
+    return [
+      ...(this.parent?.() ?? []),
+      codeHighlight(),
+      codeLanguagePicker(),
+      codeDiff({ workspacePath: this.options.workspaceRoot }),
+    ];
   },
 });
 

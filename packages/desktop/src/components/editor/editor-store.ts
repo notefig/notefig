@@ -325,7 +325,8 @@ function createMarkdownInstance(
       workspaceRoot,
       filePath,
     } as any),
-    MarkdownCodeBlock,
+    // Its diff blocks' paths are the workspace's.
+    MarkdownCodeBlock.configure({ workspaceRoot }),
     // filePath/basePath scope the widgets to this document and its
     // workspace; they also arm the prompt widget's empty-doc keeper
     // (unconfigured schema-only instances never self-insert).

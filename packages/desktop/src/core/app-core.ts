@@ -21,6 +21,7 @@ import { sharedSessionsModule } from "@/modules/shared-sessions";
 import { treeExpansionModule } from "@/modules/tree-expansion";
 import { telemetryModule } from "@/modules/telemetry";
 import { dictationModule } from "@/modules/dictation";
+import { diffBlocksModule } from "@/modules/diff-blocks";
 import { documentsModule } from "@/modules/documents";
 import { editorsModule } from "@/modules/editors";
 import { filesModule } from "@/modules/files";
@@ -77,6 +78,8 @@ export function runtimeModules(): AnyModule[] {
     agentDirectivesModule,
     // Every prompt widget's state (`core.promptWidgets`).
     promptWidgetsModule,
+    // Diff fences in rendered markdown draw as diffs.
+    diffBlocksModule,
     mockAgentModule,
     workspaceAgentsModule,
     sharedSessionsModule,

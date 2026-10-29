@@ -38,7 +38,8 @@ export const widgetRespond: AgentTool<WidgetResponse, { recorded: true }> = {
     `${describeResponseKinds()}. An optional short \`title\` becomes the ` +
     `widget's heading. The widget renders inline, so keep \`markdown\` to a ` +
     `few sentences or a short list, and never restate what you wrote into ` +
-    `the document.`,
+    `the document. Never put a diff block in it: write the diff into the ` +
+    `document, and say here where it is.`,
   input: WidgetRespondInputSchema,
   async execute() {
     return { ok: true, value: { recorded: true } };

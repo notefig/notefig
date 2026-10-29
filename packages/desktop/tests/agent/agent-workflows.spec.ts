@@ -126,20 +126,23 @@ test.describe("agent workflows", () => {
       await expect(bash).toHaveAttribute("data-tool-status", "completed");
     });
 
-    test("diff-bearing tool calls render the changed-files card; terminal content names its terminal", async ({
+    test("diff-bearing tool calls draw each changed file as a diff; terminal content names its terminal", async ({
       page,
     }) => {
       const { recording } = await sessionWith(page, "diffs", "changed-files.json");
       await sendAndSettle(page, promptTextOf(recording));
 
       const card = toolCards(page, "MultiEdit").first();
-      await expect(card).toHaveAttribute("data-tool-diffs", "3");
-      await expect(card).toContainText("3 changed files");
-      await expect(card.locator("[data-diff-path]")).toHaveCount(3);
-      const newFile = card.locator('[data-diff-path$="new-bar.ts"]');
-      await expect(newFile).toContainText("new-bar.ts");
-      await newFile.locator("button").click();
-      await expect(newFile.locator("pre")).toContainText("export const bar = new Bar();");
+      const files = card.locator("notefig-diff-block [data-diff-card]");
+      await expect(files).toHaveCount(3);
+      const newFile = files.filter({ hasText: "new-bar.ts" });
+      await expect(newFile).toHaveCount(1);
+      // Closed until opened: no diff is made before.
+      await expect(card.locator("diffs-container")).toHaveCount(0);
+      await newFile.locator("[data-diff-toggle]").click();
+      await expect(
+        newFile.locator('diffs-container [data-line-type="change-addition"]:not([data-column-number])').first(),
+      ).toContainText("export const bar = new Bar();");
 
       const terminal = toolCards(page, "Bash").first();
       await terminal.locator("button").first().click();
