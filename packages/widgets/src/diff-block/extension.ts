@@ -3,8 +3,9 @@
  * as its card (./element.tsx), and is one thing to the selection, as the
  * prompt widget is:
  *
- * 1. Selected: a click on the card, an arrow onto it, or a selection that
- *    takes it in — the card wears the selection's tint. Selected alone,
+ * 1. Selected: an arrow onto it, or a selection that takes it in — the
+ *    card wears the selection's tint. A click or a drag within the card is
+ *    the reader's: it selects the code there, as on a page, not the block. Selected alone,
  *    the keys are on it: its controls show their digits, and a digit runs
  *    one, as the prompt widget's choices do. No selection end
  *    rests in its hidden source: one that would takes in the whole block,
@@ -183,22 +184,17 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
     null;
 
   /**
-   * The selection a mouse gesture over cards means (rule 1), from the cards
-   * it went down and came up on — not the DOM selection, which a browser
-   * keeps out of a non-editable card (Chromium stops a drag at its edge).
+   * The selection a mouse gesture between a card and the text means (rule
+   * 1), from the cards it went down and came up on — not the DOM selection,
+   * which a browser keeps out of a non-editable card (Chromium stops a drag
+   * at its edge). One within a card is left to the browser.
    */
   const selectFromPointer = (view: EditorView, down: DiffBlockElement | null, up: DiffBlockElement | null, event: MouseEvent) => {
-    if (!down && !up) return;
+    if (down === up) return;
     const { state } = view;
     const posOf = (card: DiffBlockElement | null) => (card ? cards.get(card)?.() : undefined);
-    if (down && down === up) {
-      // A click, or a drag within it: the block.
-      const at = posOf(down);
-      if (at !== undefined) view.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, at)));
-      return;
-    }
-    // A drag between a card and the text: its end in a card is anywhere in
-    // that block, which rule 1 then grows to take the block in.
+    // Its end in a card is anywhere in that block, which rule 1 then grows
+    // to take the block in.
     const from = posOf(down);
     const to = posOf(up);
     const anchor = from !== undefined ? from + 1 : state.selection.anchor;
