@@ -1,5 +1,4 @@
 import type { AgentTool } from "@notefig/agent";
-import { hasDiffBlock } from "@notefig/widgets/diff-block/syntax";
 import {
   WIDGET_RESPOND_TOOL_NAME,
   WIDGET_RESPONSE_KINDS,
@@ -26,14 +25,9 @@ export { WidgetRespondInputSchema, type WidgetResponse };
  * agent hears about. A question needs no routing of its own: the user's
  * answer is the widget's next prompt on the same session.
  *
- * A diff block is refused: a widget is too small to read one in, so the
- * agent is sent to write it into the document (DIFF_BLOCK_GUIDE says so up
- * front). The widget ignores a refused call; the agent's next one answers.
- *
- * This module stays a leaf (shared types, and the diff block's pure
- * syntax): the widget reads the same schema from @notefig/shared/agent, and
- * pulling anything from the editor/component layer in here would open a
- * cycle.
+ * This module stays a leaf (shared types only): the widget reads the same
+ * schema from @notefig/shared/agent, and pulling anything from the
+ * editor/component layer in here would open a cycle.
  */
 export const widgetRespond: AgentTool<WidgetResponse, { recorded: true }> = {
   name: WIDGET_RESPOND_TOOL_NAME,
@@ -46,16 +40,7 @@ export const widgetRespond: AgentTool<WidgetResponse, { recorded: true }> = {
     `few sentences or a short list, and never restate what you wrote into ` +
     `the document. Never put a diff block in it: write the diff into the ` +
     `document, and say here where it is.`,
-  input: WidgetRespondInputSchema.superRefine((response, ctx) => {
-    if (!hasDiffBlock(response.markdown)) return;
-    ctx.addIssue({
-      code: "custom",
-      path: ["markdown"],
-      message:
-        "a diff block doesn't fit in a widget: write it into the document where " +
-        "the change belongs, then call widget_respond again saying where it is",
-    });
-  }),
+  input: WidgetRespondInputSchema,
   async execute() {
     return { ok: true, value: { recorded: true } };
   },

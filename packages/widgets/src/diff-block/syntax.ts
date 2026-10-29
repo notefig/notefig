@@ -36,15 +36,6 @@ export function isDiffInfo(info: string): boolean {
   return info.trim().split(/\s+/).slice(1).includes(ATTRIBUTE);
 }
 
-/** Whether markdown holds a diff block: a fence opening with a diff's info
- *  string. */
-export function hasDiffBlock(markdown: string): boolean {
-  for (const [, info] of markdown.matchAll(/^ {0,3}(?:`{3,}|~{3,})([^`\n]*)$/gm)) {
-    if (isDiffInfo(info)) return true;
-  }
-  return false;
-}
-
 /** The info string's words after the language for a block's `diff` attr. */
 export function diffInfo(diff: boolean): string {
   return diff ? ` ${ATTRIBUTE}` : "";
@@ -66,5 +57,5 @@ export const DIFF_BLOCK_GUIDE =
   "diff with the file's name. Use one block per file, keep to the lines around " +
   "the change, and prefer it to two separate code blocks or a plain ```diff block. " +
   "Answering a prompt widget, put the diff block in the document, where the " +
-  "change belongs, never in `widget_respond` (it refuses one): the widget " +
-  "is too small to read a diff in. Its response then says where the diff is.";
+  "change belongs, not in `widget_respond`: the widget is too small to read a " +
+  "diff in. Its response then says where the diff is.";

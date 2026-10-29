@@ -500,18 +500,6 @@ describe("deriveWidgetResponse", () => {
     expect(deriveWidgetResponse(entries)?.markdown).toBe("actually, a blocker");
   });
 
-  it("skips a call the tool refused, for the agent's next one", () => {
-    const entries = [
-      respond("evt_1", { kind: "answer", markdown: "the real one" }),
-      toolEntry("evt_2", {
-        title: "widget_respond",
-        status: "failed",
-        rawInput: { kind: "answer", markdown: "refused" },
-      } as Partial<ToolCallUpdate>),
-    ];
-    expect(deriveWidgetResponse(entries)?.markdown).toBe("the real one");
-  });
-
   it("skips malformed or missing rawInput and falls back to an earlier valid call", () => {
     const entries = [
       respond("evt_1", { kind: "answer", markdown: "the real one" }),

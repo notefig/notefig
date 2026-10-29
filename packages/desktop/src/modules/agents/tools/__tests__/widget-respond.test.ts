@@ -83,17 +83,3 @@ describe("widget_respond input schema", () => {
     expect(WidgetRespondInputSchema.safeParse({}).success).toBe(false);
   });
 });
-
-describe("widget_respond", () => {
-  it("refuses a diff block, sending it to the document", () => {
-    const parsed = widgetRespond.input.safeParse({
-      kind: "answer",
-      markdown: "Like so:\n\n```ts diff\n--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-a\n+b\n```",
-    });
-    expect(parsed.success).toBe(false);
-    expect(parsed.error?.issues[0].message).toContain("write it into the document");
-    expect(
-      widgetRespond.input.safeParse({ kind: "answer", markdown: "```ts\nconst a = 1;\n```" }).success,
-    ).toBe(true);
-  });
-});
