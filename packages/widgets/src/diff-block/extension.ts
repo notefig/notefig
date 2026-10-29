@@ -20,6 +20,7 @@
 import { NodeSelection, Plugin, PluginKey, TextSelection, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
+import type { Mappable } from "@tiptap/pm/transform";
 import type { FileDiffMetadata } from "@pierre/diffs";
 import { createDiffBlockElement, WORKSPACE_ATTRIBUTE, type DiffBlockElement } from "./element";
 import { parseDiffBlock } from "./patch";
@@ -102,10 +103,13 @@ function* blocksIn(blocks: readonly DiffBlock[], from: number, to: number): Gene
   for (let index = low; index < blocks.length && blocks[index].from < to; index++) yield blocks[index];
 }
 
-/** Whether two scans found the same blocks, moved at most: then the
- *  decorations drawing them move with them. */
-const sameBlocks = (a: readonly DiffBlock[], b: readonly DiffBlock[]) =>
-  a.length === b.length && a.every((block, index) => block.node === b[index].node);
+/** Whether a change only moved the blocks, their cards with them: the same
+ *  blocks, each card (a widget before its block) mapped to where its block
+ *  now starts. Not so when something went in at a block's start: the card
+ *  stays before it. */
+const cardsMoved = (previous: readonly DiffBlock[], blocks: readonly DiffBlock[], mapping: Mappable) =>
+  previous.length === blocks.length &&
+  previous.every((block, index) => block.node === blocks[index].node && mapping.map(block.from, -1) === blocks[index].from);
 
 /** The drawn block that starts at `pos`, if one does. */
 function drawnFrom(state: EditorState, pos: number): DiffBlock | null {
@@ -136,6 +140,10 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
   const draw = ({ node, diff }: DiffBlock) => (view: EditorView, getPos: () => number | undefined) => {
     const element = createDiffBlockElement(node.attrs.language as string | null, node.textContent, diff ?? undefined);
     element.contentEditable = "false";
+    // What ./extension.css hides the source after: an editor's card, not a
+    // rendered reply's (a widget response's) element, whose next block is
+    // its own.
+    element.setAttribute("data-source-after", "");
     cards.set(element, getPos);
     if (view.editable) {
       element.onEdit = () => {
@@ -305,7 +313,7 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
         }
         if (blocks === previous.blocks && editing === previous.editing) return previous;
         const decorations =
-          editing === previous.editing && sameBlocks(blocks, previous.blocks)
+          editing === previous.editing && cardsMoved(previous.blocks, blocks, tr.mapping)
             ? previous.decorations.map(tr.mapping, tr.doc)
             : decorate(state.doc, blocks, editing);
         return { blocks, editing, decorations };

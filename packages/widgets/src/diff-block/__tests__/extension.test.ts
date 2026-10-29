@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect, afterEach } from "vitest";
 import { Editor, Extension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
@@ -34,9 +36,10 @@ function mount(content: string) {
 const diffs = () => editor!.view.dom.querySelectorAll("notefig-diff-block");
 /** The code blocks' own, not the ones the diffs hold. */
 const pres = () => [...editor!.view.dom.querySelectorAll(":scope > pre")] as HTMLElement[];
-/** Hidden by ../extension.css, which the test DOM doesn't load: the card
- *  just before it. */
-const hidden = (pre: HTMLElement) => pre.previousElementSibling?.localName === "notefig-diff-block";
+/** The rule ../extension.css hides a drawn block's source by; the test DOM
+ *  doesn't load stylesheets. */
+const HIDING = readFileSync(join(__dirname, "../extension.css"), "utf8").match(/^([^\s/*][^{]*)\{/m)![1].trim();
+const hidden = (pre: HTMLElement) => pre.matches(HIDING);
 
 /** The position of the first code block. */
 function codeBlockAt(): number {
@@ -164,6 +167,26 @@ describe("codeDiff", () => {
     select(2);
     editor!.commands.insertContent("x");
     expect(diffs()[0]).toBe(drawn);
+  });
+
+  it("keeps a card with its block when something goes in at the block's start", () => {
+    mount(`<p>Before</p>${DIFF}`);
+    const { state, view } = editor!;
+    const at = codeBlockAt();
+    view.dispatch(state.tr.insert(at, state.schema.nodes.paragraph.create(null, state.schema.text("Inserted"))));
+    expect(hidden(pres()[0])).toBe(true);
+    view.dispatch(editor!.state.tr.setSelection(NodeSelection.create(editor!.state.doc, codeBlockAt())));
+    expect(selected()).toBe(true);
+  });
+
+  it("hides only the source after an editor's card, not the block after a rendered reply's", () => {
+    mount(`<p>Before</p><p>After</p>`);
+    // A widget response's HTML, as markdown-it renders a diff fence and a
+    // code fence after it, inside the editor.
+    const reply = document.createElement("div");
+    reply.innerHTML = `<notefig-diff-block>${DIFF}</notefig-diff-block><pre><code>plain</code></pre>`;
+    editor!.view.dom.append(reply);
+    expect(hidden(reply.querySelector(":scope > pre")!)).toBe(false);
   });
 
   it("marks the document with the workspace its diffs' paths are in", () => {

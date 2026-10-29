@@ -1,6 +1,7 @@
 /* A drawn diff block's source, hidden behind its card (./extension.ts): the
-   card's widget sits just before the block it draws. Only in the editor —
-   elsewhere the element holds its source, and the next block is another. */
-.ProseMirror notefig-diff-block + pre {
+   card's widget sits just before the block it draws, and is marked so. A
+   reply rendered in the editor (a widget response) holds diff elements too,
+   each with its source inside; the block after one of those is its own. */
+.ProseMirror notefig-diff-block[data-source-after] + pre {
   display: none;
 }
