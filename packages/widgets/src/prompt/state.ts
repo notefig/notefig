@@ -100,13 +100,14 @@ export function deriveWidgetResponse(
   return null;
 }
 
-/** One call's response: a `widget_respond` call whose input parses, else
+/** One call's response: a `widget_respond` call whose input parses and
+ *  that the tool didn't refuse (its own checks, past the schema, can), else
  *  null. The single reading both the done face (above) and the chat's
  *  transcript card (./transcript.tsx) go through. */
 export function readWidgetResponse(
   call: ToolCallUpdate,
 ): WidgetResponse | null {
-  if (call.title !== WIDGET_RESPOND_TOOL_NAME) return null;
+  if (call.title !== WIDGET_RESPOND_TOOL_NAME || call.status === "failed") return null;
   const parsed = WidgetRespondInputSchema.safeParse(call.rawInput);
   return parsed.success ? parsed.data : null;
 }

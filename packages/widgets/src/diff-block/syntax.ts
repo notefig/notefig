@@ -36,6 +36,15 @@ export function isDiffInfo(info: string): boolean {
   return info.trim().split(/\s+/).slice(1).includes(ATTRIBUTE);
 }
 
+/** Whether markdown holds a diff block: a fence opening with a diff's info
+ *  string. */
+export function hasDiffBlock(markdown: string): boolean {
+  for (const [, info] of markdown.matchAll(/^ {0,3}(?:`{3,}|~{3,})([^`\n]*)$/gm)) {
+    if (isDiffInfo(info)) return true;
+  }
+  return false;
+}
+
 /** The info string's words after the language for a block's `diff` attr. */
 export function diffInfo(diff: boolean): string {
   return diff ? ` ${ATTRIBUTE}` : "";
@@ -48,11 +57,14 @@ export const DIFF_BLOCK_I18N_KEYS = ["diffBlockEdit", "diffBlockShow", "diffBloc
 /** How an agent writes one; its MCP instructions carry this. */
 export const DIFF_BLOCK_GUIDE =
   "To show a change to code or text (one you propose, or a before and after), " +
-  "write a diff block, in chat, in a widget response or in a document: a fenced " +
+  "write a diff block, in chat or in a document: a fenced " +
   "code block whose info string is the language followed by `diff` (```ts diff), " +
   "holding a unified diff of one file as `git diff` prints it: the `---` and `+++` " +
   "lines naming the file (`--- /dev/null` for a new one), then `@@ -start,count " +
   "+start,count @@` hunks of context, `-` and `+` lines, numbered from where " +
   "those lines are in the file (read it first), not from 1. Notefig draws it as a " +
   "diff with the file's name. Use one block per file, keep to the lines around " +
-  "the change, and prefer it to two separate code blocks or a plain ```diff block.";
+  "the change, and prefer it to two separate code blocks or a plain ```diff block. " +
+  "Answering a prompt widget, put the diff block in the document, where the " +
+  "change belongs, never in `widget_respond` (it refuses one): the widget " +
+  "is too small to read a diff in. Its response then says where the diff is.";
