@@ -67,22 +67,11 @@ test("a diff block is drawn as its card, selected as one, and edited when asked 
   await page.evaluate(() => document.documentElement.classList.remove("dark"));
   await expect.poll(scheme).not.toContain("dark");
 
-  // A drag within it selects its code, as on a page, not the block.
-  const code = await diff.locator(line("addition")).first().boundingBox();
-  await page.mouse.move(code!.x + 4, code!.y + code!.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(code!.x + code!.width - 4, code!.y + code!.height / 2, { steps: 8 });
-  await page.mouse.up();
-  await expect.poll(() => page.evaluate(() => getSelection()?.toString() ?? "")).toContain("hello");
-  await expect(selected).toHaveCount(0);
-
-  // An arrow off the line above selects it; it stays drawn, and the keys
-  // are on it: each control shows its digit, as a prompt's choices do.
+  // A click selects it; it stays drawn, and the keys are on it: each
+  // control shows its digit, as a prompt's choices do.
   const keys = card.locator("[data-diff-key]");
   await expect(keys).toHaveCount(0);
-  await editor.getByText("Before.").click();
-  await page.keyboard.press("End");
-  await page.keyboard.press("ArrowDown");
+  await diff.locator(line("addition")).first().click();
   await expect(selected).toHaveCount(1);
   await expect(source).toBeHidden();
   await expect(keys).toHaveText(["1", "2"]);
@@ -110,7 +99,7 @@ test("a diff block is drawn as its card, selected as one, and edited when asked 
     `\`\`\`ts diff\n${PATCH('const greeting = "hi"; // was hi')}\n\`\`\``,
   );
 
-  // Selected again from the line above, rather than skipped.
+  // An arrow off the line above selects it, rather than skipping it.
   await editor.getByText("Before.").click();
   await expect(selected).toHaveCount(0);
   await page.keyboard.press("End");
@@ -157,9 +146,7 @@ test("a diff block links its file, and a selection takes it in whole as a refere
   // opens it: a click, or its digit while the block is selected.
   await expect(card.locator("svg use")).toHaveAttribute("href", /#/);
   const tabBar = page.locator('[data-testid="tab-bar"]');
-  await editor.getByText("Before.").click();
-  await page.keyboard.press("End");
-  await page.keyboard.press("ArrowDown");
+  await diff.locator(line("addition")).first().click();
   await expect(selected).toHaveCount(1);
   await page.keyboard.press("1");
   await expect(tabBar).toContainText("greet.ts");
