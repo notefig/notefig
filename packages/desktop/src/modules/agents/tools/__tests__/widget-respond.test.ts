@@ -93,5 +93,7 @@ describe("widget_respond and diffs", () => {
     expect(parsed.success).toBe(false);
     expect(parsed.error?.issues[0].message).toContain("write it into the document");
     expect(WidgetRespondInputSchema.safeParse({ kind: "answer", markdown: "```ts\nconst diff = 1;\n```" }).success).toBe(true);
+    // The unified-diff language, however spaced, is not a diff block.
+    expect(WidgetRespondInputSchema.safeParse({ kind: "answer", markdown: "``` diff\n-a\n+b\n```" }).success).toBe(true);
   });
 });
