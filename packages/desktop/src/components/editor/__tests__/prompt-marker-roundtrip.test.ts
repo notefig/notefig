@@ -41,6 +41,19 @@ describe("prompt marker round trip", () => {
     editor.destroy();
   });
 
+  it("parses a repeated marker into one widget", () => {
+    // An agent rewriting the file can copy the marker. Two widgets sharing
+    // one blobId share one round's state, and the second cannot send.
+    const editor = documentEditor(`${MARKER}\n\nBetween\n\n${MARKER}\n`);
+    const ids: string[] = [];
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "aiPrompt") ids.push(node.attrs.blobId);
+    });
+    expect(ids).toEqual(["blob_1a2b"]);
+    expect(markdownOf(editor).match(/notefig:prompt/g)).toHaveLength(1);
+    editor.destroy();
+  });
+
   it("re-serializes the marker unchanged", () => {
     const source = `# Title\n\n${MARKER}\n\nAfter\n`;
     const editor = documentEditor(source);
