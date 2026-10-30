@@ -17,10 +17,12 @@ runs:
       shell: bash
       run: echo "dir=$(echo ${{ inputs.checkouts }} | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
+    # The repo's Node (.nvmrc). Node 24's fetch throws an uncaught
+    # `setTypeOfService EINVAL` on macOS when the server it calls goes away.
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: "lts/*"
+        node-version-file: ${{ steps.suite.outputs.dir }}/.nvmrc
         cache: "npm"
         cache-dependency-path: "*/package-lock.json"
 

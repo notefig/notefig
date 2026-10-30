@@ -10,6 +10,7 @@
  * behind `start_watching_metadata`.
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import path from "node:path";
 
 /** Baked into the build (`VITE_TEST_BACKEND_PORT` in perf-build.sh). */
@@ -58,9 +59,13 @@ async function startShim(): Promise<Shim> {
   });
   await until(healthy, "starting");
   return {
+    // Waits for the exit rather than polling: a request to a shim that is
+    // going away can fail outside the caller's catch.
     async stop() {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      const exited = once(child, "exit");
       child.kill();
-      await until(async () => !(await healthy()), "stopping");
+      await exited;
     },
   };
 }
