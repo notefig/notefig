@@ -466,8 +466,10 @@ export interface FileHandle {
   create(content?: string): Promise<void>;
   /** Create it as a directory. */
   createDirectory(): Promise<void>;
-  /** Replace the file's content on disk; resolves once it is written. */
-  write(content: string): Promise<void>;
+  /** Replace the file's content on disk; resolves once it is written.
+   *  `contentHash`: the content's, when the caller has it already (the
+   *  autosave's serializer hashes off the main thread). */
+  write(content: string, contentHash?: string): Promise<void>;
   /** Move it (file or directory) to `newPath`, inside the same workspace. */
   rename(newPath: string): Promise<void>;
   /** Delete it; a directory goes with everything under it. */
@@ -604,8 +606,12 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
   const restat = async (path: string) =>
     (await fs.getMetadata([path])).succeeded[0];
 
-  const write = async (filePath: string, content: string) => {
-    const contentHash = calculateContentHash(content);
+  const write = async (
+    filePath: string,
+    content: string,
+    // Hashing an 8,000-line document is ~7 ms of main thread.
+    contentHash = calculateContentHash(content),
+  ) => {
 
     const existingContent = collections.content.get(filePath);
     const tx = existingContent
@@ -918,7 +924,7 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
       content: () => collections.content.get(filePath)?.content,
       create: (content) => createFile(filePath, content),
       createDirectory: () => createDirectory(filePath),
-      write: (content) => write(filePath, content),
+      write: (content, contentHash) => write(filePath, content, contentHash),
       rename: (newPath) => rename(filePath, newPath),
       delete: () => remove(filePath),
       entry: () => entry(filePath),
