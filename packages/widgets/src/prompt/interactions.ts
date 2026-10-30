@@ -366,6 +366,27 @@ export function arrowOntoReadOnlyWidget(
 }
 
 /**
+ * Whether a step of `tr` replaced a range that takes in a widget's start or
+ * end — the only way a step drops one. Typing (inside a widget's draft too)
+ * doesn't, so the document isn't walked for it: two walks of an
+ * 8,000-line document cost ~1.5 ms a keystroke.
+ */
+function replacedAWidgetEdge(tr: Transaction): boolean {
+  return tr.steps.some((step, index) => {
+    let hit = false;
+    step.getMap().forEach((from, to) => {
+      if (from === to || hit) return;
+      tr.docs[index].nodesBetween(from, to, (node, pos) => {
+        if (node.type.name !== PROMPT_NODE_NAME) return !hit;
+        if (from <= pos || to >= pos + node.nodeSize) hit = true;
+        return false;
+      });
+    });
+    return hit;
+  });
+}
+
+/**
  * Put back every widget the edit removed that can't be removed now: the
  * rest of the edit stands. Runs ahead of the empty-document keeper, so a
  * document cleared around a working widget gets that widget back, not a
@@ -377,7 +398,7 @@ export function restoreKeptWidgetsTr(
   newState: EditorState,
   prompts: PromptWidgetsApi,
 ): Transaction | null {
-  if (!transactions.some((tr) => tr.docChanged)) return null;
+  if (!transactions.some(replacedAWidgetEdge)) return null;
   const mapping = new Mapping();
   for (const tr of transactions) mapping.appendMapping(tr.mapping);
   const tr = newState.tr;
