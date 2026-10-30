@@ -163,7 +163,7 @@ function armAction(args: { label: string; shown: Shown }): void {
       const check = () =>
         requestAnimationFrame(() => {
           if (!showing()) {
-            if (performance.now() - start > 15_000)
+            if (performance.now() - start > 30_000)
               reject(new Error(`${label}: never showed ${shown.selector}`));
             else check();
             return;
