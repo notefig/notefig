@@ -16,8 +16,8 @@
  * lower. The baseline is each SLO's budget: the app may only get faster.
  *
  * The runner's noise moves a p95 too, and that alone must not fail a PR,
- * so every verdict against main needs a Mann–Whitney U test to say the two
- * distributions differ (p < 0.05):
+ * so every verdict against main needs a Mann–Whitney U test to say the
+ * PR's distribution moved (p < 0.05) the same way as its p95:
  *
  * - regressed: the p95 rose by more than the tolerance;
  * - over budget: the p95 crossed a baseline main was within, and is
@@ -33,7 +33,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ALPHA, mannWhitney, parseArgs, pooled, readJson, summarize } from "./perf-stats.mjs";
+import { ALPHA, parseArgs, pooled, readJson, significantShift, summarize } from "./perf-stats.mjs";
 
 const MARKER = "<!-- notefig-perf-slos -->";
 
@@ -46,17 +46,17 @@ function judge(budget, head, base, tolerance) {
   if (!head) return { status: "missing" };
   if (!base) return { status: head.p95 > budget ? "over-budget" : "ok" };
   const change = (head.p95 - base.p95) / base.p95;
-  const pValue = mannWhitney(head.values, base.values);
-  const shift = pValue < ALPHA ? change : 0;
+  const significant = Math.sign(change) === significantShift(head.values, base.values);
+  const shift = significant ? change : 0;
   const status =
     head.p95 > budget
       ? overBudget(shift, base.p95 > budget, tolerance)
       : withinBudget(shift, head.p95 < budget * (1 - tolerance), tolerance);
-  return { status, change, pValue };
+  return { status, change, significant };
 }
 
-/** `shift`: the p95's relative change against the base when significant,
- *  else 0. */
+/** `shift`: the p95's relative change against the base when the
+ *  distribution moved the same way, else 0. */
 function overBudget(shift, baseOver, tolerance) {
   if (shift > tolerance) return "regressed";
   if (baseOver) return "inherited";
@@ -88,10 +88,10 @@ const PASSING = new Set(["ok", "improved", "inherited"]);
 
 const ms = (value) => `${value.toFixed(value < 100 ? 1 : 0)} ms`;
 
-function formatChange({ change, pValue }) {
+function formatChange({ change, significant }) {
   if (change === undefined) return "–";
   const sign = change >= 0 ? "+" : "";
-  const noise = pValue < ALPHA ? "" : " (noise)";
+  const noise = significant ? "" : " (noise)";
   return `${sign}${(change * 100).toFixed(1)}%${noise}`;
 }
 
@@ -140,7 +140,7 @@ function render(config, rows, failing, hasBase) {
     "- Workspace open: a fresh app load, from opening the workspace to the first frame with README.md editable.",
     `- ${hasBase ? "main and this PR are built and measured in the same job, in alternating rounds; samples are pooled per side." : "No base run: baselines only."}`,
     "- Baseline: main's p95 as measured after a merge, on the `perf-baselines` branch. Only the post-merge workflow writes it, and only lower: when main is significantly faster than the stored samples.",
-    `- Each verdict against main needs a Mann–Whitney U test at p < ${ALPHA}. ⚠️ regressed: p95 up more than ${(config.regressionTolerance * 100).toFixed(0)}%. ❌ over budget: p95 past a baseline main was within, and worse than main. 🟠 over budget on main too: fails only by regressing. 🎉 improved: faster than main and clear of the baseline; it drops once this merges.`,
+    `- Each verdict against main needs a Mann–Whitney U test at p < ${ALPHA} that the PR's samples moved the same way as its p95; a p95 moved by a few outliers alone is noise. ⚠️ regressed: p95 up more than ${(config.regressionTolerance * 100).toFixed(0)}%. ❌ over budget: p95 past a baseline main was within, and worse than main. 🟠 over budget on main too: fails only by regressing. 🎉 improved: faster than main and clear of the baseline; it drops once this merges.`,
     "- Long tasks: main-thread tasks of 50 ms or more, per sample.",
     "- SLOs: `packages/desktop/tests/perf/` (read from main, so a PR doesn't set its own).",
     "",

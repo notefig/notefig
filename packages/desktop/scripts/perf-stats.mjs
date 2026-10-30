@@ -62,22 +62,39 @@ function normalCdf(z) {
   return z >= 0 ? (1 + erf) / 2 : (1 - erf) / 2;
 }
 
-/** Two-sided Mann–Whitney U p-value, normal approximation, tie-ranked. */
-export function mannWhitney(a, b) {
+/**
+ * Which way `a` is shifted from `b`: 1 if its values run significantly
+ * higher, -1 if lower, 0 if the two can't be told apart. A two-sided
+ * Mann–Whitney U test (normal approximation, tie-ranked) at p < ALPHA;
+ * the sign says which side the significance is on, so a p95 that moved
+ * one way on a few outliers isn't read as the whole distribution moving.
+ */
+export function significantShift(a, b) {
+  const z = uScore(a, b);
+  return 2 * (1 - normalCdf(Math.abs(z))) < ALPHA ? Math.sign(z) : 0;
+}
+
+/** The U statistic of `a` against `b` as a z-score; 0 when it's undefined. */
+function uScore(a, b) {
   const all = [...a.map((v) => [v, 0]), ...b.map((v) => [v, 1])].sort((x, y) => x[0] - y[0]);
-  const ranks = new Array(all.length);
-  for (let i = 0; i < all.length; ) {
-    let j = i;
-    while (j + 1 < all.length && all[j + 1][0] === all[i][0]) j++;
-    for (let k = i; k <= j; k++) ranks[k] = (i + j) / 2 + 1;
-    i = j + 1;
-  }
+  const ranks = tieRanks(all.map(([value]) => value));
   const rankA = all.reduce((sum, [, side], i) => (side === 0 ? sum + ranks[i] : sum), 0);
   const u = rankA - (a.length * (a.length + 1)) / 2;
   const mean = (a.length * b.length) / 2;
   const sd = Math.sqrt((a.length * b.length * (a.length + b.length + 1)) / 12);
-  if (sd === 0) return 1;
-  return 2 * (1 - normalCdf(Math.abs((u - mean) / sd)));
+  return sd === 0 ? 0 : (u - mean) / sd;
+}
+
+/** 1-based ranks of sorted `values`, ties sharing their average rank. */
+function tieRanks(values) {
+  const ranks = new Array(values.length);
+  for (let i = 0; i < values.length; ) {
+    let j = i;
+    while (j + 1 < values.length && values[j + 1] === values[i]) j++;
+    ranks.fill((i + j) / 2 + 1, i, j + 1);
+    i = j + 1;
+  }
+  return ranks;
 }
 
 export function summarize(runs, id) {

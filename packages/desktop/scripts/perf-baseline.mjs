@@ -16,14 +16,14 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ALPHA, mannWhitney, parseArgs, pooled, readJson, summarize } from "./perf-stats.mjs";
+import { parseArgs, pooled, readJson, significantShift, summarize } from "./perf-stats.mjs";
 
 /** The new baseline for one SLO, or null to keep the old one. */
 function ratchet(previous, measured) {
   if (!measured) return null;
   if (!previous) return measured;
   const faster =
-    measured.p95 < previous.p95 && mannWhitney(measured.samples, previous.samples) < ALPHA;
+    measured.p95 < previous.p95 && significantShift(measured.samples, previous.samples) < 0;
   return faster ? measured : null;
 }
 
