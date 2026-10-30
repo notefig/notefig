@@ -167,9 +167,12 @@ function createMetadataCollection(
 
         // Re-stat children of hydrated directories so their stats stay
         // fresh across refetches instead of pinning to hydration time.
-        const pathsToStat = entries
-          .filter((e) => hydratedDirs.has(parentDirectory(e.path)))
-          .map((e) => e.path);
+        const pathsToStat =
+          hydratedDirs.size === 0
+            ? []
+            : entries
+                .filter((e) => hydratedDirs.has(parentDirectory(e.path)))
+                .map((e) => e.path);
         const statMap = new Map<string, { modifiedAt: Date; size: number }>();
         if (pathsToStat.length > 0) {
           const statResult = await fs.getMetadata(pathsToStat);
