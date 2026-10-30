@@ -501,6 +501,18 @@ export interface WorkspaceFiles {
    */
   refetchMetadata(): Promise<void>;
   /**
+   * The rows for disk changes this app made behind the collections' back
+   * (the entry-time scratchpad sweep and landing), without a re-walk: at
+   * 20k files the walk is most of an entry. A walk in flight may predate
+   * the changes, so it lands first and the rows are written on top; every
+   * later walk sees them on disk. A created file brings its missing
+   * ancestor directories, as a walk would.
+   */
+  recordDiskChanges(changes: {
+    created: readonly string[];
+    deleted: readonly string[];
+  }): Promise<void>;
+  /**
    * Stat the direct children of these directories and write modified/size
    * into their rows — one stat batch and one write for all of them. Callers
    * re-invoke freely (tree expand, child-count changes): a hydrated
@@ -550,6 +562,52 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
       await queryClient.refetchQueries({ queryKey }, { cancelRefetch: false });
     }
     await queryClient.refetchQueries({ queryKey }, { cancelRefetch: false });
+  };
+
+  const recordDiskChanges = async ({
+    created,
+    deleted,
+  }: {
+    created: readonly string[];
+    deleted: readonly string[];
+  }) => {
+    const queryKey = fileQueryKeys.metadata(workspacePath);
+    if (queryClient.isFetching({ queryKey }) > 0) {
+      await queryClient.refetchQueries({ queryKey }, { cancelRefetch: false });
+    }
+    const { metadata, content } = collections;
+    const missing = new Set<string>();
+    for (const path of created) {
+      for (
+        let at = path;
+        at !== workspacePath && !metadata.get(at) && !missing.has(at);
+        at = parentDirectory(at)
+      ) {
+        if (relativeTreePath(workspacePath, at) === undefined) break;
+        missing.add(at);
+      }
+    }
+    const stats = missing.size > 0 ? await fs.getMetadata([...missing]) : null;
+    // One write for all of them: each rewrites the whole query cache.
+    metadata.utils.writeBatch(() => {
+      for (const path of deleted) {
+        if (metadata.get(path)) metadata.utils.writeDelete(path);
+      }
+      for (const stat of stats?.succeeded ?? []) {
+        if (metadata.get(stat.path)) continue;
+        metadata.utils.writeInsert({
+          path: stat.path,
+          relativePath: relativeTreePath(workspacePath, stat.path),
+          type: stat.type,
+          modified: stat.modifiedAt,
+          size: stat.size,
+          contentHash: "",
+        });
+      }
+    });
+    for (const path of deleted) {
+      if (content.get(path)) content.utils.writeDelete(path);
+    }
   };
 
   const seed = (): WorkspaceCollections => ({
@@ -942,6 +1000,7 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
       await collections.metadata.utils.refetch();
     },
     refetchMetadata,
+    recordDiskChanges,
     hydrateDirectoryStats,
     updateLoadedContent,
     invalidateDerived,

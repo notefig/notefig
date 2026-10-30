@@ -215,8 +215,8 @@ export function isProtectedTreePath(relativeTreePath: string): boolean {
 export interface ScratchpadsDeps {
   workspacePath: string;
   /** The workspace's files: where a new scratchpad is created, and the
-   *  listing that re-walks after the entry's disk work. */
-  files: Pick<WorkspaceFiles, "file" | "collections" | "refetchMetadata">;
+   *  rows the entry's disk work is recorded in. */
+  files: Pick<WorkspaceFiles, "file" | "collections" | "recordDiskChanges">;
   /** Entry works on plain disk truth, never on collections, so it cannot
    *  race collection or query readiness. */
   fs: Pick<
@@ -248,16 +248,16 @@ export interface WorkspaceScratchpads {
    * the most recent survivor or a fresh one — or nothing with "scratchpad
    * on startup" off. Never rejects: a failure degrades to nothing. The
    * sweep and create mutate disk behind the collections' back, so this
-   * resolves only once a re-walk that saw them has landed — the caller then
-   * adds the tab to a layout whose row already exists, and the stale-tab
-   * pruner never sees it rowless.
+   * resolves only once their rows are recorded — the caller then adds the
+   * tab to a layout whose row already exists, and the stale-tab pruner
+   * never sees it rowless.
    */
   enter(keepPaths: readonly string[]): Promise<string | null>;
   /**
    * The entry sweep alone, for an entry with nothing to land on (one of the
    * workspace's files is already open): abandoned empty scratchpads go,
-   * the open tabs are kept, and the listing re-walks so the tree and any
-   * tab on a swept file catch up. Never rejects.
+   * the open tabs are kept, and the swept rows go so the tree and any tab
+   * on a swept file catch up. Never rejects.
    */
   sweep(keepPaths: readonly string[]): Promise<void>;
 }
@@ -303,8 +303,9 @@ export function createWorkspaceScratchpads({
     });
 
   /** The most recently modified scratchpad on disk, else a freshly created
-   *  one. Null bails to nothing (a file squatting on the folder path). */
-  const resolveOnDisk = async (): Promise<string | null> => {
+   *  one (added to `created`). Null bails to nothing (a file squatting on
+   *  the folder path). */
+  const resolveOnDisk = async (created: string[]): Promise<string | null> => {
     const listing = await listOnDisk();
     if (!listing.ok && listing.error.type !== "not_found") {
       console.warn("[scratchpads] cannot use the folder:", listing.error);
@@ -314,11 +315,12 @@ export function createWorkspaceScratchpads({
 
     if (paths.length === 0) {
       const fresh = pathutil.join(dir, randomScratchpadBasename([]));
-      const created = await fs.createFiles([fresh]);
-      if (created.failed.length > 0) {
-        console.warn("[scratchpads] create failed:", created.failed[0]);
+      const result = await fs.createFiles([fresh]);
+      if (result.failed.length > 0) {
+        console.warn("[scratchpads] create failed:", result.failed[0]);
         return null;
       }
+      created.push(fresh);
       return fresh;
     }
 
@@ -336,16 +338,18 @@ export function createWorkspaceScratchpads({
    * their name. The folder is app territory; an empty file holds no user
    * work whether its name was generated or chosen, and a name-based
    * carve-out would make the sweep depend on whether a name looks like
-   * one of ours. Rows catch up via the watcher and the metadata walk.
+   * one of ours. Resolves to the deleted paths.
    */
-  const sweepOnDisk = async (keepPaths: readonly string[]) => {
+  const sweepOnDisk = async (
+    keepPaths: readonly string[],
+  ): Promise<string[]> => {
     const listing = await listOnDisk();
-    if (!listing.ok) return;
+    if (!listing.ok) return [];
     const keep = new Set(keepPaths);
     const candidates = listing.value
       .map((entry) => entry.path)
       .filter((path) => !keep.has(path));
-    if (candidates.length === 0) return;
+    if (candidates.length === 0) return [];
 
     const reads = await fs.readFiles(candidates);
     const empties = reads.succeeded
@@ -355,8 +359,9 @@ export function createWorkspaceScratchpads({
       // blank one.
       .filter(({ content }) => stripPromptMarkers(content).trim() === "")
       .map(({ path }) => path);
-    if (empties.length === 0) return;
-    await fs.deleteFiles(empties);
+    if (empties.length === 0) return [];
+    const result = await fs.deleteFiles(empties);
+    return result.succeeded;
   };
 
   return {
@@ -371,22 +376,25 @@ export function createWorkspaceScratchpads({
     },
     async enter(keepPaths) {
       let scratchpad: string | null = null;
+      let deleted: string[] = [];
+      const created: string[] = [];
       try {
-        await sweepOnDisk(keepPaths);
-        if (await landsOnStartup()) scratchpad = await resolveOnDisk();
+        deleted = await sweepOnDisk(keepPaths);
+        if (await landsOnStartup()) scratchpad = await resolveOnDisk(created);
       } catch (error) {
         console.error("[scratchpads] entry resolution failed:", error);
       }
-      await files.refetchMetadata();
+      await files.recordDiskChanges({ created, deleted });
       return scratchpad;
     },
     async sweep(keepPaths) {
+      let deleted: string[] = [];
       try {
-        await sweepOnDisk(keepPaths);
+        deleted = await sweepOnDisk(keepPaths);
       } catch (error) {
         console.error("[scratchpads] entry sweep failed:", error);
       }
-      await files.refetchMetadata();
+      await files.recordDiskChanges({ created: [], deleted });
     },
   };
 }
