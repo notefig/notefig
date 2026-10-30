@@ -771,6 +771,10 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
   };
 
   const dropQueries = () => {
+    // Stop the collections first: left to their own gc (five minutes),
+    // they hold every row and keep re-walking the listing on its interval.
+    void collections.metadata.cleanup();
+    void collections.content.cleanup();
     queryClient.removeQueries({
       queryKey: fileQueryKeys.metadata(workspacePath),
     });
