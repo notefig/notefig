@@ -2,6 +2,7 @@ import { BubbleMenu } from "@tiptap/react/menus";
 import { Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Editor } from "@tiptap/core";
+import { isActiveIn } from "./active-formats";
 
 const preventFocusLoss = (e: React.MouseEvent) => e.preventDefault();
 
@@ -9,7 +10,7 @@ const preventFocusLoss = (e: React.MouseEvent) => e.preventDefault();
 // whenever `shouldShow` changes identity, so an inline arrow cost one per
 // render.
 const showInTable = ({ editor }: { editor: Editor }) =>
-  editor.isActive("table") && !editor.isActive("link");
+  isActiveIn(editor.state, "table") && !isActiveIn(editor.state, "link");
 
 interface TableMenuProps {
   editor: Editor;
