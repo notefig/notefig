@@ -38,7 +38,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
-import { AiPromptNodeBase, PROMPT_NODE_NAME } from "./node";
+import { AiPromptNodeBase, PromptDraftNodeBase, PROMPT_NODE_NAME } from "./node";
 import { ENTERED_FROM_ABOVE } from "./state";
 import { UI_ONLY_TRANSACTION_META } from "../define-widget";
 import {
@@ -300,16 +300,20 @@ function usePromptBinding({
   // — so it shouldn't depend on it.
   const hostRef = useRef(host);
   hostRef.current = host;
+  // An unbind (below) cancels an adoption still waiting on its answer: the
+  // marker it would adopt is the one the unbind is taking out.
+  const cancelRestore = useRef(() => {});
   useEffect(() => {
     if (!filePath || !blobId || !persistedTaskId) return;
     let cancelled = false;
+    cancelRestore.current = () => {
+      cancelled = true;
+    };
     void hostRef.current.isTaskReachable(persistedTaskId).then((reachable) => {
       if (cancelled || !reachable) return;
       prompts.restore(blobId, persistedTaskId);
     });
-    return () => {
-      cancelled = true;
-    };
+    return () => cancelRestore.current();
   }, [filePath, blobId, persistedTaskId, prompts]);
 
   // Where this widget lives, for the app's session → widget lookups (the
@@ -339,6 +343,7 @@ function usePromptBinding({
     const before = previous.current;
     previous.current = boundTaskId;
     if (boundTaskId === null && before === null) return;
+    if (boundTaskId === null) cancelRestore.current();
     if (persistedTaskId !== boundTaskId) writeTaskId(boundTaskId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boundTaskId]);
@@ -459,19 +464,15 @@ function AiPromptNodeView(props: NodeViewProps) {
   );
 }
 
-/** Whether the draft holds no text worth sending. */
-function draftEmpty(node: PMNode): boolean {
-  return !node.firstChild || readDraftNode(node.firstChild).trim().length === 0;
-}
-
 /**
  * Whether an update from `oldNode` to `newNode` renders the face. Typing
  * in the draft changes document text, which ProseMirror draws itself; a
  * render for it is a React commit per keystroke, and React walks the whole
  * editor's DOM before every commit (to save the focused contenteditable's
  * selection) — 30 ms of a keystroke in an 8,000-line document. So an edit
- * that leaves the attrs and the draft's emptiness as they were renders
- * only when the widget's state reads the text itself.
+ * that leaves the attrs as they were renders only when the widget's state
+ * reads the text itself. Whether the draft is empty is the draft's own
+ * node view's to show (PromptDraftNode).
  */
 function facesDraftEdit(
   prompts: PromptWidgetsApi,
@@ -480,10 +481,43 @@ function facesDraftEdit(
 ): boolean {
   return (
     !oldNode.sameMarkup(newNode) ||
-    draftEmpty(oldNode) !== draftEmpty(newNode) ||
     widgetCapabilities(prompts, newNode).liveDraft
   );
 }
+
+/**
+ * The draft's renderer half: ProseMirror's own DOM for it, marked
+ * `data-draft-empty` while it holds no text worth sending — what paints the
+ * draft row's placeholder (styles.css). The mark lives here rather than on
+ * the face because the face would have to render, a React commit, each
+ * time the draft empties or fills.
+ */
+export const PromptDraftNode = PromptDraftNodeBase.extend({
+  addNodeView() {
+    return ({ node }) => {
+      const dom = document.createElement("div");
+      dom.dataset.type = "prompt-draft";
+      const mark = (draft: PMNode) =>
+        dom.toggleAttribute(
+          "data-draft-empty",
+          readDraftNode(draft).trim().length === 0,
+        );
+      mark(node);
+      return {
+        dom,
+        contentDOM: dom,
+        update: (next) => {
+          if (next.type !== node.type) return false;
+          mark(next);
+          return true;
+        },
+        ignoreMutation: (mutation) =>
+          mutation.type === "attributes" &&
+          mutation.attributeName === "data-draft-empty",
+      };
+    };
+  },
+});
 
 /**
  * The widget's renderer half. Deliberately host-free: the ProseMirror plugins

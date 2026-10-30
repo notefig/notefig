@@ -837,7 +837,6 @@ export function PromptBlobFace({
             phase={phase}
             editable={rules?.fieldEditable}
             draftSlot={draftSlot}
-            empty={draft.trim().length === 0}
             confirmTrust={confirmTrust}
             trustName={trustName}
             workspacePath={workspacePath}
@@ -1504,7 +1503,6 @@ function DraftRow({
   phase,
   editable,
   draftSlot,
-  empty,
   confirmTrust,
   trustName,
   workspacePath,
@@ -1517,7 +1515,6 @@ function DraftRow({
    *  face with no widget behind it): read off the phase. */
   editable?: boolean;
   draftSlot: React.ReactNode;
-  empty: boolean;
   confirmTrust: boolean;
   trustName: string;
   workspacePath: string;
@@ -1553,13 +1550,13 @@ function DraftRow({
         {/* The placeholder is painted from here rather than by the editor's
             Placeholder extension: that extension has one string for the
             whole document, and this row knows which prompt it is asking
-            for. */}
+            for. Whether the draft is empty, the draft itself marks
+            (data-draft-empty), so filling it renders nothing here. */}
         <div
           data-prompt-draft=""
           // A field that doesn't take typing is outside the editing host:
           // nothing — keys, IME, spellcheck, a stray click — edits it.
           contentEditable={open ? undefined : false}
-          data-empty={empty ? "true" : "false"}
           data-placeholder={placeholder}
           className={cn(
             "prompt-editor relative min-w-0 flex-1 whitespace-pre-wrap break-words",

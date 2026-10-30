@@ -15,7 +15,11 @@ import {
   PROMPT_NODE_NAME,
 } from "./node";
 import { promptMentionNode } from "./composer/mention-node";
-import { AiPromptNode, type AiPromptNodeOptions } from "./node-view";
+import {
+  AiPromptNode,
+  PromptDraftNode,
+  type AiPromptNodeOptions,
+} from "./node-view";
 import { promptMinimapSource } from "./minimap";
 import { focusPromptDraft } from "./doc-helpers";
 
@@ -30,7 +34,7 @@ export const promptWidget = defineEditorWidget<AiPromptNodeOptions>({
   // so its parse/serialize agrees with the editor's.
   support: {
     bases: [PromptDraftNodeBase, promptMentionNode()],
-    views: () => [PromptDraftNodeBase, promptMentionNode()],
+    views: () => [PromptDraftNode, promptMentionNode()],
   },
   codec: {
     serialize: (marker) =>
