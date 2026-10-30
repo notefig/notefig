@@ -6,7 +6,9 @@
 #   scripts/perf-compare.sh <base packages/desktop dir> [rounds]
 #
 # Both sides need `scripts/perf-build.sh` run first. Both run this
-# checkout's suite, so the scenarios are the same on each side.
+# checkout's suite, so the scenarios are the same on each side; what they
+# are judged by is the base's: its slos.json (this checkout's while the
+# base has none), and the baselines file PERF_BASELINES names, if any.
 set -euo pipefail
 head="$(cd "$(dirname "$0")/.." && pwd)"
 base="$(cd "$1" && pwd)"
@@ -16,8 +18,7 @@ rm -rf "$out"
 
 measure() { # <side> <desktop dir> <round>
   echo "::group::$1, round $3"
-  PERF_BUILD="$2/perf-build" PERF_OUT="$out/$1/round-$3" \
-    npx playwright test --config playwright.perf.config.ts
+  scripts/perf-measure.sh "$2" "$out/$1/round-$3"
   echo "::endgroup::"
 }
 
@@ -32,4 +33,7 @@ for round in $(seq 1 "$rounds"); do
   fi
 done
 
-node scripts/perf-report.mjs --base "$out/base" --head "$out/head" --out "$out/report.md"
+slos="$base/tests/perf/slos.json"
+[ -f "$slos" ] || slos="$head/tests/perf/slos.json"
+node scripts/perf-report.mjs --base "$out/base" --head "$out/head" --slos "$slos" \
+  ${PERF_BASELINES:+--baselines "$PERF_BASELINES"} --out "$out/report.md"

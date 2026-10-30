@@ -1,0 +1,62 @@
+name: Perf suite setup
+description: >
+  Toolchains, dependencies and caches for the performance SLO suite
+  (packages/desktop/tests/perf), for one or more checkouts of the repo in
+  the workspace. Expects CARGO_TARGET_DIR to be $GITHUB_WORKSPACE/target-perf.
+
+inputs:
+  checkouts:
+    description: Checkout directories, space-separated; the first runs the suite.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Find the checkout that runs the suite
+      id: suite
+      shell: bash
+      run: echo "dir=$(echo ${{ inputs.checkouts }} | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "lts/*"
+        cache: "npm"
+        cache-dependency-path: "*/package-lock.json"
+
+    - name: Install Rust stable
+      uses: dtolnay/rust-toolchain@stable
+
+    # Shared between the PR and post-merge workflows, so main's runs keep
+    # the PRs' cache warm. One target dir serves every checkout.
+    - name: Cache Rust build
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: ${{ steps.suite.outputs.dir }}/packages/desktop/src-tauri -> ../../../../target-perf
+        shared-key: perf
+
+    - name: Install dependencies
+      shell: bash
+      run: for dir in ${{ inputs.checkouts }}; do (cd "$dir" && npm ci); done
+
+    # After the install, which would empty node_modules. The Vite build
+    # fetches the 132 MB dictation model (scripts/fetch-dictation-model.mjs)
+    # into each checkout's cache dir.
+    - name: Cache dictation model
+      uses: actions/cache@v4
+      with:
+        path: "*/packages/desktop/node_modules/.cache/dictation-model"
+        key: ${{ runner.os }}-perf-dictation-model-${{ hashFiles('*/packages/desktop/scripts/fetch-dictation-model.mjs') }}
+
+    - name: Cache Playwright browsers
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Caches/ms-playwright
+        key: ${{ runner.os }}-playwright-${{ hashFiles('*/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-playwright-
+
+    - name: Install Playwright Chromium
+      shell: bash
+      working-directory: ${{ steps.suite.outputs.dir }}/packages/desktop
+      run: npx playwright install --with-deps chromium

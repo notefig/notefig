@@ -4,38 +4,31 @@
   "slos": [
     {
       "id": "workspace-open",
-      "title": "Open a 20k-file workspace → file interactive",
-      "budgetMs": 695
+      "title": "Open a 20k-file workspace → file interactive"
     },
     {
       "id": "caret-move",
-      "title": "Caret move (8k-line doc)",
-      "budgetMs": 21
+      "title": "Caret move (8k-line doc)"
     },
     {
       "id": "select-all",
-      "title": "Select all (8k-line doc)",
-      "budgetMs": 101
+      "title": "Select all (8k-line doc)"
     },
     {
       "id": "select-all-caret-move",
-      "title": "Caret move out of select all (8k-line doc)",
-      "budgetMs": 68
+      "title": "Caret move out of select all (8k-line doc)"
     },
     {
       "id": "input-delete",
-      "title": "Type and delete (8k-line doc)",
-      "budgetMs": 42
+      "title": "Type and delete (8k-line doc)"
     },
     {
       "id": "widget-input",
-      "title": "Prompt widget: type and delete",
-      "budgetMs": 50
+      "title": "Prompt widget: type and delete"
     },
     {
       "id": "widget-caret-move",
-      "title": "Prompt widget: caret move",
-      "budgetMs": 15
+      "title": "Prompt widget: caret move"
     }
   ]
 }
