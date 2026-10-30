@@ -7,6 +7,7 @@
  * are coloured when it lands; one Shiki doesn't know stays plain.
  */
 import { Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
+import { StepMap } from "@tiptap/pm/transform";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { getHighlighterIfLoaded, getSharedHighlighter } from "@pierre/diffs";
@@ -57,20 +58,34 @@ function eachCodeBlock(
   });
 }
 
-/** Whether any step of `tr` changed a code block, or made one. A block
- *  it deleted whole needs nothing: mapping drops its decorations. */
-function touchesCode(tr: Transaction): boolean {
-  let touched = false;
-  tr.mapping.maps.forEach((stepMap, index) => {
-    const after = tr.mapping.slice(index + 1);
-    stepMap.forEach((_oldFrom, _oldTo, newFrom, newTo) => {
-      tr.doc.nodesBetween(after.map(newFrom, -1), after.map(newTo, 1), (node) => {
-        if (node.type.name === "codeBlock") touched = true;
-        return !touched && !node.isTextblock;
-      });
-    });
+/** Whether `doc` has a code block anywhere in [from, to]. */
+function codeBetween(doc: PMNode, from: number, to: number): boolean {
+  let found = false;
+  doc.nodesBetween(from, to, (node) => {
+    if (node.type.name === "codeBlock") found = true;
+    return !found && !node.isTextblock;
   });
-  return touched;
+  return found;
+}
+
+/**
+ * Whether any step of `tr` changed a code block, made one or unmade one:
+ * each changed range is checked in the document before its step and after
+ * the whole transaction. A step that changes nothing's position (an attr
+ * or mark step: a block's language, say) can't be placed, so it counts.
+ */
+function touchesCode(tr: Transaction): boolean {
+  return tr.mapping.maps.some((stepMap, index) => {
+    if (stepMap === StepMap.empty) return true;
+    const after = tr.mapping.slice(index + 1);
+    let touched = false;
+    stepMap.forEach((oldFrom, oldTo, newFrom, newTo) => {
+      touched ||=
+        codeBetween(tr.docs[index], oldFrom, oldTo) ||
+        codeBetween(tr.doc, after.map(newFrom, -1), after.map(newTo, 1));
+    });
+    return touched;
+  });
 }
 
 export function codeHighlight(): Plugin {

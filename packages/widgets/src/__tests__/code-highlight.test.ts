@@ -70,4 +70,27 @@ describe("codeHighlight", () => {
     expect(colours().length).toBeGreaterThan(before.length);
     expect(colours().some((entry) => entry.startsWith('"x"'))).toBe(true);
   });
+
+  it("drops the colours of a block that stops being code", async () => {
+    await getSharedHighlighter({ themes: ["pierre-light", "pierre-dark"], langs: ["ts"] });
+    const target = highlighted('<pre><code class="language-ts">const a = 1;</code></pre><p>After</p>');
+    await expect.poll(coloured, { timeout: 10_000 }).toBeGreaterThan(0);
+
+    target.chain().setTextSelection(2).setParagraph().run();
+
+    expect(target.state.doc.firstChild!.type.name).toBe("paragraph");
+    expect(target.view.dom.querySelectorAll("p span[style]")).toHaveLength(0);
+  });
+
+  it("recolours a block whose language changes in place", async () => {
+    await getSharedHighlighter({ themes: ["pierre-light", "pierre-dark"], langs: ["ts"] });
+    const target = highlighted('<pre><code class="language-ts">const a = 1;</code></pre>');
+    await expect.poll(coloured, { timeout: 10_000 }).toBeGreaterThan(0);
+
+    // An attr step: it moves nothing, so its step map is empty.
+    target.view.dispatch(target.state.tr.setNodeAttribute(0, "language", null));
+
+    expect(coloured()).toBe(0);
+  });
 });
+
