@@ -11,11 +11,12 @@
  * renamed directory. Here a direct write touches only its rows, and a walk
  * diffs its listing against the synced rows once.
  */
-import { BasicIndex, createCollection } from "@tanstack/react-db";
-import type {
-  ChangeMessageOrDeleteKeyMessage,
-  PendingMutation,
-} from "@tanstack/db";
+import {
+  BasicIndex,
+  createCollection,
+  type ChangeMessageOrDeleteKeyMessage,
+  type PendingMutation,
+} from "@tanstack/react-db";
 import {
   QueryObserver,
   type QueryClient,
@@ -141,18 +142,29 @@ export function createMetadataCollection({
     return entries.map(({ path, type }) => {
       const stat = statMap.get(path);
       const previous = synced.get(path);
-      if (previous?.type === type && stat === undefined) return previous;
+      if (!previous) return freshRow(path, type, stat);
+      if (previous.type === type && stat === undefined) return previous;
       return {
-        path,
-        relativePath:
-          previous?.relativePath ?? relativeTreePath(workspacePath, path),
+        ...previous,
         type,
-        modified: stat?.modifiedAt ?? previous?.modified,
-        size: stat?.size ?? previous?.size,
-        contentHash: previous?.contentHash ?? "",
+        modified: stat ? stat.modifiedAt : previous.modified,
+        size: stat ? stat.size : previous.size,
       };
     });
   };
+
+  const freshRow = (
+    path: string,
+    type: FileMetadata["type"],
+    stat: { modifiedAt: Date; size: number } | undefined,
+  ): FileMetadata => ({
+    path,
+    relativePath: relativeTreePath(workspacePath, path),
+    type,
+    modified: stat?.modifiedAt,
+    size: stat?.size,
+    contentHash: "",
+  });
 
   /** A landed walk: its listing is disk truth, except for rows written
    *  since it started. */
