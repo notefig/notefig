@@ -6,7 +6,7 @@
  * re-tokenizes nothing. A language loads in the background, and its blocks
  * are coloured when it lands; one Shiki doesn't know stays plain.
  */
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { getHighlighterIfLoaded, getSharedHighlighter } from "@pierre/diffs";
@@ -45,20 +45,46 @@ function tokensOf(node: PMNode): Token[] {
     ]);
 }
 
+/** Walk `doc`'s code blocks, never into the text of any other block. */
+function eachCodeBlock(
+  doc: PMNode,
+  visit: (node: PMNode, pos: number) => void,
+): void {
+  doc.descendants((node, pos) => {
+    if (node.type.name === "codeBlock") visit(node, pos);
+    else return !node.isTextblock;
+    return false;
+  });
+}
+
+/** Whether any step of `tr` changed a code block, or made one. A block
+ *  it deleted whole needs nothing: mapping drops its decorations. */
+function touchesCode(tr: Transaction): boolean {
+  let touched = false;
+  tr.mapping.maps.forEach((stepMap, index) => {
+    const after = tr.mapping.slice(index + 1);
+    stepMap.forEach((_oldFrom, _oldTo, newFrom, newTo) => {
+      tr.doc.nodesBetween(after.map(newFrom, -1), after.map(newTo, 1), (node) => {
+        if (node.type.name === "codeBlock") touched = true;
+        return !touched && !node.isTextblock;
+      });
+    });
+  });
+  return touched;
+}
+
 export function codeHighlight(): Plugin {
   // An edit leaves every block it didn't touch the same node, so only the
   // ones it touched are tokenized again.
   let cache = new WeakMap<PMNode, Token[]>();
   const decorate = (doc: PMNode) => {
     const decorations: Decoration[] = [];
-    doc.descendants((node, pos) => {
-      if (node.type.name !== "codeBlock") return true;
+    eachCodeBlock(doc, (node, pos) => {
       let tokens = cache.get(node);
       if (!tokens) cache.set(node, (tokens = tokensOf(node)));
       for (const [from, to, style] of tokens) {
         decorations.push(Decoration.inline(pos + 1 + from, pos + 1 + to, { style }));
       }
-      return false;
     });
     return DecorationSet.create(doc, decorations);
   };
@@ -67,7 +93,13 @@ export function codeHighlight(): Plugin {
     key,
     state: {
       init: (_config, { doc }) => decorate(doc),
-      apply: (tr, set) => (tr.docChanged || tr.getMeta(key) ? decorate(tr.doc) : set),
+      // An edit away from every code block (most typing) only moves the
+      // colours along: walking the document for it cost ~5 ms a keystroke
+      // in an 8,000-line one.
+      apply: (tr, set) => {
+        if (tr.getMeta(key) || (tr.docChanged && touchesCode(tr))) return decorate(tr.doc);
+        return tr.docChanged ? set.map(tr.mapping, tr.doc) : set;
+      },
     },
     props: { decorations: (state) => key.getState(state) },
     // Loads the languages the blocks name, then re-colours. Each view waits
@@ -77,8 +109,7 @@ export function codeHighlight(): Plugin {
       const awaited = new Set<string>();
       let live = true;
       const load = () =>
-        view.state.doc.descendants((node) => {
-          if (node.type.name !== "codeBlock") return true;
+        eachCodeBlock(view.state.doc, (node) => {
           const lang = node.attrs.language as string | null;
           if (lang && !awaited.has(lang)) {
             awaited.add(lang);
@@ -92,7 +123,6 @@ export function codeHighlight(): Plugin {
               view.dispatch(view.state.tr.setMeta(key, true).setMeta("addToHistory", false));
             });
           }
-          return false;
         });
       load();
       return {

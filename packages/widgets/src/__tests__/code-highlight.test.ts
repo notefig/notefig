@@ -9,6 +9,23 @@ afterEach(() => editor?.destroy());
 
 const coloured = () => editor!.view.dom.querySelectorAll("pre code span[style]").length;
 
+/** Each coloured span's text and colour, in order. */
+const colours = () =>
+  Array.from(editor!.view.dom.querySelectorAll("pre code span[style]")).map(
+    (span) => `${span.textContent}|${span.getAttribute("style")}`,
+  );
+
+function highlighted(content: string): Editor {
+  editor = new Editor({
+    extensions: [
+      StarterKit,
+      Extension.create({ name: "codeHighlight", addProseMirrorPlugins: () => [codeHighlight()] }),
+    ],
+    content,
+  });
+  return editor;
+}
+
 describe("codeHighlight", () => {
   it("leaves a block plain while the shared highlighter has its language but not the themes, then colours it", async () => {
     // Another user of the shared highlighter loaded the language alone.
@@ -24,5 +41,33 @@ describe("codeHighlight", () => {
 
     expect(coloured()).toBe(0);
     await expect.poll(coloured, { timeout: 10_000 }).toBeGreaterThan(0);
+  });
+
+  it("keeps each colour on its token through edits beside the block", async () => {
+    await getSharedHighlighter({ themes: ["pierre-light", "pierre-dark"], langs: ["ts"] });
+    const target = highlighted(
+      '<p>Before</p><pre><code class="language-ts">const greeting = "hello";</code></pre><p>After</p>',
+    );
+    await expect.poll(coloured, { timeout: 10_000 }).toBeGreaterThan(0);
+    const before = colours();
+
+    target.chain().setTextSelection(3).insertContent("typed text").run();
+    target.chain().setTextSelection(target.state.doc.content.size - 2).insertContent("more").run();
+    target.chain().setTextSelection({ from: 1, to: 4 }).deleteSelection().run();
+
+    expect(colours()).toEqual(before);
+  });
+
+  it("recolours a block edited from inside", async () => {
+    await getSharedHighlighter({ themes: ["pierre-light", "pierre-dark"], langs: ["ts"] });
+    const target = highlighted('<pre><code class="language-ts">const a = 1;</code></pre>');
+    await expect.poll(coloured, { timeout: 10_000 }).toBeGreaterThan(0);
+    const before = colours();
+
+    const endOfCode = target.state.doc.firstChild!.nodeSize - 1;
+    target.view.dispatch(target.state.tr.insertText(' const b = "x";', endOfCode));
+
+    expect(colours().length).toBeGreaterThan(before.length);
+    expect(colours().some((entry) => entry.startsWith('"x"'))).toBe(true);
   });
 });
