@@ -126,6 +126,30 @@ const NativeHistoryFocusGuard = Extension.create({
   },
 });
 
+/**
+ * A transaction that changes nothing — no step, selection, stored marks,
+ * scroll or meta — is dropped before it applies. Tiptap's `commands.x()`
+ * dispatches even when x declines, and a Backspace runs four such handlers
+ * (the list keymap, the mention, the core keymap, the widget's): each was a
+ * whole view update, plugin views and editor-state subscribers included.
+ */
+const SkipEmptyTransactions = Extension.create({
+  name: "skipEmptyTransactions",
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        filterTransaction: (tr) =>
+          tr.docChanged ||
+          tr.selectionSet ||
+          tr.storedMarksSet ||
+          tr.scrolledIntoView ||
+          !tr.isGeneric,
+      }),
+    ];
+  },
+});
+
 export const editorExtensions = [
   ...createSchemaExtensions(
     MarkdownImage,
@@ -149,4 +173,5 @@ export const editorExtensions = [
   CharacterCount,
   NativeFormatIntercept,
   NativeHistoryFocusGuard,
+  SkipEmptyTransactions,
 ];
