@@ -73,6 +73,7 @@ import {
   promptInteractionsPlugin,
   restoreKeptWidgetsTr,
   selectAllInDraft,
+  widgetCapabilities,
 } from "./interactions";
 import { promptChangeTrackingPlugin } from "./change-tracking";
 import { promptChangeGutterPlugin } from "./change-gutter";
@@ -87,6 +88,7 @@ import { PROMPT_MENTION_NAME } from "./composer/mention-node";
 import { readDraftNode } from "./composer/draft-text";
 import { usePromptWidgetHost } from "./host-context";
 import type { PromptWidgetHost } from "./host";
+import type { Node as PMNode } from "@tiptap/pm/model";
 
 export interface AiPromptNodeOptions {
   /** Absolute path of the host document (empty in schema-only contexts). */
@@ -384,6 +386,12 @@ function AiPromptNodeView(props: NodeViewProps) {
     );
   }
 
+  // The node as the document has it now: the face doesn't re-render for
+  // every edit to the draft (see `facesDraftEdit`), so `props.node` can
+  // be a few keystrokes old.
+  const liveSize = (pos: number) =>
+    props.editor.state.doc.nodeAt(pos)?.nodeSize ?? props.node.nodeSize;
+
   const removeNode = (options?: {
     insertSlash?: boolean;
     restoreParagraph?: boolean;
@@ -393,7 +401,7 @@ function AiPromptNodeView(props: NodeViewProps) {
       const pos = props.getPos();
       if (typeof pos !== "number") return;
       const { view } = props.editor;
-      view.dispatch(deleteWidgetTr(view.state, pos, props.node.nodeSize));
+      view.dispatch(deleteWidgetTr(view.state, pos, liveSize(pos)));
       props.editor.commands.focus(undefined, { scrollIntoView: false });
       return;
     }
@@ -401,7 +409,7 @@ function AiPromptNodeView(props: NodeViewProps) {
       const pos = props.getPos();
       if (typeof pos !== "number") return;
       const { view } = props.editor;
-      view.dispatch(removeToParagraphTr(view.state, pos, props.node.nodeSize));
+      view.dispatch(removeToParagraphTr(view.state, pos, liveSize(pos)));
       props.editor.commands.focus(undefined, { scrollIntoView: false });
       return;
     }
@@ -412,7 +420,7 @@ function AiPromptNodeView(props: NodeViewProps) {
     const pos = props.getPos();
     if (typeof pos !== "number") return;
     const { view } = props.editor;
-    view.dispatch(revertToSlashTr(view.state, pos, props.node.nodeSize));
+    view.dispatch(revertToSlashTr(view.state, pos, liveSize(pos)));
     props.editor.commands.focus(undefined, { scrollIntoView: false });
   };
 
@@ -454,6 +462,32 @@ function AiPromptNodeView(props: NodeViewProps) {
   );
 }
 
+/** Whether the draft holds no text worth sending. */
+function draftEmpty(node: PMNode): boolean {
+  return !node.firstChild || readDraftNode(node.firstChild).trim().length === 0;
+}
+
+/**
+ * Whether an update from `oldNode` to `newNode` renders the face. Typing
+ * in the draft changes document text, which ProseMirror draws itself; a
+ * render for it is a React commit per keystroke, and React walks the whole
+ * editor's DOM before every commit (to save the focused contenteditable's
+ * selection) — 30 ms of a keystroke in an 8,000-line document. So an edit
+ * that leaves the attrs and the draft's emptiness as they were renders
+ * only when the widget's state reads the text itself.
+ */
+function facesDraftEdit(
+  prompts: PromptWidgetsApi,
+  oldNode: PMNode,
+  newNode: PMNode,
+): boolean {
+  return (
+    !oldNode.sameMarkup(newNode) ||
+    draftEmpty(oldNode) !== draftEmpty(newNode) ||
+    widgetCapabilities(prompts, newNode).liveDraft
+  );
+}
+
 /**
  * The widget's renderer half. Deliberately host-free: the ProseMirror plugins
  * below (the keeper, the "/" summon, the mention suggestion) need nothing
@@ -469,7 +503,13 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(AiPromptNodeView);
+    const { prompts } = this.options;
+    return ReactNodeViewRenderer(AiPromptNodeView, {
+      update: ({ oldNode, newNode, updateProps }) => {
+        if (facesDraftEdit(prompts, oldNode, newNode)) updateProps();
+        return true;
+      },
+    });
   },
 
   onCreate() {

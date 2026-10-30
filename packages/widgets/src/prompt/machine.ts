@@ -151,6 +151,11 @@ export type WidgetCapabilities = {
   fieldEditable: boolean;
   removable: boolean;
   escape: "revert" | "stop" | "leave";
+  /** The face reads the draft's text, not only whether it is empty: the
+   *  prompt in flight while sending, and a choice question, whose
+   *  highlighted option any edit to the field clears. Only then does every
+   *  edit to the draft render the face. */
+  liveDraft: boolean;
 };
 
 export function capabilitiesOf(
@@ -163,23 +168,24 @@ export function capabilitiesOf(
         fieldEditable: true,
         removable: true,
         escape: options.summoned ? "revert" : "leave",
+        liveDraft: false,
       };
     case "sending":
-      return { fieldEditable: false, removable: false, escape: "leave" };
+      return { fieldEditable: false, removable: false, escape: "leave", liveDraft: true };
     case "working":
-      return { fieldEditable: false, removable: false, escape: "stop" };
+      return { fieldEditable: false, removable: false, escape: "stop", liveDraft: false };
     case "asking":
       switch (state.ask.kind) {
         case "auth":
-          return { fieldEditable: false, removable: true, escape: "leave" };
+          return { fieldEditable: false, removable: true, escape: "leave", liveDraft: false };
         case "permission":
-          return { fieldEditable: false, removable: false, escape: "stop" };
+          return { fieldEditable: false, removable: false, escape: "stop", liveDraft: false };
         // The turn is over; only the answer is missing.
         case "question":
-          return { fieldEditable: true, removable: true, escape: "leave" };
+          return { fieldEditable: true, removable: true, escape: "leave", liveDraft: true };
       }
     case "settled":
-      return { fieldEditable: true, removable: true, escape: "leave" };
+      return { fieldEditable: true, removable: true, escape: "leave", liveDraft: false };
   }
 }
 
