@@ -20,6 +20,9 @@
     "test:all": "npm run test:unit && npm run test:tauri && npm run test:e2e",
     "test:e2e": "playwright test",
     "test:e2e:shim": "playwright test --config playwright.shim.config.ts",
+    "perf:build": "scripts/perf-build.sh",
+    "test:perf": "playwright test --config playwright.perf.config.ts",
+    "perf:report": "node scripts/perf-report.mjs --head perf-results/local",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "playwright test --debug"
   },

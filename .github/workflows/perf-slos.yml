@@ -1,0 +1,132 @@
+name: Performance SLOs
+
+# Measures the desktop app's performance SLOs (packages/desktop/tests/perf,
+# budgets in tests/perf/slos.json) on this PR and on its base, in the same
+# job, and posts the comparison as one PR comment that each push updates.
+#
+# macOS, because the suite drives the real Rust backend through test-shim,
+# which (like the shim e2e job in ci-tests.yml) builds on macOS and Windows
+# runners only, and macOS is what most users run. Both sides are built and
+# measured on the same machine, in alternating rounds: a runner's speed
+# varies from job to job, so a PR is only ever compared with a base
+# measured beside it.
+#
+# Report only while slos.json has `"enforce": false`. With `true`, the
+# report step fails the job on a regression or a newly broken budget; make
+# "Performance SLOs" a required check then.
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: perf-slos-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  perf:
+    name: Performance SLOs
+    runs-on: macos-latest
+    timeout-minutes: 75
+    env:
+      # One Rust build for both checkouts: the base build reuses every
+      # dependency the head build compiled.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target-perf
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          path: head
+
+      - name: Checkout base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "npm"
+          cache-dependency-path: |
+            head/package-lock.json
+            base/package-lock.json
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: head/packages/desktop/src-tauri -> ../../../../target-perf
+          key: perf
+
+      - name: Install dependencies
+        run: |
+          (cd head && npm ci)
+          (cd base && npm ci)
+
+      # After the install, which would empty node_modules. The dictation model is fetched by the Vite build (scripts/fetch-dictation-model.mjs);
+      # cached so a run doesn't download its 132 MB again for either side.
+      - name: Cache dictation model
+        uses: actions/cache@v4
+        with:
+          path: |
+            head/packages/desktop/node_modules/.cache/dictation-model
+            base/packages/desktop/node_modules/.cache/dictation-model
+          key: ${{ runner.os }}-dictation-model-${{ hashFiles('head/packages/desktop/scripts/fetch-dictation-model.mjs') }}
+
+      - name: Build PR
+        run: head/packages/desktop/scripts/perf-build.sh head/packages/desktop
+
+      # The base is built by the PR's build script, so a PR that changes
+      # how the suite builds measures both sides the same way.
+      - name: Build base
+        run: head/packages/desktop/scripts/perf-build.sh base/packages/desktop
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('head/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright Chromium
+        working-directory: head/packages/desktop
+        run: npx playwright install --with-deps chromium
+
+      - name: Measure base and PR
+        working-directory: head/packages/desktop
+        run: scripts/perf-compare.sh ../../../base/packages/desktop 3
+
+      - name: Post report
+        if: always() && hashFiles('head/packages/desktop/perf-results/report.md') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: head/packages/desktop/perf-results/report.md
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+          body=$(cat "$REPORT"; printf '\n<sub>Run: %s/%s/actions/runs/%s</sub>\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- notefig-perf-slos -->")) | .id' | head -n1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -f body="$body" > /dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" > /dev/null
+          fi
+
+      - name: Upload samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results
+          path: head/packages/desktop/perf-results
+          if-no-files-found: ignore

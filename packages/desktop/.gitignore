@@ -30,3 +30,7 @@ playwright/.cache/
 
 # Reference implementation (not for production)
 plate-reference/
+
+# Performance SLO suite (tests/perf)
+perf-build
+perf-results
