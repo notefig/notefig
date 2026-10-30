@@ -280,3 +280,37 @@ describe("selection-summoned widget send", () => {
     });
   });
 });
+
+describe("the face while sending", () => {
+  // Typing renders the face only when the draft's emptiness changes, so
+  // its draft prop stops at the first character; Send must still show
+  // the whole prompt.
+  it("shows the whole prompt typed, not the draft it last rendered", async () => {
+    prompts = testPrompts();
+    const host = fakePromptWidgetHost({
+      // The session never comes up: the widget stays in `sending`.
+      startOrGetSharedSession: vi.fn(() => new Promise<never>(() => {})),
+    });
+    const editor = await mountedEditor("<p>Hi there</p><p>More prose</p>", host);
+    await summonOverSelection(editor);
+    for (const char of "tighten") {
+      await act(async () => {
+        editor.view.dispatch(editor.state.tr.insertText(char));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+    await act(async () => {
+      pressKey(editor, "Enter");
+      // send() awaits resolvePromptTarget → give the microtasks room.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const face = document.querySelector('[data-blob-phase="sending"]');
+    expect(face).not.toBeNull();
+    // The face's own status line, not the draft's text in the document.
+    const chrome = face!.cloneNode(true) as Element;
+    chrome.querySelector("[data-prompt-draft]")?.remove();
+    expect(chrome.textContent).toContain("tighten");
+  });
+});
