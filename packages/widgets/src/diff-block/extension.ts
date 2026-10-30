@@ -19,13 +19,14 @@
  *
  * Presentation only: the markdown round-trip and history never hear of it.
  */
-import { NodeSelection, Plugin, PluginKey, TextSelection, type EditorState } from "@tiptap/pm/state";
+import { NodeSelection, Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { Mappable } from "@tiptap/pm/transform";
 import type { FileDiffMetadata } from "@pierre/diffs";
 import { createDiffBlockElement, WORKSPACE_ATTRIBUTE, type DiffBlockElement } from "./element";
 import { parseDiffBlock } from "./patch";
+import { touchesCode } from "../code-highlight";
 import "./extension.css";
 
 /** A code block with a diff: where it is, and its diff as Pierre reads it
@@ -78,6 +79,21 @@ function scan(doc: PMNode, previous: readonly DiffBlock[]): DiffBlock[] {
     return false;
   });
   return blocks;
+}
+
+/** The blocks where an edit that touched no code block moved them — most
+ *  typing, which walking the document for cost ~0.3 ms a keystroke in an
+ *  8,000-line one. Null when it may have changed one: scan again. */
+function moved(tr: Transaction, blocks: readonly DiffBlock[]): DiffBlock[] | null {
+  if (touchesCode(tr)) return null;
+  const next = blocks.map((block) => ({ ...block, from: tr.mapping.map(block.from, 1), to: tr.mapping.map(block.to, -1) }));
+  return next.every((block) => tr.doc.nodeAt(block.from) === block.node) ? next : null;
+}
+
+/** The document's diff blocks after `tr`. */
+function blocksAfter(tr: Transaction, blocks: readonly DiffBlock[]): readonly DiffBlock[] {
+  if (!tr.docChanged) return blocks;
+  return moved(tr, blocks) ?? scan(tr.doc, blocks);
 }
 
 /** The block `pos` is at or in, if any: a binary search, as blocks never
@@ -324,7 +340,7 @@ export function codeDiff({ workspacePath = null }: { workspacePath?: string | nu
         return { blocks, editing: null, decorations: decorate(state.doc, blocks, null) };
       },
       apply: (tr, previous, _old, state) => {
-        const blocks = tr.docChanged ? scan(state.doc, previous.blocks) : previous.blocks;
+        const blocks = blocksAfter(tr, previous.blocks);
         const meta = tr.getMeta(key) as { editing: number | null } | undefined;
         let editing = meta ? meta.editing : previous.editing === null ? null : tr.mapping.map(previous.editing);
         if (editing !== null) {
