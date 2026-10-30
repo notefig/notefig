@@ -24,11 +24,7 @@
  * moves the caret there. Docs with content are never force-populated, and
  * deleting the widget there is final.
  */
-import {
-  ReactNodeViewRenderer,
-  NodeViewWrapper,
-  NodeViewContent,
-} from "@tiptap/react";
+import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Plugin } from "@tiptap/pm/state";
 import { Selection, TextSelection } from "@tiptap/pm/state";
@@ -86,6 +82,7 @@ import { mentionSuggestion, type MentionRow } from "./composer/mention-suggestio
 import { dispatchComposerKey } from "./composer/key-bridge";
 import { PROMPT_MENTION_NAME } from "./composer/mention-node";
 import { readDraftNode } from "./composer/draft-text";
+import { reactNodeView } from "../react-node-view";
 import { usePromptWidgetHost } from "./host-context";
 import type { PromptWidgetHost } from "./host";
 import type { Node as PMNode } from "@tiptap/pm/model";
@@ -504,7 +501,7 @@ export const AiPromptNode = AiPromptNodeBase.extend<AiPromptNodeOptions>({
 
   addNodeView() {
     const { prompts } = this.options;
-    return ReactNodeViewRenderer(AiPromptNodeView, {
+    return reactNodeView(AiPromptNodeView, {
       update: ({ oldNode, newNode, updateProps }) => {
         if (facesDraftEdit(prompts, oldNode, newNode)) updateProps();
         return true;
