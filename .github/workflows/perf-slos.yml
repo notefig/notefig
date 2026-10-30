@@ -80,14 +80,21 @@ jobs:
           PERF_BASELINES: ${{ runner.temp }}/baselines.json
         run: scripts/perf-compare.sh ../../../base/packages/desktop 3
 
-      - name: Post report
+      - name: Summarize
         if: always() && hashFiles('head/packages/desktop/perf-results/report.md') != ''
+        run: cat head/packages/desktop/perf-results/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      # A fork's token can't write to this repo's PRs, so a fork's report
+      # stays in the job summary rather than failing the job on a 403.
+      - name: Comment
+        if: >-
+          always() && hashFiles('head/packages/desktop/perf-results/report.md') != ''
+          && github.event.pull_request.head.repo.full_name == github.repository
         env:
           GH_TOKEN: ${{ github.token }}
           REPORT: head/packages/desktop/perf-results/report.md
           PR: ${{ github.event.pull_request.number }}
         run: |
-          cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
           body=$(cat "$REPORT"; printf '\n<sub>Run: %s/%s/actions/runs/%s</sub>\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
           existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
             --jq '.[] | select(.body | startswith("<!-- notefig-perf-slos -->")) | .id' | head -n1)
