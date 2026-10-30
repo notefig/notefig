@@ -156,16 +156,9 @@ function FileTreeInner({
     [basePath],
   );
 
-  const { data: fileMetadataList = [] } = useLiveQuery(
-    (q) =>
-      q.from({ file: metadata }).select(({ file }) => ({
-        path: file.path,
-        relativePath: file.relativePath,
-        type: file.type,
-        modified: file.modified,
-      })),
-    [basePath],
-  );
+  // The rows themselves, not a projection: a live query over 20k rows is a
+  // second collection built row by row on every mount (~90 ms).
+  const { data: fileMetadataList = [] } = useLiveQuery(metadata);
 
   // Trees marks directories with a trailing slash in the input path list.
   // Collapse duplicate slashes defensively: a malformed segment would make
