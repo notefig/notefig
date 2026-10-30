@@ -464,11 +464,16 @@ function rangeCovers(state: EditorState, pos: number, node: PMNode): boolean {
 
 /** The selected look — one attribute on each selected widget's node
  *  view, whether the keyboard picked it or a text range covers it; the
- *  CSS (tiptap.css) and the face draw it. */
+ *  CSS (tiptap.css) and the face draw it. Either way the widget lies in
+ *  the selection, so only the selection is walked: a caret (every
+ *  keystroke) walks nothing, where the whole document cost ~2 ms a
+ *  transaction in an 8,000-line one. */
 function widgetDecorations(state: EditorState): DecorationSet {
   const selected = selectedWidget(state);
+  const { from, to } = state.selection;
+  if (from === to) return DecorationSet.empty;
   const decorations: Decoration[] = [];
-  state.doc.descendants((node, pos) => {
+  state.doc.nodesBetween(from, to, (node, pos) => {
     if (node.type.name !== PROMPT_NODE_NAME) return true;
     const end = pos + node.nodeSize;
     if (selected?.pos === pos || rangeCovers(state, pos, node)) {
