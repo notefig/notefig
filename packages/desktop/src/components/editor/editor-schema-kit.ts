@@ -10,9 +10,6 @@
  */
 
 import { Extension, Node } from "@tiptap/core";
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
 import { ListItem } from "@tiptap/extension-list";
 import { Markdown } from "tiptap-markdown";
@@ -34,7 +31,6 @@ import {
   editorWidgets,
   registerContentlessNodeName,
   widgetSchemaNodes,
-  PROMPT_DRAFT_NODE_NAME,
 } from "@notefig/widgets";
 
 // A document carrying only frontmatter is still an empty document, so the
@@ -418,38 +414,29 @@ const DIRECTION_OWNING_WRAPPERS = new Set([
 ]);
 
 /**
- * Per-block RTL: gives text-bearing block nodes a real dir="auto"
- * attribute, so the browser resolves each block's own direction from its
- * first strong character (Farsi/Arabic vs. Latin). This has to be an actual
- * HTML attribute rather than the `unicode-bidi: plaintext` CSS trick — that
- * CSS-only approximation reorders inline text but never touches the box's
- * computed `direction`, so list markers (bullets/numbers), whose position
- * follows `direction`, stay pinned to the LTR side and can render off
- * (invisible) for RTL content. dir="auto" flips both correctly.
+ * Per-block RTL: each block resolves its own direction from its first
+ * strong character (Farsi/Arabic vs. Latin), whatever the workspace's.
  *
- * Two mechanisms, split by a real HTML footgun:
+ * Two mechanisms, split by what follows `direction`:
  *
  * 1. DIRECTION_OWNING_WRAPPERS get a static dir="auto" attribute (always
  *    present, unconditional — the value is always "auto": parseHTML ignores
  *    whatever a pasted `dir` says and renderHTML always emits it, so this
- *    never becomes divergent persisted state).
+ *    never becomes divergent persisted state). It has to be the attribute:
+ *    list markers and indentation follow the box's computed `direction`,
+ *    which only `dir` sets.
  *
- * 2. paragraph/heading get dir="auto" via a decoration plugin instead of a
- *    static attribute, and only when their PARENT is not one of the wrappers
- *    above. Per the HTML dir=auto algorithm, an element's auto-direction
- *    scan skips the entire subtree of any descendant that itself carries a
- *    dir attribute. A listItem's only text is its leading paragraph — if
- *    that paragraph also carried its own dir="auto", the listItem's scan
- *    would find nothing to look at, fall back to its parent's direction
- *    (ltr), and the marker/indentation fix above would silently stop
- *    working — reproduced by hand: with both tagged, "1." stayed pinned
- *    left while the paragraph text inside correctly went rtl, i.e. exactly
- *    the "bullets align, text doesn't" symptom. Skipping the paragraph
- *    inside those wrappers lets it inherit the wrapper's own computed
- *    direction via normal CSS inheritance instead of racing it.
+ * 2. Paragraphs, headings and the prompt widget's draft get
+ *    `unicode-bidi: plaintext` in tiptap.css. Their text has no marker, and
+ *    plaintext lays it out (order and `text-align: start`) exactly as
+ *    dir="auto" did, in Blink and WebKit alike. It is not an attribute, on
+ *    purpose: a paragraph carrying its own dir would hide its text from its
+ *    list item's dir="auto" scan, and the marker would stay pinned left.
+ *    Before this, a decoration gave each such block dir="auto"; one per
+ *    block, mapped on every keystroke, cost ~25 ms a keystroke in an
+ *    8,000-line document. One difference: an empty block now takes the
+ *    workspace's direction, where dir="auto" made it ltr.
  */
-export const autoDirectionKey = new PluginKey<DecorationSet>("autoDirection");
-
 export const AutoDirection = Extension.create({
   name: "autoDirection",
   addGlobalAttributes() {
@@ -466,47 +453,7 @@ export const AutoDirection = Extension.create({
       },
     ];
   },
-  addProseMirrorPlugins() {
-    // Held as plugin state and rebuilt only when the doc changes: a
-    // `decorations` prop alone reruns on every view update, so each caret
-    // move and selection change walked the whole document.
-    const plugin: Plugin<DecorationSet> = new Plugin({
-      key: autoDirectionKey,
-      state: {
-        init: (_, state) => autoDirectionDecorations(state.doc),
-        apply: (tr, decorations) =>
-          tr.docChanged ? autoDirectionDecorations(tr.doc) : decorations,
-      },
-      props: {
-        decorations: (state) => plugin.getState(state),
-      },
-    });
-    return [plugin];
-  },
 });
-
-function autoDirectionDecorations(doc: ProseMirrorNode): DecorationSet {
-  const decorations: Decoration[] = [];
-  doc.descendants((node, pos, parent) => {
-    // Nothing inside a textblock is a block that takes `dir`.
-    if (!node.isTextblock) return true;
-    if (
-      (node.type.name === "paragraph" ||
-        node.type.name === "heading" ||
-        // A prompt widget's draft is a textblock like any other and
-        // needs the same RTL resolution — it is just not in the
-        // group above, being admissible only inside its widget.
-        node.type.name === PROMPT_DRAFT_NODE_NAME) &&
-      !(parent && DIRECTION_OWNING_WRAPPERS.has(parent.type.name))
-    ) {
-      decorations.push(
-        Decoration.node(pos, pos + node.nodeSize, { dir: "auto" }),
-      );
-    }
-    return false;
-  });
-  return DecorationSet.create(doc, decorations);
-}
 
 /**
  * The schema-defining extension list, in the same order the editor has

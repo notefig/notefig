@@ -31,6 +31,21 @@
   text-align: start;
 }
 
+/* Per-block RTL for blocks with no marker (see AutoDirection in
+   editor-schema-kit.ts): each lays out by its own first strong character,
+   aligned by the `text-align: start` above. List items, quotes and cells
+   take dir="auto" from the schema instead, for their markers. */
+.ProseMirror p,
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4,
+.ProseMirror h5,
+.ProseMirror h6,
+.ProseMirror [data-type="prompt-draft"] {
+  unicode-bidi: plaintext;
+}
+
 /* Ensure the editor fills available space: the prose container stretches to
    the scroll viewport and the contenteditable flexes to fill it, so clicks
    anywhere below the content land inside ProseMirror (which places the caret
