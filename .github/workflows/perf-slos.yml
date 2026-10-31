@@ -1,0 +1,113 @@
+name: Performance SLOs
+
+# Measures the desktop app's performance SLOs (packages/desktop/tests/perf)
+# on this PR and on its base, in the same job, and posts the comparison as
+# one PR comment that each push updates.
+#
+# macOS, because the suite drives the real Rust backend through test-shim,
+# which (like the shim e2e job in ci-tests.yml) builds on macOS and Windows
+# runners only, and macOS is what most users run. Both sides are built and
+# measured on the same machine, in alternating rounds: a runner's speed
+# varies from job to job, so a PR is only ever compared with a base
+# measured beside it.
+#
+# Nothing in the PR sets what it is judged against: the SLOs come from the
+# base's slos.json, the budgets from the perf-baselines branch, which only
+# the "Performance baselines" workflow writes. The job fails on a
+# regression or a newly crossed baseline, but it isn't a required check: a
+# deliberate slowdown merges red, and the baseline it missed stays.
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: perf-slos-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  perf:
+    name: Performance SLOs
+    runs-on: macos-latest
+    timeout-minutes: 75
+    env:
+      # One Rust build for both checkouts: the base build reuses every
+      # dependency the head build compiled.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target-perf
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          path: head
+
+      - name: Checkout base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - uses: ./head/.github/actions/perf-setup
+        with:
+          checkouts: head base
+
+      - name: Build PR
+        run: head/packages/desktop/scripts/perf-build.sh head/packages/desktop
+
+      # The base is built by the PR's build script, so a PR that changes
+      # how the suite builds measures both sides the same way.
+      - name: Build base
+        run: head/packages/desktop/scripts/perf-build.sh base/packages/desktop
+
+      # None yet before the first post-merge run: then a PR is judged
+      # against its base alone.
+      - name: Fetch baselines
+        working-directory: head
+        run: |
+          if git fetch --depth=1 origin perf-baselines; then
+            git show FETCH_HEAD:baselines.json > "$RUNNER_TEMP/baselines.json"
+          else
+            echo '{}' > "$RUNNER_TEMP/baselines.json"
+          fi
+
+      - name: Measure base and PR
+        working-directory: head/packages/desktop
+        env:
+          PERF_BASELINES: ${{ runner.temp }}/baselines.json
+        run: scripts/perf-compare.sh ../../../base/packages/desktop 3
+
+      - name: Summarize
+        if: always() && hashFiles('head/packages/desktop/perf-results/report.md') != ''
+        run: cat head/packages/desktop/perf-results/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      # A fork's token can't write to this repo's PRs, so a fork's report
+      # stays in the job summary rather than failing the job on a 403.
+      - name: Comment
+        if: >-
+          always() && hashFiles('head/packages/desktop/perf-results/report.md') != ''
+          && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: head/packages/desktop/perf-results/report.md
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          body=$(cat "$REPORT"; printf '\n<sub>Run: %s/%s/actions/runs/%s</sub>\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- notefig-perf-slos -->")) | .id' | head -n1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -f body="$body" > /dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" > /dev/null
+          fi
+
+      - name: Upload samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results
+          path: head/packages/desktop/perf-results
+          if-no-files-found: ignore

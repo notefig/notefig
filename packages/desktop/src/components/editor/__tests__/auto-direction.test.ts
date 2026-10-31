@@ -1,12 +1,14 @@
 /**
- * Per-block `dir="auto"`: which blocks get it, and that it is worked out
- * once per document rather than on every view update — a selection change
- * used to walk the whole doc.
+ * Per-block `dir="auto"` on the blocks that own a marker (list items,
+ * quotes, table cells). Paragraphs and headings resolve their direction
+ * in CSS (`unicode-bidi: plaintext`, tiptap.css), so they carry no `dir`:
+ * one on a list item's paragraph would hide its text from the item's own
+ * dir="auto" scan. The rendering itself is covered in the browser by
+ * tests/e2e/rtl-direction.spec.ts.
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { Editor } from "@tiptap/core";
-import { TextSelection } from "@tiptap/pm/state";
-import { autoDirectionKey, createSchemaExtensions } from "../editor-schema-kit";
+import { createSchemaExtensions } from "../editor-schema-kit";
 
 let editor: Editor | null = null;
 
@@ -21,31 +23,28 @@ function editorWith(content: string): Editor {
 }
 
 describe("AutoDirection", () => {
-  it("gives top-level paragraphs and headings dir=auto, not those a list item owns", () => {
-    const target = editorWith(
+  it("gives the blocks that own a marker dir=auto", () => {
+    const dom = editorWith(
+      "<ul><li><p>Item</p></li></ul><ol><li><p>One</p></li></ol>" +
+        "<blockquote><p>Quote</p></blockquote>" +
+        "<table><tr><th><p>H</p></th></tr><tr><td><p>C</p></td></tr></table>",
+    ).view.dom;
+    for (const selector of ["ul", "ol", "li", "blockquote", "th", "td"])
+      expect(dom.querySelector(selector)?.getAttribute("dir"), selector).toBe(
+        "auto",
+      );
+  });
+
+  it("leaves paragraphs and headings without dir, wherever they are", () => {
+    const dom = editorWith(
       "<h1>Title</h1><p>Body</p><ul><li><p>Item</p></li></ul>",
-    );
-    const dom = target.view.dom;
-    expect(dom.querySelector("h1")?.getAttribute("dir")).toBe("auto");
-    expect(dom.querySelector(":scope > p")?.getAttribute("dir")).toBe("auto");
-    expect(dom.querySelector("li > p")?.hasAttribute("dir")).toBe(false);
+    ).view.dom;
+    expect(dom.querySelectorAll("[dir]:is(p, h1)")).toHaveLength(0);
   });
 
-  it("keeps its decorations across a selection-only change", () => {
-    const target = editorWith("<p>One</p><p>Two</p>");
-    const before = autoDirectionKey.getState(target.state);
-    expect(before).toBeDefined();
-    target.view.dispatch(
-      target.state.tr.setSelection(TextSelection.create(target.state.doc, 1, 6)),
-    );
-    expect(autoDirectionKey.getState(target.state)).toBe(before);
-  });
-
-  it("decorates a paragraph added by an edit", () => {
-    const target = editorWith("<p>One</p>");
-    target.commands.insertContentAt(target.state.doc.content.size, "<p>Two</p>");
-    const paragraphs = target.view.dom.querySelectorAll(":scope > p");
-    expect(paragraphs).toHaveLength(2);
-    paragraphs.forEach((p) => expect(p.getAttribute("dir")).toBe("auto"));
+  it("ignores a pasted dir on a wrapper", () => {
+    const dom = editorWith('<blockquote dir="ltr"><p>Quote</p></blockquote>')
+      .view.dom;
+    expect(dom.querySelector("blockquote")?.getAttribute("dir")).toBe("auto");
   });
 });

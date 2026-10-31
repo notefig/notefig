@@ -175,6 +175,13 @@ describe("capabilitiesOf", () => {
     expect(kept).toEqual(["sending", "queued", "running", "permission"]);
   });
 
+  it("renders each draft edit only where the face reads the text", () => {
+    const live = Object.entries(STATES)
+      .filter(([, state]) => capabilitiesOf(state, plain).liveDraft)
+      .map(([name]) => name);
+    expect(live).toEqual(["sending", "question"]);
+  });
+
   it("Escape stops a live turn, reverts a fresh summon, else leaves", () => {
     expect(capabilitiesOf(COMPOSING, { summoned: true }).escape).toBe("revert");
     expect(capabilitiesOf(COMPOSING, plain).escape).toBe("leave");

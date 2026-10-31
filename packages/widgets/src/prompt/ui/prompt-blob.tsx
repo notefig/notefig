@@ -1027,6 +1027,21 @@ function openBoundChatAction(
 }
 
 /**
+ * The draft as the face shows it. The node view renders the face for an
+ * edit to the draft only when its emptiness changes, or in the states that
+ * show its text (`liveDraft`), so the prop can trail the document by a few
+ * keystrokes. Those states read the document itself: entering one (Send)
+ * renders from the widget's own subscription, with the prop as it was.
+ */
+function shownDraft(
+  capabilities: WidgetCapabilities,
+  prop: string | undefined,
+  io: { read: () => string },
+): string {
+  return capabilities.liveDraft ? io.read() : (prop ?? "");
+}
+
+/**
  * Everything the face needs, assembled from the widget's state, the
  * collections and the action hooks. Splitting it out keeps the component
  * itself a container in the literal sense — one hook call and one element —
@@ -1046,11 +1061,11 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     summoned: placement.summoned === true,
   });
   // The draft is document content, so it arrives as a prop from the node
-  // view (which re-renders on every document change) rather than from the
-  // service. `draftIO` is how the actions write it back.
-  const draft = placement.draft ?? "";
-  const reference = placement.reference ?? null;
+  // view rather than from the service. `draftIO` is how the actions write
+  // it back.
   const draftIO = useDraftIO(prompts, editor, blobId, workspacePath);
+  const draft = shownDraft(capabilities, placement.draft, draftIO);
+  const reference = placement.reference ?? null;
 
   const { label: harnessLabel } = host.useDefaultHarness();
   const actions = usePromptBlobActions({

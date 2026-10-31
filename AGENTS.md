@@ -236,6 +236,28 @@ Tests run automatically on PRs via GitHub Actions. Test files:
 - Desktop: `packages/desktop/**/*.test.ts` (Vitest)
 - Desktop E2E: `packages/desktop/tests/e2e/` (Playwright)
 
+### Performance SLOs
+
+`packages/desktop/tests/perf/` measures the app's performance SLOs (listed
+in `tests/perf/slos.json`) on a production build against the release
+`test-shim`. The "Performance SLOs" workflow runs it on every PR into main,
+measuring the PR and its base side by side, and posts the comparison as a
+PR comment; it fails on a regression but isn't a required check. Budgets
+are baselines on the `perf-baselines` branch, written only by the
+"Performance baselines" workflow after each merge to main, and only ever
+lowered (`scripts/perf-baseline.mjs`). Never edit them by hand or in a PR.
+Locally, from `packages/desktop`:
+
+```bash
+npm run perf:build    # bundle + release shim into perf-build/
+npm run test:perf     # samples into perf-results/local/
+npm run perf:report   # the SLO table
+```
+
+To compare against another checkout, build it with
+`scripts/perf-build.sh <its packages/desktop>` and run
+`scripts/perf-compare.sh <its packages/desktop>`.
+
 ### Playwright / Browser Debugging
 
 The desktop app runs in browser mode via `npm run dev:desktop` (Vite dev server on port 1420).

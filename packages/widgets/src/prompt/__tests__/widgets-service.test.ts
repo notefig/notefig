@@ -306,6 +306,7 @@ describe("stored rounds (MET-251)", () => {
       fieldEditable: true,
       removable: true,
       escape: "leave",
+      liveDraft: true,
     });
     // The answer continues the same session.
     expect(

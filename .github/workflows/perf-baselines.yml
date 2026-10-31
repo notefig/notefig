@@ -1,0 +1,86 @@
+name: Performance baselines
+
+# After every merge to main: measure main's performance SLOs
+# (packages/desktop/tests/perf) and lower their baselines on the
+# perf-baselines branch where main got significantly faster
+# (scripts/perf-baseline.mjs). This is the only writer of that branch, and
+# it never raises a baseline: what PRs are judged against only goes down.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# One writer at a time; a newer main supersedes a run still measuring.
+concurrency:
+  group: perf-baselines
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  baselines:
+    name: Performance baselines
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target-perf
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          path: main
+
+      - uses: ./main/.github/actions/perf-setup
+        with:
+          checkouts: main
+
+      - name: Build
+        run: main/packages/desktop/scripts/perf-build.sh main/packages/desktop
+
+      # As many samples as one side of a PR's comparison gets.
+      - name: Measure
+        working-directory: main/packages/desktop
+        run: |
+          for round in 1 2 3; do
+            scripts/perf-measure.sh . "perf-results/main/round-$round"
+          done
+
+      - name: Check out the baselines branch
+        working-directory: main
+        run: |
+          if git fetch --depth=1 origin perf-baselines; then
+            git worktree add ../baselines FETCH_HEAD
+          else
+            git worktree add --detach ../baselines
+            git -C ../baselines checkout --orphan perf-baselines
+            git -C ../baselines rm -rfq .
+          fi
+
+      - name: Lower the baselines
+        working-directory: main/packages/desktop
+        run: |
+          node scripts/perf-baseline.mjs --samples perf-results/main \
+            --baselines ../../../baselines/baselines.json --sha "$GITHUB_SHA"
+
+      - name: Push the baselines
+        working-directory: baselines
+        run: |
+          git add baselines.json
+          if git diff --cached --quiet; then
+            echo "No baseline moved."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "Baselines from ${GITHUB_SHA::12}"
+          git push origin HEAD:perf-baselines
+
+      - name: Upload samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-baseline-samples
+          path: main/packages/desktop/perf-results
+          if-no-files-found: ignore
