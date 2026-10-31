@@ -97,6 +97,24 @@ describe("metadata rows against the walk", () => {
     expect(files.collections.metadata.get(`${WS}/a.md`)?.size).toBe(42);
   });
 
+  it("a deletion one walk defers for a direct write, the next walk makes", async () => {
+    disk.delete(`${WS}/a.md`);
+    let release!: () => void;
+    held = new Promise((resolve) => (release = resolve));
+    const walk = files.refresh();
+    // A write from stats taken before the deletion, landing mid-walk.
+    files.collections.metadata.utils.writeUpdate({
+      ...row(`${WS}/a.md`),
+      size: 42,
+    });
+    release();
+    await walk;
+    expect(paths()).toContain(`${WS}/a.md`);
+    held = null;
+    await files.refresh();
+    expect(paths()).toEqual([`${WS}/b.md`]);
+  });
+
   it("keeps a directly written row no walk lists (an ignored path)", async () => {
     files.collections.metadata.utils.writeInsert(row(`${WS}/ignored.md`));
     await files.refresh();

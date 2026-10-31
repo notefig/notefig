@@ -178,8 +178,11 @@ export function createMetadataCollection({
       writes.push(upsert(row));
     }
     for (const path of listed) {
-      if (seen.has(path) || writtenDuringWalk.has(path)) continue;
-      if (synced.has(path)) writes.push({ type: "delete", key: path });
+      if (seen.has(path)) continue;
+      // Written since this walk started, so its absence may be stale: keep
+      // it listed and let the next walk decide.
+      if (writtenDuringWalk.has(path)) seen.add(path);
+      else if (synced.has(path)) writes.push({ type: "delete", key: path });
     }
     listed = seen;
     apply(writes);
