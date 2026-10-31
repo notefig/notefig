@@ -172,7 +172,6 @@ function armAction(args: { label: string; shown: Shown }): void {
           channel.port1.onmessage = () => {
             const ms = performance.now() - start;
             (window.__perf.latency[label] ??= []).push(ms);
-            window.__perf.setLabel(null);
             resolve(ms);
           };
           channel.port2.postMessage(null);
@@ -187,7 +186,8 @@ function armAction(args: { label: string; shown: Shown }): void {
 /**
  * One sample of an action: `input` (a key press, a click) to the first
  * painted frame that shows `shown`. The long tasks it causes are tagged
- * `label` too; the tail settles before the next one.
+ * `label` too, through the settling tail as well as up to that frame:
+ * work an action leaves for after its first paint is still its own.
  */
 export async function action(
   page: Page,
@@ -199,5 +199,6 @@ export async function action(
   await input();
   const ms = await page.evaluate(() => window.__perfAction);
   await page.waitForTimeout(500);
+  await setLabel(page, null);
   return ms;
 }
