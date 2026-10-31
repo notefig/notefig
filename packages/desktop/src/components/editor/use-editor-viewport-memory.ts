@@ -62,7 +62,14 @@ export function useEditorViewportMemory(editor: Editor, filePath: string) {
       scrollEl.removeEventListener("scroll", handleScroll);
       if (pending === null) return;
       clearTimeout(pending);
-      if (scrollEl.isConnected && editor.view.dom.isConnected) save();
+      // Closing a tab destroys the editor before this runs, and
+      // `editor.view` is a throwing getter once its view is gone.
+      if (editor.isDestroyed || !scrollEl.isConnected) return;
+      try {
+        if (editor.view.dom.isConnected) save();
+      } catch {
+        // No view left to measure: the position from the last settle stands.
+      }
     };
   }, [editor, editors, filePath]);
 
