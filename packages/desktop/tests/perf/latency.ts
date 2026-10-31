@@ -32,6 +32,7 @@ interface PerfProbe extends PerfSamples {
 declare global {
   interface Window {
     __perf: PerfProbe;
+    __perfAction: Promise<number>;
   }
 }
 
@@ -122,4 +123,82 @@ export const KEY_INTERVAL_MS = 80;
 export async function stroke(page: Page, key: string): Promise<void> {
   await page.keyboard.press(key);
   await page.waitForTimeout(KEY_INTERVAL_MS);
+}
+
+/**
+ * What an action is done showing: a visible element matching `selector`,
+ * holding `text` when given (or no text at all, with `empty`), and holding
+ * focus when `focused` is set.
+ */
+export interface Shown {
+  selector: string;
+  text?: string;
+  empty?: boolean;
+  focused?: boolean;
+}
+
+/** In the page: arm one sample, input (keydown or pointerdown) → the first
+ *  painted frame that shows `shown`, as `window.__perfAction`. */
+function armAction(args: { label: string; shown: Shown }): void {
+  const { label, shown } = args;
+  const MODIFIERS = new Set(["Control", "Shift", "Alt", "Meta"]);
+  const showing = () =>
+    Array.from(document.querySelectorAll<HTMLElement>(shown.selector)).some(
+      (el) =>
+        el.checkVisibility({ visibilityProperty: true }) &&
+        (shown.text === undefined ||
+          (el.textContent ?? "").includes(shown.text)) &&
+        (!shown.empty || (el.textContent ?? "") === "") &&
+        (!shown.focused || el.contains(document.activeElement)),
+    );
+  window.__perfAction = new Promise((resolve, reject) => {
+    const onInput = (event: Event) => {
+      if (event instanceof KeyboardEvent && MODIFIERS.has(event.key)) return;
+      window.removeEventListener("keydown", onInput, true);
+      window.removeEventListener("pointerdown", onInput, true);
+      const start = event.timeStamp;
+      window.__perf.setLabel(label);
+      // Checked in each frame's rAF, after the frame's DOM work and before
+      // its paint: the first frame that passes is the one that shows it.
+      const check = () =>
+        requestAnimationFrame(() => {
+          if (!showing()) {
+            if (performance.now() - start > 30_000)
+              reject(new Error(`${label}: never showed ${shown.selector}`));
+            else check();
+            return;
+          }
+          const channel = new MessageChannel();
+          channel.port1.onmessage = () => {
+            const ms = performance.now() - start;
+            (window.__perf.latency[label] ??= []).push(ms);
+            resolve(ms);
+          };
+          channel.port2.postMessage(null);
+        });
+      check();
+    };
+    window.addEventListener("keydown", onInput, true);
+    window.addEventListener("pointerdown", onInput, true);
+  });
+}
+
+/**
+ * One sample of an action: `input` (a key press, a click) to the first
+ * painted frame that shows `shown`. The long tasks it causes are tagged
+ * `label` too, through the settling tail as well as up to that frame:
+ * work an action leaves for after its first paint is still its own.
+ */
+export async function action(
+  page: Page,
+  label: string,
+  shown: Shown,
+  input: () => Promise<void>,
+): Promise<number> {
+  await page.evaluate(armAction, { label, shown });
+  await input();
+  const ms = await page.evaluate(() => window.__perfAction);
+  await page.waitForTimeout(500);
+  await setLabel(page, null);
+  return ms;
 }

@@ -483,7 +483,12 @@ function MentionPopup({ query }: { query: string }) {
  */
 function DraftText({ text }: { text: string }) {
   return (
-    <div className="pointer-events-none">
+    // Marked empty the way the document's draft node marks itself, for
+    // the draft row's placeholder.
+    <div
+      className="pointer-events-none"
+      data-draft-empty={text.trim() ? undefined : ""}
+    >
       <PromptEditor
         workspacePath={DEMO_ROOT}
         value={text}

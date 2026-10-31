@@ -138,8 +138,9 @@ export class DocumentSync {
   private lastMarkdown: string | null = null;
   private lastHash: string | null = null;
 
-  /** Persists a serialization; assigned by the editor-side hook. */
-  writer: ((markdown: string) => Promise<void>) | null = null;
+  /** Persists a serialization and its hash; assigned by the editor-side
+   *  hook. */
+  writer: ((markdown: string, hash: string) => Promise<void>) | null = null;
 
   /** Resolvers waiting for the pipeline to drain (whenClean). */
   private cleanWaiters: (() => void)[] = [];
@@ -267,7 +268,7 @@ export class DocumentSync {
 
         this.lastMarkdown = markdown;
         this.lastHash = hash;
-        await this.writer?.(markdown);
+        await this.writer?.(markdown, hash);
       } while (this.dirty);
     } catch (error) {
       console.error(`Autosave failed for ${this.path}:`, error);

@@ -1,5 +1,9 @@
-import { FileTree, type FileTreeSortEntry } from "@pierre/trees";
-import { FILE_ICON_CONFIG } from "./file-type-icon";
+import {
+  FileTree,
+  type FileTreeIconConfig,
+  type FileTreeSortEntry,
+} from "@pierre/trees";
+import { defineModule } from "@notefig/core";
 import type { SortOrder } from "@/utils/fs";
 import { path as pathutil } from "@/utils/path";
 import {
@@ -9,12 +13,13 @@ import {
 } from "@/modules/scratchpads";
 
 /**
- * Module-level cache of @pierre/trees models, one per workspace.
+ * Each open workspace's @pierre/trees model — `core.workspace(ws).treeModel`.
  *
  * The model outlives the FileTree component (sidebar view switches unmount
  * it), so expansion, focus, scroll and selection survive by construction —
- * the React wrapper just re-attaches the cached model to a fresh host on
- * remount.
+ * the React wrapper just re-attaches the model to a fresh host on remount.
+ * It lives as long as its workspace: closing the workspace cleans it up,
+ * along with every path it holds.
  *
  * Two consequences shape this module:
  * - Trees captures its option callbacks at construction. A cached model
@@ -68,8 +73,21 @@ export interface TreeModelEntry {
   needsScratchpadsExpansion: boolean;
 }
 
-const entriesByWorkspace = new Map<string, TreeModelEntry>();
-const MAX_CACHED_WORKSPACES = 4;
+/**
+ * The icon set every file-type icon draws from: the tree's, and the
+ * monochrome glyphs the prompt composer's mention picker and the palette's
+ * quick results render (file-type-icon.tsx) — one config, every surface
+ * agrees.
+ *
+ * "standard" is the monochrome tier (markdown/image/json/code/… plus a
+ * "default" file glyph); icons inherit currentColor. Project-specific
+ * overrides layer on top of the built-ins here, e.g.
+ * `byFileName: { "metrists.json": { name: "my-symbol" } }`.
+ */
+export const FILE_ICON_CONFIG: FileTreeIconConfig = {
+  set: "standard",
+  colored: false,
+};
 
 /**
  * Parity with the pre-trees tree: files and directories sort together, names
@@ -121,25 +139,43 @@ function makeComparator(sortState: TreeSortState) {
   };
 }
 
-export function acquireTreeModel(
-  workspacePath: string,
-  init: {
-    order: SortOrder;
-    itemHeightPx: number;
-    initialSelectedPaths: readonly string[];
-    initialExpandedPaths: readonly string[] | null;
-    delegate: TreeDelegate;
-  },
-): TreeModelEntry {
-  const existing = entriesByWorkspace.get(workspacePath);
-  if (existing) {
-    // LRU touch
-    entriesByWorkspace.delete(workspacePath);
-    entriesByWorkspace.set(workspacePath, existing);
-    existing.delegate = init.delegate;
-    return existing;
-  }
+/** What the first FileTree mount builds the model from. */
+export interface TreeModelInit {
+  order: SortOrder;
+  itemHeightPx: number;
+  initialSelectedPaths: readonly string[];
+  initialExpandedPaths: readonly string[] | null;
+  delegate: TreeDelegate;
+}
 
+export interface WorkspaceTreeModel {
+  /** The workspace's model: built from `init` on the first call, the same
+   *  one after (with `init.delegate` swapped in). */
+  acquire(init: TreeModelInit): TreeModelEntry;
+  dispose(): void;
+}
+
+export function createWorkspaceTreeModel(
+  workspacePath: string,
+): WorkspaceTreeModel {
+  let entry: TreeModelEntry | null = null;
+  return {
+    acquire(init) {
+      if (!entry) return (entry = buildTreeModel(workspacePath, init));
+      entry.delegate = init.delegate;
+      return entry;
+    },
+    dispose() {
+      entry?.model.cleanUp();
+      entry = null;
+    },
+  };
+}
+
+function buildTreeModel(
+  workspacePath: string,
+  init: TreeModelInit,
+): TreeModelEntry {
   const sortState: TreeSortState = {
     order: init.order,
     modifiedByRelPath: new Map(),
@@ -170,9 +206,6 @@ export function acquireTreeModel(
     initialSelectedPaths: init.initialSelectedPaths,
     sort: makeComparator(sortState),
     itemHeight: init.itemHeightPx,
-    // The same monochrome icon set the prompt composer's mention picker and
-    // the palette's quick results render (file-type-icon.tsx) — one config,
-    // every surface agrees.
     icons: FILE_ICON_CONFIG,
     // The library hard-codes width/height ATTRIBUTES of 16 on the icon svg
     // (Icon.tsx), so the --trees-icon-width variable only sizes the lane —
@@ -287,17 +320,19 @@ export function acquireTreeModel(
     }
   });
 
-  entriesByWorkspace.set(workspacePath, entry);
-
-  // Evict least-recently-used models beyond the cap.
-  while (entriesByWorkspace.size > MAX_CACHED_WORKSPACES) {
-    const [oldestKey, oldest] = entriesByWorkspace.entries().next().value as [
-      string,
-      TreeModelEntry,
-    ];
-    entriesByWorkspace.delete(oldestKey);
-    oldest.model.cleanUp();
-  }
-
   return entry;
 }
+
+declare module "@notefig/core" {
+  interface WorkspaceModules {
+    treeModel: WorkspaceTreeModel;
+  }
+}
+
+export const treeModelModule = defineModule({
+  name: "treeModel",
+  workspace: {
+    create: (ctx) => createWorkspaceTreeModel(ctx.workspace.path),
+    dispose: (treeModel) => treeModel.dispose(),
+  },
+});

@@ -15,7 +15,32 @@ import tailwindcss from "@tailwindcss/vite";
  * the Nextra site's tailwind v3).
  */
 export function sharedBuildPlugins(): PluginOption[] {
-  return [react(), tailwindcss(), flattenPierreShadowCss()];
+  return [
+    react(),
+    tailwindcss(),
+    classSelectorOptOuts(),
+    flattenPierreShadowCss(),
+  ];
+}
+
+// The typography plugin opts content out with
+// `:not(:where([class~="not-prose"],[class~="not-prose"] *))` on every
+// `.prose` rule. An attribute selector on `class` with a descendant `*` makes
+// every class change on any element restyle its whole subtree: the editor's
+// own `ProseMirror-focused` toggle restyled all of an 8,000-line document
+// (~130 ms) on each focus change — every dialog, tab switch and select-all.
+// `.not-prose` matches exactly the same elements (inside `:where`, at the
+// same zero specificity) and invalidates only when that class itself moves.
+function classSelectorOptOuts(): Plugin {
+  return {
+    name: "class-selector-opt-outs",
+    transform(code, id) {
+      if (!id.split("?")[0].endsWith(".css")) return null;
+      const optOut = /\[class~="?(not-[\w-]+)"?\]/g;
+      if (!optOut.test(code)) return null;
+      return { code: code.replace(optOut, ".$1"), map: null };
+    },
+  };
 }
 
 // @pierre/trees and @pierre/diffs ship their shadow-root stylesheets with

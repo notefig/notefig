@@ -8,10 +8,11 @@
  * 2. Content — path + content only, loaded on demand when a query asks for
  *    a path (an open tab).
  *
- * The split keeps the tree fast without reading every file. Both are
- * TanStack Query collections over the platform's fs: the fs (local or
- * remote) is the source we query, mutations write back through it, and
- * Query gives us loading and error state and retries.
+ * The split keeps the tree fast without reading every file. Both read the
+ * platform's fs through TanStack Query: the fs (local or remote) is the
+ * source we query, mutations write back through it, and Query gives us
+ * loading and error state and retries. Content is a query collection;
+ * metadata syncs its rows from the walk itself (metadata-collection.ts).
  *
  * Everything a workspace's files need — the fs, the query client — is
  * handed to `createWorkspaceFiles` by core; nothing here imports the
@@ -31,13 +32,8 @@ import {
   queryCollectionOptions,
   parseLoadSubsetOptions,
 } from "@tanstack/query-db-collection";
-import {
-  FsError,
-  isWorkspaceAccessError,
-  type FileSystemSurface,
-} from "@/adapters/platform-adapter.interface";
+import { type FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import type { FileEntry } from "@/utils/fs";
-import { IGNORE_RULES } from "@/utils/ignore";
 import { calculateContentHash } from "@/utils/hash";
 import { path as pathutil, relativeTreePath } from "@/utils/path";
 import {
@@ -47,6 +43,7 @@ import {
   type MetadataWatcher,
 } from "@/modules/files/file-sync";
 import { platformModule, queryClientModule } from "@/core/services";
+import { createMetadataCollection } from "./metadata-collection";
 
 const METADATA_REFETCH_INTERVAL_MS = 30_000;
 /** How long a walked listing counts as current: returning to a workspace
@@ -107,197 +104,6 @@ export const fileQueryKeys = {
  *  rows to directories by it. */
 function parentDirectory(path: string): string {
   return pathutil.dirname(path);
-}
-
-function createMetadataCollection(
-  { workspacePath, fs, queryClient }: FilesDeps,
-  hydratedDirs: Set<string>,
-  current: () => MetadataCollection | undefined,
-) {
-  return createCollection(
-    queryCollectionOptions<FileMetadata, string>({
-      queryKey: fileQueryKeys.metadata(workspacePath),
-      queryClient,
-
-      // Safety net for changes the fs watcher misses (network volumes,
-      // watcher gaps): periodically re-read the tree from disk.
-      refetchInterval: METADATA_REFETCH_INTERVAL_MS,
-      // A subscriber arriving (the file tree remounting on a workspace
-      // switch) re-walks only a listing older than this; with the default
-      // of 0, every return to a workspace walked it again.
-      staleTime: LISTING_FRESH_MS,
-
-      // Access errors can't be retried away — fail fast so the recovery UI
-      // (WorkspaceErrorBoundary) shows immediately.
-      retry: (failureCount, error) =>
-        !isWorkspaceAccessError(error) && failureCount < 3,
-
-      // Listing only — no per-path stat batch. Stats (modified/size)
-      // hydrate per directory via hydrateDirectoryStats when the tree
-      // shows it; the refetch re-stats already-hydrated directories so the
-      // 30s cycle stays cheap on large workspaces. One walk: the listing
-      // carries entry types.
-      queryFn: async (): Promise<FileMetadata[]> => {
-        const listing = await fs.readDirectory(workspacePath, {
-          recursive: true,
-          ignore: IGNORE_RULES,
-          includeFiles: true,
-          includeDirectories: true,
-        });
-
-        if (!listing.ok) {
-          // Rethrow typed so WorkspaceErrorBoundary can recognize
-          // permission failures and render the recovery fallback instead
-          // of DebugPanel.
-          const { type, path, message } = listing.error;
-          throw new FsError(type, path, message);
-        }
-
-        // Directories first, matching the old dirs-then-files ordering.
-        const entries = [
-          ...listing.value.filter((e) => e.type === "directory"),
-          ...listing.value.filter((e) => e.type === "file"),
-        ];
-        scratchpadDebug(
-          "metadata walk:",
-          entries
-            .filter((e) => e.path.includes("/.metrists"))
-            .map((e) => e.path),
-        );
-
-        // Re-stat children of hydrated directories so their stats stay
-        // fresh across refetches instead of pinning to hydration time.
-        const pathsToStat = entries
-          .filter((e) => hydratedDirs.has(parentDirectory(e.path)))
-          .map((e) => e.path);
-        const statMap = new Map<string, { modifiedAt: Date; size: number }>();
-        if (pathsToStat.length > 0) {
-          const statResult = await fs.getMetadata(pathsToStat);
-          for (const m of statResult.succeeded) {
-            statMap.set(m.path, { modifiedAt: m.modifiedAt, size: m.size });
-          }
-        }
-
-        // Merge, don't wipe: full-replace sync would erase hydrated stats
-        // and self-write bookkeeping for rows the walk still sees.
-        const previousRows = current();
-
-        return entries.map(({ path, type }) => {
-          const stat = statMap.get(path);
-          const previous = previousRows?.get(path);
-          return {
-            path,
-            relativePath: relativeTreePath(workspacePath, path),
-            type,
-            modified: stat?.modifiedAt ?? previous?.modified,
-            size: stat?.size ?? previous?.size,
-            contentHash: previous?.contentHash ?? "",
-          };
-        });
-      },
-
-      getKey: (item) => item.path,
-
-      onInsert: async ({ transaction }) => {
-        const files = transaction.mutations
-          .filter((m) => m.modified.type === "file")
-          .map((m) => m.modified.path);
-
-        const directories = transaction.mutations
-          .filter((m) => m.modified.type === "directory")
-          .map((m) => m.modified.path);
-
-        if (files.length > 0) {
-          const result = await fs.createFiles(files);
-          if (result.failed.length > 0) {
-            throw new Error(
-              `Failed to create files: ${result.failed.map((f) => f.message).join(", ")}`,
-            );
-          }
-        }
-
-        if (directories.length > 0) {
-          const result = await fs.createDirectories(directories);
-          if (result.failed.length > 0) {
-            throw new Error(
-              `Failed to create directories: ${result.failed.map((f) => f.message).join(", ")}`,
-            );
-          }
-        }
-      },
-
-      onUpdate: async ({ transaction, collection }) => {
-        let hasRename = false;
-        for (const mutation of transaction.mutations) {
-          const oldPath = String(mutation.key);
-          const newPath = mutation.modified.path;
-
-          if (oldPath !== newPath) {
-            hasRename = true;
-            const original = mutation.original;
-            if (original.type === "file") {
-              const moveResult = await fs.moveFile(oldPath, newPath);
-              if (!moveResult.ok) {
-                throw new Error(
-                  `Failed to move file ${oldPath} to ${newPath}: ${moveResult.error.message}`,
-                );
-              }
-            } else {
-              const moveResult = await fs.moveDirectory(oldPath, newPath);
-              if (!moveResult.ok) {
-                throw new Error(
-                  `Failed to move directory ${oldPath} to ${newPath}: ${moveResult.error.message}`,
-                );
-              }
-            }
-          }
-        }
-
-        // Renames change keys, so let the refetch rebuild the tree. Plain
-        // metadata updates (e.g. the modified timestamp after every save)
-        // must not trigger one: a full workspace scan per save is wasteful,
-        // and concurrent scans can land out of order, reverting a fresh
-        // timestamp to a stale one (files jump around in date-sorted trees).
-        // Direct-write the confirmed values into the synced store instead so
-        // state survives the optimistic overlay being dropped on commit.
-        if (hasRename) return;
-        collection.utils.writeUpsert(
-          transaction.mutations.map((m) => m.modified),
-        );
-        return { refetch: false };
-      },
-
-      onDelete: async ({ transaction }) => {
-        const files = transaction.mutations
-          .filter((m) => m.original.type === "file")
-          .map((m) => String(m.key));
-
-        const directories = transaction.mutations
-          .filter((m) => m.original.type === "directory")
-          .map((m) => String(m.key));
-
-        if (files.length > 0) {
-          const result = await fs.deleteFiles(files);
-          if (result.failed.length > 0) {
-            throw new Error(
-              `Failed to delete files: ${result.failed.map((f) => f.message).join(", ")}`,
-            );
-          }
-        }
-
-        if (directories.length > 0) {
-          const result = await fs.deleteDirectories(directories, {
-            recursive: true,
-          });
-          if (result.failed.length > 0) {
-            throw new Error(
-              `Failed to delete directories: ${result.failed.map((f) => f.message).join(", ")}`,
-            );
-          }
-        }
-      },
-    }),
-  );
 }
 
 /**
@@ -466,8 +272,10 @@ export interface FileHandle {
   create(content?: string): Promise<void>;
   /** Create it as a directory. */
   createDirectory(): Promise<void>;
-  /** Replace the file's content on disk; resolves once it is written. */
-  write(content: string): Promise<void>;
+  /** Replace the file's content on disk; resolves once it is written.
+   *  `contentHash`: the content's, when the caller has it already (the
+   *  autosave's serializer hashes off the main thread). */
+  write(content: string, contentHash?: string): Promise<void>;
   /** Move it (file or directory) to `newPath`, inside the same workspace. */
   rename(newPath: string): Promise<void>;
   /** Delete it; a directory goes with everything under it. */
@@ -498,6 +306,18 @@ export interface WorkspaceFiles {
    * fresh one follows.
    */
   refetchMetadata(): Promise<void>;
+  /**
+   * The rows for disk changes this app made behind the collections' back
+   * (the entry-time scratchpad sweep and landing), without a re-walk: at
+   * 20k files the walk is most of an entry. A walk in flight may predate
+   * the changes, so it lands first and the rows are written on top; every
+   * later walk sees them on disk. A created file brings its missing
+   * ancestor directories, as a walk would.
+   */
+  recordDiskChanges(changes: {
+    created: readonly string[];
+    deleted: readonly string[];
+  }): Promise<void>;
   /**
    * Stat the direct children of these directories and write modified/size
    * into their rows — one stat batch and one write for all of them. Callers
@@ -550,12 +370,63 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
     await queryClient.refetchQueries({ queryKey }, { cancelRefetch: false });
   };
 
+  const recordDiskChanges = async ({
+    created,
+    deleted,
+  }: {
+    created: readonly string[];
+    deleted: readonly string[];
+  }) => {
+    const queryKey = fileQueryKeys.metadata(workspacePath);
+    if (queryClient.isFetching({ queryKey }) > 0) {
+      await queryClient.refetchQueries({ queryKey }, { cancelRefetch: false });
+    }
+    const { metadata, content } = collections;
+    const missing = new Set<string>();
+    for (const path of created) {
+      for (
+        let at = path;
+        at !== workspacePath && !metadata.get(at) && !missing.has(at);
+        at = parentDirectory(at)
+      ) {
+        if (relativeTreePath(workspacePath, at) === undefined) break;
+        missing.add(at);
+      }
+    }
+    const stats = missing.size > 0 ? await fs.getMetadata([...missing]) : null;
+    // One transaction for all of them.
+    metadata.utils.writeBatch(() => {
+      for (const path of deleted) {
+        if (metadata.get(path)) metadata.utils.writeDelete(path);
+      }
+      for (const stat of stats?.succeeded ?? []) {
+        if (metadata.get(stat.path)) continue;
+        metadata.utils.writeInsert({
+          path: stat.path,
+          relativePath: relativeTreePath(workspacePath, stat.path),
+          type: stat.type,
+          modified: stat.modifiedAt,
+          size: stat.size,
+          contentHash: "",
+        });
+      }
+    });
+    for (const path of deleted) {
+      if (content.get(path)) content.utils.writeDelete(path);
+    }
+  };
+
   const seed = (): WorkspaceCollections => ({
-    metadata: createMetadataCollection(
-      deps,
+    metadata: createMetadataCollection({
+      workspacePath,
+      fs,
+      queryClient,
+      queryKey: fileQueryKeys.metadata(workspacePath),
+      refetchInterval: METADATA_REFETCH_INTERVAL_MS,
+      staleTime: LISTING_FRESH_MS,
       hydratedDirs,
-      () => collections.metadata,
-    ),
+      parentDirectory,
+    }),
     content: createContentCollection(deps, refetchMetadata),
   });
   let collections: WorkspaceCollections = seed();
@@ -604,8 +475,12 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
   const restat = async (path: string) =>
     (await fs.getMetadata([path])).succeeded[0];
 
-  const write = async (filePath: string, content: string) => {
-    const contentHash = calculateContentHash(content);
+  const write = async (
+    filePath: string,
+    content: string,
+    // Hashing an 8,000-line document is ~7 ms of main thread.
+    contentHash = calculateContentHash(content),
+  ) => {
 
     const existingContent = collections.content.get(filePath);
     const tx = existingContent
@@ -862,9 +737,8 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
     await Promise.all(waits);
   };
 
-  /** One stat batch and one write for every child of `dirs`: each write
-   *  rewrites the collection's whole query cache, so a first visit with
-   *  many folders open paid that once per folder. */
+  /** One stat batch and one write for every child of `dirs`: a first
+   *  visit with many folders open asks for them all at once. */
   const statChildren = async (dirs: string[]) => {
     // Before the first walk lands there are no rows to stat: leave the
     // directories unhydrated, so the next request does them.
@@ -897,6 +771,10 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
   };
 
   const dropQueries = () => {
+    // Stop the collections first: left to their own gc (five minutes),
+    // they hold every row and keep re-walking the listing on its interval.
+    void collections.metadata.cleanup();
+    void collections.content.cleanup();
     queryClient.removeQueries({
       queryKey: fileQueryKeys.metadata(workspacePath),
     });
@@ -918,7 +796,7 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
       content: () => collections.content.get(filePath)?.content,
       create: (content) => createFile(filePath, content),
       createDirectory: () => createDirectory(filePath),
-      write: (content) => write(filePath, content),
+      write: (content, contentHash) => write(filePath, content, contentHash),
       rename: (newPath) => rename(filePath, newPath),
       delete: () => remove(filePath),
       entry: () => entry(filePath),
@@ -936,6 +814,7 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
       await collections.metadata.utils.refetch();
     },
     refetchMetadata,
+    recordDiskChanges,
     hydrateDirectoryStats,
     updateLoadedContent,
     invalidateDerived,

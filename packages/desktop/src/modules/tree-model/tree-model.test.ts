@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
 import {
-  acquireTreeModel,
+  createWorkspaceTreeModel,
   type TreeModelEntry,
   type TreeSortState,
-} from "../tree-model-cache";
+} from "./tree-model";
 import {
   APP_DIR_NAME,
   SCRATCHPADS_REL_PATH,
@@ -21,7 +21,7 @@ function modelEntry(
   order: "name-asc" | "name-desc" | "date-modified",
 ): { model: TreeModelEntry["model"]; sortState: TreeSortState } {
   const workspacePath = `/ws-${(workspaceCounter += 1)}`;
-  entry = acquireTreeModel(workspacePath, {
+  entry = createWorkspaceTreeModel(workspacePath).acquire({
     order,
     itemHeightPx: 28,
     initialSelectedPaths: [],
@@ -41,7 +41,7 @@ function visiblePaths(model: TreeModelEntry["model"]): string[] {
   return model.getVisibleRows(0, count).map((row) => row.path);
 }
 
-describe("acquireTreeModel scratchpad pinning", () => {
+describe("tree model scratchpad pinning", () => {
   it("keeps the scratchpads root above regular files in name-asc order", () => {
     const { model } = modelEntry("name-asc");
     model.resetPaths([

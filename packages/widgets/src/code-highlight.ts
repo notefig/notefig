@@ -6,7 +6,7 @@
  * re-tokenizes nothing. A language loads in the background, and its blocks
  * are coloured when it lands; one Shiki doesn't know stays plain.
  */
-import { Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
+import { Plugin, PluginKey, type EditorState, type Transaction } from "@tiptap/pm/state";
 import { StepMap } from "@tiptap/pm/transform";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
@@ -16,7 +16,12 @@ const THEMES = { light: "pierre-light", dark: "pierre-dark" } as const;
 /** Past this a block stays plain: tokenizing it on every keystroke in it
  *  costs more than its colours are worth. */
 const MAX_BLOCK_LENGTH = 20_000;
-const key = new PluginKey<DecorationSet>("codeHighlight");
+/** The colours, and the languages the blocks name: what the view loads. */
+interface HighlightState {
+  decorations: DecorationSet;
+  languages: ReadonlySet<string>;
+}
+const key = new PluginKey<HighlightState>("codeHighlight");
 
 /** Each language asked for, and whether Shiki knew it. */
 const loads = new Map<string, Promise<boolean>>();
@@ -74,7 +79,7 @@ function codeBetween(doc: PMNode, from: number, to: number): boolean {
  * the whole transaction. A step that changes nothing's position (an attr
  * or mark step: a block's language, say) can't be placed, so it counts.
  */
-function touchesCode(tr: Transaction): boolean {
+export function touchesCode(tr: Transaction): boolean {
   return tr.mapping.maps.some((stepMap, index) => {
     if (stepMap === StepMap.empty) return true;
     const after = tr.mapping.slice(index + 1);
@@ -92,16 +97,19 @@ export function codeHighlight(): Plugin {
   // An edit leaves every block it didn't touch the same node, so only the
   // ones it touched are tokenized again.
   let cache = new WeakMap<PMNode, Token[]>();
-  const decorate = (doc: PMNode) => {
+  const decorate = (doc: PMNode): HighlightState => {
     const decorations: Decoration[] = [];
+    const languages = new Set<string>();
     eachCodeBlock(doc, (node, pos) => {
+      const lang = node.attrs.language as string | null;
+      if (lang) languages.add(lang);
       let tokens = cache.get(node);
       if (!tokens) cache.set(node, (tokens = tokensOf(node)));
       for (const [from, to, style] of tokens) {
         decorations.push(Decoration.inline(pos + 1 + from, pos + 1 + to, { style }));
       }
     });
-    return DecorationSet.create(doc, decorations);
+    return { decorations: DecorationSet.create(doc, decorations), languages };
   };
 
   return new Plugin({
@@ -111,38 +119,41 @@ export function codeHighlight(): Plugin {
       // An edit away from every code block (most typing) only moves the
       // colours along: walking the document for it cost ~5 ms a keystroke
       // in an 8,000-line one.
-      apply: (tr, set) => {
+      apply: (tr, value) => {
         if (tr.getMeta(key) || (tr.docChanged && touchesCode(tr))) return decorate(tr.doc);
-        return tr.docChanged ? set.map(tr.mapping, tr.doc) : set;
+        return tr.docChanged
+          ? { decorations: value.decorations.map(tr.mapping, tr.doc), languages: value.languages }
+          : value;
       },
     },
-    props: { decorations: (state) => key.getState(state) },
+    props: { decorations: (state) => key.getState(state)!.decorations },
     // Loads the languages the blocks name, then re-colours. Each view waits
     // on the shared load itself: one made while another's load was under way
     // must still hear when it lands.
     view(view) {
       const awaited = new Set<string>();
       let live = true;
-      const load = () =>
-        eachCodeBlock(view.state.doc, (node) => {
-          const lang = node.attrs.language as string | null;
-          if (lang && !awaited.has(lang)) {
-            awaited.add(lang);
-            if (!loads.has(lang)) {
-              const themes = Object.values(THEMES);
-              loads.set(lang, getSharedHighlighter({ themes, langs: [lang] }).then(() => true, () => false));
-            }
-            void loads.get(lang)!.then((known) => {
-              if (!known || !live) return;
-              cache = new WeakMap();
-              view.dispatch(view.state.tr.setMeta(key, true).setMeta("addToHistory", false));
-            });
+      const load = (languages: ReadonlySet<string>) => {
+        for (const lang of languages) {
+          if (awaited.has(lang)) continue;
+          awaited.add(lang);
+          if (!loads.has(lang)) {
+            const themes = Object.values(THEMES);
+            loads.set(lang, getSharedHighlighter({ themes, langs: [lang] }).then(() => true, () => false));
           }
-        });
-      load();
+          void loads.get(lang)!.then((known) => {
+            if (!known || !live) return;
+            cache = new WeakMap();
+            view.dispatch(view.state.tr.setMeta(key, true).setMeta("addToHistory", false));
+          });
+        }
+      };
+      const languagesOf = (state: EditorState) => key.getState(state)!.languages;
+      load(languagesOf(view.state));
       return {
+        // The languages are read again only when the blocks were.
         update: (_view, previous) => {
-          if (view.state.doc !== previous.doc) load();
+          if (languagesOf(view.state) !== languagesOf(previous)) load(languagesOf(view.state));
         },
         destroy: () => {
           live = false;

@@ -29,6 +29,42 @@
     {
       "id": "widget-caret-move",
       "title": "Prompt widget: caret move"
+    },
+    {
+      "id": "palette-open",
+      "title": "Open the command palette"
+    },
+    {
+      "id": "settings-open",
+      "title": "Open settings"
+    },
+    {
+      "id": "tab-switch",
+      "title": "Switch tabs (README ↔ 8k-line doc)"
+    },
+    {
+      "id": "chat-open",
+      "title": "Switch to an agent tab (240-entry transcript)"
+    },
+    {
+      "id": "file-open",
+      "title": "Open a file from the palette"
+    },
+    {
+      "id": "new-scratchpad",
+      "title": "New scratchpad"
+    },
+    {
+      "id": "search-open",
+      "title": "Open search"
+    },
+    {
+      "id": "search-type",
+      "title": "Search: type a query"
+    },
+    {
+      "id": "search-results",
+      "title": "Search: last keystroke → results (incl. 300 ms debounce)"
     }
   ]
 }

@@ -38,6 +38,7 @@ import {
   MINIMAP_STILL_DOT,
   deriveMinimapEntries,
   dotTitle,
+  shiftMinimapEntries,
   type MinimapDotState,
   type MinimapEntry,
   type MinimapObserver,
@@ -136,6 +137,8 @@ export class MinimapRailView implements PluginView {
   private lastSerialized = "";
   /** The doc the last render read; a selection-only update keeps it. */
   private lastDoc: PMNode | null = null;
+  /** What the last render derived from `lastDoc`. */
+  private entries: readonly MinimapEntry[] = [];
 
   constructor(
     view: EditorView,
@@ -238,8 +241,12 @@ export class MinimapRailView implements PluginView {
     // or with a source's own state, which its observer reports (above).
     const doc = this.view.state.doc;
     if (doc === this.lastDoc) return;
+    const entries =
+      (this.lastDoc &&
+        shiftMinimapEntries(this.lastDoc, doc, this.entries, this.sources)) ??
+      deriveMinimapEntries(doc, this.sources);
     this.lastDoc = doc;
-    const entries = deriveMinimapEntries(doc, this.sources);
+    this.entries = entries;
     const serialized = JSON.stringify(entries);
     if (serialized === this.lastSerialized) return;
     this.lastSerialized = serialized;

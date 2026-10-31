@@ -22,6 +22,7 @@ import {
   CommandItem,
   CommandList,
 } from "@notefig/ui/command";
+import { touchesCode } from "./code-highlight";
 
 const LANGUAGES = [
   "bash", "c", "cpp", "csharp", "css", "diff", "go", "html", "java",
@@ -156,7 +157,13 @@ export function codeLanguagePicker(): Plugin {
     key,
     state: {
       init: (_config, { doc }) => decorate(doc),
-      apply: (tr, set) => (tr.docChanged ? decorate(tr.doc) : set),
+      // An edit away from every code block (most typing) only moves the
+      // pickers along: walking the document for it cost ~1 ms a keystroke
+      // in an 8,000-line one.
+      apply: (tr, set) => {
+        if (!tr.docChanged) return set;
+        return touchesCode(tr) ? decorate(tr.doc) : set.map(tr.mapping, tr.doc);
+      },
     },
     props: { decorations: (state) => key.getState(state) },
   });
