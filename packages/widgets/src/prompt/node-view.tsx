@@ -261,7 +261,7 @@ function appendPromptTr(
  * widget's document is recorded, and the marker follows the service's
  * binding from then on.
  */
-function usePromptBinding({
+export function usePromptBinding({
   prompts,
   host,
   filePath,
@@ -300,20 +300,28 @@ function usePromptBinding({
   // — so it shouldn't depend on it.
   const hostRef = useRef(host);
   hostRef.current = host;
-  // An unbind (below) cancels an adoption still waiting on its answer: the
-  // marker it would adopt is the one the unbind is taking out.
-  const cancelRestore = useRef(() => {});
+  // An unbind (below) cancels an adoption of the session it unbinds still
+  // waiting on its answer: the marker it would adopt is the one the unbind
+  // is taking out. An adoption of another session (the marker rewritten
+  // from outside) goes on.
+  const pendingRestore = useRef<{ taskId: string; cancel(): void } | null>(
+    null,
+  );
   useEffect(() => {
     if (!filePath || !blobId || !persistedTaskId) return;
     let cancelled = false;
-    cancelRestore.current = () => {
-      cancelled = true;
+    const pending = {
+      taskId: persistedTaskId,
+      cancel: () => {
+        cancelled = true;
+      },
     };
+    pendingRestore.current = pending;
     void hostRef.current.isTaskReachable(persistedTaskId).then((reachable) => {
       if (cancelled || !reachable) return;
       prompts.restore(blobId, persistedTaskId);
     });
-    return () => cancelRestore.current();
+    return pending.cancel;
   }, [filePath, blobId, persistedTaskId, prompts]);
 
   // Where this widget lives, for the app's session → widget lookups (the
@@ -343,7 +351,9 @@ function usePromptBinding({
     const before = previous.current;
     previous.current = boundTaskId;
     if (boundTaskId === null && before === null) return;
-    if (boundTaskId === null) cancelRestore.current();
+    if (boundTaskId === null && pendingRestore.current?.taskId === before) {
+      pendingRestore.current.cancel();
+    }
     if (persistedTaskId !== boundTaskId) writeTaskId(boundTaskId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boundTaskId]);
