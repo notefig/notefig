@@ -66,6 +66,8 @@ const TRIPLES = {
   "aarch64-apple-darwin": { os: "darwin", arch: "arm64", nodeDist: "darwin-arm64" },
   "x86_64-apple-darwin": { os: "darwin", arch: "x64", nodeDist: "darwin-x64" },
   "x86_64-pc-windows-msvc": { os: "win32", arch: "x64", nodeDist: "win-x64" },
+  "x86_64-unknown-linux-gnu": { os: "linux", arch: "x64", nodeDist: "linux-x64" },
+  "aarch64-unknown-linux-gnu": { os: "linux", arch: "arm64", nodeDist: "linux-arm64" },
 };
 
 function hostTriple() {
@@ -153,7 +155,8 @@ async function downloadNode(t, version, cacheDir, expectedBinary) {
     rmSync(archivePath);
     throw new Error(`checksum mismatch for ${archive}: got ${actual}, published ${expected}`);
   }
-  // bsdtar (macOS, Windows) reads both formats; gzip is auto-detected.
+  // bsdtar (macOS, Windows) reads both formats; bsdtar and GNU tar (Linux)
+  // both auto-detect gzip.
   run("tar", ["-xf", archivePath, "-C", cacheDir]);
   rmSync(archivePath);
   if (!existsSync(expectedBinary)) {
