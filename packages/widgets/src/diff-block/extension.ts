@@ -26,7 +26,7 @@ import type { Mappable } from "@tiptap/pm/transform";
 import type { FileDiffMetadata } from "@pierre/diffs";
 import { createDiffBlockElement, WORKSPACE_ATTRIBUTE, type DiffBlockElement } from "./element";
 import { parseDiffBlock } from "./patch";
-import { touchesCode } from "../code-highlight";
+import { eachCodeBlock, touchesCode } from "../code-blocks";
 import "./extension.css";
 
 /** A code block with a diff: where it is, and its diff as Pierre reads it
@@ -68,15 +68,12 @@ const ARROWS: Record<string, "up" | "down" | "left" | "right"> = {
 function scan(doc: PMNode, previous: readonly DiffBlock[]): DiffBlock[] {
   const known = new Map(previous.map((block) => [block.node, block.diff]));
   const blocks: DiffBlock[] = [];
-  doc.descendants((node, pos) => {
-    if (node.type.name !== "codeBlock") return !node.isTextblock;
-    if (node.attrs.diff === true) {
-      const diff = known.has(node)
-        ? (known.get(node) ?? null)
-        : parseDiffBlock(node.attrs.language as string | null, node.textContent);
-      blocks.push({ from: pos, to: pos + node.nodeSize, node, diff });
-    }
-    return false;
+  eachCodeBlock(doc, (node, pos) => {
+    if (node.attrs.diff !== true) return;
+    const diff = known.has(node)
+      ? (known.get(node) ?? null)
+      : parseDiffBlock(node.attrs.language as string | null, node.textContent);
+    blocks.push({ from: pos, to: pos + node.nodeSize, node, diff });
   });
   return blocks;
 }
@@ -84,8 +81,9 @@ function scan(doc: PMNode, previous: readonly DiffBlock[]): DiffBlock[] {
 /** The blocks where an edit that touched no code block moved them — most
  *  typing, which walking the document for cost ~0.3 ms a keystroke in an
  *  8,000-line one. Null when it may have changed one: scan again. */
-function moved(tr: Transaction, blocks: readonly DiffBlock[]): DiffBlock[] | null {
+function moved(tr: Transaction, blocks: readonly DiffBlock[]): readonly DiffBlock[] | null {
   if (touchesCode(tr)) return null;
+  if (blocks.length === 0) return blocks;
   const next = blocks.map((block) => ({ ...block, from: tr.mapping.map(block.from, 1), to: tr.mapping.map(block.to, -1) }));
   return next.every((block) => tr.doc.nodeAt(block.from) === block.node) ? next : null;
 }

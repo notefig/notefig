@@ -6,11 +6,11 @@
  * re-tokenizes nothing. A language loads in the background, and its blocks
  * are coloured when it lands; one Shiki doesn't know stays plain.
  */
-import { Plugin, PluginKey, type EditorState, type Transaction } from "@tiptap/pm/state";
-import { StepMap } from "@tiptap/pm/transform";
+import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { getHighlighterIfLoaded, getSharedHighlighter } from "@pierre/diffs";
+import { eachCodeBlock, touchesCode } from "./code-blocks";
 
 const THEMES = { light: "pierre-light", dark: "pierre-dark" } as const;
 /** Past this a block stays plain: tokenizing it on every keystroke in it
@@ -49,48 +49,6 @@ function tokensOf(node: PMNode): Token[] {
         .map(([property, value]) => `${property}:${value}`)
         .join(";"),
     ]);
-}
-
-/** Walk `doc`'s code blocks, never into the text of any other block. */
-function eachCodeBlock(
-  doc: PMNode,
-  visit: (node: PMNode, pos: number) => void,
-): void {
-  doc.descendants((node, pos) => {
-    if (node.type.name === "codeBlock") visit(node, pos);
-    else return !node.isTextblock;
-    return false;
-  });
-}
-
-/** Whether `doc` has a code block anywhere in [from, to]. */
-function codeBetween(doc: PMNode, from: number, to: number): boolean {
-  let found = false;
-  doc.nodesBetween(from, to, (node) => {
-    if (node.type.name === "codeBlock") found = true;
-    return !found && !node.isTextblock;
-  });
-  return found;
-}
-
-/**
- * Whether any step of `tr` changed a code block, made one or unmade one:
- * each changed range is checked in the document before its step and after
- * the whole transaction. A step that changes nothing's position (an attr
- * or mark step: a block's language, say) can't be placed, so it counts.
- */
-export function touchesCode(tr: Transaction): boolean {
-  return tr.mapping.maps.some((stepMap, index) => {
-    if (stepMap === StepMap.empty) return true;
-    const after = tr.mapping.slice(index + 1);
-    let touched = false;
-    stepMap.forEach((oldFrom, oldTo, newFrom, newTo) => {
-      touched ||=
-        codeBetween(tr.docs[index], oldFrom, oldTo) ||
-        codeBetween(tr.doc, after.map(newFrom, -1), after.map(newTo, 1));
-    });
-    return touched;
-  });
 }
 
 export function codeHighlight(): Plugin {

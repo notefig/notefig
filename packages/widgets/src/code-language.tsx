@@ -22,7 +22,7 @@ import {
   CommandItem,
   CommandList,
 } from "@notefig/ui/command";
-import { touchesCode } from "./code-highlight";
+import { eachCodeBlock, touchesCode } from "./code-blocks";
 
 const LANGUAGES = [
   "bash", "c", "cpp", "csharp", "css", "diff", "go", "html", "java",
@@ -133,8 +133,7 @@ function mount(view: EditorView, getPos: () => number | undefined, language: str
 
 function decorate(doc: PMNode): DecorationSet {
   const decorations: Decoration[] = [];
-  doc.descendants((node, pos) => {
-    if (node.type.name !== "codeBlock") return true;
+  eachCodeBlock(doc, (node, pos) => {
     const language = (node.attrs.language as string | null) ?? "";
     decorations.push(
       Decoration.widget(pos + 1, (view, getPos) => mount(view, getPos, language), {
@@ -147,7 +146,6 @@ function decorate(doc: PMNode): DecorationSet {
         destroy: (host) => queueMicrotask(() => roots.get(host as HTMLElement)?.unmount()),
       }),
     );
-    return false;
   });
   return DecorationSet.create(doc, decorations);
 }
