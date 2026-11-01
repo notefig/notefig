@@ -115,10 +115,28 @@ describe("metadata rows against the walk", () => {
     expect(paths()).toEqual([`${WS}/b.md`]);
   });
 
-  it("keeps a directly written row no walk lists (an ignored path)", async () => {
-    files.collections.metadata.utils.writeInsert(row(`${WS}/ignored.md`));
+  it("a walk drops a directly written row it doesn't list", async () => {
+    // Created by the app, then gone from disk before any walk listed it.
+    await files.file(`${WS}/new.md`).create();
+    disk.delete(`${WS}/new.md`);
     await files.refresh();
-    expect(paths()).toContain(`${WS}/ignored.md`);
+    expect(paths()).toEqual([`${WS}/a.md`, `${WS}/b.md`]);
+  });
+
+  it("rows come back when the collection restarts after a cleanup", async () => {
+    // What TanStack DB's gc does to a collection nothing subscribes to.
+    await files.collections.metadata.cleanup();
+    await files.collections.metadata.preload();
+    expect(paths()).toEqual([`${WS}/a.md`, `${WS}/b.md`]);
+    await files.refresh();
+    expect(paths()).toEqual([`${WS}/a.md`, `${WS}/b.md`]);
+  });
+
+  it("a direct write after the workspace closes is dropped, not thrown", () => {
+    files.dispose();
+    expect(() =>
+      files.collections.metadata.utils.writeInsert(row(`${WS}/late.md`)),
+    ).not.toThrow();
   });
 
   it("creating a file confirms its row without a walk", async () => {

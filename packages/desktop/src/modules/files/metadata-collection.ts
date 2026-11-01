@@ -62,12 +62,10 @@ export function createMetadataCollection({
   hydratedDirs,
   parentDirectory,
 }: MetadataCollectionDeps) {
-  /** The synced rows: what a walk diffs against. */
+  /** The synced rows: what a walk diffs against. A walk drops any row it
+   *  doesn't list, directly written ones included, as the query
+   *  collection's full replace did. */
   const synced = new Map<string, FileMetadata>();
-  /** The paths the last landed walk listed. A walk only drops rows an
-   *  earlier walk listed: a row written directly for a path no walk sees
-   *  (an ignored one) stays, as it always has. */
-  let listed = new Set<string>();
   /** Rows written directly since the running walk started: its listing may
    *  predate them, so it neither drops nor overwrites them. */
   const writtenDuringWalk = new Set<string>();
@@ -76,8 +74,9 @@ export function createMetadataCollection({
   let batch: Write[] | null = null;
 
   const apply = (writes: Write[]) => {
-    if (writes.length === 0) return;
-    if (!handle) throw new Error("metadata collection is not syncing");
+    // Not syncing (cleaned up: closed, or gc'd): nothing to write into, and
+    // a restart walks the disk afresh.
+    if (writes.length === 0 || !handle) return;
     // Immediate: a direct write lands even while a user transaction is
     // persisting (a mutation handler writes its own confirmed rows).
     handle.begin({ immediate: true });
@@ -177,14 +176,12 @@ export function createMetadataCollection({
       if (synced.get(row.path) === row) continue;
       writes.push(upsert(row));
     }
-    for (const path of listed) {
-      if (seen.has(path)) continue;
-      // Written since this walk started, so its absence may be stale: keep
-      // it listed and let the next walk decide.
-      if (writtenDuringWalk.has(path)) seen.add(path);
-      else if (synced.has(path)) writes.push({ type: "delete", key: path });
+    for (const path of synced.keys()) {
+      // Written since this walk started, so its absence may be stale: the
+      // next walk decides.
+      if (seen.has(path) || writtenDuringWalk.has(path)) continue;
+      writes.push({ type: "delete", key: path });
     }
-    listed = seen;
     apply(writes);
   };
 
@@ -244,6 +241,10 @@ export function createMetadataCollection({
         return () => {
           unsubscribe();
           handle = null;
+          // Cleanup empties the collection, so a restart (after gc) must
+          // diff the next listing against no rows, not the old ones.
+          synced.clear();
+          writtenDuringWalk.clear();
         };
       },
     },
