@@ -28,8 +28,12 @@ import {
   type FileSystemSurface,
 } from "@/adapters/platform-adapter.interface";
 import { IGNORE_RULES } from "@/utils/ignore";
-import { relativeTreePath } from "@/utils/path";
+import { path as pathutil, relativeTreePath } from "@/utils/path";
 import type { FileMetadata } from "./files";
+
+/** Safety net for changes the fs watcher misses (network volumes, watcher
+ *  gaps): the tree is re-read from disk this often. */
+const REFETCH_INTERVAL_MS = 30_000;
 
 type Write = ChangeMessageOrDeleteKeyMessage<FileMetadata, string>;
 type ObserverResult = QueryObserverResult<FileMetadata[], Error>;
@@ -45,11 +49,11 @@ export interface MetadataCollectionDeps {
   fs: FileSystemSurface;
   queryClient: QueryClient;
   queryKey: readonly unknown[];
-  refetchInterval: number;
+  /** A subscriber arriving (the file tree remounting on a workspace switch)
+   *  re-walks only a listing older than this. */
   staleTime: number;
   /** Directories whose children have been stat'd: the walk re-stats them. */
   hydratedDirs: ReadonlySet<string>;
-  parentDirectory(path: string): string;
 }
 
 export function createMetadataCollection({
@@ -57,10 +61,8 @@ export function createMetadataCollection({
   fs,
   queryClient,
   queryKey,
-  refetchInterval,
   staleTime,
   hydratedDirs,
-  parentDirectory,
 }: MetadataCollectionDeps) {
   /** The synced rows: what a walk diffs against. A walk drops any row it
    *  doesn't list, directly written ones included, as the query
@@ -125,7 +127,7 @@ export function createMetadataCollection({
     const statMap = new Map<string, { modifiedAt: Date; size: number }>();
     if (hydratedDirs.size > 0) {
       const pathsToStat = entries
-        .filter((e) => hydratedDirs.has(parentDirectory(e.path)))
+        .filter((e) => hydratedDirs.has(pathutil.dirname(e.path)))
         .map((e) => e.path);
       if (pathsToStat.length > 0) {
         const statResult = await fs.getMetadata(pathsToStat);
@@ -188,7 +190,7 @@ export function createMetadataCollection({
   const observer = new QueryObserver<FileMetadata[], Error>(queryClient, {
     queryKey,
     queryFn: walk,
-    refetchInterval,
+    refetchInterval: REFETCH_INTERVAL_MS,
     staleTime,
     // Rows are reconciled by reference above; sharing would walk every
     // row of both listings for nothing.

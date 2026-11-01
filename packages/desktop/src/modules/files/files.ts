@@ -45,7 +45,6 @@ import {
 import { platformModule, queryClientModule } from "@/core/services";
 import { createMetadataCollection } from "./metadata-collection";
 
-const METADATA_REFETCH_INTERVAL_MS = 30_000;
 /** How long a walked listing counts as current: returning to a workspace
  *  (its tree remounting, its focus) re-walks only an older one. */
 const LISTING_FRESH_MS = 10_000;
@@ -422,10 +421,8 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
       fs,
       queryClient,
       queryKey: fileQueryKeys.metadata(workspacePath),
-      refetchInterval: METADATA_REFETCH_INTERVAL_MS,
       staleTime: LISTING_FRESH_MS,
       hydratedDirs,
-      parentDirectory,
     }),
     content: createContentCollection(deps, refetchMetadata),
   });
