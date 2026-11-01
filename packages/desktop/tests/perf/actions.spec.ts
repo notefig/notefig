@@ -31,6 +31,12 @@ import { withShim } from "./shim";
 /** Samples per action. */
 const ROUNDS = Number(process.env.PERF_ACTION_ROUNDS ?? 10);
 
+/** Round 0 of each action is an extra one, its first-ever open (a first
+ *  mount, cold code) that no later open pays: it lands under
+ *  `<label>:warmup`, which no SLO reads, so it can't be the p95. */
+const labelFor = (label: string, round: number) =>
+  round === 0 ? `${label}:warmup` : label;
+
 /** The large document's first line. */
 const LARGE_SENTINEL = "Large document";
 
@@ -214,39 +220,39 @@ test("second-class actions in an open workspace", async ({ page }) => {
     await installProbe(page);
     await openSession(page, workspace);
 
-    for (let i = 0; i < ROUNDS; i++) {
+    for (let i = 0; i <= ROUNDS; i++) {
       await action(
         page,
-        "palette-open",
+        labelFor("palette-open", i),
         { selector: "[cmdk-input]", focused: true },
         () => page.keyboard.press("Control+k"),
       );
       await press(page, "Escape");
     }
 
-    for (let i = 0; i < ROUNDS; i++) {
+    for (let i = 0; i <= ROUNDS; i++) {
       await action(
         page,
-        "settings-open",
+        labelFor("settings-open", i),
         { selector: '[role="dialog"]', text: "Appearance" },
         () => page.keyboard.press("Control+Shift+Comma"),
       );
       await press(page, "Escape");
     }
 
-    for (let i = 0; i < ROUNDS; i++) {
-      await action(page, "tab-switch", editorShowing(README_SENTINEL), () =>
+    for (let i = 0; i <= ROUNDS; i++) {
+      await action(page, labelFor("tab-switch", i), editorShowing(README_SENTINEL), () =>
         page.keyboard.press("Control+1"),
       );
-      await action(page, "tab-switch", editorShowing(LARGE_SENTINEL), () =>
+      await action(page, labelFor("tab-switch", i), editorShowing(LARGE_SENTINEL), () =>
         page.keyboard.press("Control+2"),
       );
     }
 
-    for (let i = 0; i < ROUNDS; i++) {
+    for (let i = 0; i <= ROUNDS; i++) {
       await action(
         page,
-        "chat-open",
+        labelFor("chat-open", i),
         {
           selector: '[data-entry-type="assistant"]',
           text: CHAT_SENTINEL,
@@ -258,7 +264,7 @@ test("second-class actions in an open workspace", async ({ page }) => {
 
     // From README.md, which the opened file replaces (a preview open).
     await press(page, "Control+1");
-    for (let i = 0; i < ROUNDS; i++) {
+    for (let i = 0; i <= ROUNDS; i++) {
       await press(page, "Control+p");
       await page.keyboard.type(`topic-${i}/note-${i + 10}`);
       await page.waitForTimeout(300);
@@ -268,7 +274,7 @@ test("second-class actions in an open workspace", async ({ page }) => {
       const match = value?.match(/area-(\d+)\/topic-(\d+)\/note-(\d+)\.md$/);
       expect(match, `palette picked ${value}`).toBeTruthy();
       const [, a, t, n] = match!;
-      await action(page, "file-open", editorShowing(`Note ${a}.${t}.${n}`), () =>
+      await action(page, labelFor("file-open", i), editorShowing(`Note ${a}.${t}.${n}`), () =>
         page.keyboard.press("Enter"),
       );
       await page.evaluate(
@@ -284,10 +290,10 @@ test("second-class actions in an open workspace", async ({ page }) => {
       await page.waitForTimeout(500);
     }
 
-    for (let i = 0; i < ROUNDS; i++) {
+    for (let i = 0; i <= ROUNDS; i++) {
       await action(
         page,
-        "new-scratchpad",
+        labelFor("new-scratchpad", i),
         {
           selector: '.ProseMirror[contenteditable="true"]',
           empty: true,
@@ -299,22 +305,22 @@ test("second-class actions in an open workspace", async ({ page }) => {
     }
 
     await press(page, "Control+2");
-    for (let i = 0; i < ROUNDS; i++) {
+    for (let i = 0; i <= ROUNDS; i++) {
       await showFiles(page);
       await action(
         page,
-        "search-open",
+        labelFor("search-open", i),
         { selector: 'input[placeholder^="Search "]', focused: true },
         () => page.keyboard.press("Control+Shift+f"),
       );
       const query = `Note ${i}.${i + 1}.${i + 2}`;
-      await setLabel(page, "search-type");
+      await setLabel(page, labelFor("search-type", i));
       for (const char of query.slice(0, -1)) await stroke(page, char);
       // The search itself runs in the backend, and under load the shim's
       // occasionally comes back empty: a missed sample, not a failed run.
       await action(
         page,
-        "search-results",
+        labelFor("search-results", i),
         { selector: '[class*="bg-highlight"]', text: query },
         () => page.keyboard.press(query.slice(-1)),
       ).catch((error: Error) => console.warn(error.message));

@@ -196,9 +196,14 @@ export async function action(
   input: () => Promise<void>,
 ): Promise<number> {
   await page.evaluate(armAction, { label, shown });
-  await input();
-  const ms = await page.evaluate(() => window.__perfAction);
-  await page.waitForTimeout(500);
-  await setLabel(page, null);
-  return ms;
+  try {
+    await input();
+    const ms = await page.evaluate(() => window.__perfAction);
+    await page.waitForTimeout(500);
+    return ms;
+  } finally {
+    // Even for a missed sample: what follows (cleanup keys, the next
+    // action's input) must not land under this label.
+    await setLabel(page, null);
+  }
 }
