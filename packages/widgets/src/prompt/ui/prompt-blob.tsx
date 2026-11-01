@@ -1027,10 +1027,11 @@ function openBoundChatAction(
 
 /**
  * The draft as the face shows it. The node view renders the face for an
- * edit to the draft only when its emptiness changes, or in the states that
- * show its text (`liveDraft`), so the prop can trail the document by a few
- * keystrokes. Those states read the document itself: entering one (Send)
- * renders from the widget's own subscription, with the prop as it was.
+ * edit to the draft only in the states that show its text (`liveDraft`),
+ * so elsewhere the prop trails the document: by any number of keystrokes.
+ * (The draft's emptiness is its own node view's to show: PromptDraftNode.)
+ * Those states read the document itself: entering one (Send) renders from
+ * the widget's own subscription, with the prop as it was.
  */
 function shownDraft(
   capabilities: WidgetCapabilities,
