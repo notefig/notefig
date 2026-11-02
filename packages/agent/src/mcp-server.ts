@@ -62,7 +62,7 @@ async function dispatchToolCall(
   const ctx = deps.ctx;
   if (tool.requiresPermission) {
     const title = deps.translate(tool.title);
-    const detail = tool.describeCall?.(input);
+    const detail = tool.describeCall?.(input, ctx);
     const response = await deps.permissionBroker.request({
       sessionId: ctx.taskId,
       // newEventId: unique even for same-millisecond calls (Date.now() collides).

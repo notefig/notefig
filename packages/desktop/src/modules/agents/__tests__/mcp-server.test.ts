@@ -366,7 +366,7 @@ describe("createMcpRequestHandler", () => {
     expect(result.content[0].text).toMatch(/permission denied/);
   });
 
-  it("tools/call: process_start's approval card names the command it would run", async () => {
+  it("tools/call: process_start's approval card names the command and the folder it runs in", async () => {
     const broker = new PermissionBroker(ctx.taskId, store.permissionRequests);
     const pending = handler(broker)({
       jsonrpc: "2.0",
@@ -378,7 +378,9 @@ describe("createMcpRequestHandler", () => {
     const row = store.permissionRequests.toArray.find(
       (r) => r.taskId === ctx.taskId && r.status === "pending",
     );
-    expect(row?.title).toBe(`${i18n.t("agentToolProcessStart")}: rm -rf build`);
+    expect(row?.title).toBe(
+      `${i18n.t("agentToolProcessStart")}: rm -rf build (in ${ctx.workspacePath})`,
+    );
     broker.respond(row!.id, {
       outcome: { outcome: "selected", optionId: "deny" },
     });

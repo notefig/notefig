@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AgentTool } from "@notefig/agent";
 import { PROCESS_MAX_LINES } from "@notefig/widgets";
+import { workspaceKey } from "@/utils/path";
 
 const InputSchema = z.object({
   blobId: z.string().min(1),
@@ -29,7 +30,12 @@ export const processOutput: AgentTool<
     const blocks = ctx.services.processBlocks;
     await blocks.loaded();
     const block = blocks.get(blobId);
-    if (!block.command || blocks.cwdOf(blobId) !== ctx.workspacePath) {
+    const cwd = blocks.cwdOf(blobId);
+    if (
+      !block.command ||
+      cwd === undefined ||
+      workspaceKey(cwd) !== workspaceKey(ctx.workspacePath)
+    ) {
       return { ok: false, error: `No process block ${blobId}` };
     }
     return {

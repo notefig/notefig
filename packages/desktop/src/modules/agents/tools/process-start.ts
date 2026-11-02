@@ -16,7 +16,7 @@ const InputSchema = z.object({
  *
  * Permission-gated: it runs a command outside the harness's own shell, and
  * past whatever gate the harness puts on that. The approval card names the
- * command (`describeCall`); it runs in the workspace root, always.
+ * command and the folder it runs in (`describeCall`).
  */
 export const processStart: AgentTool<
   z.infer<typeof InputSchema>,
@@ -33,7 +33,7 @@ export const processStart: AgentTool<
     "output with `process_output`.",
   input: InputSchema,
   requiresPermission: true,
-  describeCall: (input) => input.command,
+  describeCall: (input, ctx) => `${input.command} (in ${ctx.workspacePath})`,
   async execute(ctx, input) {
     const blobId = await ctx.services.processBlocks.start({
       command: input.command,

@@ -29,7 +29,7 @@ export interface AgentTool<In, Out> {
   /** For a gated tool whose calls differ in what they do: this call, shown
    *  after the title on the approval card, so the user approves the call,
    *  not just the tool. */
-  describeCall?(input: In): string;
+  describeCall?(input: In, ctx: ToolContext): string;
   execute(ctx: ToolContext, input: In): Promise<ToolResult<Out>>;
 }
 

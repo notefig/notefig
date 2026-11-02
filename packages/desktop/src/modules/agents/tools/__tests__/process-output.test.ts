@@ -58,6 +58,13 @@ describe("process_output", () => {
     ).resolves.toEqual({ ok: false, error: "No process block blob_forged" });
   });
 
+  it("knows its workspace under another spelling of the path", async () => {
+    const respelled = { ...ctx, workspacePath: "/ws/" };
+    await expect(
+      processOutput.execute(respelled, { blobId: "blob_proc_1" }),
+    ).resolves.toMatchObject({ ok: true });
+  });
+
   it("refuses another workspace's block", async () => {
     await expect(
       processOutput.execute(ctx, { blobId: "blob_proc_elsewhere" }),
