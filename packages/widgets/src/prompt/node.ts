@@ -6,6 +6,7 @@
  * makes the worker's parse/serialize output identical to the editor's.
  */
 import { Node } from "@tiptap/core";
+import { replaceMarkerComments } from "../marker-comments";
 import { parsePromptMarkerData, serializePromptMarker } from "./marker-codec";
 
 /** The schema node name. Exported so callers compose content expressions
@@ -167,60 +168,10 @@ export const AiPromptNodeBase = Node.create({
         },
         parse: {
           updateDOM(element: HTMLElement) {
-            replacePromptMarkerComments(element);
+            replaceMarkerComments(element, "ai-prompt", parsePromptMarkerData);
           },
         },
       },
     };
   },
 });
-
-/**
- * Rewrite our marker comments into the element `parseHTML` above matches.
- *
- * This hook is the last moment the comments exist: markdown-it emits them
- * verbatim (html: true) and DOMParser keeps them, but ProseMirror's own
- * DOMParser handles only element and text nodes, so anything still a comment
- * by then is dropped without a trace.
- *
- * A manual childNodes recursion rather than querySelectorAll (which cannot
- * select comments) or a TreeWalker (which the conversion worker's linkedom
- * shim does not expose) — plain childNodes works in both DOMs.
- *
- * A repeated marker (an agent rewriting the file can copy it) is dropped:
- * every widget keys its state by blobId, so a second one would share the
- * first's round. Only the first copy becomes a widget.
- */
-function replacePromptMarkerComments(element: HTMLElement): void {
-  const COMMENT_NODE = 8;
-  const ELEMENT_NODE = 1;
-  const seen = new Set<string>();
-  // `Node` in this module is Tiptap's; the DOM one needs its global name.
-  const walk = (parent: globalThis.Node): void => {
-    // Snapshot: replaceChild mutates the live childNodes list.
-    for (const child of Array.from(parent.childNodes)) {
-      if (child.nodeType === ELEMENT_NODE) {
-        walk(child);
-        continue;
-      }
-      if (child.nodeType !== COMMENT_NODE) continue;
-      const marker = parsePromptMarkerData(
-        (child as unknown as { data: string }).data ?? "",
-      );
-      if (!marker) continue;
-      if (seen.has(marker.blobId)) {
-        parent.removeChild(child);
-        continue;
-      }
-      seen.add(marker.blobId);
-      const doc = element.ownerDocument;
-      if (!doc) continue;
-      const replacement = doc.createElement("div");
-      replacement.setAttribute("data-type", "ai-prompt");
-      replacement.setAttribute("data-blob-id", marker.blobId);
-      replacement.setAttribute("data-task-id", marker.taskId);
-      parent.replaceChild(replacement, child);
-    }
-  };
-  walk(element);
-}
