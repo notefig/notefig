@@ -34,6 +34,7 @@
 import type { Node } from "@tiptap/core";
 import type { MinimapSource } from "./minimap/contract";
 import type { PromptWidgetsApi } from "./prompt/widgets-service";
+import type { ProcessBlocksApi } from "./process/process-blocks";
 
 /**
  * What a document's widgets are scoped to: which file they sit in, which
@@ -46,6 +47,8 @@ export interface WidgetRendererOptions {
   basePath: string;
   /** Every prompt widget's state (./prompt/widgets-service.ts). */
   prompts: PromptWidgetsApi;
+  /** Every process block's state (./process/process-blocks.ts). */
+  processes: ProcessBlocksApi;
 }
 import type { EditorView } from "@tiptap/pm/view";
 

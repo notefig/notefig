@@ -22,6 +22,7 @@ import {
   PageLinkSuggestion,
   dictationExtension,
   type PromptWidgetsApi,
+  type ProcessBlocksApi,
 } from "@notefig/widgets";
 import type { DictationHost } from "@notefig/dictation";
 import {
@@ -307,6 +308,7 @@ function createMarkdownInstance(
   basePath: string | undefined,
   fs: EditorFs,
   prompts: PromptWidgetsApi | undefined,
+  processes: ProcessBlocksApi | undefined,
   dictation: DictationHost | undefined,
 ): MarkdownInstance {
   const workspaceRoot = basePath || getDirectoryPath(filePath);
@@ -330,7 +332,12 @@ function createMarkdownInstance(
     // filePath/basePath scope the widgets to this document and its
     // workspace; they also arm the prompt widget's empty-doc keeper
     // (unconfigured schema-only instances never self-insert).
-    ...widgetRendererNodes({ filePath, basePath: workspaceRoot, prompts }),
+    ...widgetRendererNodes({
+      filePath,
+      basePath: workspaceRoot,
+      prompts,
+      processes,
+    }),
     // "@" page links (MET-78) in ordinary prose — the complement of the
     // prompt widget's draft-scoped mention suggestion, sharing its popup.
     // The href policy is the app's (tiptap-link-utils), injected whole.
@@ -519,6 +526,8 @@ interface MarkdownConfig {
   /** Every prompt widget's state (`core.promptWidgets`), handed to the
    *  document's widgets. Editors built without it get an inert one. */
   prompts?: PromptWidgetsApi;
+  /** Every process block's state (`core.processBlocks`), likewise. */
+  processes?: ProcessBlocksApi;
   /** `core.dictation`, when the root has it. */
   dictation?: DictationHost;
 }
@@ -586,6 +595,7 @@ export function getOrCreateEditor(
         config.basePath,
         fs,
         config.prompts,
+        config.processes,
         config.dictation,
       );
       break;

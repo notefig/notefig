@@ -134,6 +134,14 @@ export {
   type RoundOutcome,
 } from "./prompt/state";
 
+/** Every process block's state: the service the app registers as a core
+ *  module over the platform's process spawn. */
+export {
+  createProcessBlocks,
+  type ProcessBlocksApi,
+  type SpawnProcess,
+} from "./process/process-blocks";
+
 /** The document minimap (MET-172): the collector the editor registers. */
 export {
   findWidgetPos,

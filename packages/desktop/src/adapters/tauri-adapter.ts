@@ -25,6 +25,7 @@ import { FsError } from "./platform-adapter.interface";
 import { createTauriDb } from "./tauri-db";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import { path as pathutil } from "@/utils/path";
+import { getDesktopOs } from "@/utils/platform";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -140,6 +141,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     createAgentTransport: this.createAgentTransport.bind(this),
     createMcpEndpoint: this.createMcpEndpoint.bind(this),
     runShellCommand: this.runShellCommand.bind(this),
+    spawnProcess: this.spawnProcess.bind(this),
   };
 
   readonly db: DbSurface = createTauriDb();
@@ -742,6 +744,22 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       stdout: result.value.stdout,
       exitCode: result.value.exitCode ?? -1,
     };
+  }
+
+  private spawnProcess(spec: {
+    procId: string;
+    command: string;
+    cwd: string;
+  }): AgentTransport {
+    const [program, ...flags] =
+      getDesktopOs() === "windows" ? ["cmd", "/C"] : ["sh", "-c"];
+    return new TauriStdioTransport({
+      procId: spec.procId,
+      program,
+      args: [...flags, spec.command],
+      cwd: spec.cwd,
+      env: {},
+    });
   }
 
   private createUpdater(): PlatformUpdater {

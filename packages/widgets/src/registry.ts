@@ -32,12 +32,20 @@ import {
   type PromptWidgetsApi,
 } from "./prompt/widgets-service";
 import { promptWidget } from "./prompt";
+import { processWidget } from "./process";
+import {
+  inertProcessBlocks,
+  type ProcessBlocksApi,
+} from "./process/process-blocks";
 import { WidgetMinimapExtension } from "./minimap/extension";
 import type { MinimapSource } from "./minimap/contract";
 import type { EditorView } from "@tiptap/pm/view";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
-export const editorWidgets: EditorWidgetDefinition[] = [promptWidget];
+export const editorWidgets: EditorWidgetDefinition[] = [
+  promptWidget,
+  processWidget,
+];
 
 /**
  * The worker-safe halves — schema + markdown spec only. This is what the
@@ -56,17 +64,19 @@ export function widgetSchemaNodes() {
  * facts — which file it sits in, which workspace that file belongs to, and
  * the services owning widget state — and nothing else; anything further
  * reaches the app through the host, from React context inside the node
- * view. Without `prompts` (tests, schema-only editors) the widgets get a
- * service with no agent behind it.
+ * view. Without `prompts` or `processes` (tests, schema-only editors) the
+ * widgets get services with no agent or platform behind them.
  */
 export function widgetRendererNodes(options: {
   filePath: string;
   basePath: string;
   prompts?: PromptWidgetsApi;
+  processes?: ProcessBlocksApi;
 }) {
   const resolved: WidgetRendererOptions = {
     ...options,
     prompts: options.prompts ?? inertPromptWidgets(),
+    processes: options.processes ?? inertProcessBlocks(),
   };
   return editorWidgets.flatMap((widget) => [
     ...(widget.support?.views(resolved) ?? []),

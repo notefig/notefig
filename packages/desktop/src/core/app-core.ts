@@ -22,6 +22,7 @@ import { treeExpansionModule } from "@/modules/tree-expansion";
 import { telemetryModule } from "@/modules/telemetry";
 import { dictationModule } from "@/modules/dictation";
 import { diffBlocksModule } from "@/modules/diff-blocks";
+import { processBlocksModule } from "@/modules/process-blocks";
 import { documentsModule } from "@/modules/documents";
 import { editorsModule } from "@/modules/editors";
 import { filesModule } from "@/modules/files";
@@ -78,6 +79,8 @@ export function runtimeModules(): AnyModule[] {
     agentDirectivesModule,
     // Every prompt widget's state (`core.promptWidgets`).
     promptWidgetsModule,
+    // Every process block's state (`core.processBlocks`).
+    processBlocksModule,
     // Diff fences in rendered markdown draw as diffs.
     diffBlocksModule,
     mockAgentModule,

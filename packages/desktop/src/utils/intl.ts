@@ -620,6 +620,7 @@ i18n
           diffBlockEdit: "Edit diff",
           diffBlockShow: "Show changes",
           diffBlockHide: "Hide changes",
+          processBlockRestart: "Restart",
           promptBlobDone: "Done",
           promptBlobStopped: "Stopped",
           promptBlobFailed: "Failed.",
