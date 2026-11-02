@@ -18,13 +18,7 @@ import {
   resetLargeDocument,
   WIDGETS,
 } from "./fixture";
-import {
-  action,
-  installProbe,
-  readSamples,
-  setLabel,
-  stroke,
-} from "./latency";
+import { action, installProbe, readSamples, setLabel, stroke } from "./latency";
 import { saveSamples } from "./results";
 import { withShim } from "./shim";
 
@@ -48,6 +42,8 @@ const CHAT_SENTINEL = "End of the perf transcript";
 interface CoreHandle {
   tabs: {
     open(tabId: string, options: { intent: string }): boolean;
+    select(tabId: string): void;
+    focus(tabId: string): boolean;
     activeTabId(): string | null;
   };
   url: {
@@ -182,7 +178,7 @@ async function openSession(page: Page, workspace: string): Promise<void> {
   await expect(
     page.locator('[data-entry-type="assistant"]', { hasText: CHAT_SENTINEL }),
   ).toBeVisible({ timeout: 30_000 });
-  await press(page, "Control+2");
+  await focusTab(page, path.join(workspace, "large.md"));
   await expect(
     page.locator(".ProseMirror", { hasText: LARGE_SENTINEL }),
   ).toBeVisible();
@@ -193,6 +189,47 @@ async function openSession(page: Page, workspace: string): Promise<void> {
 /** An unmeasured key press, and time for its tail. */
 async function press(page: Page, key: string): Promise<void> {
   await page.keyboard.press(key);
+  await page.waitForTimeout(500);
+}
+
+/** Close the open dialog, and wait until it has: one still closing takes
+ *  the next action's key press (a tab switch's Control+1 goes nowhere). */
+async function dismiss(page: Page): Promise<void> {
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[role="dialog"]:visible')).toHaveCount(0);
+  await page.waitForTimeout(500);
+}
+
+/** Focus the selected tab (or select `tabId` first), without a key press.
+ *  The tab keys only reach the tab strip from focus inside it, and a tab
+ *  that went inert as another was selected dropped focus to the body: a
+ *  chat without a harness (as in the shim) has no composer to take it, and
+ *  main's editor didn't take it on a switch either. */
+async function focusTab(page: Page, tabId?: string): Promise<void> {
+  await page.evaluate((tabId) => {
+    const { tabs } = (window as unknown as { __notefigCore: CoreHandle })
+      .__notefigCore;
+    if (tabId) tabs.select(tabId);
+    const selected = tabs.activeTabId();
+    if (selected) tabs.focus(selected);
+  }, tabId);
+  await page.waitForTimeout(500);
+}
+
+/** Put README.md back in place of the tab that replaced it (an opened
+ *  file, a new scratchpad): closing that tab instead would select the
+ *  next one, and the next action would replace that. */
+async function restoreReadme(page: Page, readme: string): Promise<void> {
+  await page.evaluate(
+    (readme) =>
+      (
+        window as unknown as { __notefigCore: CoreHandle }
+      ).__notefigCore.tabs.open(readme, { intent: "replace" }),
+    readme,
+  );
+  await expect(
+    page.locator(".ProseMirror", { hasText: README_SENTINEL }),
+  ).toBeVisible();
   await page.waitForTimeout(500);
 }
 
@@ -216,6 +253,7 @@ const editorShowing = (text: string) => ({
 test("second-class actions in an open workspace", async ({ page }) => {
   const workspace = await perfWorkspace();
   const readme = path.join(workspace, "README.md");
+  const large = path.join(workspace, "large.md");
   await withShim(async () => {
     await installProbe(page);
     await openSession(page, workspace);
@@ -227,7 +265,7 @@ test("second-class actions in an open workspace", async ({ page }) => {
         { selector: "[cmdk-input]", focused: true },
         () => page.keyboard.press("Control+k"),
       );
-      await press(page, "Escape");
+      await dismiss(page);
     }
 
     for (let i = 0; i <= ROUNDS; i++) {
@@ -237,19 +275,28 @@ test("second-class actions in an open workspace", async ({ page }) => {
         { selector: '[role="dialog"]', text: "Appearance" },
         () => page.keyboard.press("Control+Shift+Comma"),
       );
-      await press(page, "Escape");
+      await dismiss(page);
     }
 
     for (let i = 0; i <= ROUNDS; i++) {
-      await action(page, labelFor("tab-switch", i), editorShowing(README_SENTINEL), () =>
-        page.keyboard.press("Control+1"),
+      await focusTab(page);
+      await action(
+        page,
+        labelFor("tab-switch", i),
+        editorShowing(README_SENTINEL),
+        () => page.keyboard.press("Control+1"),
       );
-      await action(page, labelFor("tab-switch", i), editorShowing(LARGE_SENTINEL), () =>
-        page.keyboard.press("Control+2"),
+      await focusTab(page);
+      await action(
+        page,
+        labelFor("tab-switch", i),
+        editorShowing(LARGE_SENTINEL),
+        () => page.keyboard.press("Control+2"),
       );
     }
 
     for (let i = 0; i <= ROUNDS; i++) {
+      await focusTab(page, large);
       await action(
         page,
         labelFor("chat-open", i),
@@ -259,11 +306,10 @@ test("second-class actions in an open workspace", async ({ page }) => {
         },
         () => page.keyboard.press("Control+3"),
       );
-      await press(page, "Control+2");
     }
 
     // From README.md, which the opened file replaces (a preview open).
-    await press(page, "Control+1");
+    await focusTab(page, readme);
     for (let i = 0; i <= ROUNDS; i++) {
       await press(page, "Control+p");
       await page.keyboard.type(`topic-${i}/note-${i + 10}`);
@@ -274,20 +320,13 @@ test("second-class actions in an open workspace", async ({ page }) => {
       const match = value?.match(/area-(\d+)\/topic-(\d+)\/note-(\d+)\.md$/);
       expect(match, `palette picked ${value}`).toBeTruthy();
       const [, a, t, n] = match!;
-      await action(page, labelFor("file-open", i), editorShowing(`Note ${a}.${t}.${n}`), () =>
-        page.keyboard.press("Enter"),
+      await action(
+        page,
+        labelFor("file-open", i),
+        editorShowing(`Note ${a}.${t}.${n}`),
+        () => page.keyboard.press("Enter"),
       );
-      await page.evaluate(
-        (readme) =>
-          (
-            window as unknown as { __notefigCore: CoreHandle }
-          ).__notefigCore.tabs.open(readme, { intent: "replace" }),
-        readme,
-      );
-      await expect(
-        page.locator(".ProseMirror", { hasText: README_SENTINEL }),
-      ).toBeVisible();
-      await page.waitForTimeout(500);
+      await restoreReadme(page, readme);
     }
 
     for (let i = 0; i <= ROUNDS; i++) {
@@ -301,10 +340,10 @@ test("second-class actions in an open workspace", async ({ page }) => {
         },
         () => page.keyboard.press("Control+n"),
       );
-      await press(page, "Control+w");
+      await restoreReadme(page, readme);
     }
 
-    await press(page, "Control+2");
+    await focusTab(page, large);
     for (let i = 0; i <= ROUNDS; i++) {
       await showFiles(page);
       await action(

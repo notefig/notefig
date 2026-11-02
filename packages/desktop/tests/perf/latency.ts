@@ -138,8 +138,14 @@ export interface Shown {
 }
 
 /** In the page: arm one sample, input (keydown or pointerdown) → the first
- *  painted frame that shows `shown`, as `window.__perfAction`. */
-function armAction(args: { label: string; shown: Shown }): void {
+ *  painted frame that shows `shown`, as `window.__perfAction`. Waits first
+ *  for `shown` to leave the screen (the last round's dialog still closing):
+ *  armed while it shows, the first frame after any input would pass and
+ *  the sample would time nothing. False when it never leaves. */
+async function armAction(args: {
+  label: string;
+  shown: Shown;
+}): Promise<boolean> {
   const { label, shown } = args;
   const MODIFIERS = new Set(["Control", "Shift", "Alt", "Meta"]);
   const showing = () =>
@@ -151,6 +157,11 @@ function armAction(args: { label: string; shown: Shown }): void {
         (!shown.empty || (el.textContent ?? "") === "") &&
         (!shown.focused || el.contains(document.activeElement)),
     );
+  const gone = performance.now() + 10_000;
+  while (showing()) {
+    if (performance.now() > gone) return false;
+    await new Promise(requestAnimationFrame);
+  }
   window.__perfAction = new Promise((resolve, reject) => {
     const onInput = (event: Event) => {
       if (event instanceof KeyboardEvent && MODIFIERS.has(event.key)) return;
@@ -181,6 +192,7 @@ function armAction(args: { label: string; shown: Shown }): void {
     window.addEventListener("keydown", onInput, true);
     window.addEventListener("pointerdown", onInput, true);
   });
+  return true;
 }
 
 /**
@@ -195,7 +207,8 @@ export async function action(
   shown: Shown,
   input: () => Promise<void>,
 ): Promise<number> {
-  await page.evaluate(armAction, { label, shown });
+  if (!(await page.evaluate(armAction, { label, shown })))
+    throw new Error(`${label}: ${shown.selector} never left before the input`);
   try {
     await input();
     const ms = await page.evaluate(() => window.__perfAction);
