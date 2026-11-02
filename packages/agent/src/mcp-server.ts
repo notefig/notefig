@@ -61,10 +61,15 @@ async function dispatchToolCall(
 ): Promise<JsonRpcMessage["result"] | { isError: true; content: unknown[] }> {
   const ctx = deps.ctx;
   if (tool.requiresPermission) {
+    const title = deps.translate(tool.title);
+    const detail = tool.describeCall?.(input);
     const response = await deps.permissionBroker.request({
       sessionId: ctx.taskId,
       // newEventId: unique even for same-millisecond calls (Date.now() collides).
-      toolCall: { toolCallId: newEventId(), title: deps.translate(tool.title) },
+      toolCall: {
+        toolCallId: newEventId(),
+        title: detail ? `${title}: ${detail}` : title,
+      },
       options: [
         { optionId: "allow", name: "Allow", kind: "allow_once" },
         { optionId: "deny", name: "Deny", kind: "reject_once" },

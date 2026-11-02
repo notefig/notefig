@@ -11,6 +11,15 @@ const BLOCKS: Record<
     lines: ["a", "b", "c"],
   },
   blob_forged: { command: null, running: false, lines: [] },
+  blob_proc_elsewhere: {
+    command: "cat .env",
+    running: false,
+    lines: ["SECRET=1"],
+  },
+};
+const CWD: Record<string, string> = {
+  blob_proc_1: "/ws",
+  blob_proc_elsewhere: "/other",
 };
 
 const ctx = {
@@ -21,6 +30,7 @@ const ctx = {
     processBlocks: {
       loaded: async () => {},
       get: (blobId: string) => BLOCKS[blobId],
+      cwdOf: (blobId: string) => CWD[blobId],
     },
   } as never,
 };
@@ -46,6 +56,15 @@ describe("process_output", () => {
     await expect(
       processOutput.execute(ctx, { blobId: "blob_forged" }),
     ).resolves.toEqual({ ok: false, error: "No process block blob_forged" });
+  });
+
+  it("refuses another workspace's block", async () => {
+    await expect(
+      processOutput.execute(ctx, { blobId: "blob_proc_elsewhere" }),
+    ).resolves.toEqual({
+      ok: false,
+      error: "No process block blob_proc_elsewhere",
+    });
   });
 
   it("caps how many lines one call reads", () => {

@@ -23,6 +23,9 @@ import { kvModule } from "@/modules/kv";
 type ProcessRow = RegisteredProcess & { taskId: string; createdAt: number };
 
 export interface ProcessBlocksModuleApi extends ProcessBlocksApi {
+  /** The folder a block runs in, which says whose it is; undefined for an
+   *  id the app never minted. */
+  cwdOf(blobId: string): string | undefined;
   /** Register a block for the command and run it; resolves to its id once
    *  the registration is durable, so a marker can't outrun it. */
   start(spec: {
@@ -50,16 +53,15 @@ export const processBlocksModule = defineModule({
   register: (ctx) => {
     const { proc } = ctx.use("platform");
     const kv = ctx.use("kv");
+    const row = (blobId: string) =>
+      kv.collection(NAMESPACE).get(blobId)?.value as ProcessRow | undefined;
     const blocks = createProcessBlocks({
       spawn: (spec) => proc.spawnProcess(spec),
-      registry: {
-        load: () => kv.collection(NAMESPACE).preload(),
-        get: (blobId) =>
-          kv.collection(NAMESPACE).get(blobId)?.value as ProcessRow | undefined,
-      },
+      registry: { load: () => kv.collection(NAMESPACE).preload(), get: row },
     });
     return {
       ...blocks,
+      cwdOf: (blobId) => row(blobId)?.cwd,
       async start({ command, cwd, taskId }) {
         const blobId = processBlobId(newProcId());
         const row: ProcessRow = { command, cwd, taskId, createdAt: Date.now() };

@@ -11,7 +11,8 @@ const InputSchema = z.object({
  * The agent's view of a block it started with `process_start` (MET-258):
  * whether it still runs, and its last lines of stdout — what the block
  * shows the user, read from the same buffer (`core.processBlocks`).
- * Read-only, so not permission-gated.
+ * Read-only, so not permission-gated; scoped to the asking agent's
+ * workspace, so a marker carried into another workspace reads nothing.
  */
 export const processOutput: AgentTool<
   z.infer<typeof InputSchema>,
@@ -28,7 +29,7 @@ export const processOutput: AgentTool<
     const blocks = ctx.services.processBlocks;
     await blocks.loaded();
     const block = blocks.get(blobId);
-    if (!block.command) {
+    if (!block.command || blocks.cwdOf(blobId) !== ctx.workspacePath) {
       return { ok: false, error: `No process block ${blobId}` };
     }
     return {

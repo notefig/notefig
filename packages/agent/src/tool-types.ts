@@ -26,6 +26,10 @@ export interface AgentTool<In, Out> {
   /** Mutating tools set this so the MCP dispatch gates behind the existing
    *  PermissionBroker before calling `execute` — no second consent surface. */
   requiresPermission?: boolean;
+  /** For a gated tool whose calls differ in what they do: this call, shown
+   *  after the title on the approval card, so the user approves the call,
+   *  not just the tool. */
+  describeCall?(input: In): string;
   execute(ctx: ToolContext, input: In): Promise<ToolResult<Out>>;
 }
 

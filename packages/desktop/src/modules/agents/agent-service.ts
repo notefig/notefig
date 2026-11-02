@@ -2012,7 +2012,10 @@ declare module "@notefig/agent" {
     editors: Pick<EditorsApi, "markdownEditor" | "selectedText" | "get">;
     /** Blocks an agent starts in a document, and reads back
      *  (`core.processBlocks`). */
-    processBlocks: Pick<ProcessBlocksModuleApi, "start" | "loaded" | "get">;
+    processBlocks: Pick<
+      ProcessBlocksModuleApi,
+      "start" | "loaded" | "get" | "cwdOf"
+    >;
   }
 }
 

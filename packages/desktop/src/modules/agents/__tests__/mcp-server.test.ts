@@ -366,6 +366,25 @@ describe("createMcpRequestHandler", () => {
     expect(result.content[0].text).toMatch(/permission denied/);
   });
 
+  it("tools/call: process_start's approval card names the command it would run", async () => {
+    const broker = new PermissionBroker(ctx.taskId, store.permissionRequests);
+    const pending = handler(broker)({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: { name: "process_start", arguments: { command: "rm -rf build" } },
+    });
+
+    const row = store.permissionRequests.toArray.find(
+      (r) => r.taskId === ctx.taskId && r.status === "pending",
+    );
+    expect(row?.title).toBe(`${i18n.t("agentToolProcessStart")}: rm -rf build`);
+    broker.respond(row!.id, {
+      outcome: { outcome: "selected", optionId: "deny" },
+    });
+    await pending;
+  });
+
   it("unknown method returns a JSON-RPC method-not-found error", async () => {
     const response = await handler()({
       jsonrpc: "2.0",
