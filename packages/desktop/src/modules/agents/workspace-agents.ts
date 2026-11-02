@@ -28,6 +28,7 @@ import { historyModule } from "@/modules/history";
 import { harnessAdaptersModule } from "@/modules/harness-adapters";
 import { harnessesModule } from "./harnesses";
 import { platformModule } from "@/core/services";
+import { processBlocksModule } from "@/modules/process-blocks";
 
 declare module "@notefig/core" {
   interface CoreModules {
@@ -50,6 +51,7 @@ export const workspaceAgentsModule = defineModule({
     editorsModule,
     harnessAdaptersModule,
     harnessesModule,
+    processBlocksModule,
   ],
   register: (ctx) => {
     const store = ctx.use("agentStore");
@@ -58,6 +60,7 @@ export const workspaceAgentsModule = defineModule({
     const documents = ctx.use("documents");
     const layout = ctx.use("layout");
     const editors = ctx.use("editors");
+    const processBlocks = ctx.use("processBlocks");
     let agents: AgentsApi | null = null;
     const runtime = createAgentRuntime({
       store,
@@ -76,6 +79,7 @@ export const workspaceAgentsModule = defineModule({
           documents,
           layout,
           editors,
+          processBlocks,
         };
       },
       agents: () => agents!,

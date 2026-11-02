@@ -1,5 +1,6 @@
 import "./agent-events";
 import type { EditorsApi } from "@/modules/editors";
+import type { ProcessBlocksModuleApi } from "@/modules/process-blocks";
 import type { CoreHookMap, Hooks } from "@notefig/core";
 import type { WorkspaceHistory } from "@/modules/history";
 import type { WorkspaceFiles } from "@/modules/files";
@@ -2009,6 +2010,8 @@ declare module "@notefig/agent" {
     layout: Pick<LayoutApi, "read">;
     /** The live editors (`core.editors`): a document as the user sees it. */
     editors: Pick<EditorsApi, "markdownEditor" | "selectedText" | "get">;
+    /** Blocks an agent starts in a document (`core.processBlocks`). */
+    processBlocks: Pick<ProcessBlocksModuleApi, "start">;
   }
 }
 

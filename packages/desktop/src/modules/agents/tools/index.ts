@@ -8,6 +8,7 @@ import { historyDiff } from "./history-diff";
 import { historyCheckpoint } from "./history-checkpoint";
 import { historyRestore } from "./history-restore";
 import { widgetRespond } from "./widget-respond";
+import { processStart } from "./process-start";
 
 /**
  * The tool registry: one direct-imported array, no dynamic registration
@@ -27,6 +28,7 @@ export const toolRegistry: readonly AgentTool<unknown, unknown>[] = [
   historyCheckpoint,
   historyRestore,
   widgetRespond,
+  processStart,
 ] as unknown as readonly AgentTool<unknown, unknown>[];
 
 export function getTool(name: string): AgentTool<unknown, unknown> | undefined {

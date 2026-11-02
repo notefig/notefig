@@ -95,6 +95,9 @@ export function testAgents(
       get files(): never {
         throw new Error("no workspace files in this test");
       },
+      get processBlocks(): never {
+        throw new Error("no process blocks in this test");
+      },
       documents,
       layout,
       editors,

@@ -1,7 +1,9 @@
 /**
  * The process block through the real markdown pipeline and node view: its
- * marker survives file → doc → file, and the block restarts its command
- * once the process's stream is gone.
+ * marker survives file → doc → file, a block the app never registered is
+ * dropped however it arrives (but never before the registry has loaded),
+ * and the block runs its registered command again once the process's
+ * stream is gone.
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { act, createElement } from "react";
@@ -18,14 +20,32 @@ import {
   createProcessBlocks,
   widgetRendererNodes,
   type ProcessBlocksApi,
+  type ProcessRegistry,
   type SpawnProcess,
 } from "@notefig/widgets";
 import { editorExtensions } from "../tiptap-editor-kit";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
-const MARKER = '<!-- notefig:process id="blob_1a2b" command="npm run dev" -->';
+const MARKER = '<!-- notefig:process id="blob_1a2b" -->';
+const FOREIGN = '<!-- notefig:process id="blob_forged" -->';
 const SOURCE = `# Title\n\n${MARKER}\n\nAfter\n`;
+
+/** blob_1a2b is registered; the registry loads when `finish` is called. */
+function registry() {
+  let finish!: () => void;
+  const load = new Promise<void>((resolve) => (finish = resolve));
+  const fake: ProcessRegistry = {
+    load: () => load,
+    get: (blobId) =>
+      blobId === "blob_1a2b"
+        ? { command: "npm run dev", cwd: "/ws" }
+        : undefined,
+  };
+  return { registry: fake, finish };
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const extensions = (processes?: ProcessBlocksApi) => [
   ...editorExtensions.filter(
@@ -44,15 +64,74 @@ function markdownOf(editor: Editor): string {
   ).markdown.getMarkdown();
 }
 
+function blockIds(editor: Editor) {
+  const ids: unknown[] = [];
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === "processBlock") ids.push(node.attrs.blobId);
+  });
+  return ids;
+}
+
 describe("process marker round trip", () => {
   it("parses a marker into a block and writes it back unchanged", () => {
     const editor = new Editor({ extensions: extensions(), content: SOURCE });
-    const blocks: Array<Record<string, unknown>> = [];
-    editor.state.doc.descendants((node) => {
-      if (node.type.name === "processBlock") blocks.push(node.attrs);
-    });
-    expect(blocks).toEqual([{ blobId: "blob_1a2b", command: "npm run dev" }]);
+    expect(blockIds(editor)).toEqual(["blob_1a2b"]);
     expect(markdownOf(editor)).toBe(SOURCE.trimEnd());
+    editor.destroy();
+  });
+});
+
+describe("dropping blocks the app never minted", () => {
+  const spawn: SpawnProcess = () => {
+    throw new Error("nothing runs here");
+  };
+
+  it("keeps every block until the registry loads, then drops the foreign one", async () => {
+    const { registry: fake, finish } = registry();
+    const processes = createProcessBlocks({ spawn, registry: fake });
+    const editor = new Editor({
+      extensions: extensions(processes),
+      content: `${MARKER}\n\n${FOREIGN}\n\nAfter\n`,
+    });
+
+    // Loading: no id is known to be foreign, so a save now keeps both,
+    // and so does a write adopted meanwhile.
+    await settle();
+    editor.commands.setContent(`${MARKER}\n\n${FOREIGN}\n\nAfter\n`);
+    expect(blockIds(editor)).toEqual(["blob_1a2b", "blob_forged"]);
+    expect(markdownOf(editor)).toContain(FOREIGN);
+
+    finish();
+    await processes.loaded();
+    await settle();
+    expect(blockIds(editor)).toEqual(["blob_1a2b"]);
+    expect(markdownOf(editor)).not.toContain("blob_forged");
+    // Out of history: undo doesn't bring it back.
+    editor.commands.undo();
+    expect(blockIds(editor)).toEqual(["blob_1a2b"]);
+    editor.destroy();
+  });
+
+  it("drops a foreign block that arrives later: an adopted write, a paste", async () => {
+    const { registry: fake, finish } = registry();
+    const processes = createProcessBlocks({ spawn, registry: fake });
+    finish();
+    const editor = new Editor({
+      extensions: extensions(processes),
+      content: "x",
+    });
+    await processes.loaded();
+
+    editor.commands.setContent(`${MARKER}\n\n${FOREIGN}\n`);
+    expect(blockIds(editor)).toEqual(["blob_1a2b"]);
+
+    editor.commands.insertContentAt(
+      editor.state.doc.content.size,
+      '<div data-type="process" data-blob-id="blob_forged"></div>' +
+        '<div data-type="process"></div>' +
+        '<div data-type="process" data-blob-id="blob_1a2b"></div>',
+    );
+    expect(blockIds(editor)).toEqual(["blob_1a2b", "blob_1a2b"]);
     editor.destroy();
   });
 });
@@ -81,48 +160,63 @@ describe("process block view", () => {
     onClose: (listener) => (exits.push(listener), () => {}),
   }));
 
-  async function mount() {
+  async function mount(options: { load?: boolean } = {}) {
     lines.length = 0;
     exits.length = 0;
     spawn.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
+    const { registry: fake, finish } = registry();
+    if (options.load !== false) finish();
     await act(async () => {
       root!.render(
-        createElement(Harness, { processes: createProcessBlocks({ spawn }) }),
+        createElement(Harness, {
+          processes: createProcessBlocks({ spawn, registry: fake }),
+        }),
       );
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await settle();
     });
+    return finish;
   }
 
-  const restart = () =>
+  const run = () =>
     container!.querySelector<HTMLButtonElement>(
       'button[aria-label="processBlockRun"]',
     );
 
-  it("restarts the command once its stream is gone", async () => {
+  it("shows nothing until the registry says what the block runs", async () => {
+    const finish = await mount({ load: false });
+    expect(container!.querySelector("code")).toBeNull();
+    await act(async () => {
+      finish();
+      await settle();
+    });
+    expect(container!.querySelector("code")?.textContent).toBe("npm run dev");
+  });
+
+  it("runs the registered command again once its stream is gone", async () => {
     await mount();
 
     // Read from the file: no stream yet, nothing runs until asked.
     expect(spawn).not.toHaveBeenCalled();
-    await act(async () => restart()!.click());
+    await act(async () => run()!.click());
     expect(spawn).toHaveBeenCalledWith({
       procId: "blob_1a2b",
       command: "npm run dev",
       cwd: "/ws",
     });
-    expect(restart()).toBeNull();
+    expect(run()).toBeNull();
 
     await act(async () => lines[0]("ready on :3000"));
     expect(container!.querySelector("pre")?.textContent).toBe("ready on :3000");
 
     await act(async () => exits[0]());
-    await act(async () => restart()!.click());
+    await act(async () => run()!.click());
     expect(spawn).toHaveBeenCalledTimes(2);
   });
 
-  it("shows the whole command, and restarts on 1 while the block is selected", async () => {
+  it("shows the whole command, and runs on 1 while the block is selected", async () => {
     await mount();
     expect(container!.querySelector("code")?.textContent).toBe("npm run dev");
     const press = (key: string) =>
@@ -139,7 +233,7 @@ describe("process block view", () => {
       if (node.type.name === "processBlock") at = pos;
     });
     await act(async () => void editor!.commands.setNodeSelection(at));
-    expect(restart()!.textContent).toBe("1");
+    expect(run()!.textContent).toBe("1");
     await act(async () => void press("1"));
     expect(spawn).toHaveBeenCalledTimes(1);
 

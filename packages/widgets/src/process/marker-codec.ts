@@ -2,62 +2,43 @@
  * The on-disk form of a process block, the prompt marker's sibling
  * (../prompt/marker-codec.ts):
  *
- *     <!-- notefig:process id="blob_1a2b" command="npm run dev" -->
+ *     <!-- notefig:process id="blob_1a2b" -->
  *
  * A comment for the same reason the prompt's is one: the file is the
- * user's, and every other markdown tool renders it as nothing. Unlike the
- * prompt it carries the command itself — there is no session row to hold
- * it, and the command is the block's definition, not live state, so a
- * rewrite of the file can't leave it stale. The process and its output are
- * never written: they belong to this run of the app.
+ * user's, and every other markdown tool renders it as nothing. It carries
+ * the id alone. The command is the app's, registered under that id when an
+ * agent starts the block, so a file can't bring a command of its own: an id
+ * the app never minted is a block the app drops. The process and its output
+ * are never written either: they belong to this run of the app.
  *
- * The id's charset is closed, as the prompt's is. The command's is not, so
- * it is escaped: `&`, `"`, `>` and newlines, which is what keeps it from
- * ending the attribute, the comment (`-->`, `--!>`) or markdown's html
- * block (a line break).
+ * The id's charset is closed, as the prompt's is, which is what keeps a
+ * hand-edited value from ending the comment.
  */
 
 const SENTINEL = "notefig:process";
 const ID = String.raw`[A-Za-z0-9_-]+`;
-const BODY = String.raw`${SENTINEL}\s+id="(${ID})"\s+command="([^"]*)"`;
+const BODY = String.raw`${SENTINEL}\s+id="(${ID})"`;
 
 const MARKER_PATTERN = new RegExp(String.raw`^<!--\s*${BODY}\s*-->$`);
 const MARKER_DATA_PATTERN = new RegExp(String.raw`^\s*${BODY}\s*$`);
 const MARKER_GLOBAL_PATTERN = new RegExp(String.raw`<!--\s*${BODY}\s*-->`, "g");
 
 export interface ProcessMarker {
-  /** The block instance (`blobId` attr) whose process and output these are. */
+  /** The block instance (`blobId` attr): its registration, process and output. */
   blobId: string;
-  /** What the block runs, through the platform's shell. */
-  command: string;
 }
 
-const ESCAPES: Record<string, string> = {
-  "&": "&amp;",
-  '"': "&quot;",
-  ">": "&gt;",
-  "\n": "&#10;",
-};
-const UNESCAPES = Object.fromEntries(
-  Object.entries(ESCAPES).map(([char, entity]) => [entity, char]),
-);
-
-/** The comment for a block, or null when it has no id or nothing to run. */
+/** The comment for a block, or null when it has no id. */
 export function serializeProcessMarker(marker: {
   blobId?: string | null;
-  command?: string | null;
 }): string | null {
-  const { blobId, command } = marker;
-  if (!blobId || !command) return null;
-  if (!new RegExp(String.raw`^${ID}$`).test(blobId)) return null;
-  const escaped = command.replace(/[&">\n]/g, (char) => ESCAPES[char]);
-  return `<!-- ${SENTINEL} id="${blobId}" command="${escaped}" -->`;
+  const { blobId } = marker;
+  if (!blobId || !new RegExp(String.raw`^${ID}$`).test(blobId)) return null;
+  return `<!-- ${SENTINEL} id="${blobId}" -->`;
 }
 
 function fromMatch(match: RegExpExecArray | null): ProcessMarker | null {
-  if (!match) return null;
-  const command = match[2].replace(/&(amp|quot|gt|#10);/g, (e) => UNESCAPES[e]);
-  return command ? { blobId: match[1], command } : null;
+  return match ? { blobId: match[1] } : null;
 }
 
 /** Parse a whole comment, e.g. a line read straight out of the file. */

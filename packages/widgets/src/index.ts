@@ -135,12 +135,16 @@ export {
 } from "./prompt/state";
 
 /** Every process block's state: the service the app registers as a core
- *  module over the platform's process spawn. */
+ *  module over the platform's process spawn and its own registry, and the
+ *  marker an agent writes for a block it started. */
 export {
   createProcessBlocks,
   type ProcessBlocksApi,
+  type ProcessRegistry,
+  type RegisteredProcess,
   type SpawnProcess,
 } from "./process/process-blocks";
+export { serializeProcessMarker } from "./process/marker-codec";
 
 /** The document minimap (MET-172): the collector the editor registers. */
 export {

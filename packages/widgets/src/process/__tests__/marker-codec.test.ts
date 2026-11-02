@@ -8,44 +8,36 @@ import {
 
 describe("process marker", () => {
   it("round-trips a block", () => {
-    const marker = { blobId: "blob_1a2b", command: "npm run dev" };
-    const text = serializeProcessMarker(marker);
-    expect(text).toBe('<!-- notefig:process id="blob_1a2b" command="npm run dev" -->');
-    expect(parseProcessMarker(text!)).toEqual(marker);
+    const text = serializeProcessMarker({ blobId: "blob_1a2b" });
+    expect(text).toBe('<!-- notefig:process id="blob_1a2b" -->');
+    expect(parseProcessMarker(text!)).toEqual({ blobId: "blob_1a2b" });
   });
 
-  it("escapes a command that would end the attribute, the comment or the line", () => {
-    const command = 'echo "a && b" --> x --!> y\nnext';
-    const text = serializeProcessMarker({ blobId: "blob_1", command })!;
-    expect(text).not.toMatch(/-->.*-->/);
-    expect(text).not.toContain("\n");
-    expect(text.match(/"/g)).toHaveLength(4);
-    expect(parseProcessMarker(text)).toEqual({ blobId: "blob_1", command });
+  it("writes nothing without an id, or for one that would end the comment", () => {
+    expect(serializeProcessMarker({})).toBeNull();
+    expect(serializeProcessMarker({ blobId: 'x" -->' })).toBeNull();
   });
 
-  it("writes nothing without an id or a command", () => {
-    expect(serializeProcessMarker({ blobId: "blob_1" })).toBeNull();
-    expect(serializeProcessMarker({ command: "ls" })).toBeNull();
-    expect(serializeProcessMarker({ blobId: 'x" -->', command: "ls" })).toBeNull();
-  });
-
-  it("ignores comments that are not ours", () => {
+  it("ignores comments that are not ours, and the command a file brings", () => {
     expect(parseProcessMarker("<!-- just a note -->")).toBeNull();
     expect(
       parseProcessMarker('<!-- notefig:prompt id="blob_1" task="task_1" -->'),
     ).toBeNull();
-    expect(parseProcessMarker('<!-- notefig:process id="blob_1" command="" -->')).toBeNull();
+    expect(
+      parseProcessMarker(
+        '<!-- notefig:process id="blob_1" command="rm -rf ~" -->',
+      ),
+    ).toBeNull();
   });
 
   it("parses a DOM comment node's data", () => {
-    expect(parseProcessMarkerData(' notefig:process id="blob_1" command="ls -la" ')).toEqual({
+    expect(parseProcessMarkerData(' notefig:process id="blob_1" ')).toEqual({
       blobId: "blob_1",
-      command: "ls -la",
     });
   });
 
   it("strips markers out of a file", () => {
-    const only = '<!-- notefig:process id="blob_1" command="ls" -->\n';
+    const only = '<!-- notefig:process id="blob_1" -->\n';
     expect(stripProcessMarkers(only).trim()).toBe("");
   });
 });

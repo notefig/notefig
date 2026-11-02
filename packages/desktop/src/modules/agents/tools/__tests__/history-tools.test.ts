@@ -45,6 +45,7 @@ const ctx = {
     } as never,
     layout: {} as never,
     editors: {} as never,
+    processBlocks: {} as never,
   },
 };
 

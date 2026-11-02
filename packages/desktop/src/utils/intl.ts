@@ -706,6 +706,7 @@ i18n
           agentToolHistoryCheckpoint: "Save Checkpoint",
           agentToolHistoryRestore: "Restore Version",
           agentToolWidgetRespond: "Respond in Widget",
+          agentToolProcessStart: "Run in Document",
 
           // Telemetry consent + Privacy settings
           telemetryConsentTitle: "Help improve Notefig",

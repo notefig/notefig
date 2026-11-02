@@ -54,6 +54,10 @@ export function serverInstructions(): string {
     `the user is asking a question, or the request could mean different ` +
     `things and the document doesn't settle which: then ask with a choice ` +
     `before editing. ` +
+    `To show a long-running command's output in the document (a dev ` +
+    `server, a build, a watcher), start it with \`process_start\` rather ` +
+    `than your own shell, and write the marker it returns where the output ` +
+    `belongs. ` +
     DIFF_BLOCK_GUIDE
   );
 }
