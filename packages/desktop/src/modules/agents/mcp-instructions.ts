@@ -56,8 +56,8 @@ export function serverInstructions(): string {
     `before editing. ` +
     `To show a long-running command's output in the document (a dev ` +
     `server, a build, a watcher), start it with \`process_start\` rather ` +
-    `than your own shell, and write the marker it returns where the output ` +
-    `belongs. ` +
+    `than your own shell, write the marker it returns where the output ` +
+    `belongs, and read its output with \`process_output\`. ` +
     DIFF_BLOCK_GUIDE
   );
 }

@@ -31,10 +31,11 @@ describe("process blocks module", () => {
       cwd: "/ws",
       taskId: "task_1",
     });
-    expect(blobId).toMatch(/^blob_[a-z0-9]+$/);
+    // The block's id is its process's: blob_<procId>.
+    const [, procId] = /^blob_(proc_[a-z0-9]+)$/.exec(blobId)!;
     await vi.waitFor(() =>
       expect(first.spawnProcess).toHaveBeenCalledWith({
-        procId: blobId,
+        procId,
         command: "npm run dev",
         cwd: "/ws",
       }),

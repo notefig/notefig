@@ -27,18 +27,18 @@ import { editorExtensions } from "../tiptap-editor-kit";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
-const MARKER = '<!-- notefig:process id="blob_1a2b" -->';
+const MARKER = '<!-- notefig:process id="blob_proc_1a2b" -->';
 const FOREIGN = '<!-- notefig:process id="blob_forged" -->';
 const SOURCE = `# Title\n\n${MARKER}\n\nAfter\n`;
 
-/** blob_1a2b is registered; the registry loads when `finish` is called. */
+/** blob_proc_1a2b is registered; the registry loads when `finish` is called. */
 function registry() {
   let finish!: () => void;
   const load = new Promise<void>((resolve) => (finish = resolve));
   const fake: ProcessRegistry = {
     load: () => load,
     get: (blobId) =>
-      blobId === "blob_1a2b"
+      blobId === "blob_proc_1a2b"
         ? { command: "npm run dev", cwd: "/ws" }
         : undefined,
   };
@@ -75,7 +75,7 @@ function blockIds(editor: Editor) {
 describe("process marker round trip", () => {
   it("parses a marker into a block and writes it back unchanged", () => {
     const editor = new Editor({ extensions: extensions(), content: SOURCE });
-    expect(blockIds(editor)).toEqual(["blob_1a2b"]);
+    expect(blockIds(editor)).toEqual(["blob_proc_1a2b"]);
     expect(markdownOf(editor)).toBe(SOURCE.trimEnd());
     editor.destroy();
   });
@@ -98,17 +98,17 @@ describe("dropping blocks the app never minted", () => {
     // and so does a write adopted meanwhile.
     await settle();
     editor.commands.setContent(`${MARKER}\n\n${FOREIGN}\n\nAfter\n`);
-    expect(blockIds(editor)).toEqual(["blob_1a2b", "blob_forged"]);
+    expect(blockIds(editor)).toEqual(["blob_proc_1a2b", "blob_forged"]);
     expect(markdownOf(editor)).toContain(FOREIGN);
 
     finish();
     await processes.loaded();
     await settle();
-    expect(blockIds(editor)).toEqual(["blob_1a2b"]);
+    expect(blockIds(editor)).toEqual(["blob_proc_1a2b"]);
     expect(markdownOf(editor)).not.toContain("blob_forged");
     // Out of history: undo doesn't bring it back.
     editor.commands.undo();
-    expect(blockIds(editor)).toEqual(["blob_1a2b"]);
+    expect(blockIds(editor)).toEqual(["blob_proc_1a2b"]);
     editor.destroy();
   });
 
@@ -123,15 +123,15 @@ describe("dropping blocks the app never minted", () => {
     await processes.loaded();
 
     editor.commands.setContent(`${MARKER}\n\n${FOREIGN}\n`);
-    expect(blockIds(editor)).toEqual(["blob_1a2b"]);
+    expect(blockIds(editor)).toEqual(["blob_proc_1a2b"]);
 
     editor.commands.insertContentAt(
       editor.state.doc.content.size,
       '<div data-type="process" data-blob-id="blob_forged"></div>' +
         '<div data-type="process"></div>' +
-        '<div data-type="process" data-blob-id="blob_1a2b"></div>',
+        '<div data-type="process" data-blob-id="blob_proc_1a2b"></div>',
     );
-    expect(blockIds(editor)).toEqual(["blob_1a2b", "blob_1a2b"]);
+    expect(blockIds(editor)).toEqual(["blob_proc_1a2b", "blob_proc_1a2b"]);
     editor.destroy();
   });
 });
@@ -202,7 +202,7 @@ describe("process block view", () => {
     expect(spawn).not.toHaveBeenCalled();
     await act(async () => run()!.click());
     expect(spawn).toHaveBeenCalledWith({
-      procId: "blob_1a2b",
+      procId: "proc_1a2b",
       command: "npm run dev",
       cwd: "/ws",
     });

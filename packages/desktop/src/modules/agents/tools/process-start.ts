@@ -28,7 +28,8 @@ export const processStart: AgentTool<
     "in the document, for a long-running command (a dev server, a build, a " +
     "watcher) whose output the user should see. Returns `marker`: write it " +
     "into the document, on a line of its own, where the output belongs. " +
-    "The user can run the command again from there once it ends.",
+    "The user can run the command again from there once it ends. Read its " +
+    "output with `process_output`.",
   input: InputSchema,
   requiresPermission: true,
   async execute(ctx, input) {

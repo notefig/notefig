@@ -36,13 +36,14 @@ function fakeSpawn(options: { startError?: Error } = {}) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const SPEC = { command: "npm run dev", cwd: "/ws" };
 
-/** The app's registrations: blob_1 and blob_2, loading until `finish`. */
+/** The app's registrations: blob_proc_1 and blob_proc_2, loading until `finish`. */
 function fakeRegistry() {
   let finish!: () => void;
   const load = new Promise<void>((resolve) => (finish = resolve));
   const registry: ProcessRegistry = {
     load: () => load,
-    get: (blobId) => (["blob_1", "blob_2"].includes(blobId) ? SPEC : undefined),
+    get: (blobId) =>
+      ["blob_proc_1", "blob_proc_2"].includes(blobId) ? SPEC : undefined,
   };
   return { registry, finish };
 }
@@ -61,12 +62,12 @@ describe("process blocks", () => {
     const { spawn, spawned } = fakeSpawn();
     const blocks = await loadedBlocks(spawn);
 
-    blocks.run("blob_1");
+    blocks.run("blob_proc_1");
     await settle();
     spawned[0].emit("ready on :3000");
 
-    expect(spawned[0].spec).toEqual({ procId: "blob_1", ...SPEC });
-    expect(blocks.get("blob_1")).toEqual({
+    expect(spawned[0].spec).toEqual({ procId: "proc_1", ...SPEC });
+    expect(blocks.get("blob_proc_1")).toEqual({
       command: "npm run dev",
       running: true,
       lines: ["ready on :3000"],
@@ -77,33 +78,36 @@ describe("process blocks", () => {
     const { spawn, spawned } = fakeSpawn();
     const blocks = await loadedBlocks(spawn);
 
-    blocks.run("blob_1");
+    blocks.run("blob_proc_1");
     await settle();
-    blocks.run("blob_1");
+    blocks.run("blob_proc_1");
     await settle();
     expect(spawned).toHaveLength(1);
 
     spawned[0].emit("old output");
     spawned[0].exit();
-    expect(blocks.get("blob_1")).toMatchObject({
+    expect(blocks.get("blob_proc_1")).toMatchObject({
       running: false,
       lines: ["old output"],
     });
 
-    blocks.run("blob_1");
+    blocks.run("blob_proc_1");
     await settle();
     expect(spawned).toHaveLength(2);
-    expect(blocks.get("blob_1")).toMatchObject({ running: true, lines: [] });
+    expect(blocks.get("blob_proc_1")).toMatchObject({
+      running: true,
+      lines: [],
+    });
   });
 
   it("ends the run with the reason when the process can't start", async () => {
     const { spawn } = fakeSpawn({ startError: new Error("spawn failed") });
     const blocks = await loadedBlocks(spawn);
 
-    blocks.run("blob_1");
+    blocks.run("blob_proc_1");
     await settle();
 
-    expect(blocks.get("blob_1")).toMatchObject({
+    expect(blocks.get("blob_proc_1")).toMatchObject({
       running: false,
       lines: ["spawn failed"],
     });
@@ -113,15 +117,18 @@ describe("process blocks", () => {
     const { spawn, spawned } = fakeSpawn();
     const blocks = await loadedBlocks(spawn);
     let changes = 0;
-    blocks.subscribe("blob_2", () => changes++);
+    blocks.subscribe("blob_proc_2", () => changes++);
 
-    blocks.run("blob_1");
+    blocks.run("blob_proc_1");
     await settle();
     for (let i = 0; i <= MAX_LINES; i++) spawned[0].emit(String(i));
 
-    expect(blocks.get("blob_1").lines).toHaveLength(MAX_LINES);
-    expect(blocks.get("blob_1").lines[0]).toBe("1");
-    expect(blocks.get("blob_2")).toMatchObject({ running: false, lines: [] });
+    expect(blocks.get("blob_proc_1").lines).toHaveLength(MAX_LINES);
+    expect(blocks.get("blob_proc_1").lines[0]).toBe("1");
+    expect(blocks.get("blob_proc_2")).toMatchObject({
+      running: false,
+      lines: [],
+    });
     expect(changes).toBe(0);
   });
 
@@ -130,16 +137,16 @@ describe("process blocks", () => {
     const { registry, finish } = fakeRegistry();
     const blocks = createProcessBlocks({ spawn, registry });
     let changes = 0;
-    blocks.subscribe("blob_1", () => changes++);
+    blocks.subscribe("blob_proc_1", () => changes++);
 
-    expect(blocks.get("blob_1").command).toBeUndefined();
+    expect(blocks.get("blob_proc_1").command).toBeUndefined();
     expect(blocks.get("blob_forged").command).toBeUndefined();
-    blocks.run("blob_1");
+    blocks.run("blob_proc_1");
 
     finish();
     await blocks.loaded();
     expect(changes).toBe(1);
-    expect(blocks.get("blob_1").command).toBe("npm run dev");
+    expect(blocks.get("blob_proc_1").command).toBe("npm run dev");
     expect(blocks.get("blob_forged").command).toBeNull();
 
     // An unregistered id runs nothing, and nothing ran while loading.

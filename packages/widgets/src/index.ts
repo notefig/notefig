@@ -139,6 +139,8 @@ export {
  *  marker an agent writes for a block it started. */
 export {
   createProcessBlocks,
+  processBlobId,
+  MAX_LINES as PROCESS_MAX_LINES,
   type ProcessBlocksApi,
   type ProcessRegistry,
   type RegisteredProcess,

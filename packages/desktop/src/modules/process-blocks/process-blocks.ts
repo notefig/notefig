@@ -11,6 +11,7 @@
  */
 import {
   createProcessBlocks,
+  processBlobId,
   type ProcessBlocksApi,
   type RegisteredProcess,
 } from "@notefig/widgets";
@@ -39,9 +40,9 @@ declare module "@notefig/core" {
 
 const NAMESPACE = "process-blocks";
 
-/** The prompt's id form (`blob_<base36>`), which the marker's charset admits. */
-const newBlobId = () =>
-  `blob_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+/** A process id (`proc_<base36>`), which the marker's charset admits. */
+const newProcId = () =>
+  `proc_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 
 export const processBlocksModule = defineModule({
   name: "processBlocks",
@@ -60,7 +61,7 @@ export const processBlocksModule = defineModule({
     return {
       ...blocks,
       async start({ command, cwd, taskId }) {
-        const blobId = newBlobId();
+        const blobId = processBlobId(newProcId());
         const row: ProcessRow = { command, cwd, taskId, createdAt: Date.now() };
         await kv.write(NAMESPACE, blobId, row);
         await blocks.loaded();

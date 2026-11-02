@@ -707,6 +707,7 @@ i18n
           agentToolHistoryRestore: "Restore Version",
           agentToolWidgetRespond: "Respond in Widget",
           agentToolProcessStart: "Run in Document",
+          agentToolProcessOutput: "Read Process Output",
 
           // Telemetry consent + Privacy settings
           telemetryConsentTitle: "Help improve Notefig",

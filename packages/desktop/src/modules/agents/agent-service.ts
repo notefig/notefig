@@ -2010,8 +2010,9 @@ declare module "@notefig/agent" {
     layout: Pick<LayoutApi, "read">;
     /** The live editors (`core.editors`): a document as the user sees it. */
     editors: Pick<EditorsApi, "markdownEditor" | "selectedText" | "get">;
-    /** Blocks an agent starts in a document (`core.processBlocks`). */
-    processBlocks: Pick<ProcessBlocksModuleApi, "start">;
+    /** Blocks an agent starts in a document, and reads back
+     *  (`core.processBlocks`). */
+    processBlocks: Pick<ProcessBlocksModuleApi, "start" | "loaded" | "get">;
   }
 }
 

@@ -62,6 +62,12 @@ export interface ProcessBlocksApi {
   run(blobId: string): void;
 }
 
+/** A block's id is its process's, `blob_<procId>`: the one place either
+ *  is derived from the other. */
+const BLOB_PREFIX = "blob_";
+export const processBlobId = (procId: string) => `${BLOB_PREFIX}${procId}`;
+const procIdOf = (blobId: string) => blobId.slice(BLOB_PREFIX.length);
+
 /** Output kept per block; older lines scroll away. */
 export const MAX_LINES = 500;
 
@@ -121,7 +127,11 @@ export function createProcessBlocks(deps: {
       // rejects both end the run with the reason as its output.
       Promise.resolve()
         .then(() => {
-          const stream = deps.spawn({ procId: blobId, command, cwd });
+          const stream = deps.spawn({
+            procId: procIdOf(blobId),
+            command,
+            cwd,
+          });
           stream.onLine((line) =>
             update(blobId, {
               lines: [...get(blobId).lines, line].slice(-MAX_LINES),

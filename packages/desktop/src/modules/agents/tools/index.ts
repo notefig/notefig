@@ -8,6 +8,7 @@ import { historyDiff } from "./history-diff";
 import { historyCheckpoint } from "./history-checkpoint";
 import { historyRestore } from "./history-restore";
 import { widgetRespond } from "./widget-respond";
+import { processOutput } from "./process-output";
 import { processStart } from "./process-start";
 
 /**
@@ -29,6 +30,7 @@ export const toolRegistry: readonly AgentTool<unknown, unknown>[] = [
   historyRestore,
   widgetRespond,
   processStart,
+  processOutput,
 ] as unknown as readonly AgentTool<unknown, unknown>[];
 
 export function getTool(name: string): AgentTool<unknown, unknown> | undefined {
