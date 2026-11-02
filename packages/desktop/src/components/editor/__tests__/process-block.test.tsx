@@ -98,7 +98,7 @@ describe("process block view", () => {
 
   const restart = () =>
     container!.querySelector<HTMLButtonElement>(
-      'button[aria-label="processBlockRestart"]',
+      'button[aria-label="processBlockRun"]',
     );
 
   it("restarts the command once its stream is gone", async () => {
