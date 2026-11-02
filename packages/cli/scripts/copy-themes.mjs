@@ -17,6 +17,7 @@ const EXCLUDE = new Set([
   ".git",
   ".DS_Store",
   ".contentlayer",
+  ".content-collections",
   "content",
 ]);
 
