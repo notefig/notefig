@@ -8,8 +8,11 @@ import {
   type SpawnProcess,
 } from "../process-blocks";
 
-/** A spawn whose processes the test drives: lines, exit, a failed start. */
-function fakeSpawn(options: { startError?: Error } = {}) {
+/** A spawn whose processes the test drives: lines, exit, a failed or
+ *  held start. */
+function fakeSpawn(
+  options: { startError?: Error; startGate?: Promise<void> } = {},
+) {
   const spawned: Array<{
     spec: Parameters<SpawnProcess>[0];
     emit(line: string): void;
@@ -32,7 +35,7 @@ function fakeSpawn(options: { startError?: Error } = {}) {
       start: () =>
         options.startError
           ? Promise.reject(options.startError)
-          : Promise.resolve(),
+          : (options.startGate ?? Promise.resolve()),
       onLine: (listener) => (lineListeners.push(listener), () => {}),
       onClose: (listener) => (closeListeners.push(listener), () => {}),
       close: async () => {
@@ -138,6 +141,7 @@ describe("process blocks", () => {
     await settle();
     spawned[0].emit("serving");
     blocks.stop("blob_proc_1");
+    await settle();
 
     expect(spawned[0].closed).toBe(true);
     // The lines read before the stop are kept, not lost with the batch.
@@ -148,6 +152,24 @@ describe("process blocks", () => {
     blocks.run("blob_proc_1");
     await settle();
     expect(spawned).toHaveLength(2);
+  });
+
+  it("holds a stop made while starting until the start is done", async () => {
+    let started!: () => void;
+    const { spawn, spawned } = fakeSpawn({
+      startGate: new Promise((resolve) => (started = resolve)),
+    });
+    const blocks = await loadedBlocks(spawn);
+    blocks.run("blob_proc_1");
+    await settle();
+
+    blocks.stop("blob_proc_1");
+    await settle();
+    expect(spawned[0].closed).toBe(false);
+    started();
+    await settle();
+    expect(spawned[0].closed).toBe(true);
+    expect(blocks.get("blob_proc_1").running).toBe(false);
   });
 
   it("lands a burst of lines as one change", async () => {

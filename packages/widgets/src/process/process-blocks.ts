@@ -99,7 +99,8 @@ export function createProcessBlocks(deps: {
   registry: ProcessRegistry;
 }): ProcessBlocksApi {
   const blocks = new Map<string, ProcessBlock>();
-  const streams = new Map<string, ProcessStream>();
+  /** Each run's stream, once it has started. */
+  const streams = new Map<string, Promise<ProcessStream>>();
   const listeners = new Map<string, Set<() => void>>();
   let loading: Promise<void> | null = null;
   let isLoaded = false;
@@ -161,37 +162,41 @@ export function createProcessBlocks(deps: {
           dropped: dropped + all.length - kept.length,
         });
       };
+      const started = Promise.resolve().then(() => {
+        const stream = deps.spawn({
+          procId: procIdOf(blobId),
+          command,
+          cwd,
+        });
+        stream.onLine((line) => {
+          pending.push(line.slice(0, MAX_LINE_LENGTH));
+          timer ??= setTimeout(flush, FLUSH_MS);
+        });
+        stream.onClose(() => {
+          clearTimeout(timer);
+          flush();
+          streams.delete(blobId);
+          update(blobId, { running: false });
+        });
+        return stream.start().then(() => stream);
+      });
+      streams.set(blobId, started);
       // A spawn that throws (no processes on this platform) or a start that
       // rejects both end the run with the reason as its output.
-      Promise.resolve()
-        .then(() => {
-          const stream = deps.spawn({
-            procId: procIdOf(blobId),
-            command,
-            cwd,
-          });
-          streams.set(blobId, stream);
-          stream.onLine((line) => {
-            pending.push(line.slice(0, MAX_LINE_LENGTH));
-            timer ??= setTimeout(flush, FLUSH_MS);
-          });
-          stream.onClose(() => {
-            clearTimeout(timer);
-            flush();
-            streams.delete(blobId);
-            update(blobId, { running: false });
-          });
-          return stream.start();
-        })
-        .catch((error: unknown) =>
-          update(blobId, {
-            running: false,
-            lines: [error instanceof Error ? error.message : String(error)],
-          }),
-        );
+      started.catch((error: unknown) =>
+        update(blobId, {
+          running: false,
+          lines: [error instanceof Error ? error.message : String(error)],
+        }),
+      );
     },
     stop(blobId) {
-      void streams.get(blobId)?.close();
+      // Stopped while starting, it closes once started: closed sooner, the
+      // kill finds no child yet and the start launches the command anyway.
+      void streams.get(blobId)?.then(
+        (stream) => stream.close(),
+        () => {},
+      );
     },
   };
 }
