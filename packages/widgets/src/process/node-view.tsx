@@ -1,6 +1,6 @@
 /**
  * Renderer half of the process block (schema + markdown in node.ts): the
- * registered command, whole, over the tail of its process's stdout, with a
+ * registered command, whole, over the tail of its process's output, with a
  * play button once the stream is gone and a stop button while it lasts. The state is the process blocks service's
  * (./process-blocks.ts), handed in with the document's other widget
  * services. A block whose id the app never minted is dropped here, the one

@@ -1,19 +1,13 @@
-import { Button } from "@notefig/ui/button";
 import { cn } from "@notefig/ui/utils";
+import { choiceChipClass } from "@notefig/widgets/prompt/ui/widget-response-view";
 import { usePendingPermissions } from "@/modules/agents/react";
 import type { PermissionOption } from "@notefig/shared/agent";
 import { useCore } from "@notefig/core/react";
 
-/** ACP option kind → button emphasis. Options render verbatim otherwise. */
-function variantForKind(kind: PermissionOption["kind"]): "default" | "outline" {
-  return kind === "allow_once" || kind === "allow_always"
-    ? "default"
-    : "outline";
-}
-
 /**
  * Renders the head of a task's pending permission queue: the tool-call title
- * and the agent-provided options, verbatim. Reads the queue from
+ * and the agent-provided options, verbatim, as the prompt widget's choice
+ * chips: a permission is the agent asking a question too. Reads the queue from
  * agentPermissionRequestsCollection (the one bus); answering settles the
  * promise the ACP client is awaiting via the task's respondPermission.
  */
@@ -50,13 +44,13 @@ export function PermissionCard({
           "rounded-lg border border-border bg-background bg-gradient-to-b from-muted/40 to-muted/40 p-3",
       )}
     >
-      <div className="mb-2 font-medium">{head.title}</div>
-      <div className="flex flex-wrap gap-2">
+      <div className="mb-1.5 font-medium">{head.title}</div>
+      <div className="flex flex-wrap items-center gap-1.5">
         {options.map((option) => (
-          <Button
+          <button
             key={option.optionId}
-            size="sm"
-            variant={variantForKind(option.kind)}
+            type="button"
+            className={choiceChipClass}
             onClick={() =>
               agents.task(taskId).respondPermission(head.id, {
                 outcome: { outcome: "selected", optionId: option.optionId },
@@ -64,7 +58,7 @@ export function PermissionCard({
             }
           >
             {option.name}
-          </Button>
+          </button>
         ))}
       </div>
       {pending.length > 1 && (

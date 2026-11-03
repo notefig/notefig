@@ -48,7 +48,7 @@ import { draftToNode, readDraftNode } from "../composer/draft-text";
 import { mentionPopupHasResults } from "../composer/mention-bridge";
 import { hostIsMention } from "../composer/mention-suggestion";
 import { registerComposerKeyHandler } from "../composer/key-bridge";
-import { choiceChipBaseClass, WidgetResponseView } from "./widget-response-view";
+import { choiceChipClass, WidgetResponseView } from "./widget-response-view";
 import { usePromptChangeCounts, type PromptReview } from "../change-store";
 import {
   usePromptChangeNavigation,
@@ -2340,7 +2340,3 @@ function ChoiceOptions({
   );
 }
 
-const choiceChipClass = cn(
-  choiceChipBaseClass,
-  "cursor-pointer transition-colors hover:bg-accent hover:text-foreground",
-);

@@ -10,7 +10,7 @@ const InputSchema = z.object({
 
 /**
  * The agent's view of a block it started with `process_start` (MET-258):
- * whether it still runs, and its last lines of stdout — what the block
+ * whether it still runs, and its last lines of output — what the block
  * shows the user, read from the same buffer (`core.processBlocks`).
  * Read-only, so not permission-gated; scoped to the asking agent's
  * workspace, so a marker carried into another workspace reads nothing.
@@ -23,7 +23,8 @@ export const processOutput: AgentTool<
   title: "agentToolProcessOutput",
   description:
     "Read a block started with `process_start`: whether its command is " +
-    "still running, and its last `lines` lines of stdout (default 50).",
+    "still running, and its last `lines` lines of output, stdout and " +
+    "stderr as they came (default 50).",
   input: InputSchema,
   async execute(ctx, input) {
     const { blobId, lines = 50 } = input;

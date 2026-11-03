@@ -16,17 +16,21 @@ function fakeSpawn(
   const spawned: Array<{
     spec: Parameters<SpawnProcess>[0];
     emit(line: string): void;
+    emitError(line: string): void;
     exit(): void;
     closed: boolean;
   }> = [];
   const spawn: SpawnProcess = (spec) => {
     const lineListeners: Array<(line: string) => void> = [];
+    const errorListeners: Array<(line: string) => void> = [];
     const closeListeners: Array<() => void> = [];
     const exit = () => closeListeners.forEach((listener) => listener());
     const process = {
       spec,
       emit: (line: string) =>
         lineListeners.forEach((listener) => listener(line)),
+      emitError: (line: string) =>
+        errorListeners.forEach((listener) => listener(line)),
       exit,
       closed: false,
     };
@@ -37,6 +41,7 @@ function fakeSpawn(
           ? Promise.reject(options.startError)
           : (options.startGate ?? Promise.resolve()),
       onLine: (listener) => (lineListeners.push(listener), () => {}),
+      onDiagnostic: (listener) => (errorListeners.push(listener), () => {}),
       onClose: (listener) => (closeListeners.push(listener), () => {}),
       close: async () => {
         process.closed = true;
@@ -90,6 +95,22 @@ describe("process blocks", () => {
       running: true,
       lines: ["ready on :3000"],
       dropped: 0,
+    });
+  });
+
+  it("keeps an ended process's stderr with its stdout, in order", async () => {
+    const { spawn, spawned } = fakeSpawn();
+    const blocks = await loadedBlocks(spawn);
+
+    blocks.run("blob_proc_1");
+    await settle();
+    spawned[0].emit("building");
+    spawned[0].emitError("error: missing module");
+    spawned[0].exit();
+
+    expect(blocks.get("blob_proc_1")).toMatchObject({
+      running: false,
+      lines: ["building", "error: missing module"],
     });
   });
 

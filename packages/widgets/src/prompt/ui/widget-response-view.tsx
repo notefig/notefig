@@ -176,6 +176,13 @@ export function ReadOnlyChoices({
 export const choiceChipBaseClass =
   "flex items-center gap-1.5 rounded-md border border-border px-2 py-0.5 text-xs text-foreground/80";
 
+/** A chip the user can press: the widget's live options, and the agent's
+ *  permission options (desktop's PermissionCard), which answer alike. */
+export const choiceChipClass = cn(
+  choiceChipBaseClass,
+  "cursor-pointer transition-colors hover:bg-accent hover:text-foreground",
+);
+
 function SummaryLine({
   summary,
   expandable,

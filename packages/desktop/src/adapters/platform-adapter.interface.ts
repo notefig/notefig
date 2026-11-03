@@ -469,7 +469,7 @@ export interface ProcessSurface {
    * Run a command line through the platform's shell in `cwd`, as a process
    * block does (@notefig/widgets' process/). The same dumb constructor as
    * `createAgentTransport`, and the same transport: the caller calls
-   * `start()` and reads stdout from `onLine`. `procId` names the process,
+   * `start()` and reads stdout from `onLine`, stderr from `onDiagnostic`. `procId` names the process,
    * so a respawn under the same id replaces the old one. Desktop-only, like
    * `runShellCommand`.
    */

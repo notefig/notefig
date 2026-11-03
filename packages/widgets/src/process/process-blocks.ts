@@ -9,7 +9,8 @@
  * in); this service reads it, so a block's command is the registered one
  * and an id with no registration is no block at all.
  *
- * A block shows its process's stdout while the stream lasts. The stream is
+ * A block shows its process's output — stdout and stderr, as they come,
+ * as a terminal would — while the stream lasts. The stream is
  * gone once the process exits and its tail has been read, and it was never
  * there for a block read from the file (processes belong to one run of the
  * app). Either way the block can run its command again: `run` starts it
@@ -24,11 +25,14 @@
  * not once a line.
  */
 
-/** A spawned process, as the platform hands it over: its stdout lines and
- *  its end. The agents' stdio transport is one. */
+/** A spawned process, as the platform hands it over: its stdout and stderr
+ *  lines and its end. The agents' stdio transport is one. */
 export interface ProcessStream {
   start(): Promise<void>;
   onLine(callback: (line: string) => void): () => void;
+  /** Its stderr: where errors, and many tools' whole logs, go. Optional,
+   *  as on the agents' transport. */
+  onDiagnostic?(callback: (line: string) => void): () => void;
   onClose(callback: () => void): () => void;
   /** Kill it (its whole process tree); `onClose` follows. */
   close(): Promise<void>;
@@ -168,10 +172,12 @@ export function createProcessBlocks(deps: {
           command,
           cwd,
         });
-        stream.onLine((line) => {
+        const take = (line: string) => {
           pending.push(line.slice(0, MAX_LINE_LENGTH));
           timer ??= setTimeout(flush, FLUSH_MS);
-        });
+        };
+        stream.onLine(take);
+        stream.onDiagnostic?.(take);
         stream.onClose(() => {
           clearTimeout(timer);
           flush();

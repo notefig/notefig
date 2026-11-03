@@ -25,7 +25,7 @@ export const processStart: AgentTool<
   name: "process_start",
   title: "agentToolProcessStart",
   description:
-    "Start a shell command in the workspace root and show its live stdout " +
+    "Start a shell command in the workspace root and show its live output " +
     "in the document, for a long-running command (a dev server, a build, a " +
     "watcher) whose output the user should see. Returns `marker`: write it " +
     "into the document, on a line of its own, where the output belongs. " +
