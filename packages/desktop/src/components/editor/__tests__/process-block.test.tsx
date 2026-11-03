@@ -211,8 +211,10 @@ describe("process block view", () => {
   it("runs the registered command again once its stream is gone", async () => {
     await mount();
 
-    // Read from the file: no stream yet, nothing runs until asked.
+    // Read from the file: no stream yet, nothing runs until asked. Its
+    // output box is already there, empty, so output never grows the block.
     expect(spawn).not.toHaveBeenCalled();
+    expect(container!.querySelector("pre")?.textContent).toBe("");
     await act(async () => run()!.click());
     expect(spawn).toHaveBeenCalledWith({
       procId: "proc_1a2b",

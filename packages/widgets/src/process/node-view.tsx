@@ -65,8 +65,7 @@ function ProcessNodeView({ node, extension, selected }: NodeViewProps) {
       {/* All of it, wrapped: what the play button runs is never cut off. */}
       <div
         className={cn(
-          "flex items-start gap-1.5 py-1 pl-2.5 pr-1 text-[0.6875rem] text-muted-foreground",
-          block.lines.length > 0 && "border-b border-border/60",
+          "flex items-start gap-1.5 border-b border-border/60 py-1 pl-2.5 pr-1 text-[0.6875rem] text-muted-foreground",
         )}
       >
         <SquareTerminal className="mt-0.5 size-3 shrink-0" />
@@ -81,9 +80,7 @@ function ProcessNodeView({ node, extension, selected }: NodeViewProps) {
           }
         />
       </div>
-      {block.lines.length > 0 && (
-        <Tail lines={block.lines} dropped={block.dropped} />
-      )}
+      <Tail lines={block.lines} dropped={block.dropped} />
     </NodeViewWrapper>
   );
 }
@@ -118,7 +115,9 @@ function ControlButton({
 }
 
 /** The output, following its newest line unless the user has scrolled up
- *  to read; what scrolled off the service's buffer is counted at the top. */
+ *  to read; what scrolled off the service's buffer is counted at the top.
+ *  One height, empty or full, so the block never grows under the reader
+ *  as lines come in. */
 function Tail({
   lines,
   dropped,
@@ -141,7 +140,7 @@ function Tail({
         following.current =
           el.scrollHeight - el.scrollTop - el.clientHeight < 8;
       }}
-      className="max-h-48 select-text overflow-auto px-2.5 py-1.5 text-[0.6875rem] leading-relaxed text-muted-foreground"
+      className="h-48 select-text overflow-auto px-2.5 py-1.5 text-[0.6875rem] leading-relaxed text-muted-foreground"
     >
       {dropped > 0 && (
         <div className="italic text-muted-foreground/60">
