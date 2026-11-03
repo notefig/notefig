@@ -268,6 +268,44 @@ describe("process block view", () => {
     expect(pre().scrollTop).toBe(0);
   });
 
+  it("is selected by the keyboard, never a click, and wears the tint", async () => {
+    await mount();
+    const view = editor!.view;
+    let at = -1;
+    editor!.state.doc.descendants((node, pos) => {
+      if (node.type.name === "processBlock") at = pos;
+    });
+    const tinted = () =>
+      container!
+        .querySelector(".node-processBlock")!
+        .hasAttribute("data-widget-selected");
+
+    // A click on it is the reader's: nothing selects the block.
+    const node = editor!.state.doc.nodeAt(at)!;
+    expect(
+      view.someProp("handleClickOn", (handle) =>
+        handle(view, at + 1, node, at, new MouseEvent("click"), true),
+      ),
+    ).toBe(true);
+    expect(tinted()).toBe(false);
+
+    // Picked by the keyboard, or inside a range: the tint.
+    await act(async () => void editor!.commands.setNodeSelection(at));
+    expect(tinted()).toBe(true);
+    await act(async () => void editor!.commands.setTextSelection(1));
+    expect(tinted()).toBe(false);
+    await act(async () => void editor!.commands.selectAll());
+    expect(tinted()).toBe(true);
+
+    // Typing over it never replaces it.
+    await act(async () => void editor!.commands.setNodeSelection(at));
+    const typed = view.someProp("handleTextInput", (handle) =>
+      handle(view, at, at + node.nodeSize, "x", () => view.state.tr),
+    );
+    expect(typed).toBe(true);
+    expect(blockIds(editor!)).toEqual(["blob_proc_1a2b"]);
+  });
+
   it("shows the whole command, and runs or stops on 1 while the block is selected", async () => {
     await mount();
     expect(container!.querySelector("code")?.textContent).toBe("npm run dev");

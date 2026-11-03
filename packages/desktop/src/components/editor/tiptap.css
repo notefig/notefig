@@ -81,7 +81,8 @@
    (interactions.ts), so a NodeSelection from anywhere else (the drag
    grip, an undo) shows nothing, and the generic node-selection outline
    never does. A refused delete shakes it (prompt-blob.tsx). */
-.ProseMirror [data-type="ai-prompt"].ProseMirror-selectednode {
+.ProseMirror [data-type="ai-prompt"].ProseMirror-selectednode,
+.ProseMirror .node-processBlock.ProseMirror-selectednode {
   outline: none;
 }
 .ProseMirror [data-type="ai-prompt"] {
@@ -92,13 +93,16 @@
    top (styles.css's draft ::selection), which would otherwise show only
    under a range, and color the text under a keyboard selection.
    A diff block wears the same tint on its card, which its plugin marks
-   while a selection takes the block in (diff-block/extension.ts). */
+   while a selection takes the block in (diff-block/extension.ts), and a
+   process block on its frame (process/node-view.tsx). */
 .ProseMirror .node-aiPrompt[data-widget-selected] > [data-type="ai-prompt"],
-.ProseMirror notefig-diff-block[data-selected] [data-diff-card] {
+.ProseMirror notefig-diff-block[data-selected] [data-diff-card],
+.ProseMirror .node-processBlock[data-widget-selected] > [data-type="process"] {
   position: relative;
 }
 .ProseMirror .node-aiPrompt[data-widget-selected] > [data-type="ai-prompt"]::after,
-.ProseMirror notefig-diff-block[data-selected] [data-diff-card]::after {
+.ProseMirror notefig-diff-block[data-selected] [data-diff-card]::after,
+.ProseMirror .node-processBlock[data-widget-selected] > [data-type="process"]::after {
   content: "";
   position: absolute;
   inset: 0;

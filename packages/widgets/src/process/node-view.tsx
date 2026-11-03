@@ -9,10 +9,23 @@
  * It wears the prompt widget's frame — settled, or raised while its
  * process runs — and its control is the diff card's kind: an icon with a
  * tooltip, and `1` while the block is selected.
+ *
+ * To the selection it is what a prompt widget and a diff block are
+ * (prompt/interactions.ts, diff-block/extension.ts): only the keyboard
+ * selects it (an arrow onto it, Backspace or Delete beside it), never a
+ * click, which is the reader's, to select the output; selected, or inside
+ * a selection that takes it in, it wears the selection's tint
+ * (tiptap.css), and typing never replaces it.
  */
 import { NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
-import { NodeSelection, Plugin, type EditorState } from "@tiptap/pm/state";
+import {
+  AllSelection,
+  NodeSelection,
+  Plugin,
+  type EditorState,
+} from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { Slice } from "@tiptap/pm/model";
 import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
@@ -154,6 +167,31 @@ function insertsBlock(
   );
 }
 
+/** The tint: on each block the selection takes in, or the block it is.
+ *  An empty selection, every caret move, looks at nothing. */
+function selectedDecorations(state: EditorState, name: string) {
+  const { selection, doc } = state;
+  if (selection.empty) return DecorationSet.empty;
+  const taken: Decoration[] = [];
+  const mark = (pos: number, size: number) =>
+    taken.push(
+      Decoration.node(pos, pos + size, { "data-widget-selected": "" }),
+    );
+  if (selection instanceof NodeSelection) {
+    if (selection.node.type.name === name)
+      mark(selection.from, selection.node.nodeSize);
+  } else {
+    const all = selection instanceof AllSelection;
+    doc.nodesBetween(selection.from, selection.to, (node, pos) => {
+      if (node.type.name !== name) return !node.isTextblock;
+      if (all || (selection.from <= pos && selection.to >= pos + node.nodeSize))
+        mark(pos, node.nodeSize);
+      return false;
+    });
+  }
+  return DecorationSet.create(doc, taken);
+}
+
 /** Take out every block whose id the app never minted. Out of history:
  *  undone, it would only be dropped again. */
 function dropForeignTr(
@@ -193,6 +231,18 @@ export const ProcessNode = ProcessNodeBase.extend<ProcessNodeOptions>({
           insertsBlock(transactions, name)
             ? dropForeignTr(state, name, processes)
             : null,
+        props: {
+          decorations: (state) => selectedDecorations(state, name),
+          // A click on the block never selects it, as on a prompt widget.
+          handleClickOn: (_view, _pos, node, _nodePos, _event, direct) =>
+            direct && node.type.name === name,
+          handleTripleClickOn: (_view, _pos, node, _nodePos, _event, direct) =>
+            direct && node.type.name === name,
+          // Typed over, a selected block would be replaced by the text.
+          handleTextInput: ({ state: { selection } }) =>
+            selection instanceof NodeSelection &&
+            selection.node.type.name === name,
+        },
         view(view) {
           let live = true;
           processes.loaded().then(
