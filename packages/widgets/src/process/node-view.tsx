@@ -23,6 +23,7 @@ import {
   AllSelection,
   NodeSelection,
   Plugin,
+  Selection,
   type EditorState,
 } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
@@ -150,6 +151,9 @@ function Tail({
   );
 }
 
+/** The vertical arrows, as a direction through the document. */
+const VERTICAL: Record<string, -1 | 1> = { ArrowUp: -1, ArrowDown: 1 };
+
 /** Did any of these transactions bring in a block of this type? */
 function insertsBlock(
   transactions: readonly { steps: readonly object[] }[],
@@ -238,6 +242,28 @@ export const ProcessNode = ProcessNodeBase.extend<ProcessNodeOptions>({
             direct && node.type.name === name,
           handleTripleClickOn: (_view, _pos, node, _nodePos, _event, direct) =>
             direct && node.type.name === name,
+          // Up or Down off the selected block lands on what is next that
+          // way. ProseMirror hands a move into text to the browser, which,
+          // from a block drawn without a caret, goes the wrong way: Up came
+          // back down below it.
+          handleKeyDown: (view, event) => {
+            const dir = VERTICAL[event.key];
+            const { selection, doc } = view.state;
+            if (
+              !dir ||
+              event.shiftKey ||
+              !(selection instanceof NodeSelection) ||
+              selection.node.type.name !== name
+            )
+              return false;
+            const next = Selection.findFrom(
+              doc.resolve(dir < 0 ? selection.from : selection.to),
+              dir,
+            );
+            if (next)
+              view.dispatch(view.state.tr.setSelection(next).scrollIntoView());
+            return true;
+          },
           // Typed over, a selected block would be replaced by the text.
           handleTextInput: ({ state: { selection } }) =>
             selection instanceof NodeSelection &&

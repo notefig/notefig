@@ -306,6 +306,26 @@ describe("process block view", () => {
     expect(blockIds(editor!)).toEqual(["blob_proc_1a2b"]);
   });
 
+  it("leaves the selected block up or down for the text that way", async () => {
+    await mount();
+    const press = (key: string) =>
+      editor!.view.someProp("handleKeyDown", (handle) =>
+        handle(editor!.view, new KeyboardEvent("keydown", { key })),
+      );
+    let at = -1;
+    editor!.state.doc.descendants((node, pos) => {
+      if (node.type.name === "processBlock") at = pos;
+    });
+    const caretIn = () => editor!.state.selection.$from.parent.textContent;
+
+    await act(async () => void editor!.commands.setNodeSelection(at));
+    await act(async () => void press("ArrowUp"));
+    expect(caretIn()).toBe("Title");
+    await act(async () => void editor!.commands.setNodeSelection(at));
+    await act(async () => void press("ArrowDown"));
+    expect(caretIn()).toBe("After");
+  });
+
   it("shows the whole command, and runs or stops on 1 while the block is selected", async () => {
     await mount();
     expect(container!.querySelector("code")?.textContent).toBe("npm run dev");
