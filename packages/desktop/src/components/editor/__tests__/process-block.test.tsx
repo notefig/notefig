@@ -15,6 +15,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 import { Editor } from "@tiptap/core";
+import { NodeSelection } from "@tiptap/pm/state";
 import { EditorContent, useEditor } from "@tiptap/react";
 import {
   createProcessBlocks,
@@ -324,6 +325,56 @@ describe("process block view", () => {
     await act(async () => void editor!.commands.setNodeSelection(at));
     await act(async () => void press("ArrowDown"));
     expect(caretIn()).toBe("After");
+  });
+
+  it("is selected, not deleted, by Backspace after it or Delete before it", async () => {
+    await mount();
+    const press = (key: string) =>
+      editor!.view.someProp("handleKeyDown", (handle) =>
+        handle(editor!.view, new KeyboardEvent("keydown", { key })),
+      );
+    const selected = () =>
+      editor!.state.selection instanceof NodeSelection &&
+      editor!.state.selection.node.type.name === "processBlock";
+    const lineStart = (text: string) => {
+      let at = -1;
+      editor!.state.doc.descendants((node, pos) => {
+        if (node.isTextblock && node.textContent === text) at = pos + 1;
+      });
+      return at;
+    };
+
+    // Backspace at the start of the line after it: selected, then deleted.
+    await act(
+      async () => void editor!.commands.setTextSelection(lineStart("After")),
+    );
+    await act(async () => void press("Backspace"));
+    expect(selected()).toBe(true);
+    expect(blockIds(editor!)).toEqual(["blob_proc_1a2b"]);
+
+    // Delete at the end of the line before it: selected.
+    await act(
+      async () =>
+        void editor!.commands.setTextSelection(lineStart("Title") + 5),
+    );
+    await act(async () => void press("Delete"));
+    expect(selected()).toBe(true);
+    expect(blockIds(editor!)).toEqual(["blob_proc_1a2b"]);
+
+    // An empty line after it goes, and the block is selected.
+    await act(
+      async () => void editor!.commands.setTextSelection(lineStart("After")),
+    );
+    await act(async () => void editor!.commands.splitBlock());
+    await act(
+      async () => void editor!.commands.setTextSelection(lineStart("")),
+    );
+    await act(async () => void press("Backspace"));
+    expect(selected()).toBe(true);
+    expect(editor!.state.doc.childCount).toBe(3);
+
+    await act(async () => void press("Backspace"));
+    expect(blockIds(editor!)).toEqual([]);
   });
 
   it("shows the whole command, and runs or stops on 1 while the block is selected", async () => {

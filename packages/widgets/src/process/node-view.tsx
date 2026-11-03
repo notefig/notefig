@@ -19,11 +19,13 @@
  */
 import { NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
+import type { Editor } from "@tiptap/core";
 import {
   AllSelection,
   NodeSelection,
   Plugin,
   Selection,
+  TextSelection,
   type EditorState,
 } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
@@ -149,6 +151,33 @@ function Tail({
       {lines.join("\n")}
     </pre>
   );
+}
+
+/**
+ * Backspace at the start of the line right after a block, or Delete at the
+ * end of the line right before one: the block, selected, as beside a
+ * prompt widget or a diff block — never deleted in one press. An empty
+ * line goes, as it would have.
+ */
+function selectBeside(editor: Editor, name: string, back: boolean) {
+  const { state } = editor;
+  const { selection } = state;
+  if (!(selection instanceof TextSelection) || !selection.empty) return false;
+  const { $from } = selection;
+  if ($from.depth === 0 || !$from.parent.isTextblock) return false;
+  if ($from.parentOffset !== (back ? 0 : $from.parent.content.size))
+    return false;
+  const $edge = state.doc.resolve(back ? $from.before() : $from.after());
+  const block = back ? $edge.nodeBefore : $edge.nodeAfter;
+  if (block?.type.name !== name) return false;
+  const tr = state.tr;
+  if (back && $from.parent.content.size === 0)
+    tr.delete($from.before(), $from.after());
+  const at = back ? $edge.pos - block.nodeSize : $edge.pos;
+  editor.view.dispatch(
+    tr.setSelection(NodeSelection.create(tr.doc, at)).scrollIntoView(),
+  );
+  return true;
 }
 
 /** The vertical arrows, as a direction through the document. */
@@ -290,6 +319,8 @@ export const ProcessNode = ProcessNodeBase.extend<ProcessNodeOptions>({
 
   addKeyboardShortcuts() {
     return {
+      Backspace: ({ editor }) => selectBeside(editor, this.name, true),
+      Delete: ({ editor }) => selectBeside(editor, this.name, false),
       // `1` on the selected block presses its control (run, or stop while
       // it runs), as a digit runs a diff card's control.
       "1": ({ editor }) => {
