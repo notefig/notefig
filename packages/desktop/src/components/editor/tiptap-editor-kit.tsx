@@ -4,7 +4,6 @@ import type { CodeBlockOptions } from "@tiptap/extension-code-block";
 /** Its diff blocks' paths are in `workspaceRoot`'s workspace. */
 type MarkdownCodeBlockOptions = CodeBlockOptions & { workspaceRoot: string | null };
 import { Plugin } from "@tiptap/pm/state";
-import { ReactNodeViewRenderer } from "@tiptap/react";
 import Placeholder from "@tiptap/extension-placeholder";
 import CharacterCount from "@tiptap/extension-character-count";
 import { EditorImage } from "./editor-image-node";
@@ -13,6 +12,7 @@ import { widgetRendererNodes, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
 // By path, not through the barrel: @pierre/diffs registers custom elements
 // on import, and the barrel also loads in the markdown worker, which has none.
 import { codeHighlight } from "@notefig/widgets/code-highlight";
+import { reactNodeView } from "@notefig/widgets/react-node-view";
 import { codeLanguagePicker } from "@notefig/widgets/code-language";
 import { codeDiff } from "@notefig/widgets/diff-block/extension";
 import {
@@ -31,7 +31,7 @@ import {
  */
 export const MarkdownImage = MarkdownImageBase.extend({
   addNodeView() {
-    return ReactNodeViewRenderer(EditorImage);
+    return reactNodeView(EditorImage);
   },
 });
 
@@ -126,6 +126,30 @@ const NativeHistoryFocusGuard = Extension.create({
   },
 });
 
+/**
+ * A transaction that changes nothing — no step, selection, stored marks,
+ * scroll or meta — is dropped before it applies. Tiptap's `commands.x()`
+ * dispatches even when x declines, and a Backspace runs four such handlers
+ * (the list keymap, the mention, the core keymap, the widget's): each was a
+ * whole view update, plugin views and editor-state subscribers included.
+ */
+const SkipEmptyTransactions = Extension.create({
+  name: "skipEmptyTransactions",
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        filterTransaction: (tr) =>
+          tr.docChanged ||
+          tr.selectionSet ||
+          tr.storedMarksSet ||
+          tr.scrolledIntoView ||
+          !tr.isGeneric,
+      }),
+    ];
+  },
+});
+
 export const editorExtensions = [
   ...createSchemaExtensions(
     MarkdownImage,
@@ -149,4 +173,5 @@ export const editorExtensions = [
   CharacterCount,
   NativeFormatIntercept,
   NativeHistoryFocusGuard,
+  SkipEmptyTransactions,
 ];

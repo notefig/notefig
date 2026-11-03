@@ -87,7 +87,16 @@ export const posix: PathFlavor = {
   },
 
   normalize(path: string): string {
-    if (!path) return path;
+    // Already normal, as nearly every path is: a 20k-file walk normalizes
+    // each path several times, and the replaces below cost 5x this check.
+    if (
+      !path ||
+      (!path.includes("\\") &&
+        !path.includes("//") &&
+        (path.length === 1 || !path.endsWith("/")))
+    ) {
+      return path;
+    }
     // Backslash conversion matches the historical normalizePath behavior on
     // mac (a `\` in a filename was always mangled; identity is the contract).
     const collapsed = path.replace(/\\/g, "/").replace(/\/+/g, "/");

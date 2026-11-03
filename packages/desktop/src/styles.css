@@ -472,8 +472,9 @@
      by the editor's Placeholder extension: that extension carries one
      string for the whole document, and the row knows whether it is asking
      for the first prompt or a follow-up reply. Absolutely positioned so it
-     doesn't disturb the draft's own line box. */
-  [data-prompt-draft][data-empty="true"]::before {
+     doesn't disturb the draft's own line box. The draft inside marks
+     itself empty (the widget's PromptDraftNode). */
+  [data-prompt-draft]:has([data-draft-empty])::before {
     content: attr(data-placeholder);
     position: absolute;
     inset-inline-start: 0;
@@ -767,7 +768,7 @@ file-tree-container:focus-visible {
 /* The words being heard take the placeholder's place: the ghost is a
    decoration, so the editor still counts as empty and would paint both. */
 .prompt-editor .ProseMirror[data-dictating] p.is-editor-empty:first-child::before,
-[data-prompt-draft][data-empty="true"]:has(.dictation-ghost)::before {
+[data-prompt-draft]:has([data-draft-empty]):has(.dictation-ghost)::before {
   content: none;
 }
 

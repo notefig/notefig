@@ -99,11 +99,14 @@ function useShownTabs(tabs: tabGroupObject, selected: string): Set<string> {
   return new Set(recent.current);
 }
 
-/** One tab's content. Selected, it lays out as a direct child of the
- *  content box. A kept-mounted tab while another is selected is out of
- *  flow and off screen, unrendered (`content-visibility` keeps its state,
- *  scroll offsets included), and inert, so it takes no focus and leaves the
- *  accessibility tree. Only this wrapper's style changes on select, so nothing remounts. */
+/** One tab's content, in a box filling the content box. A kept-mounted
+ *  tab while another is selected is off screen, unrendered
+ *  (`content-visibility` keeps its state, scroll offsets included), and
+ *  inert, so it takes no focus and leaves the accessibility tree. Only this
+ *  wrapper's style changes on select, so nothing remounts — and the box is
+ *  the same either way: a change of box (it was `display: contents` when
+ *  selected) rebuilds the layout and restyles everything inside, ~300 ms
+ *  to bring back an 8,000-line document. */
 function TabContent({
   hidden,
   children,
@@ -117,6 +120,7 @@ function TabContent({
       ref={(element) => {
         if (element) element.inert = hidden;
       }}
+      className="px-2"
       style={hidden ? HIDDEN_TAB_STYLE : SELECTED_TAB_STYLE}
     >
       {children}
@@ -124,11 +128,13 @@ function TabContent({
   );
 }
 
-const SELECTED_TAB_STYLE: React.CSSProperties = { display: "contents" };
-const HIDDEN_TAB_STYLE: React.CSSProperties = {
+const SELECTED_TAB_STYLE: React.CSSProperties = {
   position: "absolute",
   inset: 0,
   display: "flex",
+};
+const HIDDEN_TAB_STYLE: React.CSSProperties = {
+  ...SELECTED_TAB_STYLE,
   visibility: "hidden",
   contentVisibility: "hidden",
   // Off screen too, so nothing inside reads as in view: visibility alone
@@ -243,7 +249,6 @@ function TabView({
       )}
 
       <div
-        className="px-2"
         style={{
           overflow: "clip",
           display: "flex",

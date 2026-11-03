@@ -15,7 +15,8 @@
  * time transaction can clobber restored scroll positions).
  */
 import type { Editor } from "@tiptap/core";
-import { NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react";
+import { NodeViewWrapper } from "@tiptap/react";
+import { reactNodeView } from "@notefig/widgets/react-node-view";
 import { FrontmatterNodeBase } from "./editor-schema-kit";
 
 /** The document's frontmatter YAML, or null when the doc carries no
@@ -47,6 +48,6 @@ function HiddenFrontmatterView() {
 
 export const FrontmatterNode = FrontmatterNodeBase.extend({
   addNodeView() {
-    return ReactNodeViewRenderer(HiddenFrontmatterView);
+    return reactNodeView(HiddenFrontmatterView);
   },
 });

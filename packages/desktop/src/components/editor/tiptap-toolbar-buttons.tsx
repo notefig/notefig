@@ -1,6 +1,7 @@
 import { useEditorState } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
 import { ToolbarButton } from "@notefig/ui/toolbar";
+import { isActiveIn } from "./active-formats";
 
 const preventFocusLoss = (e: React.MouseEvent) => e.preventDefault();
 
@@ -19,7 +20,7 @@ export function TiptapMarkButton({
 }: MarkButtonProps) {
   const isActive = useEditorState({
     editor,
-    selector: ({ editor }) => editor.isActive(format),
+    selector: ({ editor }) => isActiveIn(editor.state, format),
   });
 
   return (
@@ -51,7 +52,7 @@ export function TiptapHeadingButton({
 }: HeadingButtonProps) {
   const isActive = useEditorState({
     editor,
-    selector: ({ editor }) => editor.isActive("heading", { level }),
+    selector: ({ editor }) => isActiveIn(editor.state, "heading", { level }),
   });
 
   return (
@@ -68,37 +69,8 @@ export function TiptapHeadingButton({
   );
 }
 
-type BlockButtonProps = {
-  editor: Editor;
-  format: string;
-  tooltip: string;
-  children: React.ReactNode;
-};
-
-export function TiptapBlockButton({
-  editor,
-  format,
-  tooltip,
-  children,
-}: BlockButtonProps) {
-  const isActive = useEditorState({
-    editor,
-    selector: ({ editor }) => editor.isActive(format),
-  });
-
-  return (
-    <ToolbarButton
-      onMouseDown={preventFocusLoss}
-      onClick={() =>
-        (editor.chain().focus() as any)[`toggle${capitalize(format)}`]().run()
-      }
-      tooltip={tooltip}
-      pressed={isActive}
-    >
-      {children}
-    </ToolbarButton>
-  );
-}
+/** A block toggles as a mark does, by its `toggle<Format>` command. */
+export const TiptapBlockButton = TiptapMarkButton;
 
 type LinkButtonProps = {
   editor: Editor;
@@ -115,7 +87,7 @@ export function TiptapLinkButton({
 }: LinkButtonProps) {
   const isActive = useEditorState({
     editor,
-    selector: ({ editor }) => editor.isActive("link"),
+    selector: ({ editor }) => isActiveIn(editor.state, "link"),
   });
 
   return (
@@ -147,7 +119,7 @@ export function TiptapTableInsertButton({
 }: TableInsertButtonProps) {
   const isActive = useEditorState({
     editor,
-    selector: ({ editor }) => editor.isActive("table"),
+    selector: ({ editor }) => isActiveIn(editor.state, "table"),
   });
 
   return (

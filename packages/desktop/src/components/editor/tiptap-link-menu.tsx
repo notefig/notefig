@@ -7,13 +7,15 @@ import { useTranslation } from "react-i18next";
 import { getDirectoryPath } from "@/utils/fs";
 import { useCore } from "@notefig/core/react";
 import { isExternalUrl, buildInternalCandidates } from "./tiptap-link-utils";
+import { isActiveIn } from "./active-formats";
 
 const preventFocusLoss = (e: React.MouseEvent) => e.preventDefault();
 
 // Module scope: BubbleMenu dispatches an options transaction into the editor
 // whenever `shouldShow` changes identity, so an inline arrow cost one per
 // render.
-const showOnLink = ({ editor }: { editor: Editor }) => editor.isActive("link");
+const showOnLink = ({ editor }: { editor: Editor }) =>
+  isActiveIn(editor.state, "link");
 
 interface LinkBubbleMenuProps {
   editor: Editor;

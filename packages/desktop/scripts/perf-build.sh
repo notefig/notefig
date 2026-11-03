@@ -12,7 +12,7 @@ rm -rf "$out"
 mkdir -p "$out"
 
 VITE_TEST_BACKEND=shim \
-VITE_TEST_BACKEND_PORT=4599 \
+VITE_TEST_BACKEND_PORT="${PERF_SHIM_PORT:-4599}" \
 VITE_TEST_HOST_OS="$(node -p process.platform)" \
 VITE_TELEMETRY_DISABLED=1 \
   npx vite build --outDir "$out/dist" --emptyOutDir

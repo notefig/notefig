@@ -15,9 +15,10 @@ import { defineConfig, devices } from "@playwright/test";
  * would measure the wrong code, and here nothing would fail to say so.
  *
  * Ports: shim on 4599 (baked into the build); preview on 1423, the perf
- * suite's own (1420 dev, 1421 shim suite, 1422 e2e).
+ * suite's own (1420 dev, 1421 shim suite, 1422 e2e). PERF_SHIM_PORT and
+ * PERF_UI_PORT move them, so two checkouts can measure side by side.
  */
-const UI_PORT = 1423;
+const UI_PORT = Number(process.env.PERF_UI_PORT ?? 1423);
 const BUILD = process.env.PERF_BUILD ?? "perf-build";
 
 export default defineConfig({

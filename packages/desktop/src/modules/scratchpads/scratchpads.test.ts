@@ -243,6 +243,40 @@ describe("enter: where it lands, on disk truth", () => {
     expect(adapter.writeFiles).not.toHaveBeenCalled();
   });
 
+  it("records what it swept and created as rows, without a re-walk", async () => {
+    const empty = `${DIR}/old-pad.md`;
+    seedFileRow(empty);
+    listDir([empty]);
+    adapter.deleteFiles.mockImplementation(async (paths: string[]) => {
+      listDir([]);
+      return ok(paths);
+    });
+    adapter.readFiles.mockResolvedValue(ok([{ path: empty, content: "" }]));
+    adapter.getMetadata.mockImplementation(async (paths: string[]) =>
+      ok(
+        paths.map((path) => ({
+          ...stat(path, 100),
+          type: path.endsWith(".md")
+            ? ("file" as const)
+            : ("directory" as const),
+        })),
+      ),
+    );
+    adapter.readDirectory.mockClear();
+
+    const resolved = await pads.enter([]);
+
+    const { metadata } = files.collections;
+    expect(metadata.get(empty)).toBeUndefined();
+    expect(metadata.get(resolved!)?.type).toBe("file");
+    expect(metadata.get(DIR)?.type).toBe("directory");
+    expect(metadata.get(`${WS}/.notefig`)?.relativePath).toBe(".notefig");
+    expect(adapter.readDirectory).not.toHaveBeenCalledWith(
+      WS,
+      expect.anything(),
+    );
+  });
+
   it("bails to null when the folder path is unusable", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     scratchpadDirLists({
