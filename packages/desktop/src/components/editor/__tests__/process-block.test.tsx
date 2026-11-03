@@ -18,6 +18,7 @@ import { Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
 import {
   createProcessBlocks,
+  PROCESS_FLUSH_MS as FLUSH_MS,
   widgetRendererNodes,
   type ProcessBlocksApi,
   type ProcessRegistry,
@@ -46,6 +47,9 @@ function registry() {
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+/** Past the service's batch window: emitted lines have landed. */
+const flushed = () =>
+  new Promise((resolve) => setTimeout(resolve, FLUSH_MS + 10));
 
 const extensions = (processes?: ProcessBlocksApi) => [
   ...editorExtensions.filter(
@@ -154,16 +158,22 @@ describe("process block view", () => {
 
   const lines: Array<(line: string) => void> = [];
   const exits: Array<() => void> = [];
+  const kill = vi.fn();
   const spawn = vi.fn<SpawnProcess>(() => ({
     start: () => Promise.resolve(),
     onLine: (listener) => (lines.push(listener), () => {}),
     onClose: (listener) => (exits.push(listener), () => {}),
+    close: async () => {
+      kill();
+      exits.at(-1)!();
+    },
   }));
 
   async function mount(options: { load?: boolean } = {}) {
     lines.length = 0;
     exits.length = 0;
     spawn.mockClear();
+    kill.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -180,10 +190,12 @@ describe("process block view", () => {
     return finish;
   }
 
-  const run = () =>
+  const button = (label: string) => () =>
     container!.querySelector<HTMLButtonElement>(
-      'button[aria-label="processBlockRun"]',
+      `button[aria-label="${label}"]`,
     );
+  const run = button("processBlockRun");
+  const stop = button("processBlockStop");
 
   it("shows nothing until the registry says what the block runs", async () => {
     const finish = await mount({ load: false });
@@ -208,7 +220,10 @@ describe("process block view", () => {
     });
     expect(run()).toBeNull();
 
-    await act(async () => lines[0]("ready on :3000"));
+    await act(async () => {
+      lines[0]("ready on :3000");
+      await flushed();
+    });
     expect(container!.querySelector("pre")?.textContent).toBe("ready on :3000");
 
     await act(async () => exits[0]());
@@ -216,7 +231,44 @@ describe("process block view", () => {
     expect(spawn).toHaveBeenCalledTimes(2);
   });
 
-  it("shows the whole command, and runs on 1 while the block is selected", async () => {
+  it("stops the running process from its stop button", async () => {
+    await mount();
+    await act(async () => run()!.click());
+    await act(async () => stop()!.click());
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(stop()).toBeNull();
+    expect(run()).not.toBeNull();
+  });
+
+  it("follows the newest line, and stops following once scrolled up", async () => {
+    await mount();
+    await act(async () => run()!.click());
+    const pre = () => container!.querySelector("pre")!;
+    const emit = (line: string) =>
+      act(async () => {
+        lines[0](line);
+        await flushed();
+      });
+    await emit("one");
+    // jsdom lays nothing out: give the box a size to scroll.
+    Object.defineProperty(pre(), "scrollHeight", {
+      value: 400,
+      configurable: true,
+    });
+    Object.defineProperty(pre(), "clientHeight", {
+      value: 100,
+      configurable: true,
+    });
+    await emit("two");
+    expect(pre().scrollTop).toBe(400);
+
+    pre().scrollTop = 0;
+    pre().dispatchEvent(new Event("scroll"));
+    await emit("three");
+    expect(pre().scrollTop).toBe(0);
+  });
+
+  it("shows the whole command, and runs or stops on 1 while the block is selected", async () => {
     await mount();
     expect(container!.querySelector("code")?.textContent).toBe("npm run dev");
     const press = (key: string) =>
@@ -237,8 +289,9 @@ describe("process block view", () => {
     await act(async () => void press("1"));
     expect(spawn).toHaveBeenCalledTimes(1);
 
-    // Running: taken, so it neither stacks a process nor replaces the block.
-    expect(press("1")).toBe(true);
+    // Running: `1` stops it, and the digit never replaces the block.
+    await act(async () => void press("1"));
+    expect(kill).toHaveBeenCalledTimes(1);
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(editor!.state.doc.textContent).not.toContain("1");
   });

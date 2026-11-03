@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   createProcessBlocks,
+  FLUSH_MS,
+  MAX_LINE_LENGTH,
   MAX_LINES,
   type ProcessRegistry,
   type SpawnProcess,
@@ -12,15 +14,20 @@ function fakeSpawn(options: { startError?: Error } = {}) {
     spec: Parameters<SpawnProcess>[0];
     emit(line: string): void;
     exit(): void;
+    closed: boolean;
   }> = [];
   const spawn: SpawnProcess = (spec) => {
     const lineListeners: Array<(line: string) => void> = [];
     const closeListeners: Array<() => void> = [];
-    spawned.push({
+    const exit = () => closeListeners.forEach((listener) => listener());
+    const process = {
       spec,
-      emit: (line) => lineListeners.forEach((listener) => listener(line)),
-      exit: () => closeListeners.forEach((listener) => listener()),
-    });
+      emit: (line: string) =>
+        lineListeners.forEach((listener) => listener(line)),
+      exit,
+      closed: false,
+    };
+    spawned.push(process);
     return {
       start: () =>
         options.startError
@@ -28,12 +35,19 @@ function fakeSpawn(options: { startError?: Error } = {}) {
           : Promise.resolve(),
       onLine: (listener) => (lineListeners.push(listener), () => {}),
       onClose: (listener) => (closeListeners.push(listener), () => {}),
+      close: async () => {
+        process.closed = true;
+        exit();
+      },
     };
   };
   return { spawn, spawned };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+/** Past the batch window: emitted lines have landed. */
+const flushed = () =>
+  new Promise((resolve) => setTimeout(resolve, FLUSH_MS + 10));
 const SPEC = { command: "npm run dev", cwd: "/ws" };
 
 /** The app's registrations: blob_proc_1 and blob_proc_2, loading until `finish`. */
@@ -65,12 +79,14 @@ describe("process blocks", () => {
     blocks.run("blob_proc_1");
     await settle();
     spawned[0].emit("ready on :3000");
+    await flushed();
 
     expect(spawned[0].spec).toEqual({ procId: "proc_1", ...SPEC });
     expect(blocks.get("blob_proc_1")).toEqual({
       command: "npm run dev",
       running: true,
       lines: ["ready on :3000"],
+      dropped: 0,
     });
   });
 
@@ -113,6 +129,42 @@ describe("process blocks", () => {
     });
   });
 
+  it("stops a running process, and can run it again after", async () => {
+    const { spawn, spawned } = fakeSpawn();
+    const blocks = await loadedBlocks(spawn);
+
+    blocks.stop("blob_proc_1");
+    blocks.run("blob_proc_1");
+    await settle();
+    spawned[0].emit("serving");
+    blocks.stop("blob_proc_1");
+
+    expect(spawned[0].closed).toBe(true);
+    // The lines read before the stop are kept, not lost with the batch.
+    expect(blocks.get("blob_proc_1")).toMatchObject({
+      running: false,
+      lines: ["serving"],
+    });
+    blocks.run("blob_proc_1");
+    await settle();
+    expect(spawned).toHaveLength(2);
+  });
+
+  it("lands a burst of lines as one change", async () => {
+    const { spawn, spawned } = fakeSpawn();
+    const blocks = await loadedBlocks(spawn);
+    blocks.run("blob_proc_1");
+    await settle();
+    let changes = 0;
+    blocks.subscribe("blob_proc_1", () => changes++);
+
+    for (let i = 0; i < 100; i++) spawned[0].emit(String(i));
+    expect(changes).toBe(0);
+    await flushed();
+    expect(changes).toBe(1);
+    expect(blocks.get("blob_proc_1").lines).toHaveLength(100);
+  });
+
   it("keeps each block's output apart, and only the newest lines", async () => {
     const { spawn, spawned } = fakeSpawn();
     const blocks = await loadedBlocks(spawn);
@@ -122,12 +174,20 @@ describe("process blocks", () => {
     blocks.run("blob_proc_1");
     await settle();
     for (let i = 0; i <= MAX_LINES; i++) spawned[0].emit(String(i));
+    await flushed();
+    spawned[0].emit("x".repeat(MAX_LINE_LENGTH + 1));
+    await flushed();
 
-    expect(blocks.get("blob_proc_1").lines).toHaveLength(MAX_LINES);
-    expect(blocks.get("blob_proc_1").lines[0]).toBe("1");
+    const { lines, dropped } = blocks.get("blob_proc_1");
+    expect(lines).toHaveLength(MAX_LINES);
+    expect(lines[0]).toBe("2");
+    expect(lines.at(-1)).toHaveLength(MAX_LINE_LENGTH);
+    // What scrolled off is counted, not kept.
+    expect(dropped).toBe(2);
     expect(blocks.get("blob_proc_2")).toMatchObject({
       running: false,
       lines: [],
+      dropped: 0,
     });
     expect(changes).toBe(0);
   });

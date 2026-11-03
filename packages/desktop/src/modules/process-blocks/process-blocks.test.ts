@@ -13,6 +13,7 @@ function launch(db: ReturnType<typeof createNodeTestDb>) {
     start: () => Promise.resolve(),
     onLine: () => () => {},
     onClose: () => () => {},
+    close: async () => {},
   }));
   const core = createTestCore({
     modules: [processBlocksModule],

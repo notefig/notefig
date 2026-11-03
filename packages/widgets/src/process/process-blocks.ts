@@ -15,7 +15,13 @@
  * app). Either way the block can run its command again: `run` starts it
  * only when the stream is gone, so a run can't stack a second process on a
  * live one. Nothing runs without being asked — a file that holds a block
- * must not start a command by being opened.
+ * must not start a command by being opened. A live one can be stopped.
+ *
+ * Output is a tail: the newest `MAX_LINES` lines, each cut at
+ * `MAX_LINE_LENGTH`, so a long or chatty process holds a bounded amount of
+ * memory; what scrolls off the top is counted, not kept. Lines land in
+ * batches, so a chatty process re-renders its block a few times a second,
+ * not once a line.
  */
 
 /** A spawned process, as the platform hands it over: its stdout lines and
@@ -24,6 +30,8 @@ export interface ProcessStream {
   start(): Promise<void>;
   onLine(callback: (line: string) => void): () => void;
   onClose(callback: () => void): () => void;
+  /** Kill it (its whole process tree); `onClose` follows. */
+  close(): Promise<void>;
 }
 
 export type SpawnProcess = (spec: {
@@ -50,6 +58,8 @@ export type ProcessBlock = {
   running: boolean;
   /** Its last `MAX_LINES` lines of stdout, oldest first. */
   lines: readonly string[];
+  /** How many earlier lines this run has discarded. */
+  dropped: number;
 };
 
 export interface ProcessBlocksApi {
@@ -60,6 +70,8 @@ export interface ProcessBlocksApi {
   loaded(): Promise<void>;
   /** Start the block's registered command, unless its stream is still live. */
   run(blobId: string): void;
+  /** Kill the block's process, if it runs. */
+  stop(blobId: string): void;
 }
 
 /** A block's id is its process's, `blob_<procId>`: the one place either
@@ -70,14 +82,24 @@ const procIdOf = (blobId: string) => blobId.slice(BLOB_PREFIX.length);
 
 /** Output kept per block; older lines scroll away. */
 export const MAX_LINES = 500;
+/** A longer line (a minified bundle, a progress bar with no newline) is cut. */
+export const MAX_LINE_LENGTH = 2000;
+/** How often a running block's new lines land, at most. */
+export const FLUSH_MS = 50;
 
-const LOADING: ProcessBlock = { command: undefined, running: false, lines: [] };
+const LOADING: ProcessBlock = {
+  command: undefined,
+  running: false,
+  lines: [],
+  dropped: 0,
+};
 
 export function createProcessBlocks(deps: {
   spawn: SpawnProcess;
   registry: ProcessRegistry;
 }): ProcessBlocksApi {
   const blocks = new Map<string, ProcessBlock>();
+  const streams = new Map<string, ProcessStream>();
   const listeners = new Map<string, Set<() => void>>();
   let loading: Promise<void> | null = null;
   let isLoaded = false;
@@ -88,7 +110,10 @@ export function createProcessBlocks(deps: {
     let block = blocks.get(blobId);
     if (!block) {
       const command = deps.registry.get(blobId)?.command ?? null;
-      blocks.set(blobId, (block = { command, running: false, lines: [] }));
+      blocks.set(
+        blobId,
+        (block = { command, running: false, lines: [], dropped: 0 }),
+      );
     }
     return block;
   };
@@ -122,7 +147,20 @@ export function createProcessBlocks(deps: {
       const cwd = deps.registry.get(blobId)?.cwd;
       const { command, running } = get(blobId);
       if (!command || cwd === undefined || running) return;
-      update(blobId, { running: true, lines: [] });
+      update(blobId, { running: true, lines: [], dropped: 0 });
+      let pending: string[] = [];
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const flush = () => {
+        timer = undefined;
+        const { lines, dropped } = get(blobId);
+        const all = [...lines, ...pending];
+        pending = [];
+        const kept = all.slice(-MAX_LINES);
+        update(blobId, {
+          lines: kept,
+          dropped: dropped + all.length - kept.length,
+        });
+      };
       // A spawn that throws (no processes on this platform) or a start that
       // rejects both end the run with the reason as its output.
       Promise.resolve()
@@ -132,12 +170,17 @@ export function createProcessBlocks(deps: {
             command,
             cwd,
           });
-          stream.onLine((line) =>
-            update(blobId, {
-              lines: [...get(blobId).lines, line].slice(-MAX_LINES),
-            }),
-          );
-          stream.onClose(() => update(blobId, { running: false }));
+          streams.set(blobId, stream);
+          stream.onLine((line) => {
+            pending.push(line.slice(0, MAX_LINE_LENGTH));
+            timer ??= setTimeout(flush, FLUSH_MS);
+          });
+          stream.onClose(() => {
+            clearTimeout(timer);
+            flush();
+            streams.delete(blobId);
+            update(blobId, { running: false });
+          });
           return stream.start();
         })
         .catch((error: unknown) =>
@@ -146,6 +189,9 @@ export function createProcessBlocks(deps: {
             lines: [error instanceof Error ? error.message : String(error)],
           }),
         );
+    },
+    stop(blobId) {
+      void streams.get(blobId)?.close();
     },
   };
 }
@@ -158,5 +204,6 @@ export function inertProcessBlocks(): ProcessBlocksApi {
     // Never: with no registry nothing is known, so nothing is dropped.
     loaded: () => new Promise(() => {}),
     run: () => {},
+    stop: () => {},
   };
 }

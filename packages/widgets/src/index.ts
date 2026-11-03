@@ -141,6 +141,7 @@ export {
   createProcessBlocks,
   processBlobId,
   MAX_LINES as PROCESS_MAX_LINES,
+  FLUSH_MS as PROCESS_FLUSH_MS,
   type ProcessBlocksApi,
   type ProcessRegistry,
   type RegisteredProcess,
