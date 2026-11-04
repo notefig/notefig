@@ -21,9 +21,6 @@ tauri-build = { version = "3.0.0-alpha.4", features = [] }
 
 [dependencies]
 tauri = { version = "3.0.0-alpha.5", features = ["protocol-asset"] }
-# Tauri 3 no longer picks a webview runtime itself: main.rs selects this one
-# with `Builder::runtime`.
-tauri-runtime-wry = "3.0.0-alpha.5"
 tauri-plugin-dialog = "3.0.0-alpha.4"
 tauri-plugin-fs = "3.0.0-alpha.3"
 serde = { version = "1", features = ["derive"] }
@@ -45,6 +42,20 @@ getrandom = "0.2"
 grep = "0.3"
 grep-regex = "0.1"
 regex = "1.10"
+
+# Tauri 3 no longer picks a webview runtime itself: main.rs selects one with
+# `Builder::runtime`, and the CLI/bundler ship whichever of these the target
+# depends on. macOS and Windows render with CEF's bundled Chromium instead of
+# WKWebView / WebView2. Its `cef` re-export has no stability guarantee; the
+# lockfile pins it.
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+tauri-runtime-cef = "3.0.0-alpha.6"
+
+# Linux stays on WebKitGTK for now: tauri-bundler 3.0.0-alpha.4 copies
+# libEGL.so / libGLESv2.so into every deb/rpm/AppImage, and the CEF 154 this
+# runtime pins no longer ships them, so no Linux package can be built.
+[target.'cfg(target_os = "linux")'.dependencies]
+tauri-runtime-wry = "3.0.0-alpha.5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # The menu-bar item (app_status.rs). macOS only: a template icon is a

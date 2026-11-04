@@ -156,6 +156,10 @@ fn migrate_app_data_from_old_identifier() {
 #[cfg(not(target_os = "macos"))]
 fn migrate_app_data_from_old_identifier() {}
 
+// CEF relaunches this binary for its renderer/GPU/utility helpers (an arg
+// starting `--type=`); the attribute routes those to CEF before any of the
+// body runs. The MCP relay flag below never collides with it.
+#[cfg_attr(not(target_os = "linux"), tauri_runtime_cef::cef_entry_point)]
 fn main() {
     // MCP stdio relay mode (Stage 3.5, mcp_bridge.rs): a harness process
     // spawns this same binary with this flag to bridge its stdio to the
@@ -178,9 +182,14 @@ fn main() {
     // file at plugin init.
     migrate_app_data_from_old_identifier();
 
+    // The webview runtime is per platform (see Cargo.toml).
+    #[cfg(not(target_os = "linux"))]
+    let runtime = tauri_runtime_cef::Cef::default();
+    #[cfg(target_os = "linux")]
+    let runtime = tauri_runtime_wry::Wry::default();
+
     // The menu-bar item (app_status.rs) is the app's, not the shim's.
-    let builder =
-        app_status::register(tauri::Builder::default().runtime(tauri_runtime_wry::Wry::default()));
+    let builder = app_status::register(tauri::Builder::default().runtime(runtime));
     let builder = builder
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
