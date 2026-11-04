@@ -19,10 +19,14 @@ const OPTIONS: SpawnAgentOptions = {
 const spawnOk = { ok: true, value: { pid: 4242, resolvedPath: "/usr/bin/claude" } };
 
 /** Rust-side stand-in: per-stream FIFO of pull responses (line_stream.rs).
- * An exhausted stream reports empty-and-not-ended, like a drained queue. */
+ * An exhausted stream reports empty-and-not-ended, like a drained queue; a
+ * stream with no queue at all reports ended, as a removed one does. */
 function pullQueues(queues: Record<string, PullResult[]>) {
-  return ({ streamId }: Record<string, unknown>): PullResult =>
-    queues[streamId as string]?.shift() ?? { lines: [], ended: false };
+  return ({ streamId }: Record<string, unknown>): PullResult => {
+    const queue = queues[streamId as string];
+    if (!queue) return { lines: [], ended: true };
+    return queue.shift() ?? { lines: [], ended: false };
+  };
 }
 
 describe("TauriStdioTransport", () => {
@@ -75,8 +79,9 @@ describe("TauriStdioTransport", () => {
       { procId: "p1", line: "a line" },
     ]);
 
-    // A non-zero exit closes with an error once the stdout stream has ended.
+    // A non-zero exit closes with an error once both streams have ended.
     queues["agent-proc://p1/stdout"].push({ lines: [], ended: true });
+    queues["agent-proc://p1/stderr"].push({ lines: [], ended: true });
     tauri.emit("agent-proc://p1/exit", { code: 1 });
     await flush();
     expect(closes).toHaveLength(1);
@@ -120,6 +125,38 @@ describe("TauriStdioTransport", () => {
     expect(lines).toEqual(['{"final":"result"}']);
     expect(closes).toHaveLength(1);
     expect(closes[0]).toBeUndefined();
+  });
+
+  it("delivers the stderr tail before closing, too", async () => {
+    // A process's last words are often an error: stdout has ended, the
+    // error is still queued on stderr. Closing on stdout's end alone lost
+    // it (a process block's output, an agent's diagnostics).
+    const queues: Record<string, PullResult[]> = {
+      "agent-proc://p1/stdout": [{ lines: [], ended: true }],
+      "agent-proc://p1/stderr": [],
+    };
+    const tauri = withMockedTauri({
+      spawn_agent: () => spawnOk,
+      pull_stream_lines: pullQueues(queues),
+    });
+
+    const transport = new TauriStdioTransport(OPTIONS);
+    const events: string[] = [];
+    transport.onDiagnostic((line) => events.push(`stderr: ${line}`));
+    transport.onClose(() => events.push("close"));
+    await transport.start();
+
+    tauri.emit("agent-proc://p1/exit", { code: 1 });
+    await flush();
+    expect(events).toEqual([]);
+
+    queues["agent-proc://p1/stderr"].push({
+      lines: ["error: missing module"],
+      ended: true,
+    });
+    tauri.emit("agent-proc://p1/stderr-doorbell");
+    await flush();
+    expect(events).toEqual(["stderr: error: missing module", "close"]);
   });
 
   it("surfaces a spawn_agent rejection as a spawn_failed error, not a hang", async () => {

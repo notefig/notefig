@@ -45,8 +45,9 @@ const EXIT_DRAIN_TIMEOUT_MS = 2000;
  *   emit — that path amplifies bytes ~6x and a single oversized frame
  *   crashes the WebContent process.
  * - `agent-proc://{procId}/exit` reports process exit; close fires only
- *   after the stdout stream has ended (or a short drain timeout), so the
- *   tail of a turn can't be lost to an exit racing the final pulls.
+ *   after the stdout and stderr streams have both ended (or a short drain
+ *   timeout), so the tail of a turn — or the error a process printed just
+ *   before it exited — can't be lost to an exit racing the final pulls.
  */
 export class TauriStdioTransport implements AgentTransport {
   readonly locus = "local" as const;
@@ -85,10 +86,16 @@ export class TauriStdioTransport implements AgentTransport {
       // close was waiting on this tail.
       () => this.maybeFinishExit(),
     );
-    this.stderrPuller = new StreamPuller(`agent-proc://${procId}/stderr`, (line) => {
-      // Out-of-band from the JSON-RPC stream — route to diagnostics.
-      for (const cb of this.diagnosticListeners) cb(line);
-    });
+    this.stderrPuller = new StreamPuller(
+      `agent-proc://${procId}/stderr`,
+      (line) => {
+        // Out-of-band from the JSON-RPC stream — route to diagnostics.
+        for (const cb of this.diagnosticListeners) cb(line);
+      },
+      // Its tail is a close waits on too: a process's last words are often
+      // an error on stderr.
+      () => this.maybeFinishExit(),
+    );
 
     // Register doorbell/exit listeners before spawning so no early output is
     // missed. Doorbells carry no payload — lines travel only via pulls. Each
@@ -115,6 +122,7 @@ export class TauriStdioTransport implements AgentTransport {
             // puller, close when it reports ended, and fall back to a timer in
             // case something (an orphaned grandchild) holds stdout open.
             this.stdoutPuller?.schedule();
+            this.stderrPuller?.schedule();
             this.exitTimer = setTimeout(
               () => this.maybeFinishExit(true),
               EXIT_DRAIN_TIMEOUT_MS,
@@ -213,13 +221,16 @@ export class TauriStdioTransport implements AgentTransport {
     this.handleClose();
   }
 
-  /** Close once the exit event AND the stdout tail have both arrived. A
+  /** Close once the exit event AND both streams' tails have arrived. A
    * code-0 exit is clean; anything else (or a signal) becomes the onClose
    * error. If we asked to close (kill), `closed` is already set and
    * handleClose no-ops, so this only fires for spontaneous exits. */
   private maybeFinishExit(force = false): void {
     if (!this.exit || this.closed) return;
-    if (!force && this.stdoutPuller && !this.stdoutPuller.ended) return;
+    const draining = [this.stdoutPuller, this.stderrPuller].some(
+      (puller) => puller && !puller.ended,
+    );
+    if (!force && draining) return;
     const code = this.exit.code;
     const error =
       code === 0
