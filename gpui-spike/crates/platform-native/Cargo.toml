@@ -1,0 +1,28 @@
+[package]
+name = "notefig-platform-native"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "The desktop platform: real fs (watcher, trash, search), the db, and app paths. Owner: files."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+notefig-core.workspace = true
+notefig-platform.workspace = true
+async-channel = "2"
+ignore = "0.4"
+notify = "8"
+trash = "5"
+grep-searcher = "0.1"
+grep-regex = "0.1"
+grep-matcher = "0.1"
+regex-syntax = "0.8"
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[dev-dependencies]
+notefig-core = { workspace = true, features = ["testing"] }
+tempfile = "3"

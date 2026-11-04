@@ -1,0 +1,28 @@
+[package]
+name = "notefig-history-module"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Port of packages/desktop/src/modules/history. Owner: git."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+serde.workspace = true
+notefig-core.workspace = true
+notefig-history = { path = "../../notefig-history" }
+notefig-platform.workspace = true
+# `"git:stale"`, declared by files (one declaration for every announcer).
+notefig-files = { path = "../files" }
+# `history_restore` writes through documents (`documents.write`).
+notefig-documents = { path = "../documents" }
+serde_json.workspace = true
+# The `"agent:*"` hooks and the agent tools' `HistoryService` seam.
+notefig-agents = { path = "../agents" }
+notefig-agent = { path = "../../notefig-agent" }
+
+[dev-dependencies]
+notefig-core = { workspace = true, features = ["testing"] }
+tempfile = "3"
+notefig-platform = { workspace = true, features = ["fake"] }

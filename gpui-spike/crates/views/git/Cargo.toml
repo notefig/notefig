@@ -1,0 +1,30 @@
+[package]
+name = "notefig-view-git"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Views ported from packages/desktop/src/components/editor/git/checkpoint-panel.tsx. Owner: git."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+gpui.workspace = true
+gpui-kit.workspace = true
+notefig-core.workspace = true
+notefig-ui = { path = "../../ui" }
+notefig-i18n = { path = "../../modules/i18n" }
+notefig-git = { path = "../../modules/git" }
+notefig-history = { path = "../../notefig-history" }
+notefig-history-module = { path = "../../modules/history" }
+
+[dev-dependencies]
+notefig-core = { workspace = true, features = ["testing"] }
+
+[features]
+# `cargo run --example git --features screenshot`: the driver's `shot:` step.
+screenshot = ["notefig-ui/screenshot"]
+
+[[example]]
+name = "git"
+path = "examples/git.rs"

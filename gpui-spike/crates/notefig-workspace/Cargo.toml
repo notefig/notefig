@@ -1,0 +1,25 @@
+[package]
+name = "notefig-workspace"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Workspace filesystem, watcher and app-state persistence for Notefig (no gpui)."
+
+[dependencies]
+anyhow.workspace = true
+ignore = "0.4"
+notify = "8"
+md5 = "0.8"
+trash = "5"
+directories = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-channel = "2"
+grep-searcher = "0.1"
+grep-regex = "0.1"
+grep-matcher = "0.1"
+regex-syntax = "0.8"
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

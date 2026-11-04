@@ -1,0 +1,18 @@
+[package]
+name = "notefig-attention"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Port of packages/desktop/src/utils/attention.ts + hooks/use-attention.ts: what the app points the user at, derived. Owner: agents."
+
+[dependencies]
+notefig-core.workspace = true
+notefig-agent = { path = "../../notefig-agent" }
+notefig-agents = { path = "../agents" }
+notefig-prompt-rounds = { path = "../prompt-rounds" }
+notefig-prompt-widgets = { path = "../prompt-widgets" }
+notefig-seen = { path = "../seen" }
+notefig-files = { path = "../files" }
+
+[dev-dependencies]
+serde_json.workspace = true

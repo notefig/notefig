@@ -1,0 +1,77 @@
+[package]
+name = "notefig-desktop"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "The desktop app: composition root (app_core.rs) and main. Owner: shell."
+
+[[bin]]
+name = "notefig"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+gpui.workspace = true
+gpui-kit.workspace = true
+notefig-core.workspace = true
+notefig-platform.workspace = true
+notefig-platform-native = { path = "../platform-native" }
+notefig-ui = { path = "../ui" }
+notefig-agent = { path = "../notefig-agent" }
+markdown-editor = { package = "gpui-kit-markdown-editor", path = "../markdown-editor" }
+# Modules
+notefig-kv = { path = "../modules/kv" }
+notefig-workspaces = { path = "../modules/workspaces" }
+notefig-files = { path = "../modules/files" }
+notefig-tree-model = { path = "../modules/tree-model" }
+notefig-tree-expansion = { path = "../modules/tree-expansion" }
+notefig-tree-inline-edit = { path = "../modules/tree-inline-edit" }
+notefig-scratchpads = { path = "../modules/scratchpads" }
+notefig-project-settings = { path = "../modules/project-settings" }
+notefig-recent-documents = { path = "../modules/recent-documents" }
+notefig-seen = { path = "../modules/seen" }
+notefig-attention = { path = "../modules/attention" }
+notefig-session = { path = "../modules/session" }
+notefig-view-file-tree = { path = "../views/file-tree" }
+notefig-view-welcome = { path = "../views/welcome" }
+notefig-layout = { path = "../modules/layout" }
+notefig-tabs = { path = "../modules/tabs" }
+notefig-editors = { path = "../modules/editors" }
+notefig-documents = { path = "../modules/documents" }
+notefig-sidebar-view = { path = "../modules/sidebar-view" }
+notefig-diff-blocks = { path = "../modules/diff-blocks" }
+# Views
+notefig-view-workspace = { path = "../views/workspace" }
+notefig-view-search = { path = "../views/search" }
+notefig-agents = { path = "../modules/agents" }
+notefig-prompt-rounds = { path = "../modules/prompt-rounds" }
+notefig-turn-writes = { path = "../modules/turn-writes" }
+notefig-directives = { path = "../modules/directives" }
+notefig-prompt-widgets = { path = "../modules/prompt-widgets" }
+notefig-harness-adapters = { path = "../modules/harness-adapters" }
+notefig-shared-sessions = { path = "../modules/shared-sessions" }
+notefig-i18n = { path = "../modules/i18n" }
+notefig-telemetry = { path = "../modules/telemetry" }
+notefig-feedback = { path = "../modules/feedback" }
+notefig-view-agent = { path = "../views/agent" }
+notefig-view-git = { path = "../views/git" }
+notefig-view-usage = { path = "../views/usage" }
+notefig-git = { path = "../modules/git" }
+notefig-history-module = { path = "../modules/history" }
+notefig-usage = { path = "../modules/usage" }
+notefig-view-settings = { path = "../views/settings" }
+notefig-view-command-palette = { path = "../views/command-palette" }
+notefig-view-tunnel = { path = "../views/tunnel" }
+notefig-view-app-status = { path = "../views/app-status" }
+notefig-view-dictation = { path = "../views/dictation" }
+notefig-view-updater = { path = "../views/updater" }
+notefig-tunnel = { path = "../modules/tunnel" }
+notefig-app-status = { path = "../modules/app-status" }
+notefig-dictation = { path = "../modules/dictation" }
+notefig-updater = { path = "../modules/updater" }
+notefig-migration = { path = "../modules/migration" }
+
+[features]
+screenshot = ["notefig-ui/screenshot"]

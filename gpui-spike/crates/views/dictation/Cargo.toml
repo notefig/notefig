@@ -1,0 +1,22 @@
+[package]
+name = "notefig-view-dictation"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Dictation's GPUI side: the right-hand hold-key monitor, Escape, the editor target and the indicator (packages/widgets/src/dictation). Owner: platform-extras."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+gpui.workspace = true
+gpui-kit.workspace = true
+notefig-core.workspace = true
+notefig-ui = { path = "../../ui" }
+notefig-dictation = { path = "../../modules/dictation" }
+gpui-kit-markdown-editor = { path = "../../markdown-editor" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = "0.3"
+block2 = "0.6"

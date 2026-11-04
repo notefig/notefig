@@ -1,0 +1,50 @@
+[package]
+name = "notefig-view-agent"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Views ported from packages/desktop/src/components/agent/*. Owner: agents."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+gpui.workspace = true
+gpui-kit.workspace = true
+notefig-core.workspace = true
+notefig-platform.workspace = true
+notefig-ui = { path = "../../ui" }
+notefig-agent = { path = "../../notefig-agent" }
+notefig-agents = { path = "../../modules/agents" }
+notefig-harness-adapters = { path = "../../modules/harness-adapters" }
+notefig-attention = { path = "../../modules/attention" }
+notefig-i18n = { path = "../../modules/i18n" }
+notefig-files = { path = "../../modules/files" }
+notefig-tabs = { path = "../../modules/tabs" }
+notefig-layout = { path = "../../modules/layout" }
+notefig-editors = { path = "../../modules/editors" }
+notefig-seen = { path = "../../modules/seen" }
+notefig-kv = { path = "../../modules/kv" }
+notefig-dictation = { path = "../../modules/dictation", default-features = false }
+markdown_editor = { package = "gpui-kit-markdown-editor", path = "../../markdown-editor" }
+async-channel = "2"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+similar = "2"
+notefig-prompt-rounds = { path = "../../modules/prompt-rounds" }
+notefig-prompt-widgets = { path = "../../modules/prompt-widgets" }
+# Settings/widget porter: the harness section registers with the Settings dialog.
+notefig-view-settings = { path = "../settings" }
+
+[features]
+screenshot = ["notefig-ui/screenshot"]
+
+[dev-dependencies]
+notefig-core = { workspace = true, features = ["testing"] }
+notefig-platform = { workspace = true, features = ["fake"] }
+notefig-platform-native = { path = "../../platform-native" }
+
+[[example]]
+name = "agent"
+path = "examples/agent.rs"

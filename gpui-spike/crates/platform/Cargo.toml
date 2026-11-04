@@ -1,0 +1,21 @@
+[package]
+name = "notefig-platform"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "The platform service's surfaces (fs, db, ui), as PlatformAdapter in the TS app. No GPUI, no OS code: implementations live elsewhere."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+notefig-core.workspace = true
+
+[features]
+# `notefig_platform::fake`: an in-memory platform for module tests.
+fake = []
+
+[dev-dependencies]
+notefig-platform = { path = ".", features = ["fake"] }
+notefig-core = { workspace = true, features = ["testing"] }

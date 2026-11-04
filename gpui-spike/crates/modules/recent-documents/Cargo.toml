@@ -1,0 +1,23 @@
+[package]
+name = "notefig-recent-documents"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Port of packages/desktop/src/modules/recent-documents. Owner: files."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+notefig-core.workspace = true
+notefig-platform.workspace = true
+notefig-kv = { path = "../kv" }
+notefig-files = { path = "../files" }
+notefig-workspaces = { path = "../workspaces" }
+notefig-scratchpads = { path = "../scratchpads" }
+
+[dev-dependencies]
+notefig-core = { workspace = true, features = ["testing"] }
+notefig-platform = { workspace = true, features = ["fake"] }

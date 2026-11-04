@@ -1,0 +1,22 @@
+[package]
+name = "notefig-view-tunnel"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Port of components/tunnel (pair dialog, status pill). Owner: platform-extras."
+
+[dependencies]
+gpui.workspace = true
+gpui-kit.workspace = true
+notefig-core.workspace = true
+notefig-ui = { path = "../../ui" }
+notefig-i18n = { path = "../../modules/i18n" }
+notefig-tunnel = { path = "../../modules/tunnel" }
+
+[dev-dependencies]
+notefig-kv = { path = "../../modules/kv" }
+notefig-platform = { workspace = true, features = ["fake"] }
+notefig-tunnel = { path = "../../modules/tunnel", features = ["testing"] }
+
+[features]
+screenshot = ["notefig-ui/screenshot"]

@@ -1,0 +1,5 @@
+Inter (inter-latin-*.ttf) — Copyright (c) 2016 The Inter Project Authors.
+Libre Baskerville (libre-baskerville-latin-*.ttf) — Copyright (c) 2012 Impallari Type.
+Both are licensed under the SIL Open Font License, Version 1.1
+(https://openfontlicense.org). Converted from the WOFF2 latin subsets shipped in
+packages/desktop/src/assets/fonts (fontsource) to TTF, unmodified otherwise.

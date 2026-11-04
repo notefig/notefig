@@ -1,0 +1,50 @@
+[package]
+name = "gpui-kit-markdown-editor"
+version = "0.1.1"
+edition = "2024"
+description = "A block-based WYSIWYG Markdown editor for GPUI, built on gpui-kit's editor host API."
+license = "Apache-2.0"
+repository = "https://github.com/wabzqem/gpui-kit-markdown-editor"
+readme = "README.md"
+keywords = ["gpui", "markdown", "editor", "wysiwyg"]
+categories = ["gui", "text-editors"]
+include = [
+    "/src",
+    "/examples",
+    "/tests/fixtures",
+    "/docs/*.md",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE-APACHE",
+]
+
+[lib]
+name = "markdown_editor"
+path = "src/lib.rs"
+doctest = false
+
+[features]
+default = ["syntect"]
+# Syntax highlighting for fenced code blocks (the editor renders through
+# gpui-kit's text renderer, which highlights only when one of these is on).
+# `syntect` is the light option (about 200 languages); `tree-sitter` builds a
+# syntax tree and takes precedence when both are enabled.
+syntect = ["gpui-kit/syntect"]
+tree-sitter = ["gpui-kit/tree-sitter", "gpui-kit/tree-sitter-languages"]
+
+[dependencies]
+gpui.workspace = true
+gpui-kit.workspace = true
+markdown = "1.0.0"
+unicode-segmentation = "1.12.0"
+
+[dev-dependencies]
+anyhow = "1"
+gpui.workspace = true
+gpui-kit.workspace = true
+
+[[example]]
+name = "story"
+path = "examples/story.rs"
+# The story has its own UI tests (link bar, toolbar commands).
+test = true

@@ -1,0 +1,18 @@
+[package]
+name = "notefig-git"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Port of packages/desktop/src/modules/git. Owner: git."
+
+[dependencies]
+futures.workspace = true
+log.workspace = true
+notefig-core.workspace = true
+notefig-history = { path = "../../notefig-history" }
+notefig-history-module = { path = "../history" }
+notefig-files = { path = "../files" }
+notefig-platform.workspace = true
+
+[dev-dependencies]
+notefig-core = { workspace = true, features = ["testing"] }

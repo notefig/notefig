@@ -1,0 +1,39 @@
+[package]
+name = "notefig-view-file-tree"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Views ported from packages/desktop/src/components/editor/file-tree.tsx, file-controls.tsx, file-type-icon.tsx. Owner: files."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+gpui.workspace = true
+gpui-kit.workspace = true
+notefig-core.workspace = true
+notefig-platform.workspace = true
+notefig-ui = { path = "../../ui" }
+notefig-files = { path = "../../modules/files" }
+notefig-tree-model = { path = "../../modules/tree-model" }
+notefig-tree-expansion = { path = "../../modules/tree-expansion" }
+notefig-tree-inline-edit = { path = "../../modules/tree-inline-edit" }
+notefig-scratchpads = { path = "../../modules/scratchpads" }
+notefig-layout = { path = "../../modules/layout" }
+notefig-tabs = { path = "../../modules/tabs" }
+notefig-editors = { path = "../../modules/editors" }
+
+[dev-dependencies]
+notefig-platform-native = { path = "../../platform-native" }
+notefig-kv = { path = "../../modules/kv" }
+notefig-documents = { path = "../../modules/documents" }
+notefig-workspaces = { path = "../../modules/workspaces" }
+notefig-editors = { path = "../../modules/editors" }
+
+[features]
+# `cargo run --example file_tree --features screenshot`: the driver's `shot:` step.
+screenshot = ["notefig-ui/screenshot"]
+
+[[example]]
+name = "file_tree"
+path = "examples/file_tree.rs"

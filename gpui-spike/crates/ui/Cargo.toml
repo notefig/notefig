@@ -1,0 +1,24 @@
+[package]
+name = "notefig-ui"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "GPUI glue shared by every view crate: core as a global, module state → re-render, the theme tokens and primitives, and the scripted screenshot driver."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+gpui.workspace = true
+gpui-kit.workspace = true
+notefig-core.workspace = true
+async-channel = "2"
+serde_json.workspace = true
+# `--features screenshot`: render_to_image for the driver's `shot:` step.
+gpui-platform = { package = "gpui-pre-platform", version = "=0.3.9", optional = true, features = ["test-support"] }
+image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
+
+[features]
+# On by default: the driver's `shot:` step works in every build.
+default = ["screenshot"]
+screenshot = ["dep:gpui-platform", "dep:image"]

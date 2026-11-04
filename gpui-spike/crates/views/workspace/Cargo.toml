@@ -1,0 +1,43 @@
+[package]
+name = "notefig-view-workspace"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Views ported from packages/desktop/src/components/workspace.tsx, components/editor/sidebar.tsx, global-column.tsx, everything-panel.tsx, components/dockable/, the editor host (text-editor, tiptap-toolbar*, tiptap-link-menu, code-viewer, image-viewer), status-bar.tsx, close-workspace-dialog, text-prompt-dialog. Owner: shell."
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars = "1"
+futures.workspace = true
+log.workspace = true
+gpui.workspace = true
+gpui-kit = { workspace = true, features = ["syntect"] }
+notefig-core.workspace = true
+notefig-platform.workspace = true
+notefig-ui = { path = "../../ui" }
+markdown-editor = { package = "gpui-kit-markdown-editor", path = "../../markdown-editor" }
+notefig-layout = { path = "../../modules/layout" }
+notefig-tabs = { path = "../../modules/tabs" }
+notefig-editors = { path = "../../modules/editors" }
+notefig-documents = { path = "../../modules/documents" }
+notefig-sidebar-view = { path = "../../modules/sidebar-view" }
+notefig-files = { path = "../../modules/files" }
+notefig-workspaces = { path = "../../modules/workspaces" }
+notefig-recent-documents = { path = "../../modules/recent-documents" }
+notefig-scratchpads = { path = "../../modules/scratchpads" }
+notefig-project-settings = { path = "../../modules/project-settings" }
+notefig-agent = { path = "../../notefig-agent" }
+notefig-agents = { path = "../../modules/agents" }
+notefig-prompt-rounds = { path = "../../modules/prompt-rounds" }
+notefig-prompt-widgets = { path = "../../modules/prompt-widgets" }
+notefig-seen = { path = "../../modules/seen" }
+notefig-attention = { path = "../../modules/attention" }
+notefig-i18n = { path = "../../modules/i18n" }
+notefig-view-agent = { path = "../agent" }
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+notefig-core = { workspace = true, features = ["testing"] }
+notefig-platform = { workspace = true, features = ["fake"] }

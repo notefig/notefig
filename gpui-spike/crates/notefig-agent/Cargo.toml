@@ -1,0 +1,35 @@
+[package]
+name = "notefig-agent"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Notefig's agent layer: ACP client, harness registry, process host, task/turn/entry model, app MCP server + stdio relay (no gpui)."
+
+[dependencies]
+smol = "2"
+async-channel = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+md5 = "0.8"
+getrandom = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Environment",
+  "Win32_System_JobObjects",
+  "Win32_System_Registry",
+  "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "notefig-mcp-relay"
+path = "src/bin/notefig-mcp-relay.rs"
+

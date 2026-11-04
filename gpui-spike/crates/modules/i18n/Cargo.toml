@@ -1,0 +1,13 @@
+[package]
+name = "notefig-i18n"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Port of packages/desktop/src/utils/intl.ts (i18next): the string catalogs, t(), language and direction. Owner: settings."
+
+[dependencies]
+serde_json.workspace = true
+notefig-core.workspace = true
+
+[dev-dependencies]
+notefig-core = { workspace = true, features = ["testing"] }

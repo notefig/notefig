@@ -1,0 +1,21 @@
+[package]
+name = "notefig-migration"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "One-time import of the Tauri app's data (notefig.db, read-only) into the new app's db. Owner: platform-extras."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+notefig-core.workspace = true
+notefig-platform.workspace = true
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[dev-dependencies]
+notefig-core = { workspace = true, features = ["testing"] }
+notefig-platform = { workspace = true, features = ["fake"] }
+tempfile = "3"

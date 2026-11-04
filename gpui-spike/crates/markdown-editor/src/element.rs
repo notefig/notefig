@@ -1,0 +1,1209 @@
+//! `BlockEditor` view (design §7).
+//!
+//! `render` takes the cached projection and renders it with gpui-kit's own
+//! `BlockNode` renderer, so the editor looks exactly like `TextView`. The
+//! [`EditorRoot`] element installs a frame-local [`FrameSink`] while its
+//! children prepaint: keyed text leaves report their layouts into it and take
+//! their selection backgrounds from it (`text::editor_seam`, D3). The root
+//! then paints the caret and the composition underline from that geometry.
+//! Paint never updates the editor entity.
+
+use std::{cell::Cell, collections::HashMap, ops::Range, rc::Rc};
+
+use gpui::prelude::FluentBuilder as _;
+use gpui::{
+    AnyElement, App, Bounds, CursorStyle, DefiniteLength, DispatchPhase, Edges, Element, ElementId,
+    ElementInputHandler, Entity, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
+    InteractiveElement, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement, Pixels, Refineable, RenderOnce, Role, StatefulInteractiveElement,
+    Style, StyleRefinement, Styled, TextStyle, Window, canvas, div, fill, point, px, size,
+};
+
+use super::{
+    cull::Measured,
+    id::BlockId,
+    list::{ListCx, render_list},
+    projection::Snapshot,
+    state::*,
+    style::BlockEditorStyle,
+};
+use gpui_kit::base::StyledExt as _;
+use gpui_kit::base::text::editor_host::{
+    BlockNode, FlowPosition, RenderContext, collect_leaf_geometry,
+};
+
+/// Items per cull unit of a long top-level list.
+const LIST_CHUNK: usize = 32;
+
+/// An action listener that only acts while the editor itself has focus. A
+/// node view can host focused inputs inside the editor's element tree; their
+/// unhandled actions must not edit the document (they propagate instead).
+fn guard<A: 'static>(
+    state: &Entity<BlockEditorState>,
+    f: impl Fn(&mut BlockEditorState, &A, &mut Window, &mut gpui::Context<BlockEditorState>) + 'static,
+) -> impl Fn(&A, &mut Window, &mut App) + 'static {
+    let state = state.downgrade();
+    move |action, window, cx| {
+        let Some(state) = state.upgrade() else {
+            return;
+        };
+        if !state.read(cx).focus_handle.is_focused(window) {
+            cx.propagate();
+            return;
+        }
+        state.update(cx, |state, cx| f(state, action, window, cx));
+    }
+}
+
+/// A block-based WYSIWYG Markdown editor (spike). Hold an
+/// `Entity<BlockEditorState>` and pass it here in `render`. Instance styling
+/// applies to the native input root; it installs no padding or height defaults.
+#[derive(IntoElement)]
+pub struct BlockEditor {
+    state: Entity<BlockEditorState>,
+    style: StyleRefinement,
+}
+
+impl BlockEditor {
+    pub fn new(state: &Entity<BlockEditorState>) -> Self {
+        Self {
+            state: state.clone(),
+            style: StyleRefinement::default(),
+        }
+    }
+}
+
+// Presentation is applied inside EditorRoot so padding is part of its
+// native hitbox and input bounds, not an unfocusable outer wrapper.
+impl Styled for BlockEditor {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
+    }
+}
+
+/// The accessible role (and heading level) of a top-level block (Phase 5,
+/// per-block accessibility). `None` for blocks that are not exposed on
+/// their own (definitions, breaks).
+pub(crate) fn block_role(node: &BlockNode) -> Option<(Role, Option<usize>)> {
+    Some(match node {
+        BlockNode::Paragraph(_) => (Role::Paragraph, None),
+        BlockNode::Heading { level, .. } => (Role::Heading, Some(*level as usize)),
+        BlockNode::Blockquote { .. } => (Role::Blockquote, None),
+        BlockNode::List { .. } => (Role::List, None),
+        BlockNode::CodeBlock(_) => (Role::Code, None),
+        BlockNode::Table(_) => (Role::Table, None),
+        BlockNode::HorizontalRule { .. } => (Role::Splitter, None),
+        BlockNode::Custom { .. } => (Role::Group, None),
+        BlockNode::ListItem { .. } => (Role::ListItem, None),
+        BlockNode::Root { .. }
+        | BlockNode::Break { .. }
+        | BlockNode::Definition { .. }
+        | BlockNode::Unknown => return None,
+        _ => return None,
+    })
+}
+
+impl RenderOnce for BlockEditor {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = gpui_kit::base::Theme::global(cx);
+        // Links are followed by the editor itself (Cmd/Ctrl-click); the shared
+        // renderer must never open a URL on its own.
+        let render_cx = RenderContext::from_app(cx).on_link_click(|_, _, _, _| {});
+        // Notefig: relative image paths resolve against the document's folder.
+        let render_cx = match self.state.read(cx).notefig.image_base.clone() {
+            Some(base) => render_cx.with_image_source(move |uri| {
+                let url = uri.to_string();
+                let has_scheme = url
+                    .split_once(':')
+                    .is_some_and(|(scheme, _)| scheme.len() > 1 && scheme.chars().all(|c| c.is_ascii_alphanumeric() || c == '+'));
+                if has_scheme {
+                    gpui::ImageSource::from(uri.clone())
+                } else {
+                    let path = std::path::Path::new(&url);
+                    let path = if path.is_absolute() {
+                        path.to_path_buf()
+                    } else {
+                        base.join(path)
+                    };
+                    gpui::ImageSource::from(path)
+                }
+            }),
+            None => render_cx,
+        };
+        let prose = self.state.read(cx).notefig.prose.clone();
+        let render_cx = match prose.as_ref().and_then(|p| p.text.clone()) {
+            Some(style) => render_cx.with_style(style),
+            None => render_cx,
+        };
+        let text_style = render_cx.style().clone();
+        let mut style = self.state.read(cx).style.resolved(&theme.tokens);
+        if style.selection_is_default() {
+            style = style.with_selection(text_style.selection());
+        }
+        // Read the prior frame before request_layout can reset shared text
+        // layouts. Manual scrolling must not become a reflow reveal request.
+        let caret_was_visible = {
+            let state = self.state.read(cx);
+            state
+                .scroll_handle
+                .as_ref()
+                .zip(state.model.caret())
+                .is_some_and(|(handle, pos)| {
+                    state
+                        .frame
+                        .borrow()
+                        .caret_bounds(pos, style.caret_width())
+                        .is_some_and(|caret| handle.bounds().contains(&caret.center()))
+                })
+        };
+        let (focus, snapshot, backgrounds, extensions, keep, list_items) =
+            self.state.update(cx, |state, _| {
+                let snapshot = state.snapshot();
+                let mut backgrounds: HashMap<u64, Vec<(Range<usize>, Hsla)>> = HashMap::new();
+                // Notefig: diff lines and search matches under the selection.
+                for (block, range, color) in state.notefig_backgrounds() {
+                    backgrounds
+                        .entry(block.as_u64())
+                        .or_default()
+                        .push((range, color));
+                }
+                for (block, range) in state.selection_ranges() {
+                    // Atoms paint whole (O(1) lookup, not a scan of the leaves).
+                    let range = match state.model.doc.get(block).map(|e| &e.content) {
+                        Some(super::document::BlockContent::Atom(_)) => {
+                            0..state.model.doc.leaf_len(block).unwrap_or(range.end)
+                        }
+                        _ => range,
+                    };
+                    backgrounds
+                        .entry(block.as_u64())
+                        .or_default()
+                        .push((range, style.selection()));
+                }
+                (
+                    state.focus_handle.clone(),
+                    snapshot,
+                    backgrounds,
+                    state.model.doc.extensions.clone(),
+                    state.pinned_blocks(),
+                    // Only needed to rebuild the cached cull units.
+                    (!state.cull.borrow().index.is_current(state.model.revision())).then(|| {
+                        let doc = &state.model.doc;
+                        doc.children(doc.root)
+                            .iter()
+                            .filter(|id| {
+                                matches!(
+                                    doc.kind(**id),
+                                    Some(super::kind::BlockKindData::List { .. })
+                                ) && doc.children(**id).len() > LIST_CHUNK
+                            })
+                            .map(|id| (*id, Rc::<[BlockId]>::from(doc.children(*id))))
+                            .collect::<HashMap<_, _>>()
+                    }),
+                )
+            });
+
+        // Match the native root's effective inherited/instance typography
+        // before deriving body-relative node metrics and culling geometry.
+        let mut typography = window.text_style();
+        typography.refine(&self.style.text);
+        let body_font = typography.font_size.to_pixels(window.rem_size());
+        let node_cx = render_cx
+            .with_markdown_extensions(extensions)
+            .with_body_font_size(typography.font_size.to_pixels(window.rem_size()));
+        // The host draws lists itself when it sets prose typography.
+        let list_cx = prose.as_ref().map(|p| ListCx {
+            style: &p.list,
+            render_cx: &node_cx,
+            gap: text_style.paragraph_gap().to_pixels(window.rem_size()),
+            spaced: p.list_items_spaced,
+            body: body_font,
+            line_height: window.line_height(),
+        });
+        let (cull, revision) = {
+            let state = self.state.read(cx);
+            (state.cull.clone(), state.model.revision())
+        };
+        let mut children: Vec<AnyElement> = Vec::new();
+        let mut evict: Option<std::collections::HashSet<BlockId>> = None;
+        let (node_view, node_view_bounds) = {
+            let state = self.state.read(cx);
+            (
+                state.notefig.node_view.clone(),
+                state.notefig.node_view_bounds.clone(),
+            )
+        };
+        node_view_bounds.borrow_mut().clear();
+        self.state.read(cx).notefig.overlay_bounds.borrow_mut().clear();
+        let language_picker = self.state.read(cx).render_language_picker(&self.state, cx);
+        let properties = self.state.read(cx).render_properties(&self.state, cx);
+        {
+            let mut cull_state = cull.borrow_mut();
+            cull_state.measured.clear();
+            let window_span = cull_state.visible.map(|(top, bottom)| {
+                // Overscan two viewports each way, so a fast scroll stays
+                // within laid-out blocks until the next frame catches up.
+                let margin = ((bottom - top) * 2.).max(px(600.));
+                (top - margin, bottom + margin)
+            });
+            let cull_state = &mut *cull_state;
+            if let Some(list_items) = list_items {
+                // Cull units: each top-level node, except that a long
+                // top-level list is split into chunks of `LIST_CHUNK` items,
+                // each rendered as a list of its own (continuing the
+                // numbering, no gap between chunks). Rebuilt per revision.
+                let nodes: Vec<&BlockNode> = snapshot
+                    .blocks
+                    .iter()
+                    .flat_map(|b| b.nodes.iter())
+                    .collect();
+                let mut units = Vec::with_capacity(nodes.len());
+                let mut node_ix = 0;
+                for (block_ix, block) in snapshot.blocks.iter().enumerate() {
+                    for (node_in_block, node) in block.nodes.iter().enumerate() {
+                        let flow = FlowPosition::at(&nodes, node_ix, false);
+                        let unit = |id, items| super::cull::UnitDesc {
+                            id,
+                            block: block_ix,
+                            node: node_in_block,
+                            node_ix,
+                            items,
+                            flow,
+                        };
+                        match (node, list_items.get(&block.id)) {
+                            (BlockNode::List { children, .. }, Some(ids))
+                                if ids.len() == children.len() =>
+                            {
+                                for start in (0..ids.len()).step_by(LIST_CHUNK) {
+                                    let range = start..(start + LIST_CHUNK).min(ids.len());
+                                    units.push(unit(ids[start], Some((range, ids.clone()))));
+                                }
+                            }
+                            _ => units.push(unit(block.id, None)),
+                        }
+                        node_ix += 1;
+                    }
+                }
+                cull_state.index.rebuild(
+                    revision,
+                    units.iter().map(|u| {
+                        let covered: &[BlockId] = match &u.items {
+                            Some((range, ids)) => &ids[range.clone()],
+                            None => &[],
+                        };
+                        (u.id, covered)
+                    }),
+                    &cull_state.heights,
+                );
+                cull_state.units = units;
+                cull_state.node_count = nodes.len();
+            }
+            let units = &cull_state.units;
+            let count = cull_state.node_count;
+            let index = &cull_state.index;
+            let n = units.len();
+            // Units to lay out: the visible range (binary search over the
+            // prefix sums) plus pinned units (selection ends, IME).
+            let (first, last) = match window_span {
+                // Unknown viewport (first frame, new geometry): measure
+                // everything, except in a long document, where laying out
+                // every block costs hundreds of milliseconds: there, lay
+                // out the first few screens and let estimates stand in.
+                None if n > super::cull::MEASURE_ALL_UP_TO => {
+                    (0, (index.find(px(4000.)) + 1).min(n))
+                }
+                None => (0, n),
+                Some((top, bottom)) => {
+                    let first = index.find(top.max(px(0.))).min(n);
+                    (first, (index.find(bottom) + 1).min(n).max(first))
+                }
+            };
+            let mut wanted: Vec<usize> = keep
+                .iter()
+                .filter_map(|id| index.unit_of.get(id).copied())
+                .filter(|ix| *ix < first || *ix >= last)
+                .collect();
+            wanted.extend(first..last);
+            wanted.sort_unstable();
+            wanted.dedup();
+            // Top-level blocks laid out this frame (kept on eviction).
+            let laid_out: Vec<BlockId> = wanted
+                .iter()
+                .map(|ix| snapshot.blocks[units[*ix].block].id)
+                .collect();
+            let mut cursor = px(0.);
+            let mut rendered = 0;
+            for unit_ix in wanted {
+                let unit = &units[unit_ix];
+                let node_ix = unit.node_ix;
+                let top = index.prefix(unit_ix);
+                if top > cursor {
+                    children.push(div().h(top - cursor).into_any_element());
+                }
+                cursor = top + index.height(unit_ix);
+                rendered += 1;
+                let flow = unit.flow;
+                let is_last_node = node_ix + 1 == count;
+                let node = &snapshot.blocks[unit.block].nodes[unit.node];
+                let element = match (&unit.items, node) {
+                    (
+                        Some((range, ids)),
+                        BlockNode::List {
+                            children: items,
+                            ordered,
+                            start,
+                            ..
+                        },
+                    ) => {
+                        let last_chunk = range.end == ids.len();
+                        let chunk = BlockNode::List {
+                            children: items[range.clone()].to_vec(),
+                            ordered: *ordered,
+                            start: if *ordered {
+                                Some(start.unwrap_or(1) + range.start as u32)
+                            } else {
+                                *start
+                            },
+                            span: None,
+                        };
+                        let flow = if range.start == 0 {
+                            flow
+                        } else {
+                            flow.first(false)
+                        };
+                        if let Some(lcx) = &list_cx {
+                            let BlockNode::List { children, ordered, start, .. } = &chunk else { unreachable!() };
+                            render_list(
+                                children,
+                                *ordered,
+                                *start,
+                                0,
+                                !last_chunk || is_last_node,
+                                range.start > 0,
+                                lcx,
+                                window,
+                                cx,
+                            )
+                        } else {
+                        chunk.render(
+                            node_ix,
+                            // Inner chunks drop the list's bottom gap.
+                            flow.last(!last_chunk || is_last_node),
+                            &node_cx,
+                            window,
+                            cx,
+                        )
+                        }
+                    }
+                    (
+                        _,
+                        BlockNode::Custom {
+                            node: custom, ..
+                        },
+                    ) if node_view.is_some()
+                        && super::notefig::PromptWidget::of(custom).is_some() =>
+                    {
+                        let renderer = node_view.clone().unwrap_or_else(|| unreachable!());
+                        let widget = super::notefig::PromptWidget::of(custom)
+                            .cloned()
+                            .unwrap_or_else(|| unreachable!());
+                        let (selected, editor_focused) = {
+                            let state = self.state.read(cx);
+                            let selected = state
+                                .selection_ranges()
+                                .iter()
+                                .any(|(b, _)| *b == unit.id)
+                                || state.model.caret().is_some_and(|c| c.block == unit.id);
+                            (selected, state.focus_handle.is_focused(window))
+                        };
+                        let ctx = super::notefig_view::NodeViewCtx {
+                            block: unit.id,
+                            widget,
+                            selected,
+                            editor_focused,
+                            editor: self.state.downgrade(),
+                        };
+                        let bounds_sink = node_view_bounds.clone();
+                        let block = unit.id;
+                        div()
+                            .relative()
+                            .w_full()
+                            .pb(px(12.))
+                            .child(renderer(&ctx, window, cx))
+                            .child(
+                                canvas(
+                                    move |bounds, _, _| bounds_sink.borrow_mut().push((block, bounds)),
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .size_full(),
+                            )
+                            .into_any_element()
+                    }
+                    (_, BlockNode::Blockquote { children: quoted, .. })
+                        if prose.as_ref().is_some_and(|p| p.quote.is_some()) =>
+                    {
+                        let q = prose.as_ref().and_then(|p| p.quote.clone()).unwrap_or_else(|| unreachable!());
+                        let refs: Vec<&BlockNode> = quoted.iter().collect();
+                        let body: Vec<AnyElement> = quoted
+                            .iter()
+                            .enumerate()
+                            .map(|(ix, child)| match (child, &list_cx) {
+                                (BlockNode::List { children, ordered, start, .. }, Some(lcx)) => render_list(
+                                    children,
+                                    *ordered,
+                                    *start,
+                                    0,
+                                    ix + 1 == quoted.len(),
+                                    false,
+                                    lcx,
+                                    window,
+                                    cx,
+                                ),
+                                _ => {
+                                    let child_flow = FlowPosition::at(&refs, ix, ix + 1 == quoted.len());
+                                    child.render(ix, child_flow, &node_cx, window, cx)
+                                }
+                            })
+                            .collect();
+                        let rtl = prose.as_ref().is_some_and(|p| p.rtl);
+                        let open_quote = q.curly_quotes.then(|| {
+                            // Hung into the padding before the text's start.
+                            // The TS mark is inline, so the first line starts
+                            // with it and the rest sit flush where it does;
+                            // GPUI text has no text-indent, so here every line
+                            // starts there and only the mark moves out.
+                            let mark = div().absolute().top_0().child("\u{201C}");
+                            if rtl { mark.left_full() } else { mark.right_full() }.into_any_element()
+                        });
+                        let room = q.padding;
+                        div()
+                            .w_full()
+                            .when(node_ix != 0, |d| d.pt(q.margin))
+                            // Its own bottom gap: the renderer's blocks carry one.
+                            .when(!is_last_node, |d| {
+                                d.pb(q.margin + text_style.paragraph_gap().to_pixels(window.rem_size()))
+                            })
+                            .child(
+                                div()
+                                    .w_full()
+                                    .border_color(q.bar_color)
+                                    .when(!rtl, |d| d.border_l(q.bar_width).pl(room))
+                                    .when(rtl, |d| d.border_r(q.bar_width).pr(room))
+                                    .text_color(q.text_color)
+                                    .font_weight(q.font_weight)
+                                    .when(q.italic, |d| d.italic())
+                                    .child(div().relative().children(open_quote).children(body)),
+                            )
+                            .into_any_element()
+                    }
+                    (_, BlockNode::HorizontalRule { .. })
+                        if prose.as_ref().is_some_and(|p| p.rule_below.is_some()) =>
+                    {
+                        let below = prose.as_ref().and_then(|p| p.rule_below).unwrap_or_default();
+                        div()
+                            .w_full()
+                            .when(!is_last_node, |d| d.pb(below))
+                            .child(div().h(px(1.)).bg(text_style.border()))
+                            .into_any_element()
+                    }
+                    (_, BlockNode::CodeBlock(_))
+                        if self.state.read(cx).shows_diff_card(unit.id) =>
+                    {
+                        let bounds_sink = node_view_bounds.clone();
+                        let block = unit.id;
+                        let card = self.state.read(cx).render_diff_card(
+                            block,
+                            self.state.downgrade(),
+                            cx,
+                        );
+                        div()
+                            .relative()
+                            .w_full()
+                            .child(card)
+                            .child(
+                                canvas(
+                                    move |bounds, _, _| bounds_sink.borrow_mut().push((block, bounds)),
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .size_full(),
+                            )
+                            .into_any_element()
+                    }
+                    (
+                        _,
+                        BlockNode::List {
+                            children: items,
+                            ordered,
+                            start,
+                            ..
+                        },
+                    ) if list_cx.is_some() => {
+                        let lcx = list_cx.as_ref().unwrap_or_else(|| unreachable!());
+                        render_list(items, *ordered, *start, 0, is_last_node, false, lcx, window, cx)
+                    }
+                    _ => node.render(node_ix, flow.last(is_last_node), &node_cx, window, cx),
+                };
+                // A top-level list after a small heading starts lower.
+                let element = match (node, prose.as_ref()) {
+                    (BlockNode::List { .. }, Some(p))
+                        if node_ix > 0
+                            && matches!(
+                                snapshot.blocks.iter().flat_map(|b| b.nodes.iter()).nth(node_ix - 1),
+                                Some(BlockNode::Heading { level, .. }) if *level >= 3
+                            ) =>
+                    {
+                        div().pt(p.list_top_after_heading).child(element).into_any_element()
+                    }
+                    _ => element,
+                };
+                // Per-block accessibility node around the rendered block.
+                let element = match block_role(node) {
+                    Some((role, level)) => div()
+                        .id(("block", unit.id.as_u64() as usize))
+                        .role(role)
+                        .when_some(level, |this, level| this.aria_level(level))
+                        .child(element)
+                        .into_any_element(),
+                    None => element,
+                };
+                children.push(
+                    Measured {
+                        id: unit.id,
+                        index: unit_ix,
+                        state: cull.clone(),
+                        child: Some(element),
+                    }
+                    .into_any_element(),
+                );
+            }
+            let total = index.prefix(n);
+            if total > cursor {
+                children.push(div().h(total - cursor).into_any_element());
+            }
+            cull_state.rendered = rendered;
+            // gpui-kit retains the text layout of every laid-out inline state
+            // that is still alive and sweeps that table on every insert once
+            // it holds 4096 entries, so a long document's cached projection
+            // must not keep every block it ever laid out alive: past a
+            // budget, drop the projection of blocks off screen (they are
+            // re-projected, cheaply, when they come back).
+            cull_state.laid_out.extend(laid_out.iter().copied());
+            if cull_state.laid_out.len() > super::cull::EVICT_AFTER {
+                cull_state.laid_out = laid_out.iter().copied().collect();
+                evict = Some(cull_state.laid_out.clone());
+            }
+        }
+
+        let placeholder = {
+            let state = self.state.read(cx);
+            let focused = state.focus_handle.is_focused(window);
+            state.placeholder_origin(focused).map(|(origin, text)| {
+                let theme = gpui_kit::base::Theme::global(cx);
+                div()
+                    .absolute()
+                    .left(origin.x)
+                    .top(origin.y)
+                    .text_color(theme.tokens.colors.muted_foreground)
+                    .child(text)
+                    .into_any_element()
+            })
+        };
+        let ghost = {
+            let state = self.state.read(cx);
+            state.notefig.ghost.clone().and_then(|text| {
+                let origin = state.caret_origin()?;
+                let theme = gpui_kit::base::Theme::global(cx);
+                Some(
+                    div()
+                        .absolute()
+                        .left(origin.x)
+                        .top(origin.y)
+                        .whitespace_nowrap()
+                        .text_color(theme.tokens.colors.muted_foreground)
+                        .child(text)
+                        .into_any_element(),
+                )
+            })
+        };
+        let quote_ends: Vec<AnyElement> = match prose.as_ref().and_then(|p| p.quote.clone()) {
+            // RTL: the leaf geometry is the unaligned left-to-right layout,
+            // so the closing mark would land at the wrong end; it is left out.
+            Some(q) if q.curly_quotes && !prose.as_ref().is_some_and(|p| p.rtl) => self
+                .state
+                .read(cx)
+                .quote_ends()
+                .into_iter()
+                .map(|origin| {
+                    div()
+                        .absolute()
+                        .left(origin.x)
+                        .top(origin.y)
+                        .text_color(q.text_color)
+                        .font_weight(q.font_weight)
+                        .when(q.italic, |d| d.italic())
+                        .child("\u{201D}")
+                        .into_any_element()
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        if let Some(keep) = evict {
+            self.state.update(cx, |state, _| {
+                let doc = &state.model.doc;
+                state.projection.evict_except(doc, &keep);
+            });
+        }
+        let content_bounds = Rc::new(Cell::new(Bounds::default()));
+        let measured_content = content_bounds.clone();
+        let mut root_style = Style::default();
+        root_style.refine(&self.style);
+        let s = &self.state;
+        div()
+            .id("block-editor")
+            // D8: one multi-line text input over the document; the value is
+            // built only while accessibility is active (cached per revision).
+            .role(Role::MultilineTextInput)
+            .when(window.is_a11y_active() || (cfg!(test) && !self.state.read(cx).notefig.perf_no_a11y), |this| {
+                this.aria_value(self.state.read(cx).accessible_value())
+            })
+            .key_context(self.state.read(cx).key_context())
+            .track_focus(&focus)
+            .cursor(if self.state.read(cx).grip_hover {
+                CursorStyle::OpenHand
+            } else if self.state.read(cx).pointer_hand {
+                CursorStyle::PointingHand
+            } else {
+                CursorStyle::IBeam
+            })
+            .w_full()
+            .on_action(guard(s, BlockEditorState::on_backspace))
+            .on_action(guard(s, BlockEditorState::on_delete))
+            .on_action(guard(s, BlockEditorState::on_delete_word_left))
+            .on_action(guard(s, BlockEditorState::on_delete_word_right))
+            .on_action(guard(s, BlockEditorState::on_delete_to_line_start))
+            .on_action(guard(s, BlockEditorState::on_delete_to_line_end))
+            .on_action(guard(s, BlockEditorState::on_move_paragraph_start))
+            .on_action(guard(s, BlockEditorState::on_move_paragraph_end))
+            .on_action(guard(s, BlockEditorState::on_select_paragraph_start))
+            .on_action(guard(s, BlockEditorState::on_select_paragraph_end))
+            .on_action(guard(s, BlockEditorState::on_enter))
+            .on_action(guard(s, BlockEditorState::on_structural_enter))
+            .on_action(guard(s, BlockEditorState::on_soft_break))
+            .on_action(guard(s, BlockEditorState::on_exit_block))
+            .on_action(guard(s, BlockEditorState::on_move_left))
+            .on_action(guard(s, BlockEditorState::on_move_right))
+            .on_action(guard(s, BlockEditorState::on_move_up))
+            .on_action(guard(s, BlockEditorState::on_move_down))
+            .on_action(guard(s, BlockEditorState::on_move_home))
+            .on_action(guard(s, BlockEditorState::on_move_end))
+            .on_action(guard(s, BlockEditorState::on_select_left))
+            .on_action(guard(s, BlockEditorState::on_move_word_left))
+            .on_action(guard(s, BlockEditorState::on_move_word_right))
+            .on_action(guard(s, BlockEditorState::on_select_word_left))
+            .on_action(guard(s, BlockEditorState::on_select_word_right))
+            .on_action(guard(s, BlockEditorState::on_select_right))
+            .on_action(guard(s, BlockEditorState::on_select_up))
+            .on_action(guard(s, BlockEditorState::on_select_down))
+            .on_action(guard(s, BlockEditorState::on_select_home))
+            .on_action(guard(s, BlockEditorState::on_select_end))
+            .on_action(guard(s, BlockEditorState::on_move_doc_start))
+            .on_action(guard(s, BlockEditorState::on_move_doc_end))
+            .on_action(guard(s, BlockEditorState::on_select_doc_start))
+            .on_action(guard(s, BlockEditorState::on_select_doc_end))
+            .on_action(guard(s, BlockEditorState::on_select_all))
+            .on_action(guard(s, BlockEditorState::on_undo))
+            .on_action(guard(s, BlockEditorState::on_redo))
+            .on_action(guard(s, BlockEditorState::on_normal_text))
+            .on_action(guard(s, BlockEditorState::on_table_insert_column_left))
+            .on_action(guard(s, BlockEditorState::on_table_insert_column_right))
+            .on_action(guard(s, BlockEditorState::on_table_insert_row_above))
+            .on_action(guard(s, BlockEditorState::on_table_insert_row_below))
+            .on_action(guard(s, BlockEditorState::on_table_delete_line))
+            .on_action(guard(s, BlockEditorState::on_close_table_menu))
+            .on_action(guard(s, BlockEditorState::on_toggle_bold))
+            .on_action(guard(s, BlockEditorState::on_toggle_italic))
+            .on_action(guard(s, BlockEditorState::on_edit_link))
+            .on_action(guard(s, BlockEditorState::on_toggle_code))
+            .on_action(guard(s, BlockEditorState::on_indent))
+            .on_action(guard(s, BlockEditorState::on_outdent))
+            .on_action(guard(s, BlockEditorState::on_copy))
+            .on_action(guard(s, BlockEditorState::on_cut))
+            .on_action(guard(s, BlockEditorState::on_paste))
+            .on_action(guard(s, BlockEditorState::on_native_paste))
+            .on_action(guard(s, BlockEditorState::on_paste_plain))
+            .on_action(guard(s, BlockEditorState::on_toggle_underline))
+            .on_action(guard(s, BlockEditorState::on_toggle_strikethrough))
+            .on_action(guard(s, BlockEditorState::on_toggle_highlight))
+            .on_action(guard(s, BlockEditorState::on_toggle_subscript))
+            .on_action(guard(s, BlockEditorState::on_toggle_superscript))
+            .on_action(guard(s, BlockEditorState::on_toggle_heading1))
+            .on_action(guard(s, BlockEditorState::on_toggle_heading2))
+            .on_action(guard(s, BlockEditorState::on_toggle_heading3))
+            .on_action(guard(s, BlockEditorState::on_toggle_heading4))
+            .on_action(guard(s, BlockEditorState::on_toggle_heading5))
+            .on_action(guard(s, BlockEditorState::on_toggle_heading6))
+            .on_action(guard(s, BlockEditorState::on_toggle_bullet_list))
+            .on_action(guard(s, BlockEditorState::on_toggle_ordered_list))
+            .on_action(guard(s, BlockEditorState::on_toggle_task_list))
+            .on_action(guard(s, BlockEditorState::on_toggle_blockquote))
+            .on_action(guard(s, BlockEditorState::on_toggle_code_block))
+            .on_drop({
+                let state = self.state.downgrade();
+                move |paths: &gpui::ExternalPaths, window, cx| {
+                    let at = window.mouse_position();
+                    if let Some(state) = state.upgrade() {
+                        state.update(cx, |s, cx| s.drop_paths(paths.paths(), Some(at), cx));
+                    }
+                }
+            })
+            .children(super::table_ui::render_menu(&self.state, cx))
+            .children(properties)
+            .child(EditorRoot {
+                state: self.state.clone(),
+                child: Some(
+                    div()
+                        .w_full()
+                        .refine_style(&self.style)
+                        .child(
+                            div().relative().w_full().children(children).children(placeholder).children(ghost).children(quote_ends).children(language_picker).child(
+                                canvas(
+                                    move |bounds, _, _| measured_content.set(bounds),
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .size_full(),
+                            ),
+                        )
+                        .into_any_element(),
+                ),
+                content_bounds,
+                padding: root_style.padding,
+                typography,
+                caret_was_visible,
+                backgrounds: Some(backgrounds),
+                snapshot,
+                style,
+            })
+    }
+}
+
+type LeafBackgrounds = HashMap<u64, Vec<(Range<usize>, Hsla)>>;
+
+struct EditorRoot {
+    state: Entity<BlockEditorState>,
+    child: Option<AnyElement>,
+    backgrounds: Option<LeafBackgrounds>,
+    snapshot: Rc<Snapshot>,
+    style: BlockEditorStyle,
+    content_bounds: Rc<Cell<Bounds<Pixels>>>,
+    padding: Edges<DefiniteLength>,
+    typography: TextStyle,
+    caret_was_visible: bool,
+}
+
+impl IntoElement for EditorRoot {
+    type Element = Self;
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+pub(crate) struct Prepaint {
+    hitbox: Hitbox,
+}
+
+impl EditorRoot {
+    /// Scroll the caret into view in the owner's scroll container, once its
+    /// block has been laid out (a culled block is pinned, so it is laid out
+    /// in the frame after the caret moved there).
+    fn reveal_caret(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+        let state = self.state.read(cx);
+        if !state.reveal.get() {
+            return;
+        }
+        let (Some(handle), Some(pos)) = (state.scroll_handle.clone(), state.model.caret()) else {
+            state.reveal.set(false);
+            return;
+        };
+        let Some(caret) = state
+            .frame
+            .borrow()
+            .caret_bounds(pos, self.style.caret_width())
+        else {
+            return;
+        };
+        state.reveal.set(false);
+        // The scroll owner stays at the region edge; text and the revealed
+        // caret stay inside the root's presentation inset at either scroll end.
+        let padding = self
+            .padding
+            .to_pixels(bounds.size.map(Into::into), window.rem_size());
+        let mut view = handle.bounds();
+        view.origin.y += padding.top;
+        view.size.height = (view.size.height - padding.top - padding.bottom).max(Pixels::ZERO);
+        let mut offset = handle.offset();
+        if caret.top() < view.top() {
+            offset.y += view.top() - caret.top();
+        } else if caret.bottom() > view.bottom() {
+            offset.y -= caret.bottom() - view.bottom();
+        } else {
+            return;
+        }
+        handle.set_offset(offset);
+        window.refresh();
+    }
+}
+
+impl EditorRoot {
+    /// Centre a block `reveal_block` asked for, once it has been laid out.
+    fn reveal_block(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+        let state = self.state.read(cx);
+        let Some(block) = state.notefig.reveal_block.get() else { return };
+        let Some(handle) = state.scroll_handle.clone() else {
+            state.notefig.reveal_block.set(None);
+            return;
+        };
+        let Some(target) = state.laid_out_bounds(block) else { return };
+        state.notefig.reveal_block.set(None);
+        let _ = bounds;
+        let view = handle.bounds();
+        let mut offset = handle.offset();
+        offset.y += view.center().y - target.center().y;
+        offset.y = offset.y.min(Pixels::ZERO);
+        handle.set_offset(offset);
+        window.refresh();
+    }
+}
+
+impl Element for EditorRoot {
+    type RequestLayoutState = AnyElement;
+    type PrepaintState = Prepaint;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, AnyElement) {
+        let mut child = self
+            .child
+            .take()
+            .unwrap_or_else(|| div().into_any_element());
+        let layout_id = child.request_layout(window, cx);
+        (layout_id, child)
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        child: &mut AnyElement,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Prepaint {
+        if let Some(backgrounds) = self.backgrounds.take() {
+            let (_, geometries) = collect_leaf_geometry(backgrounds, || child.prepaint(window, cx));
+            // Swap in the complete frame; handlers read it until the next one.
+            let mut frame = super::frame::into_frame(
+                geometries,
+                self.snapshot.leaves.clone(),
+                &self.snapshot.tables,
+            );
+            frame.content = Some(self.content_bounds.get());
+            {
+                let state = self.state.read(cx);
+                let doc = &state.model.doc;
+                let shapes: Vec<super::frame::TableShape> = self
+                    .snapshot
+                    .tables
+                    .iter()
+                    .map(|(table, _)| super::frame::TableShape {
+                        table: *table,
+                        grid: super::table::grid(doc, *table),
+                        aligns: match doc.kind(*table) {
+                            Some(super::kind::BlockKindData::Table { aligns }) => aligns.clone(),
+                            _ => Vec::new(),
+                        },
+                    })
+                    .collect();
+                // gpui-kit's cell padding is `px_3`: 0.75rem.
+                let pad = window.rem_size() * 0.75;
+                let right = frame.content.map(|c| c.right());
+                frame.layout_tables(&shapes, pad, right);
+            }
+            *self.state.read(cx).frame.borrow_mut() = frame;
+            let mask = window.content_mask().bounds;
+            let content = self.content_bounds.get();
+            let cull = self.state.read(cx).cull.clone();
+            let geometry_changed = cull.borrow_mut().set_geometry(
+                content.size.width,
+                window.rem_size(),
+                &self.typography,
+            );
+            // Retain a visible caret or an existing reveal request, but do not
+            // interrupt manual scrolling. Wait for fresh spacer positions.
+            if geometry_changed {
+                if self.caret_was_visible {
+                    self.state.read(cx).reveal.set(true);
+                }
+            } else {
+                self.reveal_caret(bounds, window, cx);
+                self.reveal_block(bounds, window, cx);
+            }
+            if geometry_changed || cull.borrow_mut().finish_frame(content, mask) {
+                // Geometry changed or scrolling left the laid-out span.
+                let state = self.state.clone();
+                window.on_next_frame(move |_, cx| state.update(cx, |_, cx| cx.notify()));
+            }
+        } else {
+            child.prepaint(window, cx);
+        }
+        Prepaint {
+            hitbox: window.insert_hitbox(bounds, HitboxBehavior::Normal),
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        child: &mut AnyElement,
+        prepaint: &mut Prepaint,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let state = self.state.read(cx);
+        let focus = state.focus_handle.clone();
+        let collapsed = state.selection_ranges().is_empty();
+        let marked = state.marked_range();
+        let caret = state.model.caret();
+        let show_caret = state.show_caret(window, cx) && collapsed;
+        let frame = state.frame.clone();
+        let menu_line = state.table_menu.as_ref().map(|m| (m.table, m.line));
+        let grips = state.table_grips_at(window.mouse_position());
+        // Node selection (a table, code block, …): the blocks' laid-out area.
+        let selected_area = state.model.selected_blocks().and_then(|(parent, range)| {
+            let doc = &state.model.doc;
+            let ids = doc.children(parent).get(range)?.to_vec();
+            let frame = frame.borrow();
+            frame
+                .leaves
+                .iter()
+                .filter(|leaf| {
+                    let path = doc.path(leaf.info.block);
+                    ids.iter()
+                        .any(|id| *id == leaf.info.block || path.contains(id))
+                })
+                .map(|leaf| leaf.bounds())
+                .reduce(|a, b| a.union(&b))
+        });
+
+        window.handle_input(
+            &focus,
+            ElementInputHandler::new(bounds, self.state.clone()),
+            cx,
+        );
+        child.paint(window, cx);
+
+        let frame = frame.borrow();
+        let style = &self.style;
+        // Block handle: a grip in the left edge of the hovered table or code
+        // block; clicking the edge node-selects it (`block_handle_at`).
+        let mouse = window.mouse_position();
+        let hovered = frame
+            .tables
+            .iter()
+            .map(|(_, b)| *b)
+            .chain(
+                frame
+                    .leaves
+                    .iter()
+                    .filter(|l| state_plain(&self.state, l.info.block, cx))
+                    .map(|l| l.bounds()),
+            )
+            .find(|b| {
+                mouse.y >= b.top()
+                    && mouse.y < b.bottom()
+                    && mouse.x >= b.left() - px(24.)
+                    && mouse.x < b.right()
+            });
+        // Notefig: any top-level block shows its grip in its handle strip.
+        let hovered = hovered.or_else(|| {
+            let state = self.state.read(cx);
+            let id = state.top_level_handle_at(mouse)?;
+            state
+                .top_level_bounds()
+                .into_iter()
+                .find(|(_, b, _)| *b == id)
+                .map(|(_, _, b)| b)
+                .or_else(|| state.node_view_bounds().into_iter().find(|(b, _)| *b == id).map(|(_, b)| b))
+        });
+        if let Some(b) = hovered {
+            let grip = Bounds::new(
+                point(b.left() - px(14.), b.top() + px(2.)),
+                size(px(4.), px(16.).min(b.size.height)),
+            );
+            window.paint_quad(fill(grip, style.caret().opacity(0.35)).corner_radii(px(2.)));
+        }
+        // Table grips (D20): only for the hovered column / row, or the
+        // line whose menu is open.
+        for (table, line, grip) in grips {
+            let open = menu_line == Some((table, line));
+            let alpha = if open { 0.8 } else { 0.35 };
+            window.paint_quad(fill(grip, style.caret().opacity(alpha)).corner_radii(px(2.)));
+        }
+        if let Some(area) = selected_area {
+            let area = area.dilate(px(4.));
+            window.paint_quad(gpui::quad(
+                area,
+                px(4.),
+                style.selection().opacity(0.35),
+                px(2.),
+                style.caret(),
+                gpui::BorderStyle::Solid,
+            ));
+        }
+        // Notefig: change-tracking gutter bars.
+        if let Some((_, color)) = self.state.read(cx).notefig.gutter {
+            for (_, bar) in self.state.read(cx).change_gutter_bars() {
+                window.paint_quad(fill(bar, color).corner_radii(px(1.5)));
+            }
+        }
+        // D22: where a dragged block would drop.
+        if let Some(line) = self.state.read(cx).drop_indicator() {
+            window.paint_quad(fill(line, style.caret()).corner_radii(px(1.)));
+        }
+        if let Some((block, range)) = marked
+            && let Some(leaf) = frame.leaf(block)
+        {
+            let a = leaf.caret_point(range.start);
+            let b = leaf.caret_point(range.end);
+            let thickness = style.caret_width();
+            let underline = Bounds::new(
+                point(a.x, a.y + leaf.line_height() - thickness),
+                size((b.x - a.x).max(thickness), thickness),
+            );
+            window.paint_quad(fill(underline, style.composition_underline()));
+        }
+        if show_caret
+            && let Some(pos) = caret
+            && let Some(b) = frame.caret_bounds(pos, style.caret_width())
+        {
+            // Whole device pixels, like the input caret: a 1px line at a
+            // fractional x would blur over two pixels.
+            let b = crate::support::snap_caret_to_device_pixels(b, window.scale_factor());
+            window.paint_quad(fill(b, style.caret()));
+        }
+        drop(frame);
+
+        // Mouse: handlers update the entity at event time, never in paint.
+        let hitbox = prepaint.hitbox.clone();
+        let entity = self.state.clone();
+        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+            if phase != DispatchPhase::Bubble
+                || event.button != MouseButton::Left
+                || !hitbox.is_hovered(window)
+            {
+                return;
+            }
+            // A click inside an app node view belongs to the node view.
+            if entity.read(cx).node_view_at(event.position) {
+                return;
+            }
+            // A table grip selects its row / column and opens the menu;
+            // any other click closes an open menu.
+            if !event.modifiers.shift
+                && entity.update(cx, |state, cx| {
+                    let hit = state.click_table_grip(event.position, cx);
+                    if !hit {
+                        state.close_table_menu(cx);
+                    }
+                    hit
+                })
+            {
+                let focus = entity.read(cx).focus_handle.clone();
+                window.focus(&focus, cx);
+                cx.stop_propagation();
+                return;
+            }
+            // A task checkbox toggles without moving the caret or starting
+            // a drag; nothing else handles this mouse-down.
+            if !event.modifiers.shift
+                && entity.update(cx, |state, cx| state.click_checkbox(event.position, cx))
+            {
+                cx.stop_propagation();
+                return;
+            }
+            entity.update(cx, |state, cx| {
+                let focus = state.focus_handle.clone();
+                window.focus(&focus, cx);
+                if event.modifiers.secondary() && state.follow_link_at(event.position, cx) {
+                    return;
+                }
+                state.dragging = true;
+                if !event.modifiers.shift {
+                    state.arm_block_drag(event.position);
+                }
+                state.mouse_at(event.position, event.modifiers.shift, cx);
+                if !event.modifiers.shift && event.click_count >= 2 {
+                    state.select_unit(event.click_count >= 3, cx);
+                }
+            });
+        });
+        let entity = self.state.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+            if phase != DispatchPhase::Bubble {
+                return;
+            }
+            if event.pressed_button.is_none() {
+                entity.update(cx, |state, cx| {
+                    state.hover_at(event.position, event.modifiers.secondary(), cx)
+                });
+                return;
+            }
+            if event.pressed_button != Some(MouseButton::Left) {
+                return;
+            }
+            entity.update(cx, |state, cx| {
+                if state.block_drag_to(event.position, cx) {
+                    return;
+                }
+                if state.dragging {
+                    state.mouse_at(event.position, true, cx);
+                }
+            });
+        });
+        let entity = self.state.clone();
+        window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+            if phase == DispatchPhase::Bubble {
+                entity.update(cx, |state, cx| {
+                    state.dragging = false;
+                    state.finish_block_drag(cx);
+                });
+            }
+        });
+    }
+}
+
+fn state_plain(state: &Entity<BlockEditorState>, block: BlockId, cx: &App) -> bool {
+    state.read(cx).model.doc.plain(block).is_some()
+}

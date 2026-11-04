@@ -1,0 +1,4 @@
+target/
+tools/ref-shots/test-results/
+tools/ref-shots/out/
+tools/ref-shots/gpui/

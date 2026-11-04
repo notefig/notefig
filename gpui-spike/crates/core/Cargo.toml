@@ -1,0 +1,18 @@
+[package]
+name = "notefig-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "The kernel: module registration, boot order, workspace lifetime, hooks. A port of @notefig/core."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+
+[features]
+# `notefig_core::testing`: a manual executor for module tests.
+testing = []
+
+[dev-dependencies]
+notefig-core = { path = ".", features = ["testing"] }

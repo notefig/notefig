@@ -1,0 +1,36 @@
+[package]
+name = "notefig-view-welcome"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Views ported from packages/desktop/src/components/welcome.tsx (and hooks/use-recent-projects, use-open-project). Owner: files."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+gpui.workspace = true
+gpui-kit.workspace = true
+notefig-core.workspace = true
+notefig-platform.workspace = true
+notefig-ui = { path = "../../ui" }
+notefig-kv = { path = "../../modules/kv" }
+notefig-updater = { path = "../../modules/updater" }
+notefig-view-updater = { path = "../../views/updater" }
+notefig-agent = { path = "../../notefig-agent" }
+notefig-agents = { path = "../../modules/agents" }
+notefig-view-agent = { path = "../../views/agent" }
+
+[dev-dependencies]
+notefig-platform-native = { path = "../../platform-native" }
+notefig-core = { workspace = true, features = ["testing"] }
+notefig-platform = { workspace = true, features = ["fake"] }
+
+[features]
+screenshot = ["notefig-ui/screenshot"]
+
+[[example]]
+name = "welcome"
+path = "examples/welcome.rs"

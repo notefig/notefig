@@ -1,0 +1,35 @@
+[package]
+name = "notefig-tunnel"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Port of packages/shared/src/tunnel and modules/agents/tunnel (Connect a machine). Owner: platform-extras."
+
+[features]
+testing = []
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+notefig-core.workspace = true
+notefig-kv = { path = "../kv" }
+notefig-agent = { path = "../../notefig-agent" }
+async-channel = "2"
+smol = "2"
+base64 = "0.22"
+getrandom = "0.3"
+hkdf = "0.12"
+sha2 = "0.10"
+xsalsa20poly1305 = "0.9"
+url = "2"
+async-net = "2"
+async-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+async-native-tls = { version = "0.5", default-features = false, features = ["runtime-async-std"] }
+
+[dev-dependencies]
+notefig-core = { workspace = true, features = ["testing"] }
+notefig-platform = { workspace = true, features = ["fake"] }
+tungstenite = "0.24"

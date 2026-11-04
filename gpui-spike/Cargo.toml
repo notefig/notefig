@@ -1,0 +1,32 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/platform", "crates/platform-native", "crates/ui", "crates/app", "crates/markdown-editor", "crates/notefig-agent", "crates/notefig-history", "crates/notefig-workspace", "crates/modules/*", "crates/views/*"]
+
+[workspace.package]
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[workspace.dependencies]
+# One feature set for every crate, so the target dir holds one build of
+# gpui and gpui-kit (each variant costs ~1 GB). `test-support` is always on:
+# it is what lets the script driver render the window to a PNG.
+gpui = { package = "gpui-pre", version = "=0.3.9", features = ["test-support"] }
+gpui-kit = { version = "=0.8.0", features = ["syntect", "test-support"] }
+anyhow = "1"
+futures = "0.3"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+notefig-core = { path = "crates/core" }
+notefig-platform = { path = "crates/platform" }
+
+# Keep the build small: the disk is tight, and debug info for gpui is GBs.
+[profile.dev]
+debug = 0
+incremental = false
+[profile.dev.package."*"]
+opt-level = 1
+# The editor is the hot path: opt-level 1 takes typing on an 8k-line doc
+# from 8.8 ms to 3.4 ms per keystroke+frame.
+[profile.dev.package.gpui-kit-markdown-editor]
+opt-level = 1

@@ -1,0 +1,31 @@
+[package]
+name = "notefig-view-search"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Views ported from packages/desktop/src/components/editor/search-panel.tsx (+ hooks/use-search.ts). Owner: settings."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+gpui.workspace = true
+gpui-kit.workspace = true
+async-channel = "2"
+notefig-core.workspace = true
+notefig-platform.workspace = true
+notefig-ui = { path = "../../ui" }
+notefig-i18n = { path = "../../modules/i18n" }
+notefig-files = { path = "../../modules/files" }
+
+[dev-dependencies]
+notefig-core = { workspace = true, features = ["testing"] }
+notefig-platform = { workspace = true, features = ["fake"] }
+notefig-platform-native = { path = "../../platform-native" }
+notefig-view-settings = { path = "../settings" }
+notefig-kv = { path = "../../modules/kv" }
+notefig-telemetry = { path = "../../modules/telemetry" }
+notefig-feedback = { path = "../../modules/feedback" }
+
+[features]
+screenshot = ["notefig-ui/screenshot", "notefig-view-settings/screenshot"]

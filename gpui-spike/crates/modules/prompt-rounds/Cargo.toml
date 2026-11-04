@@ -1,0 +1,27 @@
+[package]
+name = "notefig-prompt-rounds"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Port of packages/desktop/src/modules/prompt-rounds. Owner: agents."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+notefig-core.workspace = true
+notefig-platform.workspace = true
+notefig-agent = { path = "../../notefig-agent" }
+notefig-agents = { path = "../agents" }
+notefig-files = { path = "../files" }
+notefig-kv = { path = "../kv" }
+notefig-prompt-widgets = { path = "../prompt-widgets" }
+
+[dev-dependencies]
+notefig-core = { workspace = true, features = ["testing"] }
+notefig-platform = { workspace = true, features = ["fake"] }
+notefig-prompt-widgets = { path = "../prompt-widgets", features = ["testing"] }
+tempfile = "3"
+notefig-layout = { path = "../layout" }

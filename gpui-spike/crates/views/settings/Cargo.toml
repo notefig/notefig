@@ -1,0 +1,37 @@
+[package]
+name = "notefig-view-settings"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Views ported from packages/desktop/src/components/editor/settings-modal.tsx, settings-section.tsx, the telemetry consent and feedback dialogs, the debug panel. Owner: settings."
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+gpui.workspace = true
+gpui-kit.workspace = true
+serde_json.workspace = true
+async-channel = "2"
+notefig-core.workspace = true
+notefig-platform.workspace = true
+notefig-ui = { path = "../../ui" }
+notefig-i18n = { path = "../../modules/i18n" }
+notefig-kv = { path = "../../modules/kv" }
+notefig-telemetry = { path = "../../modules/telemetry" }
+notefig-feedback = { path = "../../modules/feedback" }
+notefig-updater = { path = "../../modules/updater" }
+notefig-view-updater = { path = "../updater" }
+notefig-project-settings = { path = "../../modules/project-settings" }
+notefig-workspaces = { path = "../../modules/workspaces" }
+notefig-tabs = { path = "../../modules/tabs" }
+notefig-layout = { path = "../../modules/layout" }
+notefig-git = { path = "../../modules/git" }
+
+[dev-dependencies]
+notefig-core = { workspace = true, features = ["testing"] }
+notefig-platform = { workspace = true, features = ["fake"] }
+notefig-platform-native = { path = "../../platform-native" }
+
+[features]
+screenshot = ["notefig-ui/screenshot"]
