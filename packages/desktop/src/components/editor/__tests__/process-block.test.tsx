@@ -269,6 +269,15 @@ describe("process block view", () => {
     pre().dispatchEvent(new Event("scroll"));
     await emit("three");
     expect(pre().scrollTop).toBe(0);
+
+    // Run again: the new run's output is followed from its first line.
+    await act(async () => exits[0]());
+    await act(async () => run()!.click());
+    await act(async () => {
+      lines[1]("four");
+      await flushed();
+    });
+    expect(pre().scrollTop).toBe(400);
   });
 
   it("is selected by the keyboard, never a click, and wears the tint", async () => {

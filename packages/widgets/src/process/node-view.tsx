@@ -130,6 +130,9 @@ function Tail({
   const following = useRef(true);
   useLayoutEffect(() => {
     const el = ref.current;
+    // A new run starts empty, and is followed again: the box outlives the
+    // run the reader scrolled up in.
+    if (lines.length === 0) following.current = true;
     if (el && following.current) el.scrollTop = el.scrollHeight;
   }, [lines]);
   return (
