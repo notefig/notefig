@@ -9,7 +9,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import CharacterCount from "@tiptap/extension-character-count";
 import { EditorImage } from "./editor-image-node";
 import { FrontmatterNode } from "./frontmatter-node";
-import { widgetRendererNodes, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
+import { NodeIndex, widgetRendererNodes, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
 // By path, not through the barrel: @pierre/diffs registers custom elements
 // on import, and the barrel also loads in the markdown worker, which has none.
 import { codeHighlight } from "@notefig/widgets/code-highlight";
@@ -147,6 +147,8 @@ export const editorExtensions = [
         : "Type something, or press / for AI…",
   }),
   CharacterCount,
+  // Where the widgets' and code blocks' nodes are, for their plugins.
+  NodeIndex,
   NativeFormatIntercept,
   NativeHistoryFocusGuard,
 ];

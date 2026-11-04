@@ -35,6 +35,7 @@ import {
 import { Mapping } from "@tiptap/pm/transform";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { PROMPT_NODE_NAME } from "./node";
+import { indexedNodes } from "../node-index";
 import { capabilitiesOf, type WidgetCapabilities } from "./machine";
 import type { PromptWidgetsApi } from "./widgets-service";
 import {
@@ -384,7 +385,10 @@ export function restoreKeptWidgetsTr(
   // Through the edit, then past what this restore already put back: two
   // widgets the edit collapsed onto one spot go back in their order.
   const restored = restoreDroppedWidgets(
-    oldState.doc,
+    {
+      before: indexedNodes(oldState, PROMPT_NODE_NAME),
+      after: indexedNodes(newState, PROMPT_NODE_NAME),
+    },
     tr,
     (pos) => tr.mapping.map(mapping.map(pos, -1), 1),
     { keep: (node) => !widgetCapabilities(prompts, node).removable },
@@ -467,17 +471,11 @@ function rangeCovers(state: EditorState, pos: number, node: PMNode): boolean {
  *  CSS (tiptap.css) and the face draw it. */
 function widgetDecorations(state: EditorState): DecorationSet {
   const selected = selectedWidget(state);
-  const decorations: Decoration[] = [];
-  state.doc.descendants((node, pos) => {
-    if (node.type.name !== PROMPT_NODE_NAME) return true;
-    const end = pos + node.nodeSize;
-    if (selected?.pos === pos || rangeCovers(state, pos, node)) {
-      decorations.push(
-        Decoration.node(pos, end, { "data-widget-selected": "" }),
-      );
-    }
-    return false;
-  });
+  const decorations = indexedNodes(state, PROMPT_NODE_NAME)
+    .filter(({ pos, node }) => selected?.pos === pos || rangeCovers(state, pos, node))
+    .map(({ pos, node }) =>
+      Decoration.node(pos, pos + node.nodeSize, { "data-widget-selected": "" }),
+    );
   return DecorationSet.create(state.doc, decorations);
 }
 

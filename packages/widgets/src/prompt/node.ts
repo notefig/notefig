@@ -95,6 +95,8 @@ export const AiPromptNodeBase = Node.create({
   // prosemirror-gapcursor via the schema spec, so it belongs to the
   // worker-safe half even though only the live editor loads Gapcursor.
   allowGapCursor: false,
+  // Its plugins find it by the node index, not by walking the document.
+  indexed: true,
 
   addAttributes() {
     return {
