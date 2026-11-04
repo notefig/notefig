@@ -62,14 +62,14 @@ function ProcessNodeView({ node, extension, selected }: NodeViewProps) {
           : "border-border/60 bg-card/80",
       )}
     >
-      {/* All of it, wrapped: what the play button runs is never cut off. */}
-      <div
-        className={cn(
-          "flex items-start gap-1.5 border-b border-border/60 py-1 pl-2.5 pr-1 text-[0.6875rem] text-muted-foreground",
-        )}
-      >
-        <SquareTerminal className="mt-0.5 size-3 shrink-0" />
-        <code className="min-w-0 flex-1 select-text whitespace-pre-wrap break-words text-foreground">
+      {/* One line; the box below opens with the command whole, so what
+          the play button runs is never cut off. */}
+      <div className="flex items-center gap-1.5 border-b border-border/60 py-1 pl-2.5 pr-1 text-[0.6875rem] text-muted-foreground">
+        <SquareTerminal className="size-3 shrink-0" />
+        <code
+          title={block.command}
+          className="min-w-0 flex-1 select-text truncate text-foreground"
+        >
           {block.command}
         </code>
         <ControlButton
@@ -80,7 +80,11 @@ function ProcessNodeView({ node, extension, selected }: NodeViewProps) {
           }
         />
       </div>
-      <Tail lines={block.lines} dropped={block.dropped} />
+      <Tail
+        command={block.command}
+        lines={block.lines}
+        dropped={block.dropped}
+      />
     </NodeViewWrapper>
   );
 }
@@ -114,14 +118,17 @@ function ControlButton({
   );
 }
 
-/** The output, following its newest line unless the user has scrolled up
- *  to read; what scrolled off the service's buffer is counted at the top.
- *  One height, empty or full, so the block never grows under the reader
- *  as lines come in. */
+/** The output, opening with the command as a terminal echoes it, whole and
+ *  wrapped, and following its newest line unless the user has scrolled up
+ *  to read; what scrolled off the service's buffer is counted after the
+ *  command. One height, empty or full, so the block never grows under the
+ *  reader as lines come in. */
 function Tail({
+  command,
   lines,
   dropped,
 }: {
+  command: string;
   lines: readonly string[];
   dropped: number;
 }) {
@@ -145,12 +152,18 @@ function Tail({
       }}
       className="h-48 select-text overflow-auto px-2.5 py-1.5 text-[0.6875rem] leading-relaxed text-muted-foreground"
     >
+      <div
+        data-command
+        className="whitespace-pre-wrap break-words text-foreground"
+      >
+        $ {command}
+      </div>
       {dropped > 0 && (
         <div className="italic text-muted-foreground/60">
           {t("processBlockDropped", { count: dropped })}
         </div>
       )}
-      {lines.join("\n")}
+      <span data-output>{lines.join("\n")}</span>
     </pre>
   );
 }

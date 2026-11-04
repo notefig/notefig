@@ -212,9 +212,13 @@ describe("process block view", () => {
     await mount();
 
     // Read from the file: no stream yet, nothing runs until asked. Its
-    // output box is already there, empty, so output never grows the block.
+    // output box is already there, opening with the command whole, so
+    // output never grows the block.
     expect(spawn).not.toHaveBeenCalled();
-    expect(container!.querySelector("pre")?.textContent).toBe("");
+    expect(container!.querySelector("pre [data-command]")?.textContent).toBe(
+      "$ npm run dev",
+    );
+    expect(container!.querySelector("pre [data-output]")?.textContent).toBe("");
     await act(async () => run()!.click());
     expect(spawn).toHaveBeenCalledWith({
       procId: "proc_1a2b",
@@ -227,7 +231,9 @@ describe("process block view", () => {
       lines[0]("ready on :3000");
       await flushed();
     });
-    expect(container!.querySelector("pre")?.textContent).toBe("ready on :3000");
+    expect(container!.querySelector("pre [data-output]")?.textContent).toBe(
+      "ready on :3000",
+    );
 
     await act(async () => exits[0]());
     await act(async () => run()!.click());
