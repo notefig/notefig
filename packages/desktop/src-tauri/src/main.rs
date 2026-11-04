@@ -9,7 +9,7 @@ use notefig::{agent_proc, app_status, db_ops, mcp_bridge, register_handlers, tra
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager};
 
-fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
+fn create_menu(app: &AppHandle) -> Result<Menu<tauri::DynRuntime>, tauri::Error> {
     let open_folder = MenuItem::with_id(
         app,
         "open_folder",
@@ -179,9 +179,8 @@ fn main() {
     migrate_app_data_from_old_identifier();
 
     // The menu-bar item (app_status.rs) is the app's, not the shim's.
-    let builder = app_status::register(tauri::Builder::default());
-    #[cfg(target_os = "macos")]
-    let builder = builder.plugin(tauri_nspanel::init());
+    let builder =
+        app_status::register(tauri::Builder::default().runtime(tauri_runtime_wry::Wry::default()));
     let builder = builder
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())

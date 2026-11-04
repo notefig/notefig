@@ -3,7 +3,7 @@
 //! Holds the Tauri command modules and the single `register_handlers`
 //! registration shared by three consumers so the 27-command handler list has
 //! exactly one source of truth (MET-73):
-//!   - the app binary (`main.rs`) on the real `Wry` runtime,
+//!   - the app binary (`main.rs`) on the real wry runtime,
 //!   - the `MockRuntime` dispatch tests (`test_support`),
 //!   - the real-backend e2e shim (`test-shim` crate, a workspace sibling).
 
@@ -22,7 +22,7 @@ pub mod walkdir_utils;
 mod test_support;
 
 /// Registers every `#[tauri::command]` the app exposes on a builder. Generic
-/// over the runtime so the same registration drives the real `Wry` runtime, the
+/// over the runtime so the same registration drives the real wry runtime, the
 /// test `MockRuntime`, and the shim's mock app — no mirrored copy to drift.
 pub fn register_handlers<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder

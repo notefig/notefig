@@ -17,12 +17,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "3.0.0-alpha.4", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
-tauri-plugin-dialog = "2"
-tauri-plugin-fs = "2"
+tauri = { version = "3.0.0-alpha.5", features = ["protocol-asset"] }
+# Tauri 3 no longer picks a webview runtime itself: main.rs selects this one
+# with `Builder::runtime`.
+tauri-runtime-wry = "3.0.0-alpha.5"
+tauri-plugin-dialog = "3.0.0-alpha.4"
+tauri-plugin-fs = "3.0.0-alpha.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 walkdir = "2"
@@ -46,10 +49,7 @@ regex = "1.10"
 [target.'cfg(target_os = "macos")'.dependencies]
 # The menu-bar item (app_status.rs). macOS only: a template icon is a
 # macOS idiom, and the Linux tray would add a libappindicator link.
-tauri = { version = "2", features = ["tray-icon"] }
-# Not cfg-gated internally (objc2 imports) — hard compile error on any
-# non-macOS target, so it must live under a macOS-only dependency table.
-tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+tauri = { version = "3.0.0-alpha.5", features = ["protocol-asset", "tray-icon"] }
 # Traffic-light pinning (traffic_lights.rs): reaches the standard window
 # buttons through AppKit. Same objc2 line tauri itself links.
 objc2 = "0.6"
@@ -57,12 +57,12 @@ objc2-app-kit = { version = "0.3", features = ["NSButton", "NSControl", "NSRespo
 objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
-tauri-plugin-updater = "2"
-tauri-plugin-process = "2"
-tauri-plugin-opener = "2"
+tauri-plugin-updater = "3.0.0-alpha.3"
+tauri-plugin-process = "3.0.0-alpha.3"
+tauri-plugin-opener = "3.0.0-alpha.3"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-window-state = "2"
+tauri-plugin-window-state = "3.0.0-alpha.2"
 
 [target.'cfg(unix)'.dependencies]
 # killpg for agent process-group teardown (agent_proc.rs) — SIGKILLing only
@@ -93,7 +93,7 @@ tempfile = "3"
 glob = "0.3"
 # Gates `tauri::test::mock_builder`/`MockRuntime` for the command-dispatch
 # tests (MET-73). Test-only so it never ships in the app binary.
-tauri = { version = "2", features = ["test"] }
+tauri = { version = "3.0.0-alpha.5", features = ["test"] }
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
