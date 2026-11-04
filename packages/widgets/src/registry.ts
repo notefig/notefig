@@ -57,7 +57,8 @@ export function widgetSchemaNodes() {
  * the services owning widget state — and nothing else; anything further
  * reaches the app through the host, from React context inside the node
  * view. Without `prompts` (tests, schema-only editors) the widgets get a
- * service with no agent behind it.
+ * service with no agent behind it. Their plugins read the node index
+ * (./node-index.ts), which the editor installs once.
  */
 export function widgetRendererNodes(options: {
   filePath: string;

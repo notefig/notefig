@@ -414,8 +414,9 @@ export function trailingParagraphTr(state: EditorState): Transaction | null {
   return state.tr.insert(state.doc.content.size, paragraph);
 }
 
-/** Every widget in `doc`, with its position. */
-function collectWidgets(doc: PMNode): Array<{ pos: number; node: PMNode }> {
+/** Every widget in `doc`, with its position: a walk, for a document no
+ *  editor's node index lists (../node-index.ts). */
+export function collectWidgets(doc: PMNode): Array<{ pos: number; node: PMNode }> {
   const found: Array<{ pos: number; node: PMNode }> = [];
   doc.descendants((node, pos) => {
     if (node.type.name !== PROMPT_NODE_NAME) return true;
@@ -423,15 +424,6 @@ function collectWidgets(doc: PMNode): Array<{ pos: number; node: PMNode }> {
     return false;
   });
   return found;
-}
-
-function widgetBlobIds(doc: PMNode): Set<string> {
-  const ids = new Set<string>();
-  for (const { node } of collectWidgets(doc)) {
-    const blobId = node.attrs.blobId as string | null;
-    if (blobId) ids.add(blobId);
-  }
-  return ids;
 }
 
 /** Nearest position at or above `rawPos` where `nodeType` may be inserted:
@@ -454,17 +446,20 @@ function findInsertPos(
 }
 
 /**
- * Put back the widgets an edit dropped: every widget of `oldDoc` that
- * `tr.doc` no longer holds (by blobId; an id-less widget is always
- * dropped) and `keep` accepts goes back in as the same node, at its old
- * position mapped through the edit. The one implementation behind both
- * external adoption (an agent rewriting the file) and the editor's own
- * rule that a widget whose agent is working can't be deleted.
+ * Put back the widgets an edit dropped: every widget `before` it that
+ * isn't `after` it (by blobId; an id-less widget is always dropped) and
+ * `keep` accepts goes back in as the same node, at its old position mapped
+ * through the edit. The one implementation behind both external adoption
+ * (an agent rewriting the file) and the editor's own rule that a widget
+ * whose agent is working can't be deleted.
  *
  * @returns how many widgets went back in.
  */
 export function restoreDroppedWidgets(
-  oldDoc: PMNode,
+  widgets: {
+    before: readonly { pos: number; node: PMNode }[];
+    after: readonly { node: PMNode }[];
+  },
   tr: { doc: PMNode; insert: (pos: number, node: PMNode) => unknown },
   mapPos: (pos: number) => number,
   options: {
@@ -474,8 +469,8 @@ export function restoreDroppedWidgets(
   },
 ): number {
   let restored = 0;
-  const survivors = widgetBlobIds(tr.doc);
-  for (const { pos, node } of collectWidgets(oldDoc)) {
+  const survivors = new Set(widgets.after.map(({ node }) => node.attrs.blobId as string | null));
+  for (const { pos, node } of widgets.before) {
     const blobId = node.attrs.blobId as string | null;
     if (blobId && survivors.has(blobId)) continue;
     if (!options.keep(node)) continue;
