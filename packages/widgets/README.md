@@ -23,13 +23,14 @@ and installs it with `PromptWidgetHostProvider`.
 ## Using it from an editor
 
 ```ts
-import { widgetSchemaNodes, widgetRendererNodes } from "@notefig/widgets";
+import { NodeIndex, widgetSchemaNodes, widgetRendererNodes } from "@notefig/widgets";
 
 // Worker / codec: schema + markdown only, no React, no host.
 widgetSchemaNodes();
 
-// Renderer: scoped to one document.
-widgetRendererNodes({ filePath, basePath });
+// Renderer: scoped to one document. Its plugins find widgets through the
+// node index, which the editor installs once.
+[...widgetRendererNodes({ filePath, basePath }), NodeIndex];
 ```
 
 Wrap anything that renders a widget — including your own components that reuse

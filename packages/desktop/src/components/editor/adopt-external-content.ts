@@ -31,6 +31,7 @@ import { TextSelection } from "@tiptap/pm/state";
 import {
   PROMPT_CHANGE_META,
   PROMPT_NODE_NAME,
+  collectWidgets,
   restoreDroppedWidgets,
   type PromptChangeAttribution,
 } from "@notefig/widgets";
@@ -251,7 +252,8 @@ function reassertDroppedWidgets(
   // Bound widgets survive when the incoming content kept their marker;
   // unbound widgets (a summoned/queued composer) are never in the file,
   // so an adoption always drops them and they are always re-asserted.
-  return restoreDroppedWidgets(oldDoc, tr, mapPos, {
+  const widgets = { before: collectWidgets(oldDoc), after: collectWidgets(tr.doc) };
+  return restoreDroppedWidgets(widgets, tr, mapPos, {
     keep: (node) => {
       if (resolveDroppedWidget(node) === "reinsert") return true;
       orphanDroppedWidget(node);
