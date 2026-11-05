@@ -6,7 +6,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParam, useSetSearchParams } from "@/modules/layout/react";
 import { useTranslation } from "react-i18next";
 import { PanelLeft, PanelLeftClose } from "lucide-react";
 import { useHotkey } from "@tanstack/react-hotkeys";
@@ -695,8 +695,8 @@ function FilesTool({
 
 /** The tree's sort order, in the URL like the rest of the shell's chrome. */
 function useSortOrder() {
-  const [searchParams, setUrlSearchParams] = useSearchParams();
-  const sortOrder = (searchParams.get("sort") as SortOrder) || "name-asc";
+  const setUrlSearchParams = useSetSearchParams();
+  const sortOrder = (useSearchParam("sort") as SortOrder | null) || "name-asc";
   const setSortOrder = useCallback(
     (order: SortOrder) => {
       setUrlSearchParams((prev) => {

@@ -22,7 +22,11 @@ function isSidebarView(value: string | null): value is SidebarView {
 
 /** The view the URL names, defaulting past anything unrecognised. */
 export function readSidebarView(params: URLSearchParams): SidebarView {
-  const value = params.get(SIDEBAR_VIEW_PARAM);
+  return toSidebarView(params.get(SIDEBAR_VIEW_PARAM));
+}
+
+/** The view a raw `?sidebarView` value names; the default for any other. */
+export function toSidebarView(value: string | null): SidebarView {
   return isSidebarView(value) ? value : DEFAULT_VIEW;
 }
 

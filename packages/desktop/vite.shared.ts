@@ -16,11 +16,84 @@ import tailwindcss from "@tailwindcss/vite";
  */
 export function sharedBuildPlugins(): PluginOption[] {
   return [
-    react(),
+    reactWithCompiler(),
     tailwindcss(),
     classSelectorOptOuts(),
     flattenPierreShadowCss(),
   ];
+}
+
+/**
+ * The app shell's chrome: what renders again for every layout, sidebar or
+ * dialog change. React Compiler memoizes these, so a tab click renders the
+ * parts whose inputs changed instead of the whole shell under it.
+ *
+ * An allowlist, not the whole app: the compiler takes a hook's result (an
+ * editor, `useCore()`'s modules) as immutable, so a value read off one
+ * during render — `editor.state.doc`, `core.workspaces.isOpen(path)` — is
+ * computed once and kept. Editor node views and widgets do exactly that
+ * (frontmatter-node, prompt-editor, the prompt node view), and are left
+ * out. A file added here must read such objects only in handlers, effects
+ * and subscriptions (`useSyncExternalStore`, the `react.ts` hooks). A
+ * component that breaks a rule the compiler can see (a ref written during
+ * render) is left as written.
+ */
+const REACT_COMPILER_SOURCES = [
+  "src/components/workspace.tsx",
+  "src/components/titlebar.tsx",
+  "src/components/dockable/",
+  "src/components/editor/sidebar.tsx",
+  "src/components/editor/file-tree.tsx",
+  "src/components/editor/command-palette.tsx",
+  "src/components/editor/settings-modal.tsx",
+  "src/components/editor/settings-section.tsx",
+  "src/components/editor/status-bar.tsx",
+  "src/components/editor/everything-panel.tsx",
+  "src/components/editor/search-panel.tsx",
+  "src/components/editor/global-column.tsx",
+  "src/components/editor/tool-bar.tsx",
+  "src/components/editor/file-controls.tsx",
+];
+
+const desktopRoot = path.resolve(__dirname);
+
+export function isReactCompilerSource(filename: string): boolean {
+  const relative = path.relative(desktopRoot, filename).split(path.sep).join("/");
+  if (relative.includes(".test.") || relative.includes("__tests__/")) {
+    return false;
+  }
+  return REACT_COMPILER_SOURCES.some((source) =>
+    source.endsWith("/") ? relative.startsWith(source) : relative === source,
+  );
+}
+
+/**
+ * @vitejs/plugin-react with React Compiler over `REACT_COMPILER_SOURCES`.
+ * `compilerSourcesOnly` runs Babel on those files alone — for tests, which
+ * have no Fast Refresh to keep and pay for every file Babel parses.
+ */
+export function reactWithCompiler(
+  options: { compilerSourcesOnly?: boolean } = {},
+): PluginOption {
+  return react({
+    ...(options.compilerSourcesOnly
+      ? {
+          include: REACT_COMPILER_SOURCES.map((source) =>
+            source.endsWith("/")
+              ? path.join(desktopRoot, source, "**/*.{ts,tsx}")
+              : path.join(desktopRoot, source),
+          ),
+        }
+      : {}),
+    babel: {
+      plugins: [
+        [
+          "babel-plugin-react-compiler",
+          { target: "19", sources: isReactCompilerSource },
+        ],
+      ],
+    },
+  });
 }
 
 // The typography plugin opts content out with

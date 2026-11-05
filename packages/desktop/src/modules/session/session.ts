@@ -12,6 +12,7 @@ import { defineModule } from "@notefig/core";
 import { urlModule } from "@/core/services";
 import { kvModule, type KvApi } from "@/modules/kv";
 import type { UrlState } from "@/modules/layout";
+import { afterPaint, coalescedAfterPaint } from "@/utils/after-paint";
 
 const NAMESPACE = "session";
 const KEY = "lastSearch";
@@ -34,19 +35,37 @@ async function savedSearch(kv: KvApi): Promise<string | null> {
 
 /**
  * Restore once the saved search has loaded, then record the URL as it
- * stands and every change after. Each is written as it happens — a quit leaves nothing pending — and recording
- * starts only after the restore, so the bare boot URL is never saved over
- * the last session. Only the app's own route ("/") is restored or recorded.
- * Returns the stop.
+ * stands and every change after. Recording starts only after the restore,
+ * so the bare boot URL is never saved over the last session. Only the
+ * app's own route ("/") is restored or recorded. Returns the stop.
+ *
+ * A change is written once its frame has painted — every change in between
+ * as one write, the last — so a tab click's frame carries no database
+ * write. A page going away writes what is pending at once, so a quit still
+ * leaves nothing behind.
  */
-export function trackSession(kv: KvApi, url: UrlState): () => void {
+export function trackSession(
+  kv: KvApi,
+  url: UrlState,
+  defer: (task: () => void) => () => void = afterPaint,
+): () => void {
   let stopped = false;
   let unsubscribe = () => {};
-  const record = () => {
+  let recorded: string | null | undefined;
+  const write = () => {
     if (url.pathname() !== "/") return;
     // One encoding of "nothing": an empty search is stored as null.
-    void kv.write(NAMESPACE, KEY, url.search() || null);
+    const search = url.search() || null;
+    if (search === recorded) return;
+    recorded = search;
+    void kv.write(NAMESPACE, KEY, search);
   };
+  const pending = coalescedAfterPaint(write, defer);
+  const record = () => pending.schedule();
+  const flush = () => pending.flush();
+  if (typeof window !== "undefined") {
+    window.addEventListener("pagehide", flush);
+  }
 
   void savedSearch(kv).then((saved) => {
     if (stopped) return;
@@ -55,13 +74,17 @@ export function trackSession(kv: KvApi, url: UrlState): () => void {
     }
     // The URL as it stands now is the session too — one opened with a
     // layout, and kept unchanged until quit, must outlive the launch.
-    record();
+    write();
     unsubscribe = url.subscribe(record);
   });
 
   return () => {
     stopped = true;
     unsubscribe();
+    pending.flush();
+    if (typeof window !== "undefined") {
+      window.removeEventListener("pagehide", flush);
+    }
   };
 }
 

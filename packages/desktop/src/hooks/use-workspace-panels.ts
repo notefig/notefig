@@ -12,7 +12,7 @@
  * of it is showing.
  */
 import { useCallback, type RefObject } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParam, useSetSearchParams } from "@/modules/layout/react";
 import type { SearchPanelHandle } from "@/components/editor/search-panel";
 import { retryOnAnimationFrame } from "@/utils/retry-on-animation-frame";
 import { DEFAULT_SETTINGS_SECTION } from "@/components/editor/settings-modal";
@@ -23,6 +23,7 @@ import {
   SIDEBAR_VIEW_PARAM,
   WORKSPACE_TOOLS,
   readSidebarView,
+  toSidebarView,
   withSidebarView,
   type SidebarView,
   type WorkspaceTool,
@@ -73,7 +74,7 @@ export interface WorkspacePanels {
 /** Open the settings modal — a URL param, so it works with or without a
  *  workspace in front (the shell and the welcome screen both use it). */
 export function useOpenSettings(): () => void {
-  const [, setUrlSearchParams] = useSearchParams();
+  const setUrlSearchParams = useSetSearchParams();
   return useCallback(() => {
     setUrlSearchParams(
       (prev) => {
@@ -92,9 +93,11 @@ export function useWorkspacePanels({
   focusActiveTab,
 }: WorkspacePanelsOptions): WorkspacePanels {
   const core = useCore();
-  const [searchParams, setUrlSearchParams] = useSearchParams();
-  const isSidebarCollapsed = searchParams.get("sidebar") === "collapsed";
-  const sidebarView = readSidebarView(searchParams);
+  const setUrlSearchParams = useSetSearchParams();
+  // Two params, read one by one: the URL changes on every tab click (it
+  // carries the layout), and the shell must not render for those.
+  const isSidebarCollapsed = useSearchParam("sidebar") === "collapsed";
+  const sidebarView = toSidebarView(useSearchParam(SIDEBAR_VIEW_PARAM));
 
   const showSidebarView = useCallback(
     (view: SidebarView) => {

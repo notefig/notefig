@@ -22,6 +22,8 @@
  *     readFile(path): Promise<string | null>;  // adapter-side content
  *     opened: { tabId: string }[];             // recorded tab opens
  *     selectAll(): void;                       // focus + select the whole doc
+ *     swapColumns(): void;                     // reorder the editor and search
+ *                                              // columns (a React move)
  *   }
  */
 
@@ -69,6 +71,10 @@ export function EditorHarness() {
 
   const [initialDoc, setInitialDoc] = useState<JSONContent | null>(null);
   const [opened] = useState<({ tabId: string } & OpenTabOptions)[]>([]);
+  // Keyed column order. Flipping it twice makes React move the editor's own
+  // column (insertBefore), which drops DOM focus mid-commit — the path where
+  // React restores the focused element's selection.
+  const [editorFirst, setEditorFirst] = useState(false);
   // No dock here: tab opens are recorded instead of applied, for every
   // caller under the harness's provider (drop handlers, jump-to-blob).
   const core = useCore();
@@ -127,6 +133,7 @@ export function EditorHarness() {
       selectAll: () => {
         core.editors.markdownEditor(config.filePath)?.chain().focus().selectAll().run();
       },
+      swapColumns: () => setEditorFirst((first) => !first),
     };
   }, [config, core, opened, fs]);
 
@@ -146,17 +153,26 @@ export function EditorHarness() {
         className="flex h-screen w-screen text-foreground"
         data-testid="editor-harness"
       >
-        <div className="w-72 shrink-0 border-r border-border bg-sidebar">
-          <SearchPanel workspacePath={config.basePath} />
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <TextEditor
-            file={file}
-            basePath={config.basePath}
-            isContentLoaded
-            initialDoc={initialDoc}
-          />
-        </div>
+        {(editorFirst ? ["editor", "search"] : ["search", "editor"]).map(
+          (column) =>
+            column === "search" ? (
+              <div
+                key="search"
+                className="w-72 shrink-0 border-r border-border bg-sidebar"
+              >
+                <SearchPanel workspacePath={config.basePath} />
+              </div>
+            ) : (
+              <div key="editor" className="flex min-w-0 flex-1 flex-col">
+                <TextEditor
+                  file={file}
+                  basePath={config.basePath}
+                  isContentLoaded
+                  initialDoc={initialDoc}
+                />
+              </div>
+            ),
+        )}
       </div>
       </PromptWidgetBoundary>
     </CoreProvider>
