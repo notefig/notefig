@@ -84,6 +84,7 @@ pub fn publish_app_status<R: Runtime>(app: AppHandle<R>, status: AppStatus) -> R
 
 #[cfg(target_os = "macos")]
 fn show<R: Runtime>(app: AppHandle<R>, status: AppStatus) -> tauri::Result<()> {
+    use tauri::Manager;
     let handle = app.clone();
     app.run_on_main_thread(move || {
         if let Err(e) = tray::present(&handle, &status) {
