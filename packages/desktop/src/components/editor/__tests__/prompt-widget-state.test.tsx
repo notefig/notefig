@@ -320,8 +320,11 @@ describe("deleting and selecting a widget", () => {
     const holdBack = (event: Event) => event.stopPropagation();
     window.addEventListener("selectionchange", holdBack, true);
     try {
+      // No await from here to the keydown (press dispatches it before its
+      // first await): a timer left over from setup could otherwise run and
+      // let the editor read the browser's caret, which is what Backspace
+      // itself must do.
       document.getSelection()!.collapse(text, 0);
-      await tick();
       expect(editor.state.selection.$from.parentOffset).toBe(5);
       await press(editor, "Backspace");
     } finally {
