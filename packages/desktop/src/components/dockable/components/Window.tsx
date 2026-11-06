@@ -115,7 +115,13 @@ function useShownTabs(tabs: tabGroupObject, selected: string): Set<string> {
  *  again on showing. (`visibility` stands in only where content-visibility
  *  is unsupported: `.hiddenTab`.) What inert did here is done directly: a
  *  tab that hides gives up focus, so keys, and the browser's own undo,
- *  which only the focused editor answers, never reach it. */
+ *  which only the focused editor answers, never reach it.
+ *
+ *  It gives up the document's selection too. Blurring an editor leaves the
+ *  selection in it, and the next editor's focus() then pays for a
+ *  selection inside a hidden subtree: ~190 ms in Chromium when that is an
+ *  8,000-line document. Editors keep their own selection and put it back
+ *  when focused, so nothing is lost. */
 function TabContent({
   hidden,
   children,
@@ -128,9 +134,17 @@ function TabContent({
   // the focus arbiter run after this commit's layout phase).
   useLayoutEffect(() => {
     if (!hidden) return;
+    const box = ref.current;
+    if (!box) return;
     const active = document.activeElement;
-    if (active instanceof HTMLElement && ref.current?.contains(active)) {
-      active.blur();
+    if (active instanceof HTMLElement && box.contains(active)) active.blur();
+    const selection = document.getSelection();
+    if (
+      selection &&
+      selection.rangeCount > 0 &&
+      (box.contains(selection.anchorNode) || box.contains(selection.focusNode))
+    ) {
+      selection.removeAllRanges();
     }
   }, [hidden]);
   return (

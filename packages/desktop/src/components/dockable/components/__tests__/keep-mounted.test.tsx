@@ -123,6 +123,37 @@ describe("keepMounted tabs", () => {
     expect(probe("kept")!.contains(document.activeElement)).toBe(false);
   });
 
+  it("takes the document's selection out of a tab as it hides", () => {
+    const core = createTestCore();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    render(core, "kept");
+    const text = document.createTextNode("selected words");
+    probe("kept")!.appendChild(text);
+    document.getSelection()!.setBaseAndExtent(text, 0, text, 8);
+    expect(document.getSelection()!.rangeCount).toBe(1);
+
+    render(core, "other");
+    expect(document.getSelection()!.rangeCount).toBe(0);
+  });
+
+  it("leaves a selection elsewhere alone", () => {
+    const core = createTestCore();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const outside = document.createTextNode("outside");
+    document.body.appendChild(outside);
+
+    render(core, "kept");
+    document.getSelection()!.setBaseAndExtent(outside, 0, outside, 3);
+    render(core, "other");
+    expect(document.getSelection()!.anchorNode).toBe(outside);
+    outside.remove();
+  });
+
   it("still unmounts a tab that is not kept", () => {
     const core = createTestCore();
     container = document.createElement("div");
