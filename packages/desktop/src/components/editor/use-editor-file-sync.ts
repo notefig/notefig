@@ -142,7 +142,8 @@ export function useEditorFileSync(
   useEffect(() => {
     const sync = getDocumentSync(file.path);
     if (!files) return;
-    sync.writer = (markdown) => files.file(file.path).write(markdown);
+    sync.writer = (markdown, hash) =>
+      files.file(file.path).write(markdown, hash);
 
     const pushSnapshot = () => {
       sync.pushUpdate(() => editor.state.doc.toJSON() as JSONContent);

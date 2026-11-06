@@ -125,6 +125,19 @@ function update(tr: Transaction, index: readonly IndexedNode[], types: ReadonlyS
   return found.length === 0 ? kept : [...kept, ...found].sort((a, b) => a.pos - b.pos);
 }
 
+/** The index's plugin over the given node types. NodeIndex installs it for
+ *  every node extension marked `indexed`; a bare EditorState (a test) can
+ *  install it directly. */
+export function nodeIndexPlugin(types: ReadonlySet<string>): Plugin<readonly IndexedNode[]> {
+  return new Plugin<readonly IndexedNode[]>({
+    key,
+    state: {
+      init: (_config, { doc }) => scan(doc, types),
+      apply: (tr, index) => update(tr, index, types),
+    },
+  });
+}
+
 export const NodeIndex = Extension.create({
   name: "nodeIndex",
   // Its state first, so another plugin's `apply` reads this transaction's.
@@ -136,14 +149,6 @@ export const NodeIndex = Extension.create({
         .filter((extension) => extension.type === "node" && getExtensionField(extension, "indexed"))
         .map((extension) => extension.name),
     );
-    return [
-      new Plugin<readonly IndexedNode[]>({
-        key,
-        state: {
-          init: (_config, { doc }) => scan(doc, types),
-          apply: (tr, index) => update(tr, index, types),
-        },
-      }),
-    ];
+    return [nodeIndexPlugin(types)];
   },
 });

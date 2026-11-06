@@ -168,3 +168,7 @@ export {
   type ComposerButtonMode,
   type ComposerKeyAction,
 } from "./prompt/state";
+export {
+  SELECTION_ANCHORS_ATTRIBUTE,
+  SelectionAnchors,
+} from "./selection-anchors";

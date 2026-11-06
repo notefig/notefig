@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type React from "react";
 import { Dockable } from "@/components/dockable";
 import type { DockChrome } from "@/components/dockable/store";
@@ -192,6 +192,34 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
   // The macOS lights sit at the window's physical top-left: over the
   // sidebar in LTR, over the dock's end-most tab bar in RTL.
   const lightsInset = direction === "rtl" ? undefined : chrome.insetStart;
+  const sidebarWidth = sidebarResize.sidebarWidth;
+  const endInset = direction === "rtl" ? (chrome.insetStart ?? null) : null;
+  // One object per change of what it shows: every dock window reads it
+  // through context, and a fresh one each render re-rendered them all.
+  const dockChrome = useMemo<Partial<DockChrome>>(
+    () => ({
+      tabBarLeading: (
+        <CollapsedSidebarHeader
+          workspacePath={workspacePath}
+          width={sidebarWidth}
+          open={!isSidebarCollapsed}
+          lightsInset={lightsInset}
+          onToggleCollapse={toggleSidebarCollapsed}
+        />
+      ),
+      tabBarTrailing: <WindowsControlsInline />,
+      tabBarLeadingActive: isSidebarCollapsed,
+      endInset,
+    }),
+    [
+      workspacePath,
+      sidebarWidth,
+      isSidebarCollapsed,
+      lightsInset,
+      toggleSidebarCollapsed,
+      endInset,
+    ],
+  );
 
   return (
     <PromptWidgetBoundary>
@@ -248,21 +276,7 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
                   hasTabs={openTabs.length > 0}
                   layout={layout}
                   onLayoutChange={handleLayoutChange}
-                  chrome={{
-                    tabBarLeading: (
-                      <CollapsedSidebarHeader
-                        workspacePath={workspacePath}
-                        width={sidebarResize.sidebarWidth}
-                        open={!isSidebarCollapsed}
-                        lightsInset={lightsInset}
-                        onToggleCollapse={toggleSidebarCollapsed}
-                      />
-                    ),
-                    tabBarTrailing: <WindowsControlsInline />,
-                    tabBarLeadingActive: isSidebarCollapsed,
-                    endInset:
-                      direction === "rtl" ? (chrome.insetStart ?? null) : null,
-                  }}
+                  chrome={dockChrome}
                 >
                   {allDockableTabs}
                 </DockArea>

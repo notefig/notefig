@@ -367,6 +367,27 @@ export function arrowOntoReadOnlyWidget(
 }
 
 /**
+ * Whether a step of `tr` replaced a range that takes in a widget's start or
+ * end — the only way a step drops one. Typing (inside a widget's draft too)
+ * doesn't, so the document isn't walked for it: two walks of an
+ * 8,000-line document cost ~1.5 ms a keystroke.
+ */
+function replacedAWidgetEdge(tr: Transaction): boolean {
+  return tr.steps.some((step, index) => {
+    let hit = false;
+    step.getMap().forEach((from, to) => {
+      if (from === to || hit) return;
+      tr.docs[index].nodesBetween(from, to, (node, pos) => {
+        if (node.type.name !== PROMPT_NODE_NAME) return !hit;
+        if (from <= pos || to >= pos + node.nodeSize) hit = true;
+        return false;
+      });
+    });
+    return hit;
+  });
+}
+
+/**
  * Put back every widget the edit removed that can't be removed now: the
  * rest of the edit stands. Runs ahead of the empty-document keeper, so a
  * document cleared around a working widget gets that widget back, not a
@@ -378,7 +399,7 @@ export function restoreKeptWidgetsTr(
   newState: EditorState,
   prompts: PromptWidgetsApi,
 ): Transaction | null {
-  if (!transactions.some((tr) => tr.docChanged)) return null;
+  if (!transactions.some(replacedAWidgetEdge)) return null;
   const mapping = new Mapping();
   for (const tr of transactions) mapping.appendMapping(tr.mapping);
   const tr = newState.tr;
@@ -468,9 +489,13 @@ function rangeCovers(state: EditorState, pos: number, node: PMNode): boolean {
 
 /** The selected look — one attribute on each selected widget's node
  *  view, whether the keyboard picked it or a text range covers it; the
- *  CSS (tiptap.css) and the face draw it. */
+ *  CSS (tiptap.css) and the face draw it. Either way the widget lies in
+ *  the selection, so a caret (every keystroke) has nothing to draw and
+ *  skips even the index lookup. */
 function widgetDecorations(state: EditorState): DecorationSet {
   const selected = selectedWidget(state);
+  const { from, to } = state.selection;
+  if (from === to) return DecorationSet.empty;
   const decorations = indexedNodes(state, PROMPT_NODE_NAME)
     .filter(({ pos, node }) => selected?.pos === pos || rangeCovers(state, pos, node))
     .map(({ pos, node }) =>

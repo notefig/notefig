@@ -1,9 +1,10 @@
 /**
  * Layout entity — the dockable tab layout as a core module.
  *
- * The URL (`?layout=<json>`) stays the single source of truth; this module
- * is the only code that reads or writes that param. It reaches the URL
- * through the `url` service rather than React Router hooks, so the layout
+ * The URL state (`?layout=<json>`) stays the single source of truth; this
+ * module is the only code that reads or writes that param. That state is
+ * the in-memory `url` service; the browser's URL mirrors it after paint.
+ * It reaches the URL through that service rather than React Router hooks, so the layout
  * can be read and changed from anywhere — an agent tool, a drop handler,
  * a hotkey — not only from inside a component that rendered under the
  * router. React reads it through `useLayout()`.
@@ -17,12 +18,14 @@ import {
   parseLayout,
 } from "@/utils/layout-codec";
 import { urlModule } from "@/core/services";
+import { afterPaint, coalescedAfterPaint } from "@/utils/after-paint";
 
 /**
- * The URL as the layout needs it. Implemented over a data router in the
- * app (`urlStateFromRouter`) and over a memory router in tests. `setSearch`
- * must update `search()` synchronously — React Router's data routers do
- * when no route has a loader.
+ * The URL as the layout needs it. Implemented in memory over the app's
+ * router, which mirrors it after paint (`urlStateFromRouter`), and over
+ * `window.location` in tests. `setSearch` must update `search()` and call
+ * the listeners synchronously: the app reads its state from here, never
+ * from the router.
  */
 export interface UrlState {
   /** The route's path; the app's own surface is "/". */
@@ -42,14 +45,79 @@ interface DataRouterLike {
   subscribe(listener: () => void): () => void;
 }
 
-export function urlStateFromRouter(router: DataRouterLike): UrlState {
+/**
+ * The app's URL state, held in memory with the router as its mirror.
+ *
+ * The search (the tab layout, the sidebar, open dialogs) changes on every
+ * tab click. Navigating the router for each one put a `history` write, the
+ * router's own notification and a transition render of everything under
+ * it between the click and the frame that answers it. Here a write lands
+ * in memory, synchronously, and the app's listeners hear it at once; the
+ * router is told after the frame has painted, once for every write in
+ * between (one history entry if any of them pushed).
+ *
+ * A change the router makes itself — back/forward, a router link — is
+ * adopted: it replaces the state and drops a mirror still pending, so the
+ * URL the user navigated to wins.
+ */
+export function urlStateFromRouter(
+  router: DataRouterLike,
+  defer: (task: () => void) => () => void = afterPaint,
+): UrlState {
+  let search = router.state.location.search;
+  let pathname = router.state.location.pathname;
+  let pushPending = false;
+  // Searches handed to the router and not yet seen back from it: its
+  // notification for one of these is our own mirror, not a navigation.
+  const mirroring = new Set<string>();
+  const listeners = new Set<() => void>();
+  const notify = () => {
+    for (const listener of [...listeners]) listener();
+  };
+
+  const mirror = coalescedAfterPaint(() => {
+    const replace = !pushPending;
+    pushPending = false;
+    if (router.state.location.search === search) return;
+    mirroring.add(search);
+    void router.navigate({ search }, { replace });
+  }, defer);
+
+  router.subscribe(() => {
+    const location = router.state.location;
+    const pathChanged = location.pathname !== pathname;
+    pathname = location.pathname;
+    if (mirroring.delete(location.search)) {
+      if (pathChanged) notify();
+      return;
+    }
+    if (location.search !== search) {
+      search = location.search;
+      pushPending = false;
+      mirror.cancel();
+      notify();
+    } else if (pathChanged) {
+      notify();
+    }
+  });
+
   return {
-    pathname: () => router.state.location.pathname,
-    search: () => router.state.location.search,
-    setSearch: (search, options) => {
-      void router.navigate({ search }, { replace: options?.replace });
+    pathname: () => pathname,
+    search: () => search,
+    setSearch: (next, options) => {
+      const normalized = next === "?" ? "" : next;
+      if (normalized === search) return;
+      search = normalized;
+      if (!options?.replace) pushPending = true;
+      mirror.schedule();
+      notify();
     },
-    subscribe: (listener) => router.subscribe(listener),
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
   };
 }
 

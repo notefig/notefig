@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import {
+  useSearch,
+  useSearchParam,
+  useSetSearchParams,
+} from "@/modules/layout/react";
 import { Button } from "@notefig/ui/button";
 import { Input } from "@notefig/ui/input";
 import { ScrollArea } from "@notefig/ui/scroll-area";
@@ -182,8 +186,8 @@ interface DebugPanelProps {
 }
 
 export function DebugPanel({ forceOpen, error }: DebugPanelProps) {
-  const [searchParams, setUrlSearchParams] = useSearchParams();
-  const isDebugOpen = searchParams.get("debug") === "true";
+  const setUrlSearchParams = useSetSearchParams();
+  const isDebugOpen = useSearchParam("debug") === "true";
   const isOpen = forceOpen || isDebugOpen;
 
   if (!isOpen) return null;
@@ -203,7 +207,6 @@ export function DebugPanel({ forceOpen, error }: DebugPanelProps) {
               });
             }
       }
-      searchParams={searchParams}
     />
   );
 }
@@ -212,13 +215,13 @@ function DebugPanelContent({
   error,
   forceOpen,
   onClose,
-  searchParams,
 }: {
   error?: { message: string; stack?: string };
   forceOpen?: boolean;
   onClose?: () => void;
-  searchParams: URLSearchParams;
 }) {
+  const search = useSearch();
+  const searchParams = useMemo(() => new URLSearchParams(search), [search]);
   const { editors, agentStore: store, kv } = useCore();
   const snapshot = useDebugSnapshot();
   const { basePath, dockableLayout, openTabs, activeTabId } = snapshot;

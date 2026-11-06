@@ -38,7 +38,9 @@
     "rehype-highlight",
     "remark-gfm",
     "vaul",
-    "postcss-load-config"
+    "postcss-load-config",
+    // Loaded by name as a Babel plugin (packages/desktop/vite.shared.ts).
+    "babel-plugin-react-compiler"
   ],
   "ignoreExports": [
     { "file": "packages/desktop/src/components/ui/**", "exports": ["*"] },

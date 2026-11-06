@@ -47,7 +47,7 @@ import {
 import { moveIntoFolder } from "@/utils/drop-actions";
 import { attachTreeStatHydration } from "./tree-stat-hydration";
 import type { ExpansionMemory } from "@/modules/tree-expansion";
-import { acquireTreeModel } from "./tree-model-cache";
+import type { WorkspaceTreeModel } from "@/modules/tree-model";
 
 /** Discriminated union representing the file tree's inline-editing state. */
 export type FileTreeMode =
@@ -61,7 +61,7 @@ export const FILE_TREE_IDLE: FileTreeMode = { type: "idle" };
  * The sidebar file tree, rendered by @pierre/trees (virtualized, keyboard
  * navigable, ARIA tree in a shadow root).
  *
- * The model itself lives in tree-model-cache.ts, one per workspace, and
+ * The model itself is the workspace's (`treeModel`, modules/tree-model), and
  * OUTLIVES this component: sidebar view switches and sort changes reattach
  * the cached model instead of rebuilding it, so expansion/scroll/focus
  * survive. All trees option callbacks route through the cache entry's
@@ -109,7 +109,8 @@ export function FileTree(props: FileTreeComponentProps) {
   // The workspace's files, once core has it open (its row can show first).
   const files = useWorkspaceModule(props.basePath, "files");
   const expansion = useWorkspaceModule(props.basePath, "treeExpansion");
-  if (!files || !expansion) return null;
+  const treeModel = useWorkspaceModule(props.basePath, "treeModel");
+  if (!files || !expansion || !treeModel) return null;
   // Remount per workspace: the inner component's transient state (pending
   // delete dialog, hover memo) must not leak across workspaces. The MODEL
   // is cached per workspace either way.
@@ -119,6 +120,7 @@ export function FileTree(props: FileTreeComponentProps) {
       {...props}
       files={files}
       expansion={expansion}
+      treeModel={treeModel}
     />
   );
 }
@@ -138,9 +140,11 @@ function FileTreeInner({
   onModeChange,
   files,
   expansion,
+  treeModel,
 }: FileTreeComponentProps & {
   files: WorkspaceFiles;
   expansion: ExpansionMemory;
+  treeModel: WorkspaceTreeModel;
 }) {
   const { t } = useTranslation();
   const core = useCore();
@@ -156,16 +160,9 @@ function FileTreeInner({
     [basePath],
   );
 
-  const { data: fileMetadataList = [] } = useLiveQuery(
-    (q) =>
-      q.from({ file: metadata }).select(({ file }) => ({
-        path: file.path,
-        relativePath: file.relativePath,
-        type: file.type,
-        modified: file.modified,
-      })),
-    [basePath],
-  );
+  // The rows themselves, not a projection: a live query over 20k rows is a
+  // second collection built row by row on every mount (~90 ms).
+  const { data: fileMetadataList = [] } = useLiveQuery(metadata);
 
   // Trees marks directories with a trailing slash in the input path list.
   // Collapse duplicate slashes defensively: a malformed segment would make
@@ -210,7 +207,7 @@ function FileTreeInner({
 
   const entry = useMemo(
     () =>
-      acquireTreeModel(basePath, {
+      treeModel.acquire({
         order: sortOrder,
         itemHeightPx,
         initialSelectedPaths: selectedFilePathRef.current
@@ -229,7 +226,7 @@ function FileTreeInner({
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- acquisition
     // inputs are first-creation-only; the delegate below tracks renders.
-    [basePath, itemHeightPx],
+    [treeModel, itemHeightPx],
   );
   const model = entry.model;
 
@@ -508,7 +505,7 @@ function FileTreeInner({
       const applyDefault = entry.needsDefaultExpansion;
       if (treePaths.length > 0) entry.needsDefaultExpansion = false;
       // The scratchpads row is a flattened .notefig/scratchpads chain (see
-      // tree-model-cache.ts) — nested, not a root-level dir, so the root
+      // modules/tree-model) — nested, not a root-level dir, so the root
       // default below misses it. Open it by default anyway (it's a
       // first-class surface, not a buried folder) — but keyed on the row's
       // FIRST APPEARANCE, not folded into the one-shot root default: on a

@@ -22,6 +22,7 @@ import {
   CommandItem,
   CommandList,
 } from "@notefig/ui/command";
+import { eachCodeBlock, touchesCode } from "./code-blocks";
 
 const LANGUAGES = [
   "bash", "c", "cpp", "csharp", "css", "diff", "go", "html", "java",
@@ -132,8 +133,7 @@ function mount(view: EditorView, getPos: () => number | undefined, language: str
 
 function decorate(doc: PMNode): DecorationSet {
   const decorations: Decoration[] = [];
-  doc.descendants((node, pos) => {
-    if (node.type.name !== "codeBlock") return true;
+  eachCodeBlock(doc, (node, pos) => {
     const language = (node.attrs.language as string | null) ?? "";
     decorations.push(
       Decoration.widget(pos + 1, (view, getPos) => mount(view, getPos, language), {
@@ -146,7 +146,6 @@ function decorate(doc: PMNode): DecorationSet {
         destroy: (host) => queueMicrotask(() => roots.get(host as HTMLElement)?.unmount()),
       }),
     );
-    return false;
   });
   return DecorationSet.create(doc, decorations);
 }
@@ -156,7 +155,13 @@ export function codeLanguagePicker(): Plugin {
     key,
     state: {
       init: (_config, { doc }) => decorate(doc),
-      apply: (tr, set) => (tr.docChanged ? decorate(tr.doc) : set),
+      // An edit away from every code block (most typing) only moves the
+      // pickers along: walking the document for it cost ~1 ms a keystroke
+      // in an 8,000-line one.
+      apply: (tr, set) => {
+        if (!tr.docChanged) return set;
+        return touchesCode(tr) ? decorate(tr.doc) : set.map(tr.mapping, tr.doc);
+      },
     },
     props: { decorations: (state) => key.getState(state) },
   });

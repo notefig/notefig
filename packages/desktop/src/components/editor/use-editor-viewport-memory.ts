@@ -25,6 +25,9 @@ import {
 } from "@/components/editor/editor-store";
 import { useCore } from "@notefig/core/react";
 
+/** How long scrolling rests before the position is read. */
+const SETTLE_MS = 150;
+
 /** @returns the ref to put on the document's scroll container. */
 export function useEditorViewportMemory(editor: Editor, filePath: string) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -38,22 +41,35 @@ export function useEditorViewportMemory(editor: Editor, filePath: string) {
 
     // Derived on scroll rather than on unmount: the teardown order between
     // this and ProseMirror's own view is not ours to rely on, and by then
-    // the position may no longer be measurable. Once per frame — scroll
-    // events are cheap, `posAtCoords` is a layout read.
-    let scheduled: number | null = null;
+    // the position may no longer be measurable. Once scrolling settles —
+    // scroll events are cheap, `posAtCoords` is a hit test of the whole
+    // document (4 ms in an 8,000-line one), which per frame lands in every
+    // keystroke that scrolls the caret into view. A switch away before it
+    // settles saves on the way out, while both are still on the page.
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const save = () => {
+      pending = null;
+      const pos = topVisiblePos(editor, scrollEl);
+      if (pos !== null) saveViewport(editors, filePath, pos);
+    };
     const handleScroll = () => {
-      if (scheduled !== null) return;
-      scheduled = requestAnimationFrame(() => {
-        scheduled = null;
-        const pos = topVisiblePos(editor, scrollEl);
-        if (pos !== null) saveViewport(editors, filePath, pos);
-      });
+      if (pending !== null) clearTimeout(pending);
+      pending = setTimeout(save, SETTLE_MS);
     };
 
     scrollEl.addEventListener("scroll", handleScroll, { passive: true });
     return () => {
-      if (scheduled !== null) cancelAnimationFrame(scheduled);
       scrollEl.removeEventListener("scroll", handleScroll);
+      if (pending === null) return;
+      clearTimeout(pending);
+      // Closing a tab destroys the editor before this runs, and
+      // `editor.view` is a throwing getter once its view is gone.
+      if (editor.isDestroyed || !scrollEl.isConnected) return;
+      try {
+        if (editor.view.dom.isConnected) save();
+      } catch {
+        // No view left to measure: the position from the last settle stands.
+      }
     };
   }, [editor, editors, filePath]);
 

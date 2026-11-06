@@ -21,6 +21,7 @@ import {
   widgetMinimapExtension,
   PageLinkSuggestion,
   dictationExtension,
+  SelectionAnchors,
   type PromptWidgetsApi,
 } from "@notefig/widgets";
 import type { DictationHost } from "@notefig/dictation";
@@ -312,6 +313,9 @@ function createMarkdownInstance(
   const workspaceRoot = basePath || getDirectoryPath(filePath);
 
   const extensions = [
+    // The editor owns its selection: React's commits keep its anchor nodes
+    // instead of walking the whole document to measure it.
+    SelectionAnchors,
     ...editorExtensions.filter(
       (e) =>
         e.name !== "image" &&

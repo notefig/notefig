@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParam, useSetSearchParams } from "@/modules/layout/react";
 
 /**
  * A boolean UI flag stored in the URL search params (`?<key>=true`),
@@ -11,9 +11,9 @@ export function useSearchParamFlag(
   key: string,
   options?: { replace?: boolean },
 ) {
-  const [searchParams, setUrlSearchParams] = useSearchParams();
+  const setUrlSearchParams = useSetSearchParams();
   const replace = options?.replace ?? false;
-  const isOn = searchParams.get(key) === "true";
+  const isOn = useSearchParam(key) === "true";
 
   const setFlag = useCallback(
     (on: boolean) => {
@@ -46,9 +46,9 @@ export function useSearchParamValue(
   key: string,
   options?: { replace?: boolean },
 ) {
-  const [searchParams, setUrlSearchParams] = useSearchParams();
+  const setUrlSearchParams = useSetSearchParams();
   const replace = options?.replace ?? false;
-  const value = searchParams.get(key);
+  const value = useSearchParam(key);
 
   const setValue = useCallback(
     (next: string | null) => {

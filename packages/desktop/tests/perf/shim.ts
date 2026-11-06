@@ -13,8 +13,11 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import path from "node:path";
 
-/** Baked into the build (`VITE_TEST_BACKEND_PORT` in perf-build.sh). */
-const PORT = 4599;
+/**
+ * Baked into the build (`VITE_TEST_BACKEND_PORT` in perf-build.sh); set
+ * PERF_SHIM_PORT for both to run two checkouts' suites side by side.
+ */
+const PORT = Number(process.env.PERF_SHIM_PORT ?? 4599);
 
 const binary = path.join(process.env.PERF_BUILD ?? "perf-build", "test-shim");
 

@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 import fs from "fs";
 import path from "path";
 import pkg from "./package.json";
-import { workspaceSourceAliases } from "./vite.shared";
+import { reactWithCompiler, workspaceSourceAliases } from "./vite.shared";
 
 const latestReleaseNotesFile = path.resolve(
   __dirname,
@@ -10,6 +10,9 @@ const latestReleaseNotesFile = path.resolve(
 );
 
 export default defineConfig({
+  // The app's React transform, React Compiler included, so the shell's
+  // tests exercise the components as they ship.
+  plugins: [reactWithCompiler({ compilerSourcesOnly: true })],
   define: {
     // Mirror vite.config.ts — telemetry stamps app_version on every event.
     __APP_VERSION__: JSON.stringify(pkg.version),

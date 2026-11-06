@@ -1,0 +1,336 @@
+diff --git a/node_modules/react-dom/cjs/react-dom-client.development.js b/node_modules/react-dom/cjs/react-dom-client.development.js
+index fa853b3..0e24c00 100644
+--- a/node_modules/react-dom/cjs/react-dom-client.development.js
++++ b/node_modules/react-dom/cjs/react-dom-client.development.js
+@@ -13785,11 +13785,64 @@
+               0 === (finishedWork.flags & 256)
+             : !1;
+     }
++    // notefig patch: an element marked data-react-selection-anchors owns its
++    // selection (ProseMirror). React's commit-time capture walks every node under
++    // the focused contenteditable to turn the selection into character offsets —
++    // O(editor DOM) on every commit anywhere in the app. For such an element,
++    // keep the selection's own anchor nodes instead (O(1)), and on restore put
++    // them back exactly when they are still inside it. When they are not, the
++    // owner restores its own selection on focus, as ProseMirror does.
++    function ownsSelectionAnchors(node) {
++      return (
++        null != node &&
++        1 === node.nodeType &&
++        "function" === typeof node.hasAttribute &&
++        node.hasAttribute("data-react-selection-anchors")
++      );
++    }
++    function captureSelectionAnchors(root) {
++      var win = (root.ownerDocument && root.ownerDocument.defaultView) || window,
++        sel = win.getSelection && win.getSelection();
++      return sel && 0 !== sel.rangeCount
++        ? {
++            start: 0,
++            end: 0,
++            selectionAnchors: !0,
++            anchorNode: sel.anchorNode,
++            anchorOffset: sel.anchorOffset,
++            focusNode: sel.focusNode,
++            focusOffset: sel.focusOffset
++          }
++        : { start: 0, end: 0, selectionAnchors: !0, anchorNode: null, focusNode: null };
++    }
++    function restoreSelectionAnchors(elem, saved) {
++      var anchor = saved.anchorNode,
++        focus = saved.focusNode;
++      if (!anchor || !focus || !elem.contains(anchor) || !elem.contains(focus))
++        return;
++      var doc = elem.ownerDocument || document,
++        win = doc.defaultView || window,
++        sel = win.getSelection && win.getSelection();
++      if (
++        !sel ||
++        (1 === sel.rangeCount &&
++          sel.anchorNode === anchor &&
++          sel.anchorOffset === saved.anchorOffset &&
++          sel.focusNode === focus &&
++          sel.focusOffset === saved.focusOffset)
++      )
++        return;
++      try {
++        sel.setBaseAndExtent(anchor, saved.anchorOffset, focus, saved.focusOffset);
++      } catch (e) {}
++    }
+     function commitBeforeMutationEffects(root, firstChild) {
+       root = root.containerInfo;
+       eventsEnabled = _enabled;
+       root = getActiveElementDeep(root);
+-      if (hasSelectionCapabilities(root)) {
++      if (ownsSelectionAnchors(root))
++        var JSCompiler_temp = captureSelectionAnchors(root);
++      else if (hasSelectionCapabilities(root)) {
+         if ("selectionStart" in root)
+           var JSCompiler_temp = {
+             start: root.selectionStart,
+@@ -17991,10 +18044,12 @@
+                 priorFocusedElem
+               )
+             ) {
+-              if (
+-                null !== priorSelectionRange &&
+-                hasSelectionCapabilities(priorFocusedElem)
+-              ) {
++              if (null !== priorSelectionRange && priorSelectionRange.selectionAnchors)
++            restoreSelectionAnchors(priorFocusedElem, priorSelectionRange);
++          else if (
++            null !== priorSelectionRange &&
++            hasSelectionCapabilities(priorFocusedElem)
++          ) {
+                 var start = priorSelectionRange.start,
+                   end = priorSelectionRange.end;
+                 void 0 === end && (end = start);
+diff --git a/node_modules/react-dom/cjs/react-dom-client.production.js b/node_modules/react-dom/cjs/react-dom-client.production.js
+index e6bfbe3..1815170 100644
+--- a/node_modules/react-dom/cjs/react-dom-client.production.js
++++ b/node_modules/react-dom/cjs/react-dom-client.production.js
+@@ -8839,11 +8839,64 @@ var offscreenSubtreeIsHidden = !1,
+   needsFormReset = !1,
+   PossiblyWeakSet = "function" === typeof WeakSet ? WeakSet : Set,
+   nextEffect = null;
++// notefig patch: an element marked data-react-selection-anchors owns its
++// selection (ProseMirror). React's commit-time capture walks every node under
++// the focused contenteditable to turn the selection into character offsets —
++// O(editor DOM) on every commit anywhere in the app. For such an element,
++// keep the selection's own anchor nodes instead (O(1)), and on restore put
++// them back exactly when they are still inside it. When they are not, the
++// owner restores its own selection on focus, as ProseMirror does.
++function ownsSelectionAnchors(node) {
++  return (
++    null != node &&
++    1 === node.nodeType &&
++    "function" === typeof node.hasAttribute &&
++    node.hasAttribute("data-react-selection-anchors")
++  );
++}
++function captureSelectionAnchors(root) {
++  var win = (root.ownerDocument && root.ownerDocument.defaultView) || window,
++    sel = win.getSelection && win.getSelection();
++  return sel && 0 !== sel.rangeCount
++    ? {
++        start: 0,
++        end: 0,
++        selectionAnchors: !0,
++        anchorNode: sel.anchorNode,
++        anchorOffset: sel.anchorOffset,
++        focusNode: sel.focusNode,
++        focusOffset: sel.focusOffset
++      }
++    : { start: 0, end: 0, selectionAnchors: !0, anchorNode: null, focusNode: null };
++}
++function restoreSelectionAnchors(elem, saved) {
++  var anchor = saved.anchorNode,
++    focus = saved.focusNode;
++  if (!anchor || !focus || !elem.contains(anchor) || !elem.contains(focus))
++    return;
++  var doc = elem.ownerDocument || document,
++    win = doc.defaultView || window,
++    sel = win.getSelection && win.getSelection();
++  if (
++    !sel ||
++    (1 === sel.rangeCount &&
++      sel.anchorNode === anchor &&
++      sel.anchorOffset === saved.anchorOffset &&
++      sel.focusNode === focus &&
++      sel.focusOffset === saved.focusOffset)
++  )
++    return;
++  try {
++    sel.setBaseAndExtent(anchor, saved.anchorOffset, focus, saved.focusOffset);
++  } catch (e) {}
++}
+ function commitBeforeMutationEffects(root, firstChild) {
+   root = root.containerInfo;
+   eventsEnabled = _enabled;
+   root = getActiveElementDeep(root);
+-  if (hasSelectionCapabilities(root)) {
++  if (ownsSelectionAnchors(root))
++        var JSCompiler_temp = captureSelectionAnchors(root);
++      else if (hasSelectionCapabilities(root)) {
+     if ("selectionStart" in root)
+       var JSCompiler_temp = {
+         start: root.selectionStart,
+@@ -11549,7 +11602,9 @@ function flushMutationEffects() {
+             priorFocusedElem
+           )
+         ) {
+-          if (
++          if (null !== priorSelectionRange && priorSelectionRange.selectionAnchors)
++            restoreSelectionAnchors(priorFocusedElem, priorSelectionRange);
++          else if (
+             null !== priorSelectionRange &&
+             hasSelectionCapabilities(priorFocusedElem)
+           ) {
+diff --git a/node_modules/react-dom/cjs/react-dom-profiling.development.js b/node_modules/react-dom/cjs/react-dom-profiling.development.js
+index bd05f98..e6d83f8 100644
+--- a/node_modules/react-dom/cjs/react-dom-profiling.development.js
++++ b/node_modules/react-dom/cjs/react-dom-profiling.development.js
+@@ -13793,11 +13793,64 @@
+               0 === (finishedWork.flags & 256)
+             : !1;
+     }
++    // notefig patch: an element marked data-react-selection-anchors owns its
++    // selection (ProseMirror). React's commit-time capture walks every node under
++    // the focused contenteditable to turn the selection into character offsets —
++    // O(editor DOM) on every commit anywhere in the app. For such an element,
++    // keep the selection's own anchor nodes instead (O(1)), and on restore put
++    // them back exactly when they are still inside it. When they are not, the
++    // owner restores its own selection on focus, as ProseMirror does.
++    function ownsSelectionAnchors(node) {
++      return (
++        null != node &&
++        1 === node.nodeType &&
++        "function" === typeof node.hasAttribute &&
++        node.hasAttribute("data-react-selection-anchors")
++      );
++    }
++    function captureSelectionAnchors(root) {
++      var win = (root.ownerDocument && root.ownerDocument.defaultView) || window,
++        sel = win.getSelection && win.getSelection();
++      return sel && 0 !== sel.rangeCount
++        ? {
++            start: 0,
++            end: 0,
++            selectionAnchors: !0,
++            anchorNode: sel.anchorNode,
++            anchorOffset: sel.anchorOffset,
++            focusNode: sel.focusNode,
++            focusOffset: sel.focusOffset
++          }
++        : { start: 0, end: 0, selectionAnchors: !0, anchorNode: null, focusNode: null };
++    }
++    function restoreSelectionAnchors(elem, saved) {
++      var anchor = saved.anchorNode,
++        focus = saved.focusNode;
++      if (!anchor || !focus || !elem.contains(anchor) || !elem.contains(focus))
++        return;
++      var doc = elem.ownerDocument || document,
++        win = doc.defaultView || window,
++        sel = win.getSelection && win.getSelection();
++      if (
++        !sel ||
++        (1 === sel.rangeCount &&
++          sel.anchorNode === anchor &&
++          sel.anchorOffset === saved.anchorOffset &&
++          sel.focusNode === focus &&
++          sel.focusOffset === saved.focusOffset)
++      )
++        return;
++      try {
++        sel.setBaseAndExtent(anchor, saved.anchorOffset, focus, saved.focusOffset);
++      } catch (e) {}
++    }
+     function commitBeforeMutationEffects(root, firstChild) {
+       root = root.containerInfo;
+       eventsEnabled = _enabled;
+       root = getActiveElementDeep(root);
+-      if (hasSelectionCapabilities(root)) {
++      if (ownsSelectionAnchors(root))
++        var JSCompiler_temp = captureSelectionAnchors(root);
++      else if (hasSelectionCapabilities(root)) {
+         if ("selectionStart" in root)
+           var JSCompiler_temp = {
+             start: root.selectionStart,
+@@ -17999,10 +18052,12 @@
+                 priorFocusedElem
+               )
+             ) {
+-              if (
+-                null !== priorSelectionRange &&
+-                hasSelectionCapabilities(priorFocusedElem)
+-              ) {
++              if (null !== priorSelectionRange && priorSelectionRange.selectionAnchors)
++            restoreSelectionAnchors(priorFocusedElem, priorSelectionRange);
++          else if (
++            null !== priorSelectionRange &&
++            hasSelectionCapabilities(priorFocusedElem)
++          ) {
+                 var start = priorSelectionRange.start,
+                   end = priorSelectionRange.end;
+                 void 0 === end && (end = start);
+diff --git a/node_modules/react-dom/cjs/react-dom-profiling.profiling.js b/node_modules/react-dom/cjs/react-dom-profiling.profiling.js
+index 631335d..78e4ae7 100644
+--- a/node_modules/react-dom/cjs/react-dom-profiling.profiling.js
++++ b/node_modules/react-dom/cjs/react-dom-profiling.profiling.js
+@@ -9533,11 +9533,64 @@ function isHydratingParent(current, finishedWork) {
+         ? current.memoizedState.isDehydrated && 0 === (finishedWork.flags & 256)
+         : !1;
+ }
++// notefig patch: an element marked data-react-selection-anchors owns its
++// selection (ProseMirror). React's commit-time capture walks every node under
++// the focused contenteditable to turn the selection into character offsets —
++// O(editor DOM) on every commit anywhere in the app. For such an element,
++// keep the selection's own anchor nodes instead (O(1)), and on restore put
++// them back exactly when they are still inside it. When they are not, the
++// owner restores its own selection on focus, as ProseMirror does.
++function ownsSelectionAnchors(node) {
++  return (
++    null != node &&
++    1 === node.nodeType &&
++    "function" === typeof node.hasAttribute &&
++    node.hasAttribute("data-react-selection-anchors")
++  );
++}
++function captureSelectionAnchors(root) {
++  var win = (root.ownerDocument && root.ownerDocument.defaultView) || window,
++    sel = win.getSelection && win.getSelection();
++  return sel && 0 !== sel.rangeCount
++    ? {
++        start: 0,
++        end: 0,
++        selectionAnchors: !0,
++        anchorNode: sel.anchorNode,
++        anchorOffset: sel.anchorOffset,
++        focusNode: sel.focusNode,
++        focusOffset: sel.focusOffset
++      }
++    : { start: 0, end: 0, selectionAnchors: !0, anchorNode: null, focusNode: null };
++}
++function restoreSelectionAnchors(elem, saved) {
++  var anchor = saved.anchorNode,
++    focus = saved.focusNode;
++  if (!anchor || !focus || !elem.contains(anchor) || !elem.contains(focus))
++    return;
++  var doc = elem.ownerDocument || document,
++    win = doc.defaultView || window,
++    sel = win.getSelection && win.getSelection();
++  if (
++    !sel ||
++    (1 === sel.rangeCount &&
++      sel.anchorNode === anchor &&
++      sel.anchorOffset === saved.anchorOffset &&
++      sel.focusNode === focus &&
++      sel.focusOffset === saved.focusOffset)
++  )
++    return;
++  try {
++    sel.setBaseAndExtent(anchor, saved.anchorOffset, focus, saved.focusOffset);
++  } catch (e) {}
++}
+ function commitBeforeMutationEffects(root, firstChild) {
+   root = root.containerInfo;
+   eventsEnabled = _enabled;
+   root = getActiveElementDeep(root);
+-  if (hasSelectionCapabilities(root)) {
++  if (ownsSelectionAnchors(root))
++        var JSCompiler_temp = captureSelectionAnchors(root);
++      else if (hasSelectionCapabilities(root)) {
+     if ("selectionStart" in root)
+       var JSCompiler_temp = {
+         start: root.selectionStart,
+@@ -13216,7 +13269,9 @@ function flushMutationEffects() {
+             priorFocusedElem
+           )
+         ) {
+-          if (
++          if (null !== priorSelectionRange && priorSelectionRange.selectionAnchors)
++            restoreSelectionAnchors(priorFocusedElem, priorSelectionRange);
++          else if (
+             null !== priorSelectionRange &&
+             hasSelectionCapabilities(priorFocusedElem)
+           ) {

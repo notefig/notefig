@@ -79,7 +79,7 @@ async function tick(): Promise<void> {
 }
 
 function openTabs(): string[] {
-  const search = router.state.location.search;
+  const search = core.use("url").search();
   return extractTabIds(
     parseLayout(new URLSearchParams(search).get(LAYOUT_PARAM)),
   );
@@ -241,7 +241,7 @@ describe("entering a project (useOpenProject)", () => {
       await openProject!("/ws-a");
     });
     expect(
-      new URLSearchParams(router.state.location.search).get("sidebarView"),
+      new URLSearchParams(core.use("url").search()).get("sidebarView"),
     ).toBe("files");
 
     await act(async () => {
@@ -249,7 +249,7 @@ describe("entering a project (useOpenProject)", () => {
       await openProject!("/ws-b");
     });
     expect(
-      new URLSearchParams(router.state.location.search).get("sidebarView"),
+      new URLSearchParams(core.use("url").search()).get("sidebarView"),
     ).toBe("search");
   });
 

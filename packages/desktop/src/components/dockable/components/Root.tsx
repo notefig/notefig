@@ -1,8 +1,19 @@
-import React, { useReducer, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import PanelView from "./Panel";
 import appReducer from "../reducer";
-import serializeLayout, { type LayoutNode } from "../utils/serializeLayout";
+import serializeLayout, {
+  type LayoutNode,
+  type PanelNode,
+} from "../utils/serializeLayout";
 import {
   DndContext,
   useSensor,
@@ -46,6 +57,73 @@ type DockableProps = {
   chrome?: Partial<DockChrome>;
 };
 
+type DockAction = Parameters<typeof appReducer>[1];
+
+const rootPanel = (children: LayoutNode[]): PanelNode => ({
+  children,
+  id: "root",
+  type: "Panel",
+  size: 1,
+});
+
+/**
+ * The dock's layout and its dispatch.
+ *
+ * Controlled (a `layout` prop): the prop is the only copy of the layout.
+ * An action runs the reducer against it and reports the result at once,
+ * in the same event — no internal state to sync the prop into, no effect
+ * a frame later to report from, no JSON comparisons to tell the two
+ * apart. Uncontrolled: the reducer's own state, reported on change.
+ */
+function useDockableLayout(
+  controlledPanels: LayoutNode[] | undefined,
+  declarativePanels: LayoutNode[],
+  onChange: ((panels: LayoutNode[]) => void) | undefined,
+) {
+  const controlled = controlledPanels !== undefined;
+  const [ownState, ownDispatch] = useReducer(
+    appReducer,
+    rootPanel(controlledPanels ?? declarativePanels),
+  );
+  const controlledState = useMemo(
+    () => (controlledPanels ? rootPanel(controlledPanels) : null),
+    [controlledPanels],
+  );
+  const state = controlledState ?? ownState;
+
+  // The layout an action applies to: the prop as last rendered, advanced by
+  // every action reported since (two actions in one event see each other).
+  // Kept current after each commit — before any event can dispatch.
+  const latestRef = useRef(state);
+  const onChangeRef = useRef(onChange);
+  const controlledRef = useRef(controlled);
+  useLayoutEffect(() => {
+    latestRef.current = state;
+    onChangeRef.current = onChange;
+    controlledRef.current = controlled;
+  });
+
+  const dispatch = useCallback((action: DockAction) => {
+    if (!controlledRef.current) return ownDispatch(action);
+    const current = latestRef.current;
+    const next = appReducer(current, action);
+    if (next === current) return;
+    latestRef.current = next;
+    onChangeRef.current?.(next.children);
+  }, []);
+
+  // Uncontrolled only: report the reducer's state after each change.
+  const lastReportedRef = useRef(ownState);
+  useEffect(() => {
+    if (controlled || !onChange) return;
+    if (ownState === lastReportedRef.current) return;
+    lastReportedRef.current = ownState;
+    onChange(ownState.children);
+  }, [controlled, ownState, onChange]);
+
+  return { state, dispatch };
+}
+
 export function DockableRoot({
   orientation = "row",
   children,
@@ -70,59 +148,17 @@ export function DockableRoot({
     serializeLayout(child, views),
   );
 
-  const [state, dispatch] = useReducer(appReducer, {
-    children: controledPanels || declarativePanels,
-    id: "root",
-    type: "Panel",
-    size: 1,
-  });
-
-  // Track the last layout JSON we reported to the parent via onChange.
-  // We use a serialised string so that the comparison survives the
-  // URL → JSON.parse round-trip (which always creates new object refs).
-  const lastReportedJsonRef = useRef<string>(
-    controledPanels ? JSON.stringify(controledPanels) : "",
+  const { state, dispatch } = useDockableLayout(
+    controledPanels,
+    declarativePanels,
+    onChange,
   );
-  // State JSON at the moment a controlled sync was dispatched. Until that
-  // dispatch re-renders, the report effect still sees this pre-sync state —
-  // emitting it would report the OLD layout as a fresh user change (one
-  // stale onChange per external layout write, observable as a junk history
-  // entry that can revert the write).
-  const preSyncStateJsonRef = useRef<string | null>(null);
 
-  // Sync controlled layout prop into internal reducer state.
-  // Only dispatch when the incoming prop is structurally different from
-  // what we last reported, which breaks the
-  // onChange → setLayout → prop change → setState infinite loop.
-  useEffect(() => {
-    if (!controledPanels) return;
-    const incoming = JSON.stringify(controledPanels);
-    if (incoming !== lastReportedJsonRef.current) {
-      lastReportedJsonRef.current = incoming;
-      preSyncStateJsonRef.current = JSON.stringify(state.children);
-      dispatch({ type: "setState", children: controledPanels });
-    }
-    // `state` is deliberately not a dependency: this effect must run only on
-    // prop changes; it reads the state of that same commit for the echo guard.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [controledPanels]);
-
-  // Report internal state changes to the parent.
-  useEffect(() => {
-    if (!onChange) return;
-    const current = JSON.stringify(state.children);
-    if (current === lastReportedJsonRef.current) {
-      preSyncStateJsonRef.current = null;
-      return;
-    }
-    if (current === preSyncStateJsonRef.current) {
-      // Pre-sync echo: a controlled sync is in flight and this is the state
-      // it is about to replace, not a user change. Never report it.
-      return;
-    }
-    lastReportedJsonRef.current = current;
-    onChange(state.children);
-  }, [state, onChange]);
+  const store = useMemo(() => ({ state, dispatch }), [state, dispatch]);
+  const chromeValue = useMemo(
+    () => ({ ...DEFAULT_DOCK_CHROME, ...chrome }),
+    [chrome],
+  );
 
   const pointerSensor = useSensor(PointerSensor, {
     activationConstraint: {
@@ -276,8 +312,8 @@ export function DockableRoot({
   }
 
   return (
-    <StoreContext.Provider value={{ state, dispatch }}>
-      <DockChromeContext.Provider value={{ ...DEFAULT_DOCK_CHROME, ...chrome }}>
+    <StoreContext.Provider value={store}>
+      <DockChromeContext.Provider value={chromeValue}>
       <div
         className={styles.container}
         style={{

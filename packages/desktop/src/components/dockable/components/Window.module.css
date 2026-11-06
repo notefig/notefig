@@ -141,3 +141,14 @@
   transform: scaleX(1) scaleY(1);
   background-color: hsl(var(--ring) / 0.3);
 }
+
+/* A kept tab while another is selected (TabContent). content-visibility
+   alone hides it: unrendered, unfocusable, out of the tab order and the
+   accessibility tree. Not visibility: it is inherited, so toggling it
+   restyles every element in the tab — 26,000 for an 8,000-line document.
+   Only where content-visibility is unsupported does it stand in. */
+@supports not (content-visibility: hidden) {
+  .hiddenTab {
+    visibility: hidden;
+  }
+}

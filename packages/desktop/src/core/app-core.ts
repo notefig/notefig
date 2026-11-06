@@ -19,6 +19,7 @@ import { workspaceAgentsModule } from "@/modules/agents/workspace-agents";
 import { treeInlineEditModule } from "@/modules/tree-inline-edit";
 import { sharedSessionsModule } from "@/modules/shared-sessions";
 import { treeExpansionModule } from "@/modules/tree-expansion";
+import { treeModelModule } from "@/modules/tree-model";
 import { telemetryModule } from "@/modules/telemetry";
 import { dictationModule } from "@/modules/dictation";
 import { diffBlocksModule } from "@/modules/diff-blocks";
@@ -85,6 +86,7 @@ export function runtimeModules(): AnyModule[] {
     sharedSessionsModule,
     usageModule,
     treeExpansionModule,
+    treeModelModule,
     lastToolModule,
     // "Send Feedback": `available` only in builds given a support URL.
     feedbackModule,

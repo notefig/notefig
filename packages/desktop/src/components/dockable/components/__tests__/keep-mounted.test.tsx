@@ -92,11 +92,66 @@ describe("keepMounted tabs", () => {
     expect(mounts.other).toBe(1);
 
     const hidden = probe("kept")!.parentElement!;
-    expect(hidden.inert).toBe(true);
-    expect(hidden.style.visibility).toBe("hidden");
+    expect(hidden.dataset.tabHidden).toBe("true");
+    expect(hidden.style.contentVisibility).toBe("hidden");
+    // Never visibility or inert inline: both are inherited, and toggling
+    // either restyles every element in the tab.
+    expect(hidden.style.visibility).toBe("");
     // Off screen as well, so no IntersectionObserver inside sees it in view.
     expect(hidden.style.transform).toBe("translateX(-200%)");
-    expect(probe("other")!.parentElement!.inert).toBe(false);
+    const shown = probe("other")!.parentElement!;
+    expect(shown.dataset.tabHidden).toBeUndefined();
+    // Never inert: an inherited state, toggling it restyles the whole tab.
+    expect(hidden.inert).toBe(false);
+    expect(shown.inert).toBe(false);
+  });
+
+  it("takes focus out of a tab as it hides", () => {
+    const core = createTestCore();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    render(core, "kept");
+    const input = document.createElement("input");
+    probe("kept")!.appendChild(input);
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    render(core, "other");
+    expect(document.activeElement).not.toBe(input);
+    expect(probe("kept")!.contains(document.activeElement)).toBe(false);
+  });
+
+  it("takes the document's selection out of a tab as it hides", () => {
+    const core = createTestCore();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    render(core, "kept");
+    const text = document.createTextNode("selected words");
+    probe("kept")!.appendChild(text);
+    document.getSelection()!.setBaseAndExtent(text, 0, text, 8);
+    expect(document.getSelection()!.rangeCount).toBe(1);
+
+    render(core, "other");
+    expect(document.getSelection()!.rangeCount).toBe(0);
+  });
+
+  it("leaves a selection elsewhere alone", () => {
+    const core = createTestCore();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const outside = document.createTextNode("outside");
+    document.body.appendChild(outside);
+
+    render(core, "kept");
+    document.getSelection()!.setBaseAndExtent(outside, 0, outside, 3);
+    render(core, "other");
+    expect(document.getSelection()!.anchorNode).toBe(outside);
+    outside.remove();
   });
 
   it("still unmounts a tab that is not kept", () => {

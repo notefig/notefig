@@ -10,6 +10,7 @@ import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import { usePromptWidgetHost } from "../host-context";
+import { SelectionAnchors } from "../../selection-anchors";
 import type { PromptWidgetHost } from "../host";
 import { promptMentionNode } from "./mention-node";
 import { dictationExtension } from "../../dictation/extension";
@@ -70,6 +71,8 @@ function promptExtensions(
   renderer: SuggestionRenderer,
 ) {
   return [
+    // Owns its selection; React skips its commit-time walk of it.
+    SelectionAnchors,
     StarterKit.configure({
       blockquote: false,
       bold: false,

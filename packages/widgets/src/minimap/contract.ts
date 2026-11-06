@@ -131,26 +131,78 @@ export function deriveMinimapEntries(
   doc: PMNode,
   sources: Record<string, MinimapSource>,
 ): MinimapEntry[] {
-  const entries: MinimapEntry[] = [];
-  const size = Math.max(doc.content.size, 1);
+  const found: Found[] = [];
   doc.descendants((node, pos) => {
     const source = sources[node.type.name];
     if (!source) return true;
     const info = source.entry(node);
     if (!info) return false;
-    const identity = info.id ?? `pos:${pos}`;
-    entries.push({
-      key: `${node.type.name}:${identity}:${pos}`,
-      observerKey: `${node.type.name}:${identity}`,
+    found.push({
+      observerKey: `${node.type.name}:${info.id ?? `pos:${pos}`}`,
       nodeTypeName: node.type.name,
       pos,
-      // Clamped in from the edges so the first/last dot never sits on the
-      // rail's boundary; crowding is resolved by spreadRatios below.
-      ratio: Math.min(Math.max(pos / size, RATIO_LO), RATIO_HI),
       title: dotTitle(info.title),
     });
     return false;
   });
-  const spread = spreadRatios(entries.map((e) => e.ratio));
-  return entries.map((entry, i) => ({ ...entry, ratio: spread[i] }));
+  return place(found, doc);
+}
+
+/** An entry before it is placed on the rail. */
+type Found = Pick<MinimapEntry, "observerKey" | "nodeTypeName" | "pos" | "title">;
+
+function place(found: Found[], doc: PMNode): MinimapEntry[] {
+  const size = Math.max(doc.content.size, 1);
+  // Clamped in from the edges so the first/last dot never sits on the
+  // rail's boundary; crowding is resolved by spreadRatios.
+  const spread = spreadRatios(
+    found.map(({ pos }) => Math.min(Math.max(pos / size, RATIO_LO), RATIO_HI)),
+  );
+  return found.map((entry, i) => ({
+    ...entry,
+    key: `${entry.observerKey}:${entry.pos}`,
+    ratio: spread[i],
+  }));
+}
+
+/**
+ * `previous`, derived from `prevDoc`, moved to where the edit to `doc` put
+ * its elements — walking only what the edit changed, where deriving again
+ * walks the whole document (~0.8 ms a keystroke in an 8,000-line one).
+ * Null when the change takes in a mapped element, or lies inside one (its
+ * title may read it): derive again.
+ */
+export function shiftMinimapEntries(
+  prevDoc: PMNode,
+  doc: PMNode,
+  previous: readonly MinimapEntry[],
+  sources: Record<string, MinimapSource>,
+): MinimapEntry[] | null {
+  const start = prevDoc.content.findDiffStart(doc.content);
+  if (start === null) return place([...previous], doc);
+  let { a: endA, b: endB } = prevDoc.content.findDiffEnd(doc.content)!;
+  const overlap = start - Math.min(endA, endB);
+  if (overlap > 0) {
+    endA += overlap;
+    endB += overlap;
+  }
+  const mapped = (node: PMNode, to: number) => {
+    let hit = false;
+    node.nodesBetween(start, to, (child) => {
+      if (sources[child.type.name]) hit = true;
+      return !hit;
+    });
+    return hit;
+  };
+  if (mapped(prevDoc, endA) || mapped(doc, endB)) return null;
+  const shift = endB - endA;
+  // An element without an id is known by its position, which moves.
+  const moves = previous.filter((entry) => entry.pos >= start);
+  if (moves.some((e) => e.observerKey === `${e.nodeTypeName}:pos:${e.pos}`)) return null;
+  return place(
+    previous.map((entry) =>
+      entry.pos < start ? entry : { ...entry, pos: entry.pos + shift },
+    ),
+    doc,
+  );
 }

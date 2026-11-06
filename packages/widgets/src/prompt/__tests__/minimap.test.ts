@@ -7,7 +7,8 @@ import { describe, expect, it } from "vitest";
 import { getSchema } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import type { Schema, Node as PMNode } from "@tiptap/pm/model";
-import { deriveMinimapEntries } from "../../minimap/contract";
+import { deriveMinimapEntries, shiftMinimapEntries } from "../../minimap/contract";
+import { EditorState } from "@tiptap/pm/state";
 import { AiPromptNodeBase, PromptDraftNodeBase } from "../node";
 import { promptMentionNode } from "../composer/mention-node";
 import { describeDotState, promptMinimapSource } from "../minimap";
@@ -130,6 +131,33 @@ describe("deriveMinimapEntries", () => {
 
   it("returns nothing for a widget-less document", () => {
     expect(deriveMinimapEntries(doc(para("just prose")), sources)).toEqual([]);
+  });
+});
+
+describe("shiftMinimapEntries", () => {
+  const before = doc(para("one"), widget("blob_a"), para("two"), widget("blob_b", "draft"), para("three"));
+  const state = EditorState.create({ doc: before });
+  const entries = deriveMinimapEntries(before, sources);
+  const shifted = (tr: ReturnType<EditorState["tr"]["insertText"]>) =>
+    shiftMinimapEntries(before, tr.doc, entries, sources);
+
+  it("moves the entries along with typing, as deriving again would place them", () => {
+    for (const tr of [
+      state.tr.insertText("typed", 2),
+      state.tr.delete(1, 3),
+      state.tr.insertText("between", before.child(0).nodeSize + before.child(1).nodeSize + 2),
+      state.tr.insert(0, para("new")),
+    ]) {
+      expect(shifted(tr)).toEqual(deriveMinimapEntries(tr.doc, sources));
+    }
+  });
+
+  it("derives again when an edit takes in a widget or types inside one", () => {
+    const widgetAt = before.child(0).nodeSize;
+    expect(shifted(state.tr.delete(widgetAt, widgetAt + before.child(1).nodeSize))).toBeNull();
+    expect(shifted(state.tr.insert(0, widget("blob_c")))).toBeNull();
+    const draftAt = widgetAt + before.child(1).nodeSize + before.child(2).nodeSize + 2;
+    expect(shifted(state.tr.insertText("x", draftAt + 1))).toBeNull();
   });
 });
 
