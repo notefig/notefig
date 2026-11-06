@@ -277,6 +277,28 @@ describe("enter: where it lands, on disk truth", () => {
     );
   });
 
+  it("records a row for an existing scratchpad the collection hasn't seen", async () => {
+    // Written outside the app after the last listing, its watcher event not
+    // yet in: without a row, stale-tab cleanup would close the tab landed on.
+    const pad = `${DIR}/from-elsewhere.md`;
+    listDir([pad]);
+    adapter.readFiles.mockResolvedValue(ok([{ path: pad, content: "notes" }]));
+    adapter.getMetadata.mockImplementation(async (paths: string[]) =>
+      ok(
+        paths.map((path) => ({
+          ...stat(path, 100),
+          type: path.endsWith(".md")
+            ? ("file" as const)
+            : ("directory" as const),
+        })),
+      ),
+    );
+
+    await expect(pads.enter([])).resolves.toBe(pad);
+    expect(adapter.createFiles).not.toHaveBeenCalled();
+    expect(files.collections.metadata.get(pad)?.type).toBe("file");
+  });
+
   it("bails to null when the folder path is unusable", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     scratchpadDirLists({

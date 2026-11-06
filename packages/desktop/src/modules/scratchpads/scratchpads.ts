@@ -384,6 +384,11 @@ export function createWorkspaceScratchpads({
       } catch (error) {
         console.error("[scratchpads] entry resolution failed:", error);
       }
+      // The landing scratchpad may predate this entry yet have no row: an
+      // external write whose watcher event hasn't arrived. Without its row,
+      // stale-tab cleanup would close the tab we land on. Existing rows are
+      // skipped, so this costs nothing in the usual case.
+      if (scratchpad && !created.includes(scratchpad)) created.push(scratchpad);
       await files.recordDiskChanges({ created, deleted });
       return scratchpad;
     },
