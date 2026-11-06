@@ -12,6 +12,7 @@ import { AiPromptNodeBase, PromptDraftNodeBase } from "../prompt/node";
 import { promptMentionNode } from "../prompt/composer/mention-node";
 import { promptMinimapSource } from "../prompt/minimap";
 import { restoreKeptWidgetsTr } from "../prompt/interactions";
+import { nodeIndexPlugin } from "../node-index";
 import { testPrompts } from "../testing/test-prompts";
 import type { PromptWidgetsApi } from "../prompt/widgets-service";
 
@@ -216,10 +217,11 @@ const widgetIds = (doc: PMNode) => {
 
 const picker = codeLanguagePicker();
 const diff = codeDiff({});
+const index = nodeIndexPlugin(new Set([nodes.aiPrompt.name]));
 
 /** Where each plugin's mapped state after `tr` differs from a fresh one. */
 function divergences(before: EditorState, tr: Transaction, after: EditorState): string[] {
-  const fresh = EditorState.create({ doc: after.doc, plugins: [picker, diff] });
+  const fresh = EditorState.create({ doc: after.doc, plugins: [index, picker, diff] });
   const found: string[] = [];
 
   const pickers = (s: EditorState) =>
@@ -258,7 +260,7 @@ describe("incremental plugin state against a full recompute", () => {
     const failures: string[] = [];
     for (let run = 0; run < 120 && failures.length < 5; run++) {
       const rnd = random(run + 1);
-      let state = EditorState.create({ doc: startDoc(), plugins: [picker, diff] });
+      let state = EditorState.create({ doc: startDoc(), plugins: [index, picker, diff] });
       const history: Transaction[] = [];
       for (let step = 0; step < 25; step++) {
         const tr = randomEdit(state, history, rnd);

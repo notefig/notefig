@@ -3,6 +3,7 @@ import { Schema } from "@tiptap/pm/model";
 import { EditorState } from "@tiptap/pm/state";
 import { restoreKeptWidgetsTr } from "../interactions";
 import { PROMPT_NODE_NAME } from "../node";
+import { nodeIndexPlugin } from "../../node-index";
 import type { PromptWidgetsApi } from "../widgets-service";
 
 const schema = new Schema({
@@ -26,6 +27,7 @@ const state = EditorState.create({
     widget,
     paragraph.create(null, schema.text("after")),
   ]),
+  plugins: [nodeIndexPlugin(new Set([PROMPT_NODE_NAME]))],
 });
 const widgetPos = state.doc.firstChild!.nodeSize;
 

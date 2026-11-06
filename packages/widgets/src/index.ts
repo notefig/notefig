@@ -51,6 +51,7 @@ export {
  */
 export {
   captureSelectionReference,
+  collectWidgets,
   deleteWidgetTr,
   docHasPromptNode,
   docHasRealContent,
@@ -133,6 +134,9 @@ export {
   isMutatingToolCall,
   type RoundOutcome,
 } from "./prompt/state";
+
+/** Where a document's indexed nodes are, without a walk. */
+export { indexedNodes, NodeIndex, type IndexedNode } from "./node-index";
 
 /** The document minimap (MET-172): the collector the editor registers. */
 export {
