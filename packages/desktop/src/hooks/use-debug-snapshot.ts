@@ -9,7 +9,7 @@
  * the open-workspace rows.
  */
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearch } from "@/modules/layout/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFocusedWorkspace } from "@/modules/workspaces/react";
 import { path as pathutil } from "@/utils/path";
@@ -28,7 +28,8 @@ import type { DebugSnapshot } from "@/utils/debug-report";
 import type { QueryClient } from "@tanstack/react-query";
 
 export function useDebugSnapshot(): DebugSnapshot {
-  const [searchParams] = useSearchParams();
+  const search = useSearch();
+  const searchParams = useMemo(() => new URLSearchParams(search), [search]);
   // The focused workspace stands in for the old route param: the dock
   // spans every open workspace, so this is only the sidebar's scope.
   const workspacePath = useFocusedWorkspace();

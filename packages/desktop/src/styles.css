@@ -354,6 +354,41 @@
     z-index: 1;
   }
 
+  /* Radix's modal layers (dialogs, dropdown/context menus, selects, modal
+     popovers) block the app by setting an inline `pointer-events: none` on
+     <body>. pointer-events is inherited, so that one write restyles every
+     element in the app — about 840 ms with a long document open, once on
+     open and again on close. Pin <body> to auto (an author !important beats
+     the inline style), so its computed style never changes and nothing
+     below it restyles, and block the app with a click-catcher instead: a
+     fixed layer over #root (z-index 1) and under the portaled layers
+     (z-50), shown only while Radix's style is on <body>. Presses on it hit
+     <body>, which Radix reads as outside the layer and dismisses — the same
+     as before, and nothing underneath gets the press or a hover. */
+  body {
+    pointer-events: auto !important;
+  }
+
+  body[style*="pointer-events: none"]::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 49;
+  }
+}
+
+/* The same modal layers lock scrolling with react-remove-scroll-bar, whose
+   stylesheet sets `--removed-body-scroll-bar-size` on <body>. Custom
+   properties inherit, so that too restyled every element in the app on
+   each open and close (another ~1 s with a long document open). Nothing
+   here reads it; registered as non-inherited, it changes <body> alone. */
+@property --removed-body-scroll-bar-size {
+  syntax: "*";
+  inherits: false;
+}
+
+@layer base {
+
   /* Map Dockable CSS variables to our design tokens */
   :root {
     --dockable-colors-headers: hsl(var(--background));

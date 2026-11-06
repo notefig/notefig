@@ -59,6 +59,33 @@ describe("trackSession", () => {
     expect(await kv.read("settings", "lastSearch")).toBeUndefined();
   });
 
+  it("writes a burst of changes once, after paint", async () => {
+    const kv = testKv();
+    const writes: unknown[] = [];
+    const write = kv.write.bind(kv);
+    kv.write = ((namespace: string, key: string, value: unknown) => {
+      if (namespace === "session") writes.push(value);
+      return write(namespace, key, value);
+    }) as typeof kv.write;
+    const url = await track(kv);
+    writes.length = 0;
+    url.setSearch("?layout=one");
+    url.setSearch("?layout=two");
+    url.setSearch("?layout=three");
+    expect(writes).toEqual([]);
+    await settle(40);
+    expect(writes).toEqual(["?layout=three"]);
+  });
+
+  it("writes what is pending when the page goes away", async () => {
+    const kv = testKv();
+    const url = await track(kv);
+    url.setSearch("?layout=last");
+    window.dispatchEvent(new Event("pagehide"));
+    await settle();
+    expect(await kv.read("session", "lastSearch")).toBe("?layout=last");
+  });
+
   it("records nothing before the restore, so the bare boot URL never wins", async () => {
     const kv = testKv();
     await kv.write("session", "lastSearch", "?layout=saved");

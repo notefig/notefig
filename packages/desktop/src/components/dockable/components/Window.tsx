@@ -12,7 +12,7 @@ import { ScrollArea } from "@notefig/ui/scroll-area";
 import { cn } from "@notefig/ui/utils";
 import { dropZoneProps } from "@/utils/drag-protocol";
 import { useCore } from "@notefig/core/react";
-import { useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import type { TabsApi } from "@/modules/tabs";
 export type tabObject = {
   id: string;
@@ -100,13 +100,28 @@ function useShownTabs(tabs: tabGroupObject, selected: string): Set<string> {
 }
 
 /** One tab's content, in a box filling the content box. A kept-mounted
- *  tab while another is selected is off screen, unrendered
- *  (`content-visibility` keeps its state, scroll offsets included), and
- *  inert, so it takes no focus and leaves the accessibility tree. Only this
- *  wrapper's style changes on select, so nothing remounts — and the box is
- *  the same either way: a change of box (it was `display: contents` when
- *  selected) rebuilds the layout and restyles everything inside, ~300 ms
- *  to bring back an 8,000-line document. */
+ *  tab while another is selected is off screen and unrendered
+ *  (`content-visibility: hidden` keeps its state, scroll offsets
+ *  included): nothing in it can be seen, clicked, focused, tabbed to or
+ *  found, and it leaves the accessibility tree. Only this wrapper's style changes on select,
+ *  so nothing remounts — and the box is the same either way: a change of
+ *  box (it was `display: contents` when selected) rebuilds the layout and
+ *  restyles everything inside, ~300 ms to bring back an 8,000-line
+ *  document.
+ *
+ *  Neither `inert` nor `visibility: hidden`: both are inherited, so
+ *  toggling either restyles every element in the tab — about 26,000 for
+ *  an 8,000-line document, most of a tab switch's time, on hiding and
+ *  again on showing. (`visibility` stands in only where content-visibility
+ *  is unsupported: `.hiddenTab`.) What inert did here is done directly: a
+ *  tab that hides gives up focus, so keys, and the browser's own undo,
+ *  which only the focused editor answers, never reach it.
+ *
+ *  It gives up the document's selection too. Blurring an editor leaves the
+ *  selection in it, and the next editor's focus() then pays for a
+ *  selection inside a hidden subtree: ~190 ms in Chromium when that is an
+ *  8,000-line document. Editors keep their own selection and put it back
+ *  when focused, so nothing is lost. */
 function TabContent({
   hidden,
   children,
@@ -114,13 +129,29 @@ function TabContent({
   hidden: boolean;
   children: React.ReactNode;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Before the tab now selected asks for focus (its own layout effects and
+  // the focus arbiter run after this commit's layout phase).
+  useLayoutEffect(() => {
+    if (!hidden) return;
+    const box = ref.current;
+    if (!box) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && box.contains(active)) active.blur();
+    const selection = document.getSelection();
+    if (
+      selection &&
+      selection.rangeCount > 0 &&
+      (box.contains(selection.anchorNode) || box.contains(selection.focusNode))
+    ) {
+      selection.removeAllRanges();
+    }
+  }, [hidden]);
   return (
     <div
-      // Set as the DOM property: this React types package predates `inert`.
-      ref={(element) => {
-        if (element) element.inert = hidden;
-      }}
-      className="px-2"
+      ref={ref}
+      className={hidden ? `px-2 ${styles.hiddenTab}` : "px-2"}
+      data-tab-hidden={hidden || undefined}
       style={hidden ? HIDDEN_TAB_STYLE : SELECTED_TAB_STYLE}
     >
       {children}
@@ -135,7 +166,6 @@ const SELECTED_TAB_STYLE: React.CSSProperties = {
 };
 const HIDDEN_TAB_STYLE: React.CSSProperties = {
   ...SELECTED_TAB_STYLE,
-  visibility: "hidden",
   contentVisibility: "hidden",
   // Off screen too, so nothing inside reads as in view: visibility alone
   // doesn't stop an IntersectionObserver (a prompt widget marks itself

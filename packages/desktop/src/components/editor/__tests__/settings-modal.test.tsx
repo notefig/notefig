@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter, useSearchParams } from "react-router-dom";
+import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { defineModule, type Core } from "@notefig/core";
 import { CoreProvider } from "@notefig/core/react";
 import { SettingsModal } from "../settings-modal";
 import { ThemeProvider } from "../../theme-provider";
-import { createTestCore } from "@/testing/test-core";
+import { createTestCore, memoryUrlState } from "@/testing/test-core";
 import { kvModule } from "@/modules/kv";
 import { workspacesModule } from "@/modules/workspaces";
 import { createFeedback } from "@/modules/feedback";
@@ -39,17 +39,9 @@ let testCore: Core;
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
-function SearchParamsReader() {
-  const [searchParams] = useSearchParams();
-  return (
-    <div data-testid="search-params" className="sr-only">
-      {searchParams.toString()}
-    </div>
-  );
-}
-
-beforeEach(() => {
-  testCore = createTestCore({
+function createSettingsCore(initialSearch: string) {
+  return createTestCore({
+    url: memoryUrlState(initialSearch),
     modules: [
       kvModule,
       workspacesModule,
@@ -60,6 +52,10 @@ beforeEach(() => {
       }),
     ],
   });
+}
+
+beforeEach(() => {
+  testCore = createSettingsCore("");
 });
 
 afterEach(() => {
@@ -71,6 +67,8 @@ afterEach(() => {
 });
 
 function renderWithSettingsModal(initialSearch = "") {
+  // The app's URL state is core's `url`, not the router's.
+  testCore = createSettingsCore(initialSearch);
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -94,7 +92,6 @@ function renderWithSettingsModal(initialSearch = "") {
               children: createElement(
                 "div",
                 null,
-                createElement(SearchParamsReader, null),
                 createElement(SettingsModal, {
                   direction: "ltr",
                   onDirectionChange: () => {},
@@ -110,9 +107,7 @@ function renderWithSettingsModal(initialSearch = "") {
 }
 
 function currentParams(): string {
-  return (
-    container?.querySelector("[data-testid='search-params']")?.textContent ?? ""
-  );
+  return testCore.use("url").search().replace(/^\?/, "");
 }
 
 describe("SettingsModal shortcuts", () => {

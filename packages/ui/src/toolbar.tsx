@@ -268,14 +268,19 @@ export function ToolbarGroup({
   return (
     <div
       className={cn(
-        "group/toolbar-group",
-        "relative hidden has-[button]:flex",
+        // The last group drops its separator. Written as a child selector
+        // on the group, not `group-last/…:hidden` on the separator: that
+        // compiles to `:is(:where(.group):last-child *)`, and Chrome then
+        // restyles every element under ANY element whose last-child-ness
+        // changes — the whole app each time a dialog portals into <body>,
+        // a whole document each time a tab mounts after it.
+        "relative hidden has-[button]:flex [&:last-child>[data-toolbar-separator]]:hidden",
         className,
       )}
     >
       <div className="flex items-center">{children}</div>
 
-      <div className="group-last/toolbar-group:hidden mx-1.5 py-0.5">
+      <div data-toolbar-separator="" className="mx-1.5 py-0.5">
         <Separator orientation="vertical" />
       </div>
     </div>
