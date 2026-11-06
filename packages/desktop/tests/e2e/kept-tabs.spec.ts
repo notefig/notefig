@@ -1,5 +1,5 @@
 /**
- * Kept tabs — a file tab stays mounted, hidden and inert, while another tab
+ * Kept tabs — a file tab stays mounted, hidden and unfocusable, while another tab
  * in its window is selected (up to MAX_KEPT_TABS per window). These are the
  * ways a hidden editor could still act on, or be acted on by, what the user
  * does in the visible one.
@@ -134,7 +134,9 @@ test.describe("kept tabs", () => {
     await page.keyboard.press("Control+Tab");
     await expect(visibleEditor(page)).toContainText("bravo content");
     expect(
-      await page.evaluate(() => !!document.activeElement?.closest("[inert]")),
+      await page.evaluate(
+        () => !!document.activeElement?.closest("[data-tab-hidden]"),
+      ),
     ).toBe(false);
 
     await page.keyboard.type("XYZ");

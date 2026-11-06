@@ -92,11 +92,35 @@ describe("keepMounted tabs", () => {
     expect(mounts.other).toBe(1);
 
     const hidden = probe("kept")!.parentElement!;
-    expect(hidden.inert).toBe(true);
-    expect(hidden.style.visibility).toBe("hidden");
+    expect(hidden.dataset.tabHidden).toBe("true");
+    expect(hidden.style.contentVisibility).toBe("hidden");
+    // Never visibility or inert inline: both are inherited, and toggling
+    // either restyles every element in the tab.
+    expect(hidden.style.visibility).toBe("");
     // Off screen as well, so no IntersectionObserver inside sees it in view.
     expect(hidden.style.transform).toBe("translateX(-200%)");
-    expect(probe("other")!.parentElement!.inert).toBe(false);
+    const shown = probe("other")!.parentElement!;
+    expect(shown.dataset.tabHidden).toBeUndefined();
+    // Never inert: an inherited state, toggling it restyles the whole tab.
+    expect(hidden.inert).toBe(false);
+    expect(shown.inert).toBe(false);
+  });
+
+  it("takes focus out of a tab as it hides", () => {
+    const core = createTestCore();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    render(core, "kept");
+    const input = document.createElement("input");
+    probe("kept")!.appendChild(input);
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    render(core, "other");
+    expect(document.activeElement).not.toBe(input);
+    expect(probe("kept")!.contains(document.activeElement)).toBe(false);
   });
 
   it("still unmounts a tab that is not kept", () => {
