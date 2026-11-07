@@ -244,18 +244,30 @@ async function batch<T>(
   return result;
 }
 
+interface ListOptions {
+  recursive?: boolean;
+  includeFiles?: boolean;
+  includeDirectories?: boolean;
+  ignore?: { directories: string[] };
+}
+
+/** A listing like the adapters': `.git` and ignored folders are skipped. */
 async function listDirectory(
   path: string,
-  recursive: boolean,
+  options: ListOptions,
 ): Promise<{ path: string; type: "file" | "directory" }[]> {
   const entries: Dirent[] = await fsp.readdir(path, { withFileTypes: true });
+  const skipped = new Set([".git", ...(options.ignore?.directories ?? [])]);
   const out: { path: string; type: "file" | "directory" }[] = [];
   for (const entry of entries) {
     const full = join(path, entry.name);
-    const type = entry.isDirectory() ? "directory" : "file";
-    out.push({ path: full, type });
-    if (recursive && type === "directory" && entry.name !== ".git") {
-      out.push(...(await listDirectory(full, true)));
+    if (!entry.isDirectory()) {
+      if (options.includeFiles !== false) out.push({ path: full, type: "file" });
+      continue;
+    }
+    if (options.includeDirectories !== false) out.push({ path: full, type: "directory" });
+    if (options.recursive && !skipped.has(entry.name.toLowerCase())) {
+      out.push(...(await listDirectory(full, options)));
     }
   }
   return out;
@@ -335,7 +347,7 @@ export function nodeFs(): FileSystemSurface {
       ) as never,
     async readDirectory(path, options) {
       try {
-        return { ok: true, value: await listDirectory(path, options?.recursive ?? false) } as never;
+        return { ok: true, value: await listDirectory(path, options ?? {}) } as never;
       } catch (error) {
         return { ok: false, error: failure(path, error) };
       }
@@ -374,7 +386,11 @@ export function inProcessSyncRuntime(
     loadEngine: loadSyncEngine,
     async launchWorker() {
       stats.launched += 1;
-      const inner = createInProcessSyncWorker(() => createGitStorageHost(fs), remote.http);
+      const inner = createInProcessSyncWorker(
+        () => createGitStorageHost(fs),
+        remote.http,
+        fs,
+      );
       let alive = true;
       const api = Object.fromEntries(
         Object.entries(inner).map(([method, call]) => [

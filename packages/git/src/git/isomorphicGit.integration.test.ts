@@ -306,6 +306,18 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     ]);
   });
 
+  it("lists the files of a commit's tree", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    await host.createDir(join(repoDir, "notes"));
+    await host.writeFileAtomic(join(repoDir, "notes", "b.md"), encode("b\n"));
+    await host.writeFileAtomic(join(repoDir, "a.md"), encode("a\n"));
+    await service.addAllAndCommit({ message: "two", author: { name: "T", email: "t@x" } });
+
+    await expect(service.listFiles()).resolves.toEqual(["a.md", "notes/b.md"]);
+  });
+
   it("returns empty log for initialized repo without commits", async () => {
     const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
     await service.init({ defaultBranch: "main" });

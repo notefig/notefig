@@ -267,6 +267,59 @@ describe("solo sync", () => {
     expect(sync.capabilities().detail).toContain("note.md");
     expect(await read(path)).toBe("# Note\n\nMine.\n");
     expect(await remote.tip()).toBe(theirs);
+
+    // Resuming keeps the local file whole; the remote's text stays in history.
+    sync.resume();
+    await sync.syncNow();
+    expect(sync.capabilities().status).toBe("synced");
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nMine.");
+    expect(await runGit(remote.bare, ["merge-base", "--is-ancestor", theirs, "main"])).toBe("");
+    expect(await read(path)).toBe("# Note\n\nMine.\n");
+  });
+
+  it("commits what changed while the app was closed, deletions included", async () => {
+    const { core, ws, remote } = await setup();
+    await core.workspace(ws).close();
+    await fsp.writeFile(join(ws, "note.md"), "# Note\n\nEdited while closed.\n");
+    await fsp.writeFile(join(ws, "added.md"), "Added while closed.\n");
+    await runGit(ws, ["rm", "-q", "--cached", "note.md"]).catch(() => {});
+    await runGit(ws, ["reset", "-q"]);
+    await fsp.mkdir(join(ws, "node_modules", "pkg"), { recursive: true });
+    await fsp.writeFile(join(ws, "node_modules", "pkg", "index.js"), "ignored by the listing");
+
+    await core.workspace(ws).open();
+    const sync = core.workspace(ws).sync;
+    await sync.whenReady();
+    await sync.syncNow();
+
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nEdited while closed.");
+    expect(await runGit(remote.bare, ["show", "main:added.md"])).toBe("Added while closed.");
+
+    await core.workspace(ws).close();
+    await fsp.rm(join(ws, "added.md"));
+    await core.workspace(ws).open();
+    await core.workspace(ws).sync.whenReady();
+    await core.workspace(ws).sync.syncNow();
+    const tree = await runGit(remote.bare, ["ls-tree", "-r", "--name-only", "main"]);
+    expect(tree.split("\n")).not.toContain("added.md");
+    expect(tree.split("\n")).toContain("note.md");
+  });
+
+  it("stops when another branch is checked out, and resumes once it is back", async () => {
+    const { core, ws } = await setup();
+    await runGit(ws, ["checkout", "-q", "-b", "elsewhere"]);
+    await core.workspace(ws).close();
+    await core.workspace(ws).open();
+    const reopened = core.workspace(ws).sync;
+    await reopened.whenReady();
+    await reopened.syncNow();
+    expect(reopened.capabilities()).toMatchObject({ status: "diverged" });
+    expect(reopened.capabilities().detail).toContain("elsewhere");
+
+    await runGit(ws, ["checkout", "-q", "main"]);
+    reopened.resume();
+    await reopened.syncNow();
+    expect(reopened.capabilities().status).toBe("synced");
   });
 
   it("holds remote content back from an editor with unsaved edits and stops", async () => {

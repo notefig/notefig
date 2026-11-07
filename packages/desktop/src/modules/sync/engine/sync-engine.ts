@@ -78,7 +78,7 @@ const windowBlur = (listener: () => void) => {
 };
 
 export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
-  start(): Promise<void>;
+  start(): void;
 } {
   const root = pathutil.normalize(deps.workspacePath);
   const spec = sessionSpecOf(root, deps.config);
@@ -88,8 +88,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
   const onBlur = deps.onBlur ?? windowBlur;
 
   let author: SyncAuthor = deps.config.author ?? FALLBACK_AUTHOR;
-  /** Tree paths written since the last commit; "all" re-walks everything. */
-  let dirty: Set<string> | "all" = "all";
+  /** Tree paths written since the last commit; at start, a scan for what
+   *  changed while closed (everything, right after turning sync on). */
+  let dirty: Set<string> | "scan" | "all" = deps.fullScan ? "all" : "scan";
   /** The local branch tip, as last reported. */
   let head: string | null = null;
   /** The remote tip already taken in (pulled or pushed). */
@@ -100,6 +101,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
   let cancelPoll: (() => void) | null = null;
   let running: Promise<void> | null = null;
   let again = false;
+  /** The worker session is open (the branch check passed). */
+  let opened = false;
+  /** The user resumed from a stop: the next pull keeps local files. */
+  let keepLocalOnce = false;
 
   const treePath = (absolute: string): string | null => {
     const relative = pathutil.relative(root, absolute);
@@ -125,14 +130,15 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
   };
 
   const commitStep = async () => {
-    if (dirty !== "all" && dirty.size === 0) return;
-    const paths = dirty === "all" ? null : [...dirty];
+    if (typeof dirty !== "string" && dirty.size === 0) return;
+    const paths = typeof dirty === "string" ? dirty : [...dirty];
     dirty = new Set();
     deps.dispatch({ type: "step", activity: "committing" });
     const result = await api.commit({ paths, author, userName: author.name });
     if (!result.ok) {
       // Keep what wasn't committed for the next try.
-      dirty = paths === null ? "all" : new Set([...paths, ...(dirty as Set<string>)]);
+      dirty =
+        typeof paths === "string" ? paths : new Set([...paths, ...(dirty as Set<string>)]);
     }
     const { oid, paths: committed } = unwrap(result);
     if (!oid) return;
@@ -221,8 +227,24 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
 
   const pullStep = async (remote: string) => {
     deps.dispatch({ type: "step", activity: "fetching" });
-    const outcome = unwrap(await api.pull({ remote }));
+    const keepLocal = keepLocalOnce;
+    keepLocalOnce = false;
+    const outcome = unwrap(await api.pull({ remote, keepLocal }));
     await settlePull(outcome, remote);
+  };
+
+  /** Check the branch and open the worker session, once it passes. */
+  const ensureOpen = async () => {
+    if (opened) return;
+    const repo = await readRepoInfo(deps.fs, root);
+    author = deps.config.author ?? repo?.author ?? FALLBACK_AUTHOR;
+    if (repo?.branch !== deps.config.branch) {
+      diverge(
+        `This workspace has ${repo?.branch ?? "no branch"} checked out, but syncs ${deps.config.branch}. Check out ${deps.config.branch}, then resume.`,
+      );
+    }
+    head = unwrap(await api.open(spec)).head;
+    opened = true;
   };
 
   /** Push; true when the remote refused (it moved), so the cycle reruns. */
@@ -260,6 +282,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
   const cycle = async () => {
     if (!deps.capabilities().commits) return;
     try {
+      await ensureOpen();
       await commitStep();
       let refused = await reconcile();
       for (let retry = 0; refused && retry < MAX_PUSH_RETRIES; retry++) {
@@ -320,7 +343,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
     for (const path of paths) {
       const tree = treePath(path);
       if (!tree) continue;
-      if (dirty !== "all") dirty.add(tree);
+      if (typeof dirty !== "string") dirty.add(tree);
       any = true;
     }
     if (!any || stopped) return;
@@ -328,26 +351,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
     cancelIdle = setTimer(() => void syncNow(), deps.capabilities().idleCommitMs);
   };
 
-  const hasPendingWrites = () => dirty === "all" || dirty.size > 0;
+  const hasPendingWrites = () => typeof dirty === "string" || dirty.size > 0;
 
   return {
-    async start() {
-      const repo = await readRepoInfo(deps.fs, root);
-      author = deps.config.author ?? repo?.author ?? FALLBACK_AUTHOR;
-      if (repo?.branch !== deps.config.branch) {
-        deps.dispatch({
-          type: "diverged",
-          detail: `This workspace has ${repo?.branch ?? "no branch"} checked out, but syncs ${deps.config.branch}.`,
-        });
-        return;
-      }
-      const opened = await api.open(spec);
-      if (!opened.ok) {
-        deps.dispatch(faultOf(opened.error));
-        schedulePoll();
-        return;
-      }
-      head = opened.value.head;
+    start() {
       cleanups.push(
         deps.hooks.on("files:written", ({ paths, source }) => {
           if (source !== "sync") markWritten(paths);
@@ -360,6 +367,16 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
         }),
       );
       void syncNow();
+    },
+    async resume() {
+      // Only the cycle the user asked for keeps local files; a later
+      // divergence stops again.
+      keepLocalOnce = true;
+      try {
+        await syncNow();
+      } finally {
+        keepLocalOnce = false;
+      }
     },
     syncNow,
     async stop() {
@@ -375,6 +392,6 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
 
 export const startSyncEngine: SyncEngineFactory = async (deps) => {
   const engine = createSyncEngine(deps);
-  await engine.start();
+  engine.start();
   return engine;
 };

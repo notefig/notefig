@@ -30,14 +30,14 @@ startGitWorker(async () => {
 
   const host = createHostClient<SyncHostApi>(reviveHostError);
   const http: GitHttpClient = { request: (request) => host.gitHttp(request) };
-  const wiring = syncWorkerWiring(http);
+  const wiring = syncWorkerWiring(http, host);
 
   return {
     createHost: (repo) => wiring.wrapHost(createGitStorageHost(host), repo),
     createDeps: wiring.deps,
     expose: (git) =>
       exposeWorkerApi(
-        createSyncWorkerApi(git, wiring.capture, http) as unknown as WorkerApi,
+        createSyncWorkerApi(git, wiring) as unknown as WorkerApi,
       ),
   };
 });

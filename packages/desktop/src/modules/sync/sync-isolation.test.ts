@@ -122,6 +122,7 @@ describe("sync chunk isolation", () => {
     const runtime: SyncRuntime = {
       loadEngine: vi.fn(async () => async () => ({
         syncNow: async () => {},
+        resume: async () => {},
         stop: async () => {},
       })),
       launchWorker: vi.fn(async () => ({

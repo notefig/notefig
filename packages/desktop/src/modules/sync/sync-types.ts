@@ -77,10 +77,12 @@ export interface SyncVerifyOutcome {
  */
 export type SyncWorkerApi = {
   open(spec: SyncSessionSpec): Promise<SyncResult<{ head: string | null }>>;
-  /** Commit local changes: only `paths` (`/`-separated) when given, the
-   *  whole worktree when null. `oid` is null when nothing changed. */
+  /** Commit local changes: only `paths` (`/`-separated); `"scan"`: what
+   *  changed since the last commit (one listing, metadata in batches);
+   *  `"all"`: a whole-worktree status. `oid` is null when nothing
+   *  changed. */
   commit(input: {
-    paths: string[] | null;
+    paths: SyncCommitScope;
     author: SyncAuthor;
     userName: string;
   }): Promise<SyncResult<{ oid: string | null; paths: string[] }>>;
@@ -89,7 +91,12 @@ export type SyncWorkerApi = {
   poll(): Promise<SyncResult<{ remote: string | null; notefigRefs: number }>>;
   /** Fetch `remote` and bring the branch to it (fast-forward, or a rebase
    *  of local commits that touch other files). */
-  pull(input: { remote: string }): Promise<SyncResult<SyncPullOutcome>>;
+  pull(input: {
+    remote: string;
+    /** Keep the local side, whole, of files both sides changed (the user
+     *  resumed from `diverged`). */
+    keepLocal?: boolean;
+  }): Promise<SyncResult<SyncPullOutcome>>;
   /** Push the branch, compare-and-swap against `remote` (null: create). */
   push(input: { remote: string | null }): Promise<SyncResult<SyncPushOutcome>>;
   /** Read and push access to a remote, before sync is on. */
@@ -97,6 +104,9 @@ export type SyncWorkerApi = {
     spec: SyncSessionSpec;
   }): Promise<SyncResult<SyncVerifyOutcome>>;
 };
+
+/** Which files a commit looks at. */
+export type SyncCommitScope = string[] | "scan" | "all";
 
 /** A running worker. */
 export interface SyncWorkerConnection {
@@ -115,6 +125,9 @@ export interface SyncEnableInput {
 export interface SyncEngine {
   /** Run a sync cycle now (commit what changed, poll, pull, push). */
   syncNow(): Promise<void>;
+  /** Carry on after a stop: the next pull keeps local files changed on
+   *  both sides (the remote's version stays in history). */
+  resume(): Promise<void>;
   /** Stop timers and listeners, terminate the worker. */
   stop(): Promise<void>;
 }
@@ -123,6 +136,9 @@ export interface SyncEngine {
 export interface SyncEngineHost {
   workspacePath: string;
   config: SyncConfig;
+  /** Sync was just turned on: the first commit takes every local change,
+   *  not only what changed since the last commit. */
+  fullScan?: boolean;
   /** The machine's events. */
   dispatch(event: SyncEvent): void;
   /** What the machine allows right now. */

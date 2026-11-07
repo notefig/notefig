@@ -26,6 +26,9 @@ import {
   type GitStorageHost,
   type GitWorkerApi,
 } from "@notefig/git";
+import type { GitHostFs } from "@/adapters/git-storage-host";
+import { IGNORE_RULES } from "@/utils/ignore";
+import { path as pathutil } from "@/utils/path";
 import type { SyncAuthor } from "../sync-config";
 import type {
   SyncPullOutcome,
@@ -40,12 +43,19 @@ import { createWorktreeCapture, type WorktreeCapture } from "./worktree-capture"
 /** Where the remote's notefig state lives (MET-266 decision 18). */
 export const NOTEFIG_REFS_PREFIX = "refs/notefig/v1/";
 
-/** Solo's driver: no file merges (see above). */
-export const refuseOverlaps: GitMergeDriver = {
-  merge: ({ path }) => ({
-    failed: `${path} changed on both sides, and solo sync never merges a file.`,
-  }),
-};
+/**
+ * Solo's merge driver: no file merges (see above). Only when the user
+ * resumes from `diverged` does a pull keep the local side of the files both
+ * changed, whole; the remote's version stays in the branch's history.
+ */
+export function soloMergeDriver(policy: { keepLocal: boolean }): GitMergeDriver {
+  return {
+    merge: ({ path, ours, theirs }) =>
+      policy.keepLocal
+        ? { content: ours, overwritten: theirs === null ? [] : [theirs] }
+        : { failed: `${path} changed on both sides, and solo sync never merges a file.` },
+  };
+}
 
 const branchRef = (branch: string) => `refs/heads/${branch}`;
 /** The last remote tip this clone fetched: keeps a diverged remote commit
@@ -94,6 +104,63 @@ function pendingChanges(
   const staged = status.staged.map((c) => c.path).filter(keep);
   const all = new Set([...add, ...remove, ...staged]);
   return { add: [...add], remove: [...remove], all: [...all].sort() };
+}
+
+/** What the start-up scan reads: one listing, metadata in batches. */
+export type ScanFs = Pick<GitHostFs, "readDirectory" | "getMetadata">;
+
+/** Files changed this long before the last commit still count. */
+const SCAN_SLACK_MS = 120_000;
+const METADATA_BATCH = 500;
+
+async function inBatches<T>(items: string[], run: (batch: string[]) => Promise<T[]>) {
+  const out: T[] = [];
+  for (let at = 0; at < items.length; at += METADATA_BATCH) {
+    out.push(...(await run(items.slice(at, at + METADATA_BATCH))));
+  }
+  return out;
+}
+
+/**
+ * The files that may have changed while sync wasn't watching (the app was
+ * closed, or offline edits): written since the last commit, or tracked and
+ * gone. One listing and a metadata call per 500 files, instead of the stat
+ * and hash per file a whole-tree status costs over the host channel (a
+ * fresh clone's index stats never match ours, so status would re-read
+ * every file). Null when there is no commit yet: status walks everything.
+ */
+async function scanCandidates(
+  service: GitService,
+  fs: ScanFs,
+  root: string,
+): Promise<string[] | null> {
+  const [last] = await service.log({ depth: 1 }).catch(() => []);
+  if (!last) return null;
+  const since = last.commit.committer.timestamp * 1000 - SCAN_SLACK_MS;
+  const listing = await fs.readDirectory(root, {
+    recursive: true,
+    includeFiles: true,
+    includeDirectories: false,
+    ignore: IGNORE_RULES,
+  });
+  if (!listing.ok) return null;
+  const onDisk = listing.value.map((entry) => entry.path);
+  const changed = await inBatches(onDisk, async (batch) =>
+    (await fs.getMetadata(batch)).succeeded
+      .filter((meta) => new Date(meta.modifiedAt).getTime() > since)
+      .map((meta) => meta.path),
+  );
+  const tree = (path: string) => pathutil.toTreePath(pathutil.relative(root, path) ?? path);
+  const listed = new Set(onDisk.map(tree));
+  // Tracked but not listed: deleted, or only hidden by the listing's
+  // ignore rules — the metadata call tells them apart.
+  const unlisted = (await service.listFiles()).filter((path) => !listed.has(path));
+  const gone = await inBatches(unlisted, async (batch) =>
+    (await fs.getMetadata(batch.map((p) => pathutil.join(root, pathutil.fromTreePath(p))))).failed
+      .filter((failure) => failure.type === "not_found")
+      .map((failure) => failure.path),
+  );
+  return [...changed, ...gone].map(tree).filter((path) => !APP_DIR.test(path));
 }
 
 async function commitChanges(
@@ -165,16 +232,28 @@ async function canPush(
 
 /** The pieces `startGitWorker` is wired with, shared by the worker entry
  *  and the in-process test runtime. */
-export function syncWorkerWiring(http: GitHttpClient): {
+export interface SyncWorkerWiring {
+  http: GitHttpClient;
+  /** For the start-up scan. */
+  scanFs: ScanFs;
   capture: WorktreeCapture;
+  /** Read by the merge driver during a pull. */
+  policy: { keepLocal: boolean };
   wrapHost: (host: GitStorageHost, repo: GitRepoRef) => GitStorageHost;
   deps: () => { http: GitHttpClient; mergeDriver: GitMergeDriver };
-} {
+}
+
+export function syncWorkerWiring(http: GitHttpClient, scanFs: ScanFs): SyncWorkerWiring {
   const capture = createWorktreeCapture();
+  const policy = { keepLocal: false };
+  const mergeDriver = soloMergeDriver(policy);
   return {
+    http,
+    scanFs,
     capture,
+    policy,
     wrapHost: (host, repo) => capture.wrap(host, repo),
-    deps: () => ({ http, mergeDriver: refuseOverlaps }),
+    deps: () => ({ http, mergeDriver }),
   };
 }
 
@@ -182,20 +261,21 @@ export function syncWorkerWiring(http: GitHttpClient): {
 export function createInProcessSyncWorker(
   createHost: (repo: GitRepoRef) => GitStorageHost,
   http: GitHttpClient,
+  scanFs: ScanFs,
 ): SyncWorkerApi {
-  const wiring = syncWorkerWiring(http);
+  const wiring = syncWorkerWiring(http, scanFs);
   const git = createGitWorkerApi(
     (repo) => wiring.wrapHost(createHost(repo), repo),
     wiring.deps,
   );
-  return createSyncWorkerApi(git, wiring.capture, http);
+  return createSyncWorkerApi(git, wiring);
 }
 
 export function createSyncWorkerApi(
   git: GitWorkerApi,
-  capture: WorktreeCapture,
-  http: GitHttpClient,
+  wiring: Pick<SyncWorkerWiring, "http" | "scanFs" | "capture" | "policy">,
 ): SyncWorkerApi {
+  const { http, scanFs, capture, policy } = wiring;
   let session: { spec: SyncSessionSpec; repo: GitRepoRef; service: GitService } | null =
     null;
 
@@ -220,7 +300,16 @@ export function createSyncWorkerApi(
       }),
 
     commit: ({ paths, author, userName }) =>
-      attempt(() => commitChanges(current().service, paths, author, userName)),
+      attempt(async () => {
+        const { service, spec } = current();
+        const scoped =
+          paths === "scan"
+            ? await scanCandidates(service, scanFs, spec.workspacePath)
+            : paths === "all"
+              ? null
+              : paths;
+        return commitChanges(service, scoped, author, userName);
+      }),
 
     poll: () =>
       attempt(async () => {
@@ -237,16 +326,21 @@ export function createSyncWorkerApi(
         };
       }),
 
-    pull: ({ remote }) =>
+    pull: ({ remote, keepLocal }) =>
       attempt(async () => {
         const { spec, repo, service } = current();
         await service.fetchRefs(spec.remote, [
           { ref: branchRef(spec.branch), oid: remote, localRef: trackingRef(spec.branch) },
         ]);
-        const { result, writes } = await capture.run(repo, () =>
-          service.rebaseOnto({ theirs: remote, holder: "theirs" }),
-        );
-        return pullOutcome(result, writes);
+        policy.keepLocal = keepLocal === true;
+        try {
+          const { result, writes } = await capture.run(repo, () =>
+            service.rebaseOnto({ theirs: remote, holder: keepLocal ? "ours" : "theirs" }),
+          );
+          return pullOutcome(result, writes);
+        } finally {
+          policy.keepLocal = false;
+        }
       }),
 
     push: ({ remote }) =>

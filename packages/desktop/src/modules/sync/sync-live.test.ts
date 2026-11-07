@@ -40,7 +40,7 @@ function liveHttp(): GitHttpClient {
   const auth = createBasicAuthProvider({
     [remoteCredentialKey(URL_)]: { username: USER, password: TOKEN },
   });
-  const client = createFetchHttpClient(fetch);
+  const client = createFetchHttpClient(fetch as never);
   return { request: async (request) => client.request(await auth.authorize(request)) };
 }
 
@@ -62,7 +62,7 @@ async function cloneLive(root: string, name: string, branch: string) {
   const path = join(root, name);
   await runGit(root, ["-c", `http.extraHeader=${header}`, "clone", "-q", URL_, path]);
   await runGit(path, ["checkout", "-q", "-b", branch]);
-  const worker = createInProcessSyncWorker(() => createGitStorageHost(fs), liveHttp());
+  const worker = createInProcessSyncWorker(() => createGitStorageHost(fs), liveHttp(), fs);
   value(await worker.open(sessionSpecOf(path, { remote: URL_, branch })));
   return { path, worker };
 }

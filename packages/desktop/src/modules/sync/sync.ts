@@ -48,6 +48,8 @@ import { syncRuntimeModule, type SyncRuntime } from "./sync-runtime";
 import type {
   SyncEnableInput,
   SyncEngine,
+  SyncEngineFactory,
+  SyncWorkerConnection,
   SyncResult,
   SyncVerifyOutcome,
 } from "./sync-types";
@@ -146,7 +148,34 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     if (port) void port.deliver(event).catch(() => {});
   };
 
-  const start = (next: SyncConfig): Promise<void> => {
+  /** Start the engine; the worker goes if it fails to. */
+  const startEngine = async (
+    factory: SyncEngineFactory,
+    worker: SyncWorkerConnection,
+    next: SyncConfig,
+    fullScan: boolean,
+  ): Promise<SyncEngine> => {
+    try {
+      return await factory({
+        workspacePath,
+        config: next,
+        fullScan,
+        dispatch,
+        capabilities: () => capabilities,
+        delivered,
+        worker,
+        hooks: deps.hooks,
+        documents: deps.documents,
+        files: deps.files,
+        fs: deps.fs,
+      });
+    } catch (error) {
+      worker.terminate();
+      throw error;
+    }
+  };
+
+  const start = (next: SyncConfig, fullScan = false): Promise<void> => {
     config = next;
     dispatch({ type: "enable" });
     const run = (async () => {
@@ -159,18 +188,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
         worker.terminate();
         return;
       }
-      engine = await factory({
-        workspacePath,
-        config: next,
-        dispatch,
-        capabilities: () => capabilities,
-        delivered,
-        worker,
-        hooks: deps.hooks,
-        documents: deps.documents,
-        files: deps.files,
-        fs: deps.fs,
-      });
+      engine = await startEngine(factory, worker, next, fullScan);
     })().catch((error: unknown) => {
       console.error(`[sync] Could not start sync for ${workspacePath}:`, error);
       dispatch({
@@ -181,6 +199,12 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     });
     starting = run;
     return run;
+  };
+
+  const retryStart = (retry: SyncConfig) => {
+    void (starting ?? Promise.resolve()).then(() => {
+      if (!engine && !disposed && config === retry) void start(retry);
+    });
   };
 
   const stop = async () => {
@@ -235,7 +259,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       };
       await writeSyncConfig(deps.fs, workspacePath, next);
       dispatch({ type: "disable" });
-      await start(next);
+      await start(next, true);
     },
     async disable() {
       config = null;
@@ -245,7 +269,9 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     },
     resume() {
       dispatch({ type: "resume" });
-      void engine?.syncNow();
+      if (engine) void engine.resume();
+      // A start that failed (the chunk or the worker didn't load) retries.
+      else if (config && !disposed) retryStart(config);
     },
     syncNow: async () => {
       await starting;

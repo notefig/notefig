@@ -821,6 +821,18 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
+  async listFiles(input?: { ref?: string }): Promise<string[]> {
+    return this.run(() =>
+      git.listFiles({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        ref: input?.ref ?? "HEAD",
+      }),
+    );
+  }
+
   async listRemoteRefs(
     remote: GitRemote,
     prefixes: string[],

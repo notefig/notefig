@@ -203,6 +203,9 @@ export interface GitService {
   log(input: GitLogInput): ReturnType<typeof igLog>;
   /** Read a text file's content as of a given ref/commit (for history diff/restore). */
   readTextFile(input: GitReadTextFileInput): Promise<string>;
+  /** Every file path (`/`-separated) in a commit's tree (`ref`: oid or
+   *  ref, default `HEAD`). */
+  listFiles(input?: { ref?: string }): Promise<string[]>;
 
   // ── Remote operations (smart HTTP; need a `GitHttpClient`) ─────────────
 
