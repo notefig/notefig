@@ -7,8 +7,7 @@
  * browser-safe fallback. Without this shim, Vite stubs `crypto` and the
  * first packed-object read throws "createHash is not a function"; the git
  * service's catch-all maps that to CorruptRepository, so any real cloned
- * repo (loose-object-only repos never hit packs) shows "commit history
- * metadata is inconsistent" in the git panel.
+ * repo (loose-object-only repos never hit packs) reads as corrupt.
  *
  * Built on the platform's own `crypto.subtle` so it adds no dependency.
  * `digest` returns a Promise where node returns a string — safe because

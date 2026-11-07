@@ -1,7 +1,6 @@
 import "./agent-events";
 import type { EditorsApi } from "@/modules/editors";
 import type { CoreHookMap, Hooks } from "@notefig/core";
-import type { WorkspaceHistory } from "@/modules/history";
 import type { WorkspaceFiles } from "@/modules/files";
 import type { DocumentsApi } from "@/modules/documents";
 import type { LayoutApi } from "@/modules/layout";
@@ -184,8 +183,6 @@ type TurnState = {
    * one card per update stacked stale, contradictory snapshots).
    */
   planEntryId: string | null;
-  /** The user prompt that started this turn (checkpoint commit message). */
-  userText: string;
   /**
    * Where this turn's entries land: the collections for live turns
    * (liveEntryWriter), a ReplayStage for a session/load replay. The target
@@ -250,7 +247,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Some app tools (workspace_read_document, history_restore, …)
+ * Some app tools (workspace_read_document, document_read_range, …)
  * don't get `locations` from the adapter the way native tool calls
  * sometimes do (confirmed absent on every MCP tool_call in
  * docs/architecture/spikes/v2-mcp-passthrough-spike.md). Derive the same
@@ -725,7 +722,6 @@ export class AgentTask {
       joiner: new MarkdownJoiner(),
       run: null,
       planEntryId: null,
-      userText: "",
       entries: stage,
     };
     try {
@@ -958,7 +954,6 @@ export class AgentTask {
       joiner: new MarkdownJoiner(),
       run: null,
       planEntryId: null,
-      userText: text,
       entries: this.store.liveEntryWriter,
     };
     this.turnUsageUpdates = [];
@@ -1276,13 +1271,10 @@ export class AgentTask {
     this.currentTurn = null;
     this.setStatus(turnStatus === "error" ? "error" : "idle");
     if (turnStatus === "completed") {
-      // The workspace's history checkpoints it (one commit per turn).
       this.deps.hooks.emit("agent:turn-completed", {
         taskId: this.taskId,
         turnId: turn.turnId,
         workspacePath: this.workspacePath,
-        prompt: turn.userText,
-        harnessId: this.harness.id,
       });
     }
     return turnStatus;
@@ -1999,8 +1991,6 @@ async function discardSession(client: NotefigAcpClient, sessionId: string) {
 
 declare module "@notefig/agent" {
   interface ToolServices {
-    /** The workspace's history repo (`core.workspace(ws).history`). */
-    history: WorkspaceHistory;
     /** The workspace's files (`core.workspace(ws).files`). */
     files: WorkspaceFiles;
     /** Reading and adopting writes of any open workspace's text files. */

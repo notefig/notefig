@@ -6,8 +6,7 @@
  * A workspace's TaskManager is created lazily by its first task; this
  * module owns its end. Closing the workspace disposes every live task, and
  * rows with a session demote to "restored" so the next open can revive them
- * (MET-54). It needs the history repo, so it is disposed first: cancelling
- * a turn can still checkpoint there.
+ * (MET-54).
  */
 import { defineModule } from "@notefig/core";
 import { createAgentRuntime } from "./agent-service";
@@ -24,7 +23,6 @@ import { tabsModule } from "@/modules/tabs";
 import { documentsModule } from "@/modules/documents";
 import { layoutModule } from "@/modules/layout";
 import { editorsModule } from "@/modules/editors";
-import { historyModule } from "@/modules/history";
 import { harnessAdaptersModule } from "@/modules/harness-adapters";
 import { harnessesModule } from "./harnesses";
 import { platformModule } from "@/core/services";
@@ -67,9 +65,6 @@ export const workspaceAgentsModule = defineModule({
       services: (workspacePath) => {
         const workspace = ctx.workspaceHandle(workspacePath);
         return {
-          get history() {
-            return workspace.history;
-          },
           get files() {
             return workspace.files;
           },
@@ -101,7 +96,6 @@ export const workspaceAgentsModule = defineModule({
     void agents.whenReconciled();
   },
   workspace: {
-    needs: [historyModule],
     create: ({ workspace }, agents) => agents.workspace(workspace.path),
     dispose: (_handle, workspace, agents) =>
       agents.disposeWorkspace(workspace.path),

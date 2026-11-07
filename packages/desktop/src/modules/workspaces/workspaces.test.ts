@@ -18,9 +18,6 @@ const files = {
   created: vi.fn((_path: string) => {}),
   disposed: vi.fn((_path: string) => {}),
 };
-// A history module that records its disposal: what core runs when it
-// closes the workspace.
-const history = { disposed: vi.fn((_path: string) => {}) };
 // No file-sync stand-in: watcher lifetime left the registry in MET-183. The
 // registry publishes membership and nothing else; arming, stopping and
 // re-arming are covered by utils/__tests__/workspace-watchers.test.ts.
@@ -42,7 +39,7 @@ function taskRow(overrides: Partial<AgentTaskRow> = {}): AgentTaskRow {
 // Core closes each workspace's modules when its row goes: the agents (the
 // real module, over a real in-memory SQLite, so a close's
 // demote-to-restored runs the production path end to end), then the
-// history repo and the files. The agents' app-wide neighbours that a close
+// files. The agents' app-wide neighbours that a close
 // never reaches (tabs, documents) are inert stand-ins.
 let core: Core;
 let registry: WorkspaceRegistry;
@@ -60,13 +57,6 @@ beforeEach(async () => {
             return {} as never;
           },
           dispose: (_files, workspace) => files.disposed(workspace.path),
-        },
-      }),
-      defineModule({
-        name: "history",
-        workspace: {
-          create: () => ({}) as never,
-          dispose: (_history, workspace) => history.disposed(workspace.path),
         },
       }),
       defineModule({ name: "tabs", register: () => ({}) as never }),
@@ -149,7 +139,6 @@ describe("closing a workspace", () => {
 
     await close("/ws");
 
-    expect(history.disposed).toHaveBeenCalledWith("/ws");
     expect(files.disposed).toHaveBeenCalledTimes(1);
     expect(files.disposed).toHaveBeenCalledWith("/ws");
     expect(registry.isOpen("/ws")).toBe(false);

@@ -4,10 +4,8 @@
  * (Docker/Heroku-style "sunny-otter.md") in the app-owned
  * `.notefig/scratchpads/` folder; membership in that folder — not the
  * filename — is what makes a file a scratchpad. Scratchpads never reach the
- * user's git (the `.notefig/` exclude covers them) but ARE checkpointed by
- * the app's history repo, whose own exclude history-service narrows to this
- * one folder. Moving a file out of the folder is how it becomes a tracked
- * project file. Scratchpads are also the ONLY child of the app dir the fs
+ * user's git (the `.notefig/` exclude covers them). Moving a file out of
+ * the folder is how it becomes a tracked project file. Scratchpads are also the ONLY child of the app dir the fs
  * walkers and the watcher surface — everything else under `.notefig/` is
  * hidden by position, so app-internal files need no dot prefix. Consumers
  * derive every path from the constants here.
@@ -45,9 +43,9 @@ import { platformModule } from "@/core/services";
 // Path scheme & naming (pure)
 // ---------------------------------------------------------------------------
 
-// The names live in the leaf utils/app-dir so modules/history can
-// reach them without importing this entity (and closing a cycle through
-// ./files); re-exported here because this module is the access path.
+// The names live in the leaf utils/app-dir so other modules can reach them
+// without importing this entity (and closing a cycle through ./files);
+// re-exported here because this module is the access path.
 export { APP_DIR_NAME, SCRATCHPADS_DIR_NAME, SCRATCHPADS_REL_PATH };
 
 // Docker/Heroku-style generated names ("sunny-otter.md"): random, cute,

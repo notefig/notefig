@@ -3,9 +3,7 @@
  *
  * Single source of truth: the Rust commands (read_directory, search,
  * metadata watcher) receive these lists via command args, so there is no
- * Rust-side copy to drift. Filtering is opt-in per call — the git storage
- * host (createGitStorageHost) never passes them, so git sees the
- * complete tree including .git internals and dependency folders.
+ * Rust-side copy to drift. Filtering is opt-in per call.
  *
  * Denylist, not allowlist: unknown and extensionless files (LICENSE,
  * Makefile) stay tracked. Names like `dist`/`build` could collide with a

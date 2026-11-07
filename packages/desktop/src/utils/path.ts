@@ -26,9 +26,9 @@ export { posix, win32, type PathFlavor };
  */
 /**
  * THE canonical key for anything registry- or persistence-keyed by a
- * workspace path: TaskManager, trust, blob sessions, task rows, git query
- * keys, history services. Identity on posix — the spelling mac already
- * persists never changes — and normalized+lowercased native on Windows, so
+ * workspace path: TaskManager, trust, blob sessions, task rows. Identity
+ * on posix — the spelling mac already persists never changes — and
+ * normalized+lowercased native on Windows, so
  * `C:\Foo` and `c:/foo` collapse to one workspace. Replaces the historical
  * `normalizePath(workspacePath)` keys (identical output for the absolute
  * paths real mac routes carry).

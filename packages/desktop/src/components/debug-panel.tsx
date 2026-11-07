@@ -225,11 +225,6 @@ function DebugPanelContent({
   const { editors, agentStore: store, kv } = useCore();
   const snapshot = useDebugSnapshot();
   const { basePath, dockableLayout, openTabs, activeTabId } = snapshot;
-  const {
-    rows: latestGitStatus,
-    error: latestGitStatusError,
-    updatedAt: latestGitStatusUpdatedAt,
-  } = snapshot.git;
 
   const [isCapturing, setIsCapturing] = useState(false);
   const { entries: consoleEntries, clear: clearConsole } =
@@ -824,22 +819,6 @@ function DebugPanelContent({
                 )}
               </div>
             )}
-
-            <div className="border-t border-border pt-2">
-              <Row label="gitStatus.updatedAt">
-                {latestGitStatusUpdatedAt
-                  ? new Date(latestGitStatusUpdatedAt).toISOString()
-                  : "(none)"}
-              </Row>
-              {latestGitStatusError ? (
-                <Row label="gitStatus.error">
-                  {latestGitStatusError.message}
-                </Row>
-              ) : null}
-              <pre className="mt-1 rounded bg-muted p-2 text-[0.625rem] leading-tight whitespace-pre-wrap break-all border border-border select-text">
-                {JSON.stringify(latestGitStatus, null, 2)}
-              </pre>
-            </div>
           </div>
         ) : activeTab === "session" ? (
           <div className="flex flex-col h-full">

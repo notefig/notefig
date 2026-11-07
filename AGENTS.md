@@ -106,7 +106,7 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   by hand in `closeWorkspace`. Core disposes in reverse `needs` order.
 - Every piece of state is built by a factory from what it is handed, and
   a module calls that factory with what core hands it. The entity exports
-  the factory (`createWorkspaceGit(deps)`, `createKv(persistence)`,
+  the factory (`createWorkspaceFiles(deps)`, `createKv(persistence)`,
   `createAgentStore(persistence)`), which is also what its tests build —
   no module mocks. Per-workspace state is built in `workspace.create`
   (`ctx.use("platform")`, the workspace's other instances via
@@ -124,8 +124,8 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   boundary rules (the root `.fallowrc.json`, which CI audits from) fail a
   commit that imports an adapter implementation from app code. There is no
   ambient core: code outside React is handed what it uses.
-- A per-workspace API is reached through core: `core.workspace(ws).git`,
-  or `useWorkspaceModule(ws, "git")` in React; an app-wide one and every
+- A per-workspace API is reached through core: `core.workspace(ws).files`,
+  or `useWorkspaceModule(ws, "files")` in React; an app-wide one and every
   service straight off core: `core.kv`, `const { kv, platform } =
   useCore()`. No hook only hands back what core already exposes
   (`useAgents()`, `usePlatform()`); a hook in `react.ts` earns its place by
@@ -136,7 +136,7 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   and facade, `src/testing/test-agents.ts`).
 - There is one event bus: core's hooks. A module declares the moments it
   announces in `CoreHookMap` (next to its `declare module "@notefig/core"`
-  block, e.g. `"git:stale"` in git, `"files:changed"` in files, the
+  block, e.g. `"files:changed"` in files, the
   `"agent:*"` moments in `src/modules/agents/agent-events.ts`) and emits them with
   `ctx.hooks.emit`; a factory that announces is handed `hooks` like any
   other dependency. Listeners subscribe in `boot` or `workspace.create`

@@ -121,8 +121,7 @@
       {
         "name": "platform-contract",
         "patterns": [
-          "packages/desktop/src/adapters/platform-adapter.interface.ts",
-          "packages/desktop/src/adapters/git-storage-host.ts"
+          "packages/desktop/src/adapters/platform-adapter.interface.ts"
         ]
       },
       { "name": "platform", "patterns": ["packages/desktop/src/adapters/**"] },

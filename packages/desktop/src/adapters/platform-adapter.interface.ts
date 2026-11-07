@@ -592,10 +592,6 @@ export interface PlatformUiSurface {
  * surface is self-contained and can be reasoned about (and swapped) on its
  * own. Construction is synchronous and side-effect free — see the lifecycle
  * invariance note on MET-118.
- *
- * Note `getGitStorageHost` is deliberately absent: the git host is built
- * purely on fs operations and now lives above the adapter, in
- * `createGitStorageHost` (git-storage-host.ts).
  */
 export interface IPlatformAdapter {
   fs: FileSystemSurface;
