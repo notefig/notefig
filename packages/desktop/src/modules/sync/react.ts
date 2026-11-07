@@ -9,10 +9,11 @@ import {
   type SyncCapabilities,
 } from "./sync-machine";
 import type { WorkspaceSync } from "./sync";
-import type { SyncOverwriteRecord } from "./sync-types";
+import type { SyncOverwriteRecord, SyncPeer } from "./sync-types";
 
 const OFF: SyncCapabilities = syncCapabilities(INITIAL_SYNC_STATE);
 const NONE: readonly SyncOverwriteRecord[] = [];
+const ALONE: readonly SyncPeer[] = [];
 
 /** Read `read(sync)` live: from the workspace's sync instance while it is
  *  open, through its own changes and the open set's. */
@@ -50,6 +51,7 @@ function useSyncValue<T>(
 
 const readCapabilities = (sync: WorkspaceSync) => sync.capabilities();
 const readOverwrites = (sync: WorkspaceSync) => sync.overwrites();
+const readPresence = (sync: WorkspaceSync) => sync.presence();
 
 /** The live capabilities of a workspace's sync: `off` while it is not
  *  open or not a sync workspace. */
@@ -62,4 +64,10 @@ export function useSyncOverwrites(
   workspacePath: string | null,
 ): readonly SyncOverwriteRecord[] {
   return useSyncValue(workspacePath, readOverwrites, NONE);
+}
+
+/** The other devices present in a workspace (MET-272), live: who, which
+ *  document, where, and their agents. Empty unless shared. */
+export function useSyncPresence(workspacePath: string | null): readonly SyncPeer[] {
+  return useSyncValue(workspacePath, readPresence, ALONE);
 }
