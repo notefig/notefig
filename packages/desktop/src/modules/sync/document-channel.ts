@@ -24,13 +24,15 @@
  *   (`merged: true`): the merge ran in the worker and the result was
  *   adopted the same way. `remoteCursors` (latest value, MET-272) carries
  *   the other devices' carets and agents, already mapped onto this
- *   clone's head by the worker, set only when they change; `leases` is
- *   MET-273's seam. Nothing sets either in solo.
+ *   clone's head by the worker, set only when they change; `leases` (MET-273,
+ *   latest value) who holds which block, which the editor draws and makes
+ *   read-only. Nothing sets either in solo.
  * - editor → sync: `cursor` (latest value) is the local caret as block
  *   plus offset (MET-272 publishes it, throttled, in presence);
- *   `requestLease` asks for blocks before an edit. Solo grants every
- *   lease (there is no one to hold against); MET-273 gates on the branch
- *   CAS.
+ *   `requestLease` asks whether blocks are free. Solo grants every
+ *   lease (there is no one to hold against); shared answers from the lease
+ *   view. Acquisition itself rides the next push, atomic with the branch
+ *   CAS (MET-273).
  *
  * The editor side attaches only at the shared level; in solo nothing new
  * runs in the editor.
@@ -223,13 +225,19 @@ export interface SyncRemoteCursor {
   agent?: SyncAgentActivity;
 }
 
-/** A leased block as the editor draws it (MET-273). */
+/** A leased block as the editor draws it (MET-273): a block index on this
+ *  clone's branch head, and who holds it. */
 export interface SyncLeaseView {
   blockIndex: number;
+  /** The device id, or `<deviceId>/<taskId>` for an agent (as presence). */
   holderId: string;
+  /** The person's name (an agent's person). */
   name: string;
   color: string;
+  /** Held by this device's person or one of its agents. */
   mine: boolean;
+  kind: "human" | "agent";
+  harness?: string;
 }
 
 export type SyncLeaseOutcome =

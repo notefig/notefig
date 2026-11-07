@@ -87,6 +87,8 @@ export interface PresenceDeps {
   api: Pick<SyncWorkerApi, "publishPresence" | "deletePresence" | "readPresence">;
   hooks: Hooks;
   identity(): { name: string; color: string };
+  /** Blocks a device's holders lease (MET-273): the list's holds. */
+  holds?(deviceId: string): { total: number; agents: Record<string, number> };
   capabilities(): SyncCapabilities;
   setPeersPresent(present: boolean): void;
   presenceChanged(peers: readonly SyncPeer[]): void;
@@ -224,15 +226,19 @@ export function createPresence(deps: PresenceDeps): Presence {
   const peerOf = (deviceId: string): SyncPeer | null => {
     const payload = reads.get(deviceId)?.read.payload;
     if (!payload) return null;
+    const holds = deps.holds?.(deviceId);
     return {
       deviceId,
       name: payload.user.name,
       color: payload.user.color,
       focused: payload.focused,
       cursors: payload.cursors.map((cursor) => ({ ...cursor, path: absolute(cursor.path) })),
-      agents: payload.agents.map((agent) =>
-        agent.path ? { ...agent, path: absolute(agent.path) } : agent,
-      ),
+      agents: payload.agents.map((agent) => ({
+        ...agent,
+        ...(agent.path ? { path: absolute(agent.path) } : {}),
+        ...(holds?.agents[agent.taskId] ? { holds: holds.agents[agent.taskId] } : {}),
+      })),
+      ...(holds ? { holds: holds.total } : {}),
     };
   };
 

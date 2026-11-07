@@ -16,9 +16,12 @@ import type {
   SyncBlockPosition,
   SyncDocumentPort,
   SyncIncomingContent,
+  SyncLeaseOutcome,
 } from "./document-channel";
+import type { GatedWrite } from "@/modules/write-gate";
 import type { EditorsApi } from "@/modules/editors";
 import type { AgentTaskRow } from "@notefig/shared/agent";
+import type { LeaseHolder } from "./lease-rules";
 
 /** An error that crossed the worker boundary, as data. `code` is a
  *  `GitErrorCode` when git raised it. */
@@ -108,7 +111,9 @@ export type SyncTextMergeOutcome =
   | { status: "failed"; reason: SyncFailsafeReason; detail: string };
 
 export type SyncPushOutcome =
-  | { status: "pushed"; head: string }
+  /** `leases`: what the push acquired (atomically with the branch) and
+   *  what the lease rule refused, when it carried acquisitions. */
+  | { status: "pushed"; head: string; leases?: SyncLeasePushResult }
   | { status: "up-to-date"; head: string }
   /** The remote refused (it moved: re-poll and pull). */
   | { status: "rejected"; reason: string }
@@ -140,7 +145,13 @@ export type SyncWorkerApi = {
    *  many `refs/notefig/v1/` refs there are, and the presence refs among
    *  them. */
   poll(): Promise<
-    SyncResult<{ remote: string | null; notefigRefs: number; presence: SyncRefTip[] }>
+    SyncResult<{
+      remote: string | null;
+      notefigRefs: number;
+      presence: SyncRefTip[];
+      /** Lease refs (`refs/notefig/v1/locks/…`), MET-273. */
+      locks: SyncRefTip[];
+    }>
   >;
   /** Publish this device's presence on its own ref, in a request of its
    *  own (never with a content push): a blob, CAS against `old` (null:
@@ -192,8 +203,38 @@ export type SyncWorkerApi = {
    *  and index to it, and return the worktree writes that make the files
    *  match it. */
   resetToRemote(input: { remote: string }): Promise<SyncResult<{ head: string; writes: SyncWrite[] }>>;
-  /** Push the branch, compare-and-swap against `remote` (null: create). */
-  push(input: { remote: string | null }): Promise<SyncResult<SyncPushOutcome>>;
+  /** Push the branch, compare-and-swap against `remote` (null: create).
+   *  With `acquire` (the shared level), the lease rule runs over what the
+   *  pushed commits change, and the leases it grants (plus CAS deletes of
+   *  stale leases taken over) go in the same atomic push. */
+  push(input: {
+    remote: string | null;
+    acquire?: SyncAcquireInput;
+  }): Promise<SyncResult<SyncPushOutcome>>;
+  /** Read lease refs (fetching the blobs not here yet, in one request),
+   *  map their blocks onto the branch head, and keep them as the worker's
+   *  lease table: the merge's holder and the push's lease rule read it.
+   *  `live` is the main thread's observation; `self` this device's id.
+   *  An empty list clears the table (solo has no leases). */
+  readLeases(input: {
+    refs: Array<SyncRefTip & { live: boolean }>;
+    self: string;
+  }): Promise<SyncResult<SyncLeaseRead[]>>;
+  /** Renew or release this device's own leases, without content: one
+   *  atomic request of lease refs only (never with the branch). A null
+   *  `payload` deletes the ref. */
+  publishLeases(input: {
+    updates: Array<{ ref: string; old: string | null; payload: SyncLeasePayload | null }>;
+  }): Promise<SyncResult<SyncLeasePublishOutcome>>;
+  /** The lease rule for a write that hasn't happened yet (an agent's): the
+   *  blocks `content` changes against `current` (the document as the
+   *  writer sees it), checked against the table mapped onto it. */
+  planWrite(input: {
+    path: string;
+    current: string;
+    content: string;
+    holder: LeaseHolder;
+  }): Promise<SyncResult<SyncWritePlan>>;
   /** Read and push access to a remote, before sync is on. */
   verify(input: {
     spec: SyncSessionSpec;
@@ -275,14 +316,112 @@ export interface SyncPeer {
   color: string;
   focused: boolean;
   cursors: Array<{ path: string; anchor: SyncBlockPosition; head?: SyncBlockPosition }>;
-  agents: Array<SyncAgentActivity & { path?: string; anchor?: SyncBlockPosition }>;
+  /** `holds`: blocks this agent leases (MET-273). */
+  agents: Array<SyncAgentActivity & { path?: string; anchor?: SyncBlockPosition; holds?: number }>;
   /**
    * How many blocks this device's holders (the person and their agents)
-   * lease. Undefined until leases exist (MET-273 fills it; the presence
-   * list already has its slot).
+   * lease right now (MET-273; 0 when none).
    */
   holds?: number;
 }
+
+// --- Leases (MET-273) --------------------------------------------------------
+
+/**
+ * `refs/notefig/v1/locks/<sha1(path)>/<holder>` points at a blob holding
+ * this, as JSON: the blocks `holder` leases in `path`, as indexes relative
+ * to `commit`. `seq` only makes a renewal move the ref.
+ */
+export interface SyncLeasePayload {
+  v: 1;
+  holder: LeaseHolder;
+  /** `/`-separated, relative to the workspace. */
+  path: string;
+  commit: string;
+  seq: number;
+  blocks: number[];
+}
+
+/** One lease ref as the worker read it. `mapped`: each of the payload's
+ *  blocks on the branch head (null: deleted since). */
+export interface SyncLeaseRead {
+  ref: string;
+  oid: string;
+  live: boolean;
+  /** Null: not a lease payload this version reads. */
+  payload: SyncLeasePayload | null;
+  mapped: Array<number | null>;
+}
+
+/** An agent's write riding in this push: its blocks are attributed to it,
+ *  the rest of what the commits change to the person. */
+export interface SyncAgentClaim {
+  holder: LeaseHolder;
+  path: string;
+  /** The text it wrote. */
+  content: string;
+}
+
+export interface SyncAcquireInput {
+  /** This device's person. */
+  human: LeaseHolder;
+  agents: SyncAgentClaim[];
+}
+
+/** A lease the push acquired or extended. `prev[i]`: the index of block
+ *  `i` in the holder's previous payload (null: new); `touched[i]`: the
+ *  change touched it. */
+export interface SyncLeaseGrant {
+  holder: LeaseHolder;
+  path: string;
+  ref: string;
+  oid: string;
+  payload: SyncLeasePayload;
+  prev: Array<number | null>;
+  touched: boolean[];
+  /** Stale leases of others this took over (deleted in the same push). */
+  tookOver: LeaseHolder[];
+}
+
+/** A live lease as the app shows it: blocks on this clone's head. */
+export interface SyncLease {
+  holder: LeaseHolder;
+  /** Absolute path of the document. */
+  path: string;
+  blocks: number[];
+  /** Held by this device (its person or one of its agents). */
+  mine: boolean;
+}
+
+export interface SyncLeaseRefusal {
+  holder: LeaseHolder;
+  path: string;
+  reason: "held" | "cap";
+  holders: LeaseHolder[];
+  /** Blocks (of the remote's version) that refused. */
+  blocks: number[];
+}
+
+export interface SyncLeasePushResult {
+  grants: SyncLeaseGrant[];
+  refusals: SyncLeaseRefusal[];
+}
+
+export type SyncLeasePublishOutcome =
+  | { status: "published"; oids: Record<string, string | null> }
+  /** A ref wasn't at its `old` (atomic: nothing changed): re-poll. */
+  | { status: "rejected" }
+  | { status: "unknown" };
+
+export type SyncWritePlan =
+  | { granted: true; needed: number[] }
+  | {
+      granted: false;
+      reason: "held" | "cap";
+      holders: LeaseHolder[];
+      /** Blocks (of `current`) that refused. */
+      blocks: number[];
+    };
 
 /** Which files a commit looks at. */
 export type SyncCommitScope = string[] | "scan" | "all";
@@ -312,6 +451,12 @@ export interface SyncEngine {
   acceptIncoming(): Promise<void>;
   /** The level changed (solo ↔ shared): re-time the poll. */
   levelChanged(): void;
+  /** An agent's write through sync's lease gate (shared level): refused
+   *  with the holders' names before anything is written, or written,
+   *  pushed with its leases, and reported if it was merged. */
+  gateWrite(write: GatedWrite, perform: () => Promise<void>): Promise<void>;
+  /** Whether `blocks` of `path` are free of others' live leases. */
+  checkLease(path: string, blocks: number[]): SyncLeaseOutcome;
   /** Stop timers and listeners, terminate the worker. */
   stop(): Promise<void>;
 }
@@ -333,6 +478,8 @@ export interface SyncEngineHost {
   overwritten(record: Omit<SyncOverwriteRecord, "id" | "at">): void;
   /** The live peers changed (MET-272). */
   presenceChanged(peers: readonly SyncPeer[]): void;
+  /** The live leases changed (MET-273). */
+  leasesChanged(leases: readonly SyncLease[]): void;
   /** The name and colour settings (sync.json's `presence`), read live:
    *  Settings → Sync can change them while sync runs. */
   presenceSettings(): SyncPresenceSettings | undefined;
@@ -365,7 +512,7 @@ export interface SyncEngineDeps extends SyncEngineHost {
   hooks: Hooks;
   /** The adopting write (`core.documents`), with `source: "sync"`, and an
    *  open editor's text for merging its unsaved edits. */
-  documents: Pick<DocumentsApi, "write" | "editorText">;
+  documents: Pick<DocumentsApi, "read" | "write" | "editorText">;
   /** The workspace's files: rows for created and deleted files. */
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
   fs: Pick<

@@ -56,11 +56,14 @@ import { syncRuntimeModule, type SyncRuntime } from "./sync-runtime";
 import { editorsModule, type EditorsApi } from "@/modules/editors";
 import { agentStoreModule } from "@/modules/agents/agent-collections";
 import type { AgentTaskRow } from "@notefig/shared/agent";
+import { writeGateModule, type WriteGateApi } from "@/modules/write-gate";
+import type { LeaseHolder } from "./lease-rules";
 import { resolvePresenceIdentity, type SyncPresenceSettings } from "./presence-identity";
 import type {
   SyncEnableInput,
   SyncEngine,
   SyncEngineFactory,
+  SyncLease,
   SyncOverwriteRecord,
   SyncPeer,
   SyncWorkerConnection,
@@ -90,7 +93,32 @@ declare module "@notefig/core" {
     /** The other devices present changed (MET-272): who, where, and
      *  their agents. Empty when the last one left. */
     "sync:presence": { workspacePath: string; peers: readonly SyncPeer[] };
+    /** A holder (a person or an agent; `local`: this device's) took or
+     *  extended a lease on `blocks` blocks of `path` (MET-273). */
+    "sync:lease-acquired": SyncLeaseMoment;
+    /** A holder let go of `blocks` blocks of `path` (idle, done, gone). */
+    "sync:lease-released": SyncLeaseMoment;
+    /** The lease rule refused one of this device's holders: `holders` have
+     *  the blocks (`reason: "held"`), or it would exceed the cap. */
+    "sync:lease-refused": {
+      workspacePath: string;
+      holder: LeaseHolder;
+      path: string;
+      holders: LeaseHolder[];
+      reason: "held" | "cap";
+    };
   }
+}
+
+/** A lease moving, as the lease hooks carry it. */
+export interface SyncLeaseMoment {
+  workspacePath: string;
+  holder: LeaseHolder;
+  /** Absolute path of the document. */
+  path: string;
+  /** How many blocks were taken or let go. */
+  blocks: number;
+  local: boolean;
 }
 
 /** One workspace's sync, as the rest of the app sees it. */
@@ -131,6 +159,9 @@ export interface WorkspaceSync {
   /** The other devices present (live presence, MET-272), with where they
    *  are and their agents. Empty in a regular workspace or alone. */
   presence(): readonly SyncPeer[];
+  /** The live leases (MET-273), this device's and the others', blocks on
+   *  this clone's head. Empty below the shared level. */
+  leases(): readonly SyncLease[];
   /** The name and colour this device shows the others: the settings, with
    *  the defaults filled in (null: not a sync workspace). */
   identity(): { name: string; color: string; settings: SyncPresenceSettings } | null;
@@ -160,13 +191,16 @@ export interface WorkspaceSyncDeps {
     AppDirExcludeFs;
   runtime: SyncRuntime;
   hooks: Hooks;
-  documents: Pick<DocumentsApi, "write" | "editorText">;
+  documents: Pick<DocumentsApi, "read" | "write" | "editorText">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
   /** The live editors, for presence's editor plugin (shared level). */
   editors?: Pick<EditorsApi, "markdownEditor" | "paths">;
   /** This device's agent sessions (`core.agentStore.tasks`), published in
    *  presence. */
   agentTasks?: () => readonly AgentTaskRow[];
+  /** Where agent writes are gated (`core.writeGate`): at the shared level
+   *  sync's lease gate goes in front of them. */
+  writeGate?: Pick<WriteGateApi, "register">;
   /** Default: `Date.now`. */
   now?: () => number;
 }
@@ -186,6 +220,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
   let overwrites: SyncOverwriteRecord[] = [];
   let overwriteCount = 0;
   let peers: readonly SyncPeer[] = [];
+  let leases: readonly SyncLease[] = [];
   /** sync.json's `presence`, kept apart from `config` (whose identity marks
    *  which start is current) so Settings can change it while sync runs. */
   let presenceSettings: SyncPresenceSettings | undefined;
@@ -223,10 +258,19 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     notify();
   };
 
+  const leasesChanged = (next: readonly SyncLease[]) => {
+    leases = next;
+    notify();
+  };
+
   const openPort = (path: string): SyncDocumentPort => {
     const open = ports.get(path);
     if (open && !open.closed) return open;
     const port = createDocumentPort(path, {
+      // The lease rule's view: below shared (or with no engine) everything
+      // is granted; acquisition itself rides the next push.
+      grantLease: async (blocks) =>
+        engine && capabilities.leases ? engine.checkLease(path, blocks) : { granted: true },
       onClose: () => {
         if (ports.get(path) === port) ports.delete(path);
       },
@@ -257,6 +301,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
         delivered,
         overwritten,
         presenceChanged,
+        leasesChanged,
         presenceSettings: () => presenceSettings,
         ports: () => [...ports.values()],
         openPort,
@@ -320,7 +365,15 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     starting = null;
     await running?.stop();
     if (peers.length > 0) presenceChanged([]);
+    if (leases.length > 0) leasesChanged([]);
   };
+
+  // Agent writes pass sync's lease gate at the shared level (decision 11).
+  const unregisterGate = deps.writeGate?.register(async (write, perform) => {
+    if (pathutil.normalize(write.workspacePath) !== workspacePath) return perform();
+    if (!engine || !capabilities.leases) return perform();
+    return engine.gateWrite(write, perform);
+  });
 
   const ready = (async () => {
     const found = await readSyncConfig(deps.fs, workspacePath);
@@ -379,6 +432,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       await engine?.acceptIncoming();
     },
     presence: () => peers,
+    leases: () => leases,
     identity() {
       if (!config) return null;
       const settings = presenceSettings ?? {};
@@ -421,6 +475,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     },
     async dispose() {
       disposed = true;
+      unregisterGate?.();
       await ready.catch(() => {});
       await stop();
       for (const port of [...ports.values()]) port.channel.close();
@@ -428,6 +483,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       listeners.clear();
       overwrites = [];
       peers = [];
+      leases = [];
     },
   };
 }
@@ -440,7 +496,14 @@ declare module "@notefig/core" {
 
 export const syncModule = defineModule({
   name: "sync",
-  needs: [platformModule, documentsModule, syncRuntimeModule, editorsModule, agentStoreModule],
+  needs: [
+    platformModule,
+    documentsModule,
+    syncRuntimeModule,
+    editorsModule,
+    agentStoreModule,
+    writeGateModule,
+  ],
   workspace: {
     needs: [filesModule],
     create: (ctx) => {
@@ -454,6 +517,7 @@ export const syncModule = defineModule({
         files: ctx.useWorkspace("files"),
         editors: ctx.use("editors"),
         agentTasks: () => tasks.toArray,
+        writeGate: ctx.use("writeGate"),
       });
     },
     dispose: (sync) => sync.dispose(),

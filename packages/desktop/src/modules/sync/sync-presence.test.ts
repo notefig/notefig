@@ -211,11 +211,17 @@ describe("presence", () => {
       await b.sync.syncNow();
     }
     const content = t.receivePacks.filter((refs) => refs.some((ref) => ref.startsWith("refs/heads/")));
-    const presence = t.receivePacks.filter((refs) => refs.some((ref) => ref.startsWith("refs/notefig/")));
+    const presence = t.receivePacks.filter((refs) =>
+      refs.some((ref) => ref.startsWith("refs/notefig/v1/presence/")),
+    );
     expect(content.length).toBeGreaterThan(0);
     expect(presence.length).toBeGreaterThan(0);
-    for (const refs of t.receivePacks) expect(refs).toHaveLength(1);
-    expect(content.length + presence.length).toBe(t.receivePacks.length);
+    // A presence update is one ref, alone. A content push carries only the
+    // branch and, at the shared level, the leases it acquires (MET-273).
+    for (const refs of presence) expect(refs).toHaveLength(1);
+    for (const refs of content) {
+      expect(refs.slice(1).every((ref) => ref.startsWith("refs/notefig/v1/locks/"))).toBe(true);
+    }
   });
 
   it("closing a workspace deletes its presence ref and leaves nothing running", async () => {

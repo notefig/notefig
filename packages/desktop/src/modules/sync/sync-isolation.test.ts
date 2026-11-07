@@ -138,6 +138,8 @@ describe("sync chunk isolation", () => {
         resume: async () => {},
         acceptIncoming: async () => {},
         levelChanged: () => {},
+        gateWrite: async (_write: unknown, perform: () => Promise<void>) => perform(),
+        checkLease: () => ({ granted: true as const }),
         stop: async () => {},
       })),
       launchWorker: vi.fn(async () => ({

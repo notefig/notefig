@@ -55,6 +55,8 @@ import type { SyncFailsafe } from "../sync-machine";
 import { resolvePresenceIdentity } from "../presence-identity";
 import { createPresence } from "./presence";
 import { createPresenceEditors } from "./presence-editor";
+import { createLeases } from "./leases";
+import { createLeaseGate } from "./lease-gate";
 import {
   ApplyFailsafe,
   overwriteDocument,
@@ -160,17 +162,37 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
    *  fallback): presence names the user after it by default. */
   let authorKnown = deps.config.author !== undefined;
 
+  /** How many times sync wrote each tree path (pulls, merges): the lease
+   *  gate tells an agent its write was merged when this moved. */
+  const syncWrites = new Map<string, number>();
+  const countSyncWrite = (tree: string) => syncWrites.set(tree, (syncWrites.get(tree) ?? 0) + 1);
+
+  const identity = () =>
+    resolvePresenceIdentity({
+      deviceId: deps.config.deviceId,
+      settings: deps.presenceSettings(),
+      authorName: authorKnown ? author.name : null,
+    });
+  const leases = createLeases({
+    workspacePath: root,
+    deviceId: deps.config.deviceId,
+    api,
+    hooks: deps.hooks,
+    identity,
+    capabilities: () => deps.capabilities(),
+    ports: () => deps.ports(),
+    leasesChanged: (list) => deps.leasesChanged(list),
+    now,
+    setTimer,
+  });
+
   const presence = createPresence({
     workspacePath: root,
     deviceId: deps.config.deviceId,
     api,
     hooks: deps.hooks,
-    identity: () =>
-      resolvePresenceIdentity({
-        deviceId: deps.config.deviceId,
-        settings: deps.presenceSettings(),
-        authorName: authorKnown ? author.name : null,
-      }),
+    identity,
+    holds: (deviceId) => leases.holdsOf(deviceId),
     capabilities: () => deps.capabilities(),
     setPeersPresent: (present) => deps.dispatch({ type: "peers", present }),
     presenceChanged: (peers) => deps.presenceChanged(peers),
@@ -307,6 +329,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
       if (done === "pending") continue;
       pending.delete(tree);
       markDirty(tree);
+      if (done.content !== null) countSyncWrite(tree);
       if (done.content !== null && head) {
         deps.delivered(absolute(tree), {
           kind: "applied",
@@ -346,6 +369,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
           held.push(write.path);
           continue;
         }
+        countSyncWrite(write.path);
         deps.delivered(path, {
           kind: "applied",
           content: write.text,
@@ -455,10 +479,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
   const pushStep = async (remote: string | null): Promise<boolean> => {
     if (!head || head === remote) return false;
     deps.dispatch({ type: "step", activity: "pushing" });
-    const outcome = unwrap(await api.push({ remote }));
+    const outcome = unwrap(await api.push({ remote, acquire: leases.acquireInput() }));
     switch (outcome.status) {
       case "pushed":
         integrated = outcome.head;
+        leases.pushed(outcome.leases);
         offlineEdits = false;
         deps.hooks.emit("sync:pushed", { workspacePath: root, commit: outcome.head });
         return false;
@@ -475,8 +500,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
 
   /** One attempt: poll, pull if needed, push if ahead. */
   const reconcile = async (): Promise<boolean> => {
-    const { remote, presence: tips } = unwrap(await api.poll());
+    const { remote, presence: tips, locks } = unwrap(await api.poll());
     presenceTips = tips;
+    // Leases (shared only): liveness, then the worker's table, before the
+    // pull's merge (holder wins) and the push's rule read it.
+    await leases.observe(locks);
     if (remote && remote !== integrated && remote !== head) {
       await pullStep(remote);
     } else if (remote && remote === head) {
@@ -521,6 +549,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
   const presenceStep = async () => {
     const tips = presenceTips;
     presenceTips = null;
+    if (!stopped) await leases.step(head);
     if (tips && !stopped) await presence.step(tips, head);
     presenceEditors?.reconcile();
   };
@@ -585,6 +614,18 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
     scheduleCommit();
   };
 
+  const gateWrite = createLeaseGate({
+    root,
+    api,
+    hooks: deps.hooks,
+    leases,
+    documents: deps.documents,
+    treePath,
+    syncNow: () => syncNow(),
+    syncWrites: (tree) => syncWrites.get(tree) ?? 0,
+    setTimer,
+  });
+
   const hasPendingWrites = () => typeof dirty === "string" || dirty.size > 0;
 
   /** The failsafe's "Accept all incoming": set the local state aside on a
@@ -634,9 +675,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
         }),
         // Quit or reload: say goodbye if there's time; else the others see
         // this device go stale.
-        onPageHide(() => void presence.goodbye()),
+        onPageHide(() => {
+          void presence.goodbye();
+          void leases.goodbye();
+        }),
       );
       presence.start();
+      leases.start();
       void syncNow();
     },
     async resume() {
@@ -662,6 +707,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
       presenceEditors?.reconcile();
       if (!running) schedulePoll();
     },
+    gateWrite: (write, perform) => gateWrite(write, perform),
+    checkLease: (path, blocks) => leases.check(path, blocks),
     syncNow,
     async stop() {
       stopped = true;
@@ -671,8 +718,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
       for (const cleanup of cleanups.splice(0)) cleanup();
       presenceEditors?.stop();
       presence.stop();
+      leases.stop();
       await running?.catch(() => {});
-      await presence.goodbye();
+      await Promise.all([presence.goodbye(), leases.goodbye()]);
       deps.worker.terminate();
     },
   };
