@@ -16,8 +16,9 @@
  * - reports the local caret (`setCursor`), throttled: a selection change
  *   only arms a timer, and the block position is computed when it fires.
  *
- * MET-273's leased blocks draw from the same channel (`leases`), next to
- * these holders.
+ * MET-273's leased blocks draw from the same channel (`leases`), in a
+ * sibling plugin registered and removed with this one (`lease-editor.ts`):
+ * held blocks in the holder's colour, read-only to everyone else.
  */
 import type { Editor } from "@tiptap/core";
 import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
@@ -27,6 +28,7 @@ import type { EditorsApi } from "@/modules/editors";
 import { path as pathutil } from "@/utils/path";
 import type { SyncCursor, SyncDocumentPort, SyncRemoteCursor } from "../document-channel";
 import { fromBlockPosition, toBlockPosition } from "../presence-position";
+import { createLeasePlugin, leasePluginKey } from "./lease-editor";
 
 /** The local caret is reported at most this often. */
 export const PRESENCE_CURSOR_THROTTLE_MS = 300;
@@ -243,6 +245,17 @@ export function createPresenceEditors(deps: {
     }
   };
 
+  /** Apply the channel's leases to the editor, as they change. */
+  const followLeases = async (attachment: Attachment) => {
+    for await (const views of attachment.port.leases) {
+      const { editor } = attachment;
+      if (editor.isDestroyed || attached.get(attachment.port.channel.path) !== attachment) break;
+      editor.view.dispatch(
+        editor.state.tr.setMeta(leasePluginKey, views).setMeta("addToHistory", false),
+      );
+    }
+  };
+
   /** Notices on `incoming` are for other readers; keep the stream moving. */
   const drain = async (port: SyncDocumentPort) => {
     for await (const _ of port.channel.incoming) {
@@ -260,7 +273,9 @@ export function createPresenceEditors(deps: {
         setTimer: deps.setTimer,
       }),
     );
+    editor.registerPlugin(createLeasePlugin());
     void follow(attachment);
+    void followLeases(attachment);
     void drain(port);
   };
 
@@ -268,7 +283,10 @@ export function createPresenceEditors(deps: {
     const attachment = attached.get(path);
     if (!attachment) return;
     attached.delete(path);
-    if (!attachment.editor.isDestroyed) attachment.editor.unregisterPlugin(presencePluginKey);
+    if (!attachment.editor.isDestroyed) {
+      attachment.editor.unregisterPlugin(presencePluginKey);
+      attachment.editor.unregisterPlugin(leasePluginKey);
+    }
     attachment.port.channel.close();
   };
 
