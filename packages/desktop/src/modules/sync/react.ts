@@ -8,15 +8,19 @@ import {
   syncCapabilities,
   type SyncCapabilities,
 } from "./sync-machine";
+import type { WorkspaceSync } from "./sync";
+import type { SyncOverwriteRecord } from "./sync-types";
 
 const OFF: SyncCapabilities = syncCapabilities(INITIAL_SYNC_STATE);
+const NONE: readonly SyncOverwriteRecord[] = [];
 
-/** The live capabilities of a workspace's sync: `off` while it is not
- *  open or not a sync workspace. Joins the open set with the instance's
- *  own changes. */
-export function useSyncCapabilities(
+/** Read `read(sync)` live: from the workspace's sync instance while it is
+ *  open, through its own changes and the open set's. */
+function useSyncValue<T>(
   workspacePath: string | null,
-): SyncCapabilities {
+  read: (sync: WorkspaceSync) => T,
+  fallback: T,
+): T {
   const core = useCore();
   const current = useCallback(() => {
     if (!workspacePath) return null;
@@ -38,8 +42,24 @@ export function useSyncCapabilities(
     },
     [core, current],
   );
-  return useSyncExternalStore(
-    subscribe,
-    () => current()?.capabilities() ?? OFF,
-  );
+  return useSyncExternalStore(subscribe, () => {
+    const sync = current();
+    return sync ? read(sync) : fallback;
+  });
+}
+
+const readCapabilities = (sync: WorkspaceSync) => sync.capabilities();
+const readOverwrites = (sync: WorkspaceSync) => sync.overwrites();
+
+/** The live capabilities of a workspace's sync: `off` while it is not
+ *  open or not a sync workspace. */
+export function useSyncCapabilities(workspacePath: string | null): SyncCapabilities {
+  return useSyncValue(workspacePath, readCapabilities, OFF);
+}
+
+/** What merges overwrote in a workspace, live, until dismissed. */
+export function useSyncOverwrites(
+  workspacePath: string | null,
+): readonly SyncOverwriteRecord[] {
+  return useSyncValue(workspacePath, readOverwrites, NONE);
 }

@@ -9,6 +9,7 @@ import {
   useWorkspaceOfPath,
 } from "@/modules/workspaces/react";
 import { SyncStatusCell } from "@/components/sync/sync-status";
+import { SyncOverwritesCell } from "@/components/sync/sync-overwrites";
 import { fileTabPath } from "@/modules/tabs";
 
 interface StatusBarProps {
@@ -85,6 +86,7 @@ export function StatusBar({ activeTabId, direction = "ltr" }: StatusBarProps) {
     >
       <SaveCell synced={debouncedSynced} />
       <SyncStatusCell workspacePath={focusedWorkspace} />
+      <SyncOverwritesCell workspacePath={focusedWorkspace} />
       {wordCount !== null && <WordCountCell count={wordCount} />}
       <TunnelStatus />
     </div>
