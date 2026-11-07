@@ -22,6 +22,7 @@
  * `beginMove` and waits for `whenWritesSettled` before touching the file.
  */
 import { defineModule, type Hooks } from "@notefig/core";
+import type { JSONContent } from "@tiptap/core";
 import {
   FsError,
   type FileSystemSurface,
@@ -29,7 +30,7 @@ import {
 import type { WorkspaceFiles } from "@/modules/files";
 import type { EditorsApi } from "@/modules/editors";
 import { calculateContentHash } from "@/utils/hash";
-import { getDocumentSync } from "@/utils/markdown-conversion";
+import { getDocumentSync, serializeDoc } from "@/utils/markdown-conversion";
 import { path as pathutil } from "@/utils/path";
 import {
   adoptExternalContent,
@@ -52,14 +53,24 @@ export interface DocumentsApi {
    *  settled.
    *
    *  `source: "sync"` (remote content) never overwrites unsaved edits: when
-   *  the open editor has edits not yet saved, nothing is written and the
-   *  write answers `"held"` (the editor's save lands as usual). Any other
-   *  write keeps last-writer-wins and answers `"written"`. */
+   *  the open editor has edits not yet saved (or the user types while the
+   *  content is being adopted), the write answers `"held"` (the editor's
+   *  save lands as usual). With `expect` (a version from `editorText`), it
+   *  is written only while the editor still holds that version, and
+   *  answers `"stale"` otherwise. Sync's adoption stays out of the undo
+   *  history. Any other write keeps last-writer-wins and answers
+   *  `"written"`. */
   write(
     path: string,
     content: string,
-    options?: { source?: DocumentWriteSource },
+    options?: { source?: DocumentWriteSource; expect?: DocumentVersion },
   ): Promise<DocumentWriteResult>;
+  /**
+   * The open editor's text, once its pending save has landed, and the
+   * version it is of (for `write`'s `expect`); null when no editor has
+   * `path` open. Serialized off the main thread.
+   */
+  editorText(path: string): Promise<{ text: string; version: DocumentVersion } | null>;
   /** Resolves once every write in flight for `path` has landed (or failed). */
   whenWritesSettled(path: string): Promise<void>;
   /**
@@ -75,7 +86,9 @@ export interface DocumentsApi {
 
 /** Who is writing: an agent (ACP), or sync applying remote content. */
 export type DocumentWriteSource = "agent" | "sync";
-export type DocumentWriteResult = "written" | "held";
+export type DocumentWriteResult = "written" | "held" | "stale";
+/** An open editor's document at one moment (opaque). */
+export type DocumentVersion = object;
 
 /** What documents are built from. */
 export interface DocumentsDeps {
@@ -159,20 +172,31 @@ export function createDocuments({
     return sync.isDirty();
   };
 
-  /** Push written content into the path's live editor, if one is open. */
-  const adoptIntoEditor = async (target: string, content: string) => {
+  /** Push written content into the path's live editor, if one is open.
+   *  False when the editor kept local edits instead (typed meanwhile).
+   *  `version`: sync's writes adopt only while the editor still holds it,
+   *  so a keystroke typed during the write is never diffed away. */
+  const adoptIntoEditor = async (
+    target: string,
+    content: string,
+    source: DocumentWriteSource,
+    version: DocumentVersion | undefined,
+  ): Promise<boolean> => {
     const editor = editors.markdownEditor(target);
-    if (!editor || editor.isDestroyed) return;
+    if (!editor || editor.isDestroyed) return true;
     const sync = getDocumentSync(target);
     const doc = await sync.prepareAdoption(content);
-    if (!doc || editor.isDestroyed) return;
+    if (editor.isDestroyed) return true;
+    if (!doc) return false;
+    if (version !== undefined && editor.state.doc !== version) return false;
     const contentHash = calculateContentHash(content);
     const adoption = adoptExternalContent(editor, doc, {
       source: { path: target, contentHash, attribute },
+      ...(source === "sync" ? { addToHistory: false } : {}),
     });
     if (adoption.reinsertedWidgets === 0) {
       sync.commitAdoption(content, contentHash);
-      return;
+      return true;
     }
     // Re-asserted widget markers exist only in the editor at this point.
     // Repair the file INSIDE this tracked write — a fire-and-forget save
@@ -183,6 +207,20 @@ export function createDocuments({
     await writeToDisk(target, repaired);
     updateLoadedRows(target, repaired);
     sync.commitAdoption(repaired, calculateContentHash(repaired));
+    return true;
+  };
+
+  /** Whether a sync write may go ahead: the editor still holds `expect`,
+   *  or (without one) has no unsaved edits. */
+  const syncWriteBlocked = (
+    target: string,
+    expect: DocumentVersion | undefined,
+  ): DocumentWriteResult | null => {
+    const editor = editors.markdownEditor(target);
+    if (expect !== undefined && editor && !editor.isDestroyed) {
+      return editor.state.doc === expect ? null : "stale";
+    }
+    return hasUnsavedEdits(target) ? "held" : null;
   };
 
   return {
@@ -211,13 +249,31 @@ export function createDocuments({
       const move = pendingMoves.get(path);
       const target = move ? await move : path;
       return trackWrite(target, async (): Promise<DocumentWriteResult> => {
-        if (source === "sync" && hasUnsavedEdits(target)) return "held";
+        let version: DocumentVersion | undefined;
+        if (source === "sync") {
+          const blocked = syncWriteBlocked(target, options?.expect);
+          if (blocked) return blocked;
+          version = options?.expect ?? editors.markdownEditor(target)?.state.doc;
+        }
         await writeToDisk(target, content);
         updateLoadedRows(target, content);
         hooks?.emit("files:written", { paths: [target], source });
-        await adoptIntoEditor(target, content);
-        return "written";
+        const adopted = await adoptIntoEditor(target, content, source, version);
+        if (adopted || source !== "sync") return "written";
+        return options?.expect !== undefined ? "stale" : "held";
       });
+    },
+
+    async editorText(path) {
+      const editor = editors.markdownEditor(path);
+      if (!editor || editor.isDestroyed) return null;
+      const sync = getDocumentSync(path);
+      sync.flushPendingEdits?.();
+      await sync.whenClean();
+      if (editor.isDestroyed) return null;
+      const version = editor.state.doc;
+      const { markdown } = await serializeDoc(version.toJSON() as JSONContent);
+      return { text: markdown, version };
     },
 
     whenWritesSettled(path) {

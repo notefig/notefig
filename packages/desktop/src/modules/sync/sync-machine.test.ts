@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   INITIAL_SYNC_STATE,
+  SHARED_COMMIT_MAX_WAIT_MS,
   SHARED_POLL_MS,
   SOLO_POLL_MS,
   syncCapabilities,
@@ -159,5 +160,50 @@ describe("sync machine", () => {
     const solo = run({ type: "enable" });
     expect(transition(solo, { type: "enable" })).toBe(solo);
     expect(transition(solo, { type: "peers", present: false })).toBe(solo);
+  });
+
+  it("goes shared on contention too, and back to solo only when both inputs clear", () => {
+    const contended = caps({ type: "enable" }, { type: "contention", active: true });
+    expect(contended).toMatchObject({
+      merges: true,
+      pollIntervalMs: SHARED_POLL_MS,
+      commitMaxWaitMs: SHARED_COMMIT_MAX_WAIT_MS,
+    });
+    const both = run(
+      { type: "enable" },
+      { type: "contention", active: true },
+      { type: "peers", present: true },
+      { type: "contention", active: false },
+    );
+    expect(both.level).toBe("shared");
+    expect(transition(both, { type: "peers", present: false }).level).toBe("solo");
+    expect(caps({ type: "enable" }).commitMaxWaitMs).toBeNull();
+  });
+
+  const failsafe: SyncEvent = {
+    type: "failsafe",
+    failsafe: { reason: "unrelated", recoveryRef: "refs/notefig-local/recovery/1", paths: [] },
+    detail: "rewritten",
+  };
+
+  it("stops at the failsafe until the user accepts incoming; resume doesn't leave it", () => {
+    const stopped = run({ type: "enable" }, failsafe);
+    expect(syncCapabilities(stopped)).toMatchObject({
+      status: "failsafe",
+      commits: false,
+      polls: false,
+      canResume: false,
+      failsafe: { reason: "unrelated", recoveryRef: "refs/notefig-local/recovery/1" },
+      detail: "rewritten",
+    });
+    expect(transition(stopped, { type: "resume" })).toBe(stopped);
+    expect(transition(stopped, { type: "failed", fault: "offline" }).fault).toBe("failsafe");
+    expect(transition(stopped, { type: "diverged", detail: "x" }).fault).toBe("failsafe");
+    expect(caps({ type: "enable" }, failsafe, { type: "recovered" })).toMatchObject({
+      status: "synced",
+      commits: true,
+      failsafe: null,
+    });
+    expect(caps({ type: "enable" }, failsafe, { type: "disable" }).failsafe).toBeNull();
   });
 });

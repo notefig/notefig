@@ -25,6 +25,7 @@ import {
   readRepoInfo,
   tokenCreationHelp,
   type RepoInfo,
+  type SyncFailsafe,
   type WorkspaceSync,
 } from "@/modules/sync";
 import { turnOffSync, turnOnSync } from "@/modules/sync/turn-on";
@@ -191,7 +192,55 @@ const STATUS_TEXT: Record<string, string> = {
   throttled: "The host is rate limiting — retrying later",
   "auth-error": "The token was refused",
   diverged: "Stopped",
+  failsafe: "Stopped to keep your work safe",
 };
+
+const FAILSAFE_TEXT: Record<SyncFailsafe["reason"], string> = {
+  unrelated: "The remote branch was rewritten (force-pushed), so there is nothing to merge onto.",
+  validation: "A merge produced a document Notefig couldn't vouch for.",
+  divergence:
+    "Edits made while offline overlap too much of what others changed meanwhile to merge them blindly.",
+};
+
+/** The failsafe's choice. The local state is already on a recovery ref. */
+function FailsafeChoice({
+  sync,
+  failsafe,
+  onTurnOff,
+}: {
+  sync: WorkspaceSync;
+  failsafe: SyncFailsafe;
+  onTurnOff: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const accept = async () => {
+    setBusy(true);
+    try {
+      await sync.acceptIncoming();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-2 rounded border border-destructive/40 p-3" data-testid="sync-failsafe">
+      <p className="text-sm">{FAILSAFE_TEXT[failsafe.reason]}</p>
+      <Note>
+        Nothing is lost: your local version is saved on the local ref {failsafe.recoveryRef},
+        which is never pushed. Take the remote's version of every file, or turn sync off and
+        keep your files as they are.
+      </Note>
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={() => void accept()} disabled={busy}>
+          {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+          Accept all incoming
+        </Button>
+        <Button variant="outline" onClick={onTurnOff} disabled={busy}>
+          Turn sync off
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function SyncOnPanel({ sync }: { sync: WorkspaceSync }) {
   const { platform } = useCore();
@@ -211,6 +260,13 @@ function SyncOnPanel({ sync }: { sync: WorkspaceSync }) {
       </p>
       {capabilities.detail && (
         <p className="text-sm text-muted-foreground">{capabilities.detail}</p>
+      )}
+      {capabilities.failsafe && (
+        <FailsafeChoice
+          sync={sync}
+          failsafe={capabilities.failsafe}
+          onTurnOff={() => turnOff(false)}
+        />
       )}
       {capabilities.status === "diverged" && (
         <Note>

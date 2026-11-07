@@ -19,8 +19,10 @@
  * - sync → editor: `incoming` (ordered) carries remote content that has
  *   been applied to the file. Solo needs only this, and only as a notice:
  *   the documents write path has already adopted it into an open editor
- *   (caret kept). MET-271 sends merged content here for the editor to
- *   apply as a transaction instead. `remoteCursors` and `leases` (latest
+ *   (caret kept, out of the undo history). Shared (MET-271) sends the
+ *   same notice for content merged with the editor's own unsaved edits
+ *   (`merged: true`): the merge ran in the worker and the result was
+ *   adopted the same way. `remoteCursors` and `leases` (latest
  *   value) are the seams for MET-272 presence and MET-273 leases; nothing
  *   sets them in solo.
  * - editor → sync: `cursor` (latest value) is the local caret as block
@@ -156,6 +158,8 @@ export interface SyncIncomingContent {
   commit: string;
   /** Whether an open editor adopted it (false: it had unsaved edits). */
   adopted: boolean;
+  /** The content is local edits merged with the remote's (MET-271). */
+  merged?: boolean;
 }
 
 /** A position as block plus offset, relative to a branch commit, so every

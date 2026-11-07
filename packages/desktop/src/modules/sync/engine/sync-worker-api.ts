@@ -7,11 +7,13 @@
  * Every method answers with data (`SyncResult`), never throws: a `GitError`
  * becomes `{ code, message }`.
  *
- * Solo (MET-270) never writes conflict markers and never merges text: the
- * merge driver refuses every file both sides changed, so a rebase only
- * succeeds when local and remote commits touch different files, and
- * anything else comes back `diverged` with nothing moved. MET-271 replaces
- * the driver with the markdown merge.
+ * Nothing here ever writes conflict markers. The merge driver
+ * (`sync-merge-driver.ts`) refuses every file both sides changed in solo,
+ * so a solo rebase only succeeds when local and remote commits touch
+ * different files, and anything else comes back `diverged` with nothing
+ * moved. A pull with `merge` (the shared level) merges them; one the
+ * merge can't vouch for comes back `failsafe`, with the local branch set
+ * aside on a recovery ref first.
  */
 import {
   GitError,
@@ -27,10 +29,12 @@ import {
   type GitWorkerApi,
 } from "@notefig/git";
 import type { GitHostFs } from "@/adapters/git-storage-host";
+import type { MarkdownMerge } from "../merge/merge";
 import { IGNORE_RULES } from "@/utils/ignore";
 import { path as pathutil } from "@/utils/path";
 import type { SyncAuthor } from "../sync-config";
 import type {
+  SyncOverwrite,
   SyncPullOutcome,
   SyncPushOutcome,
   SyncResult,
@@ -39,23 +43,23 @@ import type {
   SyncWrite,
 } from "../sync-types";
 import { createWorktreeCapture, type WorktreeCapture } from "./worktree-capture";
+import {
+  createSyncMergeDriver,
+  defaultMergePolicy,
+  failsafeReasonOf,
+  type SyncMergeLog,
+  type SyncMergePolicy,
+} from "./sync-merge-driver";
+import {
+  mergeTexts,
+  reconcileFile,
+  resetBranch,
+  writeRecoveryRef,
+  type MergeContext,
+} from "./sync-worker-merge";
 
 /** Where the remote's notefig state lives (MET-266 decision 18). */
 export const NOTEFIG_REFS_PREFIX = "refs/notefig/v1/";
-
-/**
- * Solo's merge driver: no file merges (see above). Only when the user
- * resumes from `diverged` does a pull keep the local side of the files both
- * changed, whole; the remote's version stays in the branch's history.
- */
-export function soloMergeDriver(policy: { keepLocal: boolean }): GitMergeDriver {
-  return {
-    merge: ({ path, ours, theirs }) =>
-      policy.keepLocal
-        ? { content: ours, overwritten: theirs === null ? [] : [theirs] }
-        : { failed: `${path} changed on both sides, and solo sync never merges a file.` },
-  };
-}
 
 const branchRef = (branch: string) => `refs/heads/${branch}`;
 /** The last remote tip this clone fetched: keeps a diverged remote commit
@@ -163,6 +167,23 @@ async function scanCandidates(
   return [...changed, ...gone].map(tree).filter((path) => !APP_DIR.test(path));
 }
 
+/**
+ * Stage the files seen written by hashing them, gone ones as removals.
+ * Not left to status: its stat cache can't see a same-size write within
+ * the second of the last index update (git's "racy clean" case: the
+ * editor saves every half second), and that edit would never be
+ * committed. Ignored files are left alone by `add`.
+ */
+async function stageWritten(service: GitService, paths: string[]) {
+  for (const filepath of paths) {
+    try {
+      await service.add({ filepath });
+    } catch {
+      await service.remove({ filepath }).catch(() => {});
+    }
+  }
+}
+
 async function commitChanges(
   service: GitService,
   paths: string[] | null,
@@ -170,6 +191,7 @@ async function commitChanges(
   userName: string,
 ): Promise<{ oid: string | null; paths: string[] }> {
   if (paths && paths.length === 0) return { oid: null, paths: [] };
+  if (paths) await stageWritten(service, paths.filter((path) => !APP_DIR.test(path)));
   const status = await service.status(paths ? { filepaths: paths } : undefined);
   const changes = pendingChanges(status, (path) => !APP_DIR.test(path));
   if (changes.all.length === 0) return { oid: null, paths: [] };
@@ -182,28 +204,70 @@ async function commitChanges(
   return { oid, paths: changes.all };
 }
 
-function pullOutcome(
-  result: GitRebaseResult,
-  writes: SyncWrite[],
-): SyncPullOutcome {
+/** What a pull's merges overwrote: text fragments, and files the remote
+ *  won whole. */
+function overwrites(result: GitRebaseResult, log: SyncMergeLog): SyncOverwrite[] {
+  const merged = result.status === "rebased" ? result.merged : [];
+  const out: SyncOverwrite[] = merged
+    .filter((file) => file.overwritten.length > 0)
+    .map((file) => ({ path: file.path, fragments: file.overwritten }));
+  for (const took of log.tookRemote) {
+    if (took.binary) out.push({ path: took.path, fragments: [], binary: true });
+  }
+  return out;
+}
+
+/** The rebase's answer as the engine reads it. `previous`: the branch tip
+ *  before the pull. A refusal or a missing merge base sets the local
+ *  branch aside on a recovery ref before answering `failsafe`. */
+async function pullOutcome(
+  service: GitService,
+  previous: string,
+  rebase: { result: GitRebaseResult; writes: SyncWrite[] },
+  log: SyncMergeLog,
+): Promise<SyncPullOutcome> {
+  const { result, writes } = rebase;
   switch (result.status) {
     case "up-to-date":
       return { status: "up-to-date", head: result.oid };
     case "fast-forward":
-    case "rebased":
+    case "rebased": {
+      const overwritten = overwrites(result, log);
       return {
         status: result.status,
         head: result.oid,
+        previous,
         writes,
         skippedDirty: result.skippedDirty,
+        overwritten,
+        recoveryRef:
+          overwritten.length > 0 || log.tookRemote.length > 0
+            ? await writeRecoveryRef(service, previous)
+            : null,
       };
-    case "conflicted":
+    }
+    case "conflicted": {
+      const paths = [...new Set(result.conflicts.map((c) => c.path))];
+      const refused = result.conflicts.find((c) => c.reason === "driver");
+      const reason = failsafeReasonOf(refused?.message);
+      if (reason === "solo") return { status: "diverged", paths };
       return {
-        status: "diverged",
-        paths: [...new Set(result.conflicts.map((c) => c.path))],
+        status: "failsafe",
+        reason,
+        paths,
+        detail: refused?.message ?? `Could not merge ${paths.join(", ")}.`,
+        recoveryRef: await writeRecoveryRef(service, previous),
       };
+    }
     case "unrelated":
-      return { status: "unrelated" };
+      return {
+        status: "failsafe",
+        reason: "unrelated",
+        paths: [],
+        detail:
+          "The remote branch shares no history with this workspace (it was rewritten or force-pushed).",
+        recoveryRef: await writeRecoveryRef(service, previous),
+      };
   }
 }
 
@@ -231,27 +295,46 @@ async function canPush(
 }
 
 /** The pieces `startGitWorker` is wired with, shared by the worker entry
- *  and the in-process test runtime. */
+ * and the in-process test runtime. */
 export interface SyncWorkerWiring {
   http: GitHttpClient;
   /** For the start-up scan. */
   scanFs: ScanFs;
   capture: WorktreeCapture;
-  /** Read by the merge driver during a pull. */
-  policy: { keepLocal: boolean };
+  /** Read by the merge driver during a pull (set per pull). MET-273 sets
+   *  `holderFor` from the leases it maps forward. */
+  policy: SyncMergePolicy;
+  /** What the driver did during the current pull. */
+  log: SyncMergeLog;
+  /** The markdown merge, loaded into the worker on first use. */
+  loadMerge: () => Promise<MarkdownMerge>;
   wrapHost: (host: GitStorageHost, repo: GitRepoRef) => GitStorageHost;
   deps: () => { http: GitHttpClient; mergeDriver: GitMergeDriver };
 }
 
-export function syncWorkerWiring(http: GitHttpClient, scanFs: ScanFs): SyncWorkerWiring {
+/** The worker's markdown merge, built on first use. */
+function lazyWorkerMerge(): () => Promise<MarkdownMerge> {
+  let merge: Promise<MarkdownMerge> | null = null;
+  return () =>
+    (merge ??= import("../merge/worker-merge").then((m) => m.createWorkerMerge()));
+}
+
+export function syncWorkerWiring(
+  http: GitHttpClient,
+  scanFs: ScanFs,
+  loadMerge: () => Promise<MarkdownMerge> = lazyWorkerMerge(),
+): SyncWorkerWiring {
   const capture = createWorktreeCapture();
-  const policy = { keepLocal: false };
-  const mergeDriver = soloMergeDriver(policy);
+  const policy = defaultMergePolicy();
+  const log: SyncMergeLog = { tookRemote: [] };
+  const mergeDriver = createSyncMergeDriver(policy, loadMerge, log);
   return {
     http,
     scanFs,
     capture,
     policy,
+    log,
+    loadMerge,
     wrapHost: (host, repo) => capture.wrap(host, repo),
     deps: () => ({ http, mergeDriver }),
   };
@@ -262,8 +345,9 @@ export function createInProcessSyncWorker(
   createHost: (repo: GitRepoRef) => GitStorageHost,
   http: GitHttpClient,
   scanFs: ScanFs,
+  loadMerge?: () => Promise<MarkdownMerge>,
 ): SyncWorkerApi {
-  const wiring = syncWorkerWiring(http, scanFs);
+  const wiring = syncWorkerWiring(http, scanFs, loadMerge);
   const git = createGitWorkerApi(
     (repo) => wiring.wrapHost(createHost(repo), repo),
     wiring.deps,
@@ -273,9 +357,12 @@ export function createInProcessSyncWorker(
 
 export function createSyncWorkerApi(
   git: GitWorkerApi,
-  wiring: Pick<SyncWorkerWiring, "http" | "scanFs" | "capture" | "policy">,
+  wiring: Pick<
+    SyncWorkerWiring,
+    "http" | "scanFs" | "capture" | "policy" | "log" | "loadMerge"
+  >,
 ): SyncWorkerApi {
-  const { http, scanFs, capture, policy } = wiring;
+  const { http, scanFs, capture, policy, log } = wiring;
   let session: { spec: SyncSessionSpec; repo: GitRepoRef; service: GitService } | null =
     null;
 
@@ -289,6 +376,12 @@ export function createSyncWorkerApi(
 
   const readHead = (service: GitService, branch: string) =>
     service.readRef(branchRef(branch));
+
+  const mergeContext = (): MergeContext => ({
+    service: current().service,
+    loadMerge: wiring.loadMerge,
+    policy,
+  });
 
   return {
     open: (spec) =>
@@ -326,21 +419,54 @@ export function createSyncWorkerApi(
         };
       }),
 
-    pull: ({ remote, keepLocal }) =>
+    pull: ({ remote, keepLocal, merge, offline }) =>
       attempt(async () => {
         const { spec, repo, service } = current();
         await service.fetchRefs(spec.remote, [
           { ref: branchRef(spec.branch), oid: remote, localRef: trackingRef(spec.branch) },
         ]);
+        const previous = await readHead(service, spec.branch);
+        if (!previous) throw new GitError("InvalidInput", "The branch has no commits.");
         policy.keepLocal = keepLocal === true;
+        policy.merge = merge === true;
+        policy.guardDivergence = offline === true;
+        log.tookRemote = [];
         try {
-          const { result, writes } = await capture.run(repo, () =>
+          const rebase = await capture.run(repo, () =>
+            // Holder: the side already on the branch (MET-273: leases).
             service.rebaseOnto({ theirs: remote, holder: keepLocal ? "ours" : "theirs" }),
           );
-          return pullOutcome(result, writes);
+          return await pullOutcome(service, previous, rebase, log);
         } finally {
           policy.keepLocal = false;
+          policy.merge = false;
+          policy.guardDivergence = false;
         }
+      }),
+
+    reconcile: (input) =>
+      attempt(async () => {
+        const { spec } = current();
+        return reconcileFile(mergeContext(), branchRef(spec.branch), input);
+      }),
+
+    mergeTexts: (input) => attempt(() => mergeTexts(mergeContext(), input)),
+
+    saveRecovery: () =>
+      attempt(async () => {
+        const { spec, service } = current();
+        const head = await readHead(service, spec.branch);
+        if (!head) throw new GitError("InvalidInput", "The branch has no commits.");
+        return { ref: await writeRecoveryRef(service, head) };
+      }),
+
+    resetToRemote: ({ remote }) =>
+      attempt(async () => {
+        const { spec, service } = current();
+        await service.fetchRefs(spec.remote, [
+          { ref: branchRef(spec.branch), oid: remote, localRef: trackingRef(spec.branch) },
+        ]);
+        return resetBranch(service, branchRef(spec.branch), remote);
       }),
 
     push: ({ remote }) =>

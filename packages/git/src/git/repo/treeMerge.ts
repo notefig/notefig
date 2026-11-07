@@ -120,6 +120,20 @@ async function withLineMerge(
   return blobEntry(ctx, result.content, mode);
 }
 
+/** A binary both sides changed: the driver's `pickBinary` keeps one side. */
+async function mergeBinary(
+  state: TreeMergeState,
+  path: string,
+  [, ours, theirs]: Sides,
+): Promise<Entry | null | undefined> {
+  const pick = await state.driver?.pickBinary?.({ path, holder: state.holder });
+  if (!pick) return conflict(state, path, { reason: "binary" });
+  if (typeof pick !== "string")
+    return conflict(state, path, { reason: "driver", message: pick.failed });
+  state.merged.push({ commit: state.commit, path, overwritten: [] });
+  return (pick === "ours" ? ours : theirs) ?? null;
+}
+
 /** A file both sides changed. `null` = deleted; `undefined` = conflict (recorded). */
 async function mergeFile(
   ctx: RepoContext,
@@ -128,8 +142,7 @@ async function mergeFile(
   sides: Sides,
 ): Promise<Entry | null | undefined> {
   const texts = await Promise.all(sides.map((e) => readText(ctx, e)));
-  if (texts.includes("binary"))
-    return conflict(state, path, { reason: "binary" });
+  if (texts.includes("binary")) return mergeBinary(state, path, sides);
   const mode = mergedMode(sides);
   return state.driver
     ? withDriver(ctx, state, state.driver, path, texts as Texts, mode)

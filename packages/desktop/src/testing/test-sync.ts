@@ -30,6 +30,7 @@ import { createGitStorageHost } from "@/adapters/git-storage-host";
 import { createInProcessSyncWorker } from "@/modules/sync/engine/sync-worker-api";
 import { loadSyncEngine, type SyncRuntime } from "@/modules/sync/sync-runtime";
 import type { SyncWorkerApi } from "@/modules/sync/sync-types";
+import type { MarkdownMerge } from "@/modules/sync/merge/merge";
 
 const IDENTITY = [
   "-c",
@@ -76,6 +77,9 @@ export interface TestRemote {
   /** Requests made, for rate checks: `METHOD service`. */
   requests: string[];
   mode: RemoteMode;
+  /** Runs before each request reaches the backend (`METHOD service`):
+   *  lets a test land someone else's push mid-cycle. */
+  onRequest: ((label: string) => Promise<void>) | null;
   /** The branch tip on the remote. */
   tip(branch?: string): Promise<string | null>;
   /** Clone into `<root>/<name>` with system git. */
@@ -170,10 +174,13 @@ export async function createTestRemote(
     credential,
     requests,
     mode: "ok",
+    onRequest: null,
     http: {
       async request(request) {
         const service = /service=([a-z-]+)|\/(git-[a-z-]+)$/.exec(request.url);
-        requests.push(`${request.method} ${service?.[1] ?? service?.[2] ?? request.url}`);
+        const label = `${request.method} ${service?.[1] ?? service?.[2] ?? request.url}`;
+        requests.push(label);
+        await remote.onRequest?.(label);
         if (remote.mode === "offline") throw new Error("connection refused");
         if (remote.mode === "throttled") return empty(429);
         // What Rust does: a request without the stored credential gets no
@@ -369,18 +376,29 @@ export interface InProcessRuntime {
   terminated: number;
   /** Worker calls by method, in order. */
   calls: string[];
+  /** Times a worker loaded the markdown merge. */
+  mergeLoads: number;
 }
 
-/** A `syncRuntime` serving the real worker API in-process over `remote`. */
+/** A `syncRuntime` serving the real worker API in-process over `remote`.
+ *  `wrapMerge` wraps the worker's markdown merge (to observe or break it). */
 export function inProcessSyncRuntime(
   fs: FileSystemSurface,
   remote: Pick<TestRemote, "http">,
+  options: { wrapMerge?: (merge: MarkdownMerge) => MarkdownMerge } = {},
 ): InProcessRuntime {
   const stats: InProcessRuntime = {
     module: null as never,
     launched: 0,
     terminated: 0,
     calls: [],
+    mergeLoads: 0,
+  };
+  const loadMerge = async () => {
+    stats.mergeLoads += 1;
+    const { createWorkerMerge } = await import("@/modules/sync/merge/worker-merge");
+    const merge = createWorkerMerge();
+    return options.wrapMerge ? options.wrapMerge(merge) : merge;
   };
   const runtime: SyncRuntime = {
     loadEngine: loadSyncEngine,
@@ -390,6 +408,7 @@ export function inProcessSyncRuntime(
         () => createGitStorageHost(fs),
         remote.http,
         fs,
+        loadMerge,
       );
       let alive = true;
       const api = Object.fromEntries(

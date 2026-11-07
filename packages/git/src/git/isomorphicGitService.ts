@@ -5,6 +5,7 @@ import { toGitError } from "./errors";
 import { createIsomorphicGitFs } from "./isomorphicGitFs";
 import { fetchRefs, pushRefs, type CapabilityCache } from "./remoteOps";
 import { rebaseOnto, resolveCommitish } from "./repo/rebase";
+import { diffTrees } from "./repo/treeDiff";
 import type { RepoContext } from "./repo/repoContext";
 import { defaultHttpClient } from "./smartHttp/httpPorts";
 import { lsRefs } from "./smartHttp/lsRefs";
@@ -17,6 +18,7 @@ import {
   type GitPushRefsOptions,
   type GitPushRefsResult,
   type GitRebaseOntoInput,
+  type GitTreeChange,
   type GitRebaseResult,
   type GitRefUpdate,
   type GitRemote,
@@ -929,6 +931,18 @@ export class IsomorphicGitService implements GitService {
         oids: [oidA, oidB],
       });
       return base ?? null;
+    });
+  }
+
+  async changedFiles(from: string, to: string): Promise<GitTreeChange[]> {
+    return this.run(async () => {
+      const [a, b] = await Promise.all(
+        [from, to].map(async (ref) => {
+          const oid = await resolveCommitish(this.ctx, ref);
+          return (await git.readCommit({ ...this.ctx.git, oid })).commit.tree;
+        }),
+      );
+      return diffTrees(this.ctx, a, b);
     });
   }
 

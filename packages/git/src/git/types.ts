@@ -248,6 +248,9 @@ export interface GitService {
   readBlob(oid: string): Promise<Uint8Array>;
   /** The best common ancestor of two commits (oids or refs), or null. */
   mergeBase(a: string, b: string): Promise<string | null>;
+  /** The files that differ between two commits (oids or refs), with their
+   *  blob oids on each side; subtrees both share are skipped. */
+  changedFiles(from: string, to: string): Promise<GitTreeChange[]>;
   /**
    * Replay the current branch's commits since the merge base onto `theirs`
    * and move the branch there, updating the index and every unmodified
@@ -335,9 +338,25 @@ export type GitMergeOutput =
   /** `content: null` deletes the file. `overwritten`: loser text the holder's edits replaced. */
   { content: string | null; overwritten: string[] } | { failed: string };
 
+/** A binary file both sides changed (`path`, and the rebase's holder). */
+export interface GitBinaryMergeInput {
+  path: string;
+  holder: GitMergeHolder;
+}
+
+/** Keep one side's version whole, or refuse (a conflict). */
+export type GitBinaryMergeOutput = GitMergeHolder | { failed: string };
+
 /** Replaces the default line merge (conflict markers) for files both sides changed. */
 export interface GitMergeDriver {
   merge(input: GitMergeInput): GitMergeOutput | Promise<GitMergeOutput>;
+  /**
+   * Binary files both sides changed. Omitted, they are a `"binary"`
+   * conflict, as without a driver.
+   */
+  pickBinary?(
+    input: GitBinaryMergeInput,
+  ): GitBinaryMergeOutput | Promise<GitBinaryMergeOutput>;
 }
 
 /** Optional ports for `IsomorphicGitService`; omitted, behaviour is real git's. */
@@ -420,6 +439,14 @@ export interface GitWriteRefInput {
   oid: string;
   /** Overwrite an existing ref (default true). */
   force?: boolean;
+}
+
+export interface GitTreeChange {
+  path: string;
+  /** Blob oid in `from`; absent when the file was added. */
+  from?: string;
+  /** Blob oid in `to`; absent when the file was deleted. */
+  to?: string;
 }
 
 export interface GitRebaseOntoInput {

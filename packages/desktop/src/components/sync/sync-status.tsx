@@ -28,6 +28,7 @@ const LOOK: Record<
   throttled: { icon: CloudOff, label: "Rate limited", tone: "text-warning" },
   "auth-error": { icon: KeyRound, label: "Sign-in needed", tone: "text-destructive" },
   diverged: { icon: AlertTriangle, label: "Sync stopped", tone: "text-destructive" },
+  failsafe: { icon: AlertTriangle, label: "Sync stopped", tone: "text-destructive" },
 };
 
 export function SyncStatusCell({ workspacePath }: { workspacePath: string | null }) {

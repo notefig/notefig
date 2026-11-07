@@ -172,6 +172,7 @@ const GIT_SERVICE_METHODS = [
   "writeBlob",
   "readBlob",
   "mergeBase",
+  "changedFiles",
   "rebaseOnto",
 ] as const satisfies readonly GitServiceMethod[];
 

@@ -4,7 +4,8 @@
  * structurally identical doc JSON, or saves through the worker would corrupt
  * files relative to what the editor shows.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import MarkdownIt from "markdown-it";
 import { Editor } from "@tiptap/core";
 import { editorExtensions } from "../tiptap-editor-kit";
 import { createMarkdownCodec } from "../markdown-codec";
@@ -163,5 +164,37 @@ describe("codec ↔ editor equivalence", () => {
     expect(codec.hash("# Title\n\nBody")).toBe(
       calculateContentHash("# Title\n\nBody"),
     );
+  });
+});
+
+describe("parser lifetime", () => {
+  const taskList = "- [ ] one\n- [x] two\n\nText.";
+
+  it("applies the parse plugins once however many times the codec parses", () => {
+    const use = vi.spyOn(MarkdownIt.prototype, "use");
+    try {
+      const fresh = createMarkdownCodec();
+      fresh.parse(taskList);
+      const afterFirst = use.mock.calls.length;
+      for (let i = 0; i < 300; i++) fresh.parse(taskList);
+      expect(use.mock.calls.length).toBe(afterFirst);
+      // Still parses task lists.
+      expect(fresh.serialize(fresh.parse(taskList))).toBe(codec.serialize(codec.parse(taskList)));
+    } finally {
+      use.mockRestore();
+    }
+  });
+
+  it("keeps a live editor's core rules constant across setContent calls", () => {
+    const editor = createEditor(taskList);
+    const md = (
+      editor.storage as unknown as {
+        markdown: { parser: { md: MarkdownIt } };
+      }
+    ).markdown.parser.md;
+    const rules = md.core.ruler.getRules("").length;
+    for (let i = 0; i < 50; i++) editor.commands.setContent(taskList);
+    expect(md.core.ruler.getRules("").length).toBe(rules);
+    expect(getMarkdown(editor)).toBe(codec.serialize(codec.parse(taskList)));
   });
 });

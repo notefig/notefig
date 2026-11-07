@@ -19,6 +19,7 @@ import { syncModule, syncConfigPath, type SyncRuntime } from "@/modules/sync";
 
 const SRC = resolve(__dirname, "../..");
 const ENGINE_DIR = join(SRC, "modules/sync/engine");
+const MERGE_DIR = join(SRC, "modules/sync/merge");
 const SYNC_WORKER = join(SRC, "workers/sync.worker.ts");
 
 const STATIC_IMPORT =
@@ -63,8 +64,9 @@ function staticGraph(root: string): Set<string> {
 }
 
 describe("sync chunk isolation", () => {
-  it("keeps the engine and the sync worker out of the app's static import graph", () => {
+  it("keeps the engine, the merge and the sync worker out of the app's static import graph", () => {
     expect(existsSync(join(ENGINE_DIR, "sync-engine.ts"))).toBe(true);
+    expect(existsSync(join(MERGE_DIR, "merge.ts"))).toBe(true);
     const graph = staticGraph(join(SRC, "main.tsx"));
 
     // The module itself is wired in, so the check is not vacuous…
@@ -72,9 +74,20 @@ describe("sync chunk isolation", () => {
     expect(graph.has(join(SRC, "modules/sync/sync-runtime.ts"))).toBe(true);
     // …and only dynamic imports lead past it.
     const leaked = [...graph].filter(
-      (file) => file.startsWith(`${ENGINE_DIR}/`) || file === SYNC_WORKER,
+      (file) =>
+        file.startsWith(`${ENGINE_DIR}/`) ||
+        file.startsWith(`${MERGE_DIR}/`) ||
+        file === SYNC_WORKER,
     );
     expect(leaked).toEqual([]);
+  });
+
+  it("keeps the markdown merge out of the sync engine's main-thread graph", () => {
+    // The merge runs only in the sync worker, and only once it merges.
+    const graph = staticGraph(join(ENGINE_DIR, "sync-engine.ts"));
+    expect([...graph].filter((file) => file.startsWith(`${MERGE_DIR}/`))).toEqual([]);
+    const worker = staticGraph(join(ENGINE_DIR, "sync-worker-api.ts"));
+    expect(worker.has(join(MERGE_DIR, "merge.ts"))).toBe(false);
   });
 
   it("never asks for the engine or a worker in a regular workspace", async () => {
@@ -123,6 +136,8 @@ describe("sync chunk isolation", () => {
       loadEngine: vi.fn(async () => async () => ({
         syncNow: async () => {},
         resume: async () => {},
+        acceptIncoming: async () => {},
+        levelChanged: () => {},
         stop: async () => {},
       })),
       launchWorker: vi.fn(async () => ({

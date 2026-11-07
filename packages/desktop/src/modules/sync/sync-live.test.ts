@@ -129,4 +129,50 @@ describe.skipIf(!URL_ || !TOKEN)("sync worker against a live host", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("merges two devices' overlapping edits through a refused push", { timeout: 120_000 }, async () => {
+    const root = mkdtempSync(join(tmpdir(), "notefig-sync-live-"));
+    const branch = `notefig-sync-271-${Date.now()}`;
+    const base = "# Live\n\nFirst paragraph.\n\nSecond paragraph here.\n\nThird paragraph.\n";
+    try {
+      const a = await cloneLive(root, "a", branch);
+      const b = await cloneLive(root, "b", branch);
+      await commitFile(a, base, "live-a");
+      const created = value(await a.worker.push({ remote: null }));
+      expect(created.status).toBe("pushed");
+      const tip = created.status === "pushed" ? created.head : "";
+      await pause();
+      value(await b.worker.pull({ remote: tip }));
+      await fsp.writeFile(join(b.path, FILE), base);
+      await pause();
+
+      // Both edit: different blocks, and the same word of one sentence.
+      await commitFile(a, base.replace("First paragraph.", "First paragraph, by A.").replace("here", "now"), "live-a");
+      await commitFile(b, base.replace("Third paragraph.", "Third paragraph, by B.").replace("here", "today"), "live-b");
+      expect(value(await timed("push", () => a.worker.push({ remote: tip }))).status).toBe("pushed");
+      await pause();
+      // B's compare-and-swap is stale: refused.
+      expect(value(await b.worker.push({ remote: tip })).status).toBe("rejected");
+      await pause();
+      const { remote } = value(await timed("poll", () => b.worker.poll()));
+      const merged = value(
+        await timed("pull+merge", () => b.worker.pull({ remote: remote!, merge: true })),
+      );
+      expect(merged).toMatchObject({ status: "rebased" });
+      if (merged.status !== "rebased") return;
+      expect(merged.overwritten).toEqual([{ path: FILE, fragments: ["today"] }]);
+      expect(merged.recoveryRef).toMatch(/^refs\/notefig-local\/recovery\//);
+      const text = merged.writes.find((write) => write.path === FILE);
+      expect(text).toMatchObject({
+        kind: "text",
+        text: "# Live\n\nFirst paragraph, by A.\n\nSecond paragraph now.\n\nThird paragraph, by B.\n",
+      });
+      await pause();
+      expect(value(await timed("push", () => b.worker.push({ remote })))).toMatchObject({ status: "pushed" });
+      console.log("[sync-live] merge latencies (ms):", JSON.stringify(latencies));
+    } finally {
+      await deleteBranch(join(root, "a"), branch);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

@@ -246,35 +246,36 @@ describe("solo sync", () => {
     expect(await read(join(ws, "theirs.md"))).toBe("From the CLI.\n");
   });
 
-  it("stops at diverged when both sides changed the same file, writing no markers", async () => {
-    const { sync, remote, ws, core } = await setup();
+  it("never merges at solo: a same-file change on both sides moves to shared, which merges", async () => {
+    const { sync, remote, ws, core, runtime } = await setup();
     const path = join(ws, "note.md");
     remote.mode = "offline";
-    await fsp.writeFile(path, "# Note\n\nMine.\n");
+    await fsp.writeFile(path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
     core.hooks.emit("files:written", { paths: [path], source: "app" });
     await sync.syncNow();
+    expect(runtime.mergeLoads).toBe(0);
 
     remote.mode = "ok";
     const plain = await remote.clone("plain");
-    const theirs = await remote.pushFromPlainGit(plain, { "note.md": "# Note\n\nTheirs.\n" }, "cli");
+    const theirs = await remote.pushFromPlainGit(
+      plain,
+      { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" },
+      "cli",
+    );
+    const levels: string[] = [];
+    core.hooks.on("sync:state", ({ capabilities }) => void levels.push(String(capabilities.merges)));
     await sync.syncNow();
 
-    expect(sync.capabilities()).toMatchObject({
-      status: "diverged",
-      commits: false,
-      canResume: true,
-    });
-    expect(sync.capabilities().detail).toContain("note.md");
-    expect(await read(path)).toBe("# Note\n\nMine.\n");
-    expect(await remote.tip()).toBe(theirs);
-
-    // Resuming keeps the local file whole; the remote's text stays in history.
-    sync.resume();
-    await sync.syncNow();
-    expect(sync.capabilities().status).toBe("synced");
-    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nMine.");
+    // The solo pull refused, the shared one merged.
+    expect(runtime.calls.filter((call) => call === "pull")).toHaveLength(2);
+    expect(runtime.mergeLoads).toBeGreaterThan(0);
+    expect(levels).toContain("true");
+    expect(sync.capabilities()).toMatchObject({ status: "synced", merges: true });
+    const merged = "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.\n";
+    expect(await read(path)).toBe(merged);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(merged.trimEnd());
     expect(await runGit(remote.bare, ["merge-base", "--is-ancestor", theirs, "main"])).toBe("");
-    expect(await read(path)).toBe("# Note\n\nMine.\n");
+    expect(await read(path)).not.toMatch(/<{7}|>{7}/);
   });
 
   it("commits what changed while the app was closed, deletions included", async () => {
@@ -322,7 +323,7 @@ describe("solo sync", () => {
     expect(reopened.capabilities().status).toBe("synced");
   });
 
-  it("holds remote content back from an editor with unsaved edits and stops", async () => {
+  it("never writes over an editor whose save doesn't land; nothing stalls", async () => {
     const { sync, remote, ws, editors } = await setup();
     const path = join(ws, "note.md");
     getOrCreateEditor(
@@ -342,11 +343,12 @@ describe("solo sync", () => {
     await remote.pushFromPlainGit(plain, { "note.md": "# Note\n\nTheirs.\n" }, "cli");
     await sync.syncNow();
 
-    expect(sync.capabilities().status).toBe("diverged");
+    // Waiting for the save timed out: the merge waits for the next cycle.
+    expect(sync.capabilities()).toMatchObject({ status: "synced", failsafe: null });
     expect(await read(path)).not.toContain("Theirs.");
     expect(codec.serialize(editor.getJSON())).not.toContain("Theirs.");
     disposeEditor(editors, path);
-  });
+  }, 20_000);
 
   it("shows an auth error and stops until resumed", async () => {
     const { sync, remote, ws, core, runtime } = await setup();
