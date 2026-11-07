@@ -368,6 +368,8 @@ const SCENARIOS: Record<string, Scenario> = {
 const MARKER = /^(<{7}|>{7}|={7})(\s|$)/m;
 
 describe.skipIf(!process.env.MERGE_CORPUS)("merge corpus", () => {
+  // An opt-in measurement harness, not shipped code: one long tally loop.
+  // fallow-ignore-next-line complexity
   it("merges generated concurrent edits on the repo's markdown", async () => {
     installWorkerDomShim();
     // Fresh codecs per base file, so one base's chunk cache never helps
@@ -404,6 +406,80 @@ describe.skipIf(!process.env.MERGE_CORPUS)("merge corpus", () => {
     const lostExamples: Array<{ file: string; scenario: string; segment: string }> = [];
     const started = Date.now();
 
+    const timedMerge = (file: string, scenario: string, input: Parameters<typeof merge>[0]) => {
+      const t0 = Date.now();
+      if (process.env.MERGE_CORPUS_DEBUG) process.stderr.write(`> ${file} ${scenario} ${input.base.length}\n`);
+      const r: MergeResult = merge(input);
+      const ms = Date.now() - t0;
+      if (process.env.MERGE_CORPUS_DEBUG) process.stderr.write(`  merged ${ms}ms\n`);
+      times.push(ms);
+      if (ms > 500) slow.push({ file, scenario, ms });
+      return r;
+    };
+
+    const recordFailure = (
+      file: string,
+      scenario: string,
+      holder: Holder,
+      roundTrips: boolean,
+      reason: string,
+    ) => {
+      const key = `${roundTrips ? "clean" : "non-round-trip base"}: ${reason}`;
+      failReasons[key] = (failReasons[key] ?? 0) + 1;
+      if (failExamples.length < 12) failExamples.push({ file, scenario, reason, detail: holder });
+    };
+
+    const recordWrong = (
+      where: { file: string; scenario: string; holder: Holder },
+      expected: string,
+      got: string,
+    ) => {
+      if (wrongExamples.length >= 40) return;
+      let k = 0;
+      while (k < expected.length && expected[k] === got[k]) k++;
+      wrongExamples.push({
+        ...where,
+        expected: expected.slice(Math.max(0, k - 80), k + 80),
+        got: got.slice(Math.max(0, k - 80), k + 80),
+      });
+    };
+
+    /** Segments of blocks no op touched must be in the result verbatim. */
+    const checkPreserved = (
+      file: string,
+      scenario: string,
+      pair: { ours: Op[]; theirs: Op[] },
+      spans: NonNullable<ReturnType<typeof sourceSpans>>,
+      content: string,
+    ) => {
+      const ops = [...pair.ours, ...pair.theirs];
+      const touched = (i: number) => ops.some((op) => i >= op.at - 1 && i <= op.at + op.del);
+      spans.segments.forEach((segment, index) => {
+        const indexes = spans.segmentOf.flatMap((seg, i) => (seg === index ? [i] : []));
+        if (indexes.some(touched)) return;
+        untouched.segments++;
+        const body = segment.text.replace(/\s+$/, "");
+        if (content.includes(body)) untouched.kept++;
+        else if (lostExamples.length < 12) {
+          lostExamples.push({ file, scenario, segment: body.slice(0, 160) });
+        }
+      });
+    };
+
+    /** Canonical, as any client sees it after one reload (two lists left
+     *  adjacent, say, read back as one); the merge keeps base bytes for
+     *  untouched blocks, so canonical forms are compared. */
+    const matchesExpected = (
+      blocks: string[],
+      content: string,
+      onWrong: (expected: string, got: string) => void,
+    ) => {
+      const expected = canon(assemble(blocks));
+      const got = canon(content);
+      if (expected !== got) onWrong(expected, got);
+      return expected === got;
+    };
+
     for (const [fileIndex, file] of files.entries()) {
       if (process.env.MERGE_CORPUS_FILTER && !file.includes(process.env.MERGE_CORPUS_FILTER)) continue;
       // Yield so vitest's worker RPC isn't starved by a long synchronous run.
@@ -428,7 +504,13 @@ describe.skipIf(!process.env.MERGE_CORPUS)("merge corpus", () => {
       if (spans) untouched.basesWithSpans++;
       else untouched.basesWithoutSpans.push(file);
 
+      // fallow-ignore-next-line complexity
       Object.entries(SCENARIOS).forEach(([name, scenario], si) => {
+        const s = (bucket.byScenario[name] ??= tally());
+        const count = (key: keyof Tally) => {
+          bucket.all[key]++;
+          s[key]++;
+        };
         for (let p = 0; p < PAIRS; p++) {
           const rng = mulberry32(fileIndex * 1000 + si * 37 + p + 1);
           const pair = scenario(rng, blocks);
@@ -437,69 +519,21 @@ describe.skipIf(!process.env.MERGE_CORPUS)("merge corpus", () => {
           const ours = assemble(apply(blocks, pair.ours));
           const theirs = assemble(apply(blocks, pair.theirs));
           const input = { base: raw, ours, theirs, holder };
-          const t0 = Date.now();
-          if (process.env.MERGE_CORPUS_DEBUG) process.stderr.write(`> ${file} ${name} ${raw.length}\n`);
-          const r: MergeResult = merge(input);
-          if (process.env.MERGE_CORPUS_DEBUG) process.stderr.write(`  merged ${Date.now() - t0}ms\n`);
-          const ms = Date.now() - t0;
-          times.push(ms);
-          if (ms > 500) slow.push({ file, scenario: name, ms });
-          const s = (bucket.byScenario[name] ??= tally());
-          bucket.all.pairs++;
-          s.pairs++;
-
+          const r = timedMerge(file, name, input);
+          count("pairs");
           if (JSON.stringify(merge2(input)) !== JSON.stringify(r)) nondeterministic++;
           if ("failed" in r) {
-            bucket.all.failed++;
-            s.failed++;
-            const key = `${roundTrips ? "clean" : "non-round-trip base"}: ${r.failed}`;
-            failReasons[key] = (failReasons[key] ?? 0) + 1;
-            if (failExamples.length < 12) {
-              failExamples.push({ file, scenario: name, reason: r.failed, detail: holder });
-            }
+            count("failed");
+            recordFailure(file, name, holder, roundTrips, r.failed);
             continue;
           }
           if (MARKER.test(r.content) && ![raw, ours, theirs].some((x) => MARKER.test(x))) markers++;
-          if (r.overwritten.length) {
-            bucket.all.overwritten++;
-            s.overwritten++;
-          }
-          if (spans) {
-            const touched = (i: number) =>
-              [...pair.ours, ...pair.theirs].some((op) => i >= op.at - 1 && i <= op.at + op.del);
-            spans.segments.forEach((segment, index) => {
-              const indexes = spans.segmentOf.flatMap((seg, i) => (seg === index ? [i] : []));
-              if (indexes.some(touched)) return;
-              untouched.segments++;
-              const body = segment.text.replace(/\s+$/, "");
-              if (r.content.includes(body)) untouched.kept++;
-              else if (lostExamples.length < 12) {
-                lostExamples.push({ file, scenario: name, segment: body.slice(0, 160) });
-              }
-            });
-          }
-          if (pair.expected) {
-            // Canonical, as any client sees it after one reload (two lists
-            // left adjacent, say, read back as one).
-            // The merge keeps base bytes for untouched blocks, so compare
-            // canonical forms.
-            const expected = canon(assemble(pair.expected(holder)));
-            const got = canon(r.content);
-            if (expected !== got) {
-              bucket.all.wrong++;
-              s.wrong++;
-              if (wrongExamples.length < 40) {
-                let k = 0;
-                while (k < expected.length && expected[k] === got[k]) k++;
-                wrongExamples.push({
-                  file,
-                  scenario: name,
-                  holder,
-                  expected: expected.slice(Math.max(0, k - 80), k + 80),
-                  got: got.slice(Math.max(0, k - 80), k + 80),
-                });
-              }
-            }
+          if (r.overwritten.length) count("overwritten");
+          if (spans) checkPreserved(file, name, pair, spans, r.content);
+          const wrong = (expected: string, got: string) =>
+            recordWrong({ file, scenario: name, holder }, expected, got);
+          if (pair.expected && !matchesExpected(pair.expected(holder), r.content, wrong)) {
+            count("wrong");
           }
         }
       });
