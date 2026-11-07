@@ -84,6 +84,7 @@ import {
   createMockMcpEndpoint,
 } from "./mock-harness";
 import type { HarnessesApi } from "./harnesses";
+import type { WriteGateApi } from "@/modules/write-gate";
 import { splitLeadingQuote, type AgentsApi } from "./agents";
 
 /** KV namespace for agent state (sessionId per task, workspace trust flag). */
@@ -111,6 +112,9 @@ export interface AgentRuntimeDeps {
   /** Each harness as configured (`core.harnesses`): how a restored session
    *  is spawned again. */
   harnesses: Pick<HarnessesApi, "harness" | "ready" | "isReady">;
+  /** What a harness's `fs/write_text_file` goes through (`core.writeGate`):
+   *  other modules may refuse a write, or report on it, from there. */
+  writeGate?: Pick<WriteGateApi, "run">;
 }
 
 /**
@@ -625,9 +629,21 @@ export class AgentTask {
               .services(this.workspacePath)
               .documents.read(path, options),
           writeTextFile: async (path, content) => {
-            await this.deps
-              .services(this.workspacePath)
-              .documents.write(path, content);
+            const write = async () => {
+              await this.deps
+                .services(this.workspacePath)
+                .documents.write(path, content);
+            };
+            if (!this.deps.writeGate) return write();
+            await this.deps.writeGate.run(
+              {
+                workspacePath: this.workspacePath,
+                path,
+                content,
+                writer: { kind: "agent", taskId: this.taskId, harness: this.harness.id },
+              },
+              write,
+            );
           },
         },
         { workspacePath: this.workspacePath, path: pathutil },
