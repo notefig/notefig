@@ -22,13 +22,15 @@
  *   (caret kept, out of the undo history). Shared (MET-271) sends the
  *   same notice for content merged with the editor's own unsaved edits
  *   (`merged: true`): the merge ran in the worker and the result was
- *   adopted the same way. `remoteCursors` and `leases` (latest
- *   value) are the seams for MET-272 presence and MET-273 leases; nothing
- *   sets them in solo.
+ *   adopted the same way. `remoteCursors` (latest value, MET-272) carries
+ *   the other devices' carets and agents, already mapped onto this
+ *   clone's head by the worker, set only when they change; `leases` is
+ *   MET-273's seam. Nothing sets either in solo.
  * - editor → sync: `cursor` (latest value) is the local caret as block
- *   plus offset; `requestLease` asks for blocks before an edit. Solo
- *   ignores the cursor and grants every lease (there is no one to hold
- *   against); MET-273 gates on the branch CAS.
+ *   plus offset (MET-272 publishes it, throttled, in presence);
+ *   `requestLease` asks for blocks before an edit. Solo grants every
+ *   lease (there is no one to hold against); MET-273 gates on the branch
+ *   CAS.
  *
  * The editor side attaches only at the shared level; in solo nothing new
  * runs in the editor.
@@ -162,26 +164,63 @@ export interface SyncIncomingContent {
   merged?: boolean;
 }
 
-/** A position as block plus offset, relative to a branch commit, so every
- *  client resolves it the same way (MET-266 decision 19). */
-export interface SyncBlockAnchor {
-  commit: string;
+/**
+ * A position in a document as its top-level block (decision 17: every
+ * top-level ProseMirror node is one block) plus an offset in ProseMirror
+ * positions from just before that block. Blocks are found across versions
+ * by `merge/blocks.ts`'s alignment, the same identity the merge and leases
+ * use (decision 6).
+ */
+export interface SyncBlockPosition {
   blockIndex: number;
   offset: number;
 }
 
-/** The local caret and selection. */
-export interface SyncCursor {
-  anchor: SyncBlockAnchor;
-  head: SyncBlockAnchor;
+/** A position relative to a branch commit, so every client resolves it the
+ *  same way (MET-266 decision 19). */
+export interface SyncBlockAnchor extends SyncBlockPosition {
+  commit: string;
 }
 
-/** Another device's (or agent's) caret (MET-272). */
-export interface SyncRemoteCursor extends SyncCursor {
+/**
+ * The local caret and selection, editor → sync, in the editor's own
+ * document. The editor's content is the branch head plus whatever was
+ * typed since the last commit (a few seconds at most at the shared
+ * level), so sync takes it as relative to the head commit and stamps
+ * that commit on publish.
+ */
+export interface SyncCursor {
+  anchor: SyncBlockPosition;
+  head: SyncBlockPosition;
+}
+
+/** What an agent is doing, as presence carries it. */
+export interface SyncAgentActivity {
+  taskId: string;
+  /** The harness id (`claude`, `codex`, …). */
+  harness: string;
+  /** The task's title. */
+  label: string;
+  /** `editing`: a write is in flight; `working`: the turn is running. */
+  status: "working" | "editing";
+}
+
+/**
+ * Another device's caret, or one of its agents, sync → editor (MET-272).
+ * Already mapped by the sync worker onto this client's branch head, which
+ * is what the open editor's content is based on; the editor only resolves
+ * the block and offset in its document and draws it.
+ */
+export interface SyncRemoteCursor {
+  /** The device id, or `<deviceId>/<taskId>` for an agent. */
   holderId: string;
   name: string;
   color: string;
-  agent?: { taskId: string; harness: string };
+  anchor: SyncBlockPosition;
+  /** The selection's other end; null for a bare caret (or an agent). */
+  head: SyncBlockPosition | null;
+  /** Set for an agent: drawn as a holder with an agent marker. */
+  agent?: SyncAgentActivity;
 }
 
 /** A leased block as the editor draws it (MET-273). */
@@ -221,7 +260,7 @@ export interface SyncDocumentPort {
   deliver(event: SyncIncomingContent): Promise<void>;
   remoteCursors: LatestValue<SyncRemoteCursor[]>;
   leases: LatestValue<SyncLeaseView[]>;
-  /** The editor's latest caret. */
+  /** The editor's latest caret (null: none, or the editor detached). */
   cursor: LatestValue<SyncCursor | null>;
   readonly closed: boolean;
 }
