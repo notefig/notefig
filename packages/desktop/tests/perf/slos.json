@@ -23,6 +23,18 @@
       "title": "Type and delete (8k-line doc)"
     },
     {
+      "id": "input-delete-solo-sync",
+      "title": "Type and delete (8k-line doc, solo sync workspace)"
+    },
+    {
+      "id": "autosave",
+      "title": "Autosave: keystroke → file written (8k-line doc)"
+    },
+    {
+      "id": "autosave-solo-sync",
+      "title": "Autosave: keystroke → file written (8k-line doc, solo sync workspace)"
+    },
+    {
       "id": "widget-input",
       "title": "Prompt widget: type and delete"
     },

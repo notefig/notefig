@@ -3,6 +3,10 @@
  * prompt widgets — caret moves, a caret move out of a select-all, typing
  * and deleting, and typing and caret moves inside a widget's draft.
  *
+ * Typing latency and autosave (keystroke → the file rewritten on disk) are
+ * measured for each kind of workspace in KINDS, by the same code; the
+ * other scenarios only for a regular one.
+ *
  * The caret visits the top, middle and end of the document, a table cell,
  * a list item, a heading and every widget, because what a keystroke costs
  * depends on where it lands. Everything typed is deleted again, so the
@@ -12,6 +16,7 @@ import { test, expect, type Page } from "@playwright/test";
 import path from "node:path";
 import { perfWorkspace, resetLargeDocument, WIDGETS } from "./fixture";
 import {
+  autosave,
   installProbe,
   readSamples,
   scenario,
@@ -20,6 +25,13 @@ import {
 } from "./latency";
 import { saveSamples } from "./results";
 import { withShim } from "./shim";
+
+/**
+ * What kind of workspace is measured. A kind other than "regular" names
+ * its SLOs with a suffix (`input-delete-solo-sync`), so a comparison
+ * between kinds is a diff of rows.
+ */
+type WorkspaceKind = "regular" | "solo-sync";
 
 /** Where to put the caret: a kind of block, at a fraction of the doc. */
 type Target =
@@ -143,9 +155,18 @@ async function typeAndDelete(page: Page): Promise<void> {
   for (let i = 0; i < TYPED.length; i++) await stroke(page, "Backspace");
 }
 
-async function openLargeDocument(page: Page): Promise<void> {
+async function openLargeDocument(
+  page: Page,
+  kind: WorkspaceKind,
+): Promise<string> {
   const workspace = await perfWorkspace();
   await resetLargeDocument(workspace);
+  if (kind === "solo-sync") {
+    // MET-270: the one place "solo-sync" differs from "regular". Until sync
+    // exists it is the same workspace. Then write its `.notefig/sync.json`
+    // here, in a copy of the fixture (this directory is shared, and reused,
+    // by the regular runs).
+  }
   await page.goto("/");
   await page.waitForFunction(() => Boolean(window.__notefigTest));
   await page.evaluate(
@@ -160,6 +181,35 @@ async function openLargeDocument(page: Page): Promise<void> {
   ).toHaveCount(WIDGETS, { timeout: 30_000 });
   // Let the open's tail (tree, collections, minimap) settle first.
   await page.waitForTimeout(3000);
+  return path.join(workspace, "large.md");
+}
+
+/**
+ * The typing SLOs of a `kind` of workspace: type and delete at every
+ * place, then the same keystrokes timed to the file being rewritten.
+ * Returns the autosave latencies, which the page's probe can't see.
+ */
+async function measureTyping(
+  page: Page,
+  kind: WorkspaceKind,
+  file: string,
+): Promise<number[]> {
+  const id = (slo: string) => (kind === "regular" ? slo : `${slo}-${kind}`);
+  await scenario(page, id("input-delete"), async () => {
+    for (const place of PLACES) {
+      await setLabel(page, null);
+      await placeCaret(page, place);
+      await setLabel(page, id("input-delete"));
+      await typeAndDelete(page);
+    }
+  });
+  const saved: number[] = [];
+  for (const place of PLACES) {
+    await placeCaret(page, place);
+    for (const key of ["x", "Backspace"])
+      saved.push(await autosave(page, file, key));
+  }
+  return saved;
 }
 
 test("edit an 8,000-line document with tables and widgets", async ({
@@ -167,7 +217,7 @@ test("edit an 8,000-line document with tables and widgets", async ({
 }) => {
   await withShim(async () => {
     await installProbe(page);
-    await openLargeDocument(page);
+    const file = await openLargeDocument(page, "regular");
 
     await scenario(page, "caret-move", async () => {
       for (const place of PLACES) {
@@ -190,14 +240,7 @@ test("edit an 8,000-line document with tables and widgets", async ({
       await page.waitForTimeout(300);
     }
 
-    await scenario(page, "input-delete", async () => {
-      for (const place of PLACES) {
-        await setLabel(page, null);
-        await placeCaret(page, place);
-        await setLabel(page, "input-delete");
-        await typeAndDelete(page);
-      }
-    });
+    const saved = await measureTyping(page, "regular", file);
 
     for (let index = 0; index < WIDGETS; index++) {
       await placeCaret(page, { kind: "widget", index });
@@ -222,7 +265,21 @@ test("edit an 8,000-line document with tables and widgets", async ({
       expect(await page.evaluate(widgetDraft, index)).toBe("");
     }
 
-    await saveSamples("editor", await readSamples(page));
+    const samples = await readSamples(page);
+    samples.latency.autosave = saved;
+    await saveSamples("editor", samples);
+    await page.goto("about:blank");
+  });
+});
+
+test("type in a solo sync workspace", async ({ page }) => {
+  await withShim(async () => {
+    await installProbe(page);
+    const file = await openLargeDocument(page, "solo-sync");
+    const saved = await measureTyping(page, "solo-sync", file);
+    const samples = await readSamples(page);
+    samples.latency["autosave-solo-sync"] = saved;
+    await saveSamples("editor-solo-sync", samples);
     await page.goto("about:blank");
   });
 });
