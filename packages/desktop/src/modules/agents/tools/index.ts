@@ -3,10 +3,6 @@ import { workspaceListDocuments } from "./workspace-list-documents";
 import { workspaceReadDocument } from "./workspace-read-document";
 import { documentReadRange } from "./document-read-range";
 import { workspaceOpenFiles } from "./workspace-open-files";
-import { historyLog } from "./history-log";
-import { historyDiff } from "./history-diff";
-import { historyCheckpoint } from "./history-checkpoint";
-import { historyRestore } from "./history-restore";
 import { widgetRespond } from "./widget-respond";
 
 /**
@@ -22,10 +18,6 @@ export const toolRegistry: readonly AgentTool<unknown, unknown>[] = [
   workspaceReadDocument,
   documentReadRange,
   workspaceOpenFiles,
-  historyLog,
-  historyDiff,
-  historyCheckpoint,
-  historyRestore,
   widgetRespond,
 ] as unknown as readonly AgentTool<unknown, unknown>[];
 

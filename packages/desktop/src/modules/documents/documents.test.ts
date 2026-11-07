@@ -139,14 +139,14 @@ describe("documents.write adoption (open editor)", () => {
     expect(liveMarkdown()).toContain("id: q_1234");
   });
 
-  it("history_restore-shaped full replace lands in the live editor", async () => {
+  it("a whole-file replace lands in the live editor", async () => {
     writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
-    openEditor("# Current\n\nEdited since checkpoint.\n");
+    openEditor("# Current\n\nEdited before the rewrite.\n");
 
-    await documents.write(path, "# Restored\n\nCheckpoint content.\n");
+    await documents.write(path, "# Rewritten\n\nNew content.\n");
 
-    expect(liveMarkdown()).toContain("Checkpoint content.");
-    expect(liveMarkdown()).not.toContain("Edited since checkpoint.");
+    expect(liveMarkdown()).toContain("New content.");
+    expect(liveMarkdown()).not.toContain("Edited before the rewrite.");
   });
 
   it("skips adoption while a local edit is mid-debounce (prepareAdoption null), disk write intact", async () => {
