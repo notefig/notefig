@@ -3,3 +3,4 @@ export * from "./isomorphicGitFs";
 export * from "./isomorphicGitService";
 export * from "./workerBoundary";
 export * from "./workerRuntime";
+export * from "./smartHttp/httpPorts";

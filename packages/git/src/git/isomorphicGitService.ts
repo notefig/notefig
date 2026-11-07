@@ -1,20 +1,36 @@
 import git from "isomorphic-git";
 import type { FsClient } from "isomorphic-git";
 
+import { toGitError } from "./errors";
 import { createIsomorphicGitFs } from "./isomorphicGitFs";
+import { fetchRefs, pushRefs, type CapabilityCache } from "./remoteOps";
+import { rebaseOnto, resolveCommitish } from "./repo/rebase";
+import type { RepoContext } from "./repo/repoContext";
+import { defaultHttpClient } from "./smartHttp/httpPorts";
+import { lsRefs } from "./smartHttp/lsRefs";
+import { createHttpTransport, type GitTransport } from "./smartHttp/transport";
 import {
   GitError,
+  type GitFetchRef,
+  type GitFetchRefsOptions,
+  type GitFetchRefsResult,
+  type GitPushRefsOptions,
+  type GitPushRefsResult,
+  type GitRebaseOntoInput,
+  type GitRebaseResult,
+  type GitRefUpdate,
+  type GitRemote,
+  type GitRemoteRef,
+  type GitServiceDeps,
+  type GitWriteRefInput,
   type GitAddInput,
   type GitCheckoutPathsInput,
   type GitCommitInput,
   type GitCreateBranchInput,
-  type GitFetchInput,
   type GitFileChange,
   type GitInitInput,
   type GitListBranchesInput,
   type GitLogInput,
-  type GitPullInput,
-  type GitPushInput,
   type GitReadTextFileInput,
   type GitRemoveInput,
   type GitAddAllAndCommitInput,
@@ -36,31 +52,6 @@ function joinGitPath(repoPath: string, relativePath: string): string {
 
 function encodeText(value: string): Uint8Array {
   return textEncoder.encode(value);
-}
-
-function toGitError(error: unknown): GitError {
-  if (error instanceof GitError) {
-    return error;
-  }
-
-  const name =
-    typeof error === "object" && error !== null && "name" in error
-      ? String((error as { name: unknown }).name)
-      : "Error";
-  const message =
-    typeof error === "object" && error !== null && "message" in error
-      ? String((error as { message: unknown }).message)
-      : "Unknown git error";
-
-  switch (name) {
-    case "NotFoundError":
-      return new GitError("RepoNotFound", message, error);
-    case "FastForwardError":
-    case "PushRejectedError":
-      return new GitError("NotFastForward", message, error);
-    default:
-      return new GitError("CorruptRepository", message, error);
-  }
 }
 
 function validateMessage(message: string): void {
@@ -181,13 +172,55 @@ export class IsomorphicGitService implements GitService {
    */
   private cache: Record<string, unknown> = {};
 
+  /** receive-pack capabilities per remote URL, looked up on first push. */
+  private readonly pushCapabilities: CapabilityCache = new Map();
+
   constructor(
     private readonly host: GitStorageHost,
     repo: GitRepoRef,
+    private readonly deps: GitServiceDeps = {},
   ) {
     this.fsClient = createIsomorphicGitFs(host);
     this.dir = repo.repoPath;
     this.gitdir = repo.gitDir;
+  }
+
+  private get ctx(): RepoContext {
+    return {
+      git: {
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+      },
+      host: this.host,
+    };
+  }
+
+  private transport(remote: GitRemote): GitTransport {
+    const http = this.deps.http ?? defaultHttpClient();
+    if (!http) {
+      throw new GitError(
+        "UnsupportedOperation",
+        "No http client to reach remotes with.",
+      );
+    }
+    if (!/^https?:\/\//.test(remote.url)) {
+      throw new GitError(
+        "UnsupportedOperation",
+        `Only HTTP(S) remotes are supported: ${remote.url}`,
+      );
+    }
+    return createHttpTransport(remote, http, this.deps.auth);
+  }
+
+  /** Run `op`, classifying anything it throws. */
+  private async run<T>(op: () => Promise<T>): Promise<T> {
+    try {
+      return await op();
+    } catch (error) {
+      throw this.fail(error);
+    }
   }
 
   /** Wrap-and-throw seam: classify, and drop the cache on repo-level loss. */
@@ -786,28 +819,106 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async fetch(
-    _input: GitFetchInput,
-  ): Promise<import("isomorphic-git").FetchResult> {
-    throw new GitError(
-      "UnsupportedOperation",
-      "Fetch is not implemented in v1.",
+  async listRemoteRefs(
+    remote: GitRemote,
+    prefixes: string[],
+  ): Promise<GitRemoteRef[]> {
+    return this.run(() => lsRefs(this.transport(remote), prefixes));
+  }
+
+  async fetchRefs(
+    remote: GitRemote,
+    refs: GitFetchRef[],
+    options?: GitFetchRefsOptions,
+  ): Promise<GitFetchRefsResult> {
+    return this.run(() =>
+      fetchRefs(this.ctx, this.transport(remote), refs, options),
     );
   }
 
-  async pull(_input: GitPullInput): Promise<void> {
-    throw new GitError(
-      "UnsupportedOperation",
-      "Pull is not implemented in v1.",
+  async pushRefs(
+    remote: GitRemote,
+    updates: GitRefUpdate[],
+    options?: GitPushRefsOptions,
+  ): Promise<GitPushRefsResult> {
+    const caps = { cache: this.pushCapabilities, key: remote.url };
+    return this.run(() =>
+      pushRefs(this.ctx, this.transport(remote), caps, updates, options),
     );
   }
 
-  async push(
-    _input: GitPushInput,
-  ): Promise<import("isomorphic-git").PushResult> {
-    throw new GitError(
-      "UnsupportedOperation",
-      "Push is not implemented in v1.",
+  async readRef(ref: string): Promise<string | null> {
+    try {
+      return await git.resolveRef({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        ref,
+      });
+    } catch (error) {
+      const gitError = toGitError(error);
+      if (gitError.code === "RepoNotFound") return null;
+      throw this.fail(error);
+    }
+  }
+
+  async writeRef(input: GitWriteRefInput): Promise<void> {
+    await this.run(() =>
+      git.writeRef({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        ref: input.ref,
+        value: input.oid,
+        force: input.force ?? true,
+      }),
     );
+  }
+
+  async deleteRef(ref: string): Promise<void> {
+    if ((await this.readRef(ref)) === null) return;
+    await this.run(() =>
+      git.deleteRef({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        ref,
+      }),
+    );
+  }
+
+  async writeBlob(content: Uint8Array): Promise<string> {
+    return this.run(() =>
+      git.writeBlob({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        blob: content,
+      }),
+    );
+  }
+
+  async readBlob(oid: string): Promise<Uint8Array> {
+    return this.run(async () => {
+      const { blob } = await git.readBlob({ ...this.ctx.git, oid });
+      return blob;
+    });
+  }
+
+  async mergeBase(a: string, b: string): Promise<string | null> {
+    return this.run(async () => {
+      const [oidA, oidB] = await Promise.all(
+        [a, b].map((ref) => resolveCommitish(this.ctx, ref)),
+      );
+      const [base] = await git.findMergeBase({
+        ...this.ctx.git,
+        oids: [oidA, oidB],
+      });
+      return base ?? null;
+    });
+  }
+
+  async rebaseOnto(input: GitRebaseOntoInput): Promise<GitRebaseResult> {
+    return this.run(() => rebaseOnto(this.ctx, this.deps.mergeDriver, input));
   }
 }
