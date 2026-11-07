@@ -393,6 +393,50 @@ describeGit("smart HTTP remote operations (git http-backend)", () => {
       );
     });
 
+    it("injected driver: pickBinary keeps one side of a binary both changed; without it, a conflict", async () => {
+      const picks: string[] = [];
+      const driver: GitMergeDriver = {
+        merge: () => ({ failed: "not called" }),
+        pickBinary({ path, holder }) {
+          picks.push(`${path}:${holder}`);
+          return "theirs";
+        },
+      };
+      const service = new IsomorphicGitService(
+        new NodeGitStorageHost(a.repo.repoPath),
+        a.repo,
+        { http: nodeHttpClient(), mergeDriver: driver },
+      );
+      const { upstream, local } = await diverge(
+        { "img.bin": "OURS\u0000bytes" },
+        { "img.bin": "THEIRS\u0000bytes" },
+      );
+      const conflicted = await new IsomorphicGitService(
+        new NodeGitStorageHost(a.repo.repoPath),
+        a.repo,
+        { http: nodeHttpClient(), mergeDriver: { merge: driver.merge } },
+      ).rebaseOnto({ theirs: upstream });
+      expect(conflicted).toMatchObject({
+        status: "conflicted",
+        conflicts: [{ commit: local, path: "img.bin", reason: "binary" }],
+      });
+
+      const result = await service.rebaseOnto({ theirs: upstream });
+      expect(picks).toEqual(["img.bin:theirs"]);
+      expect(result).toMatchObject({
+        status: "rebased",
+        merged: [{ commit: local, path: "img.bin", overwritten: [] }],
+      });
+      expect(readFileSync(join(a.repo.repoPath, "img.bin"), "utf8")).toBe(
+        "THEIRS\u0000bytes",
+      );
+      expect(await service.changedFiles(local, upstream)).toEqual([
+        expect.objectContaining({ path: "img.bin" }),
+      ]);
+      const tip = (await service.readRef(MAIN))!;
+      expect(await service.changedFiles(upstream, tip)).toEqual([]);
+    });
+
     it("fast-forwards, leaving an uncommitted edit alone", async () => {
       const upstream = await b.commitFiles(
         { "note.md": "new\n", "other.md": "o\n" },
