@@ -51,7 +51,7 @@ export interface TestAgents {
  * Every dependency defaults to a fake a test can override: the fs answers
  * every write and reads empty files, the MCP endpoint is inert, spawning a
  * real transport throws (tasks start through the transport factory a test
- * passes), and the tools' history and files throw until given.
+ * passes), and the tools' workspace files throw until given.
  */
 export function testAgents(
   overrides: Partial<Omit<AgentRuntimeDeps, "kv" | "hooks">> & {
@@ -89,9 +89,6 @@ export function testAgents(
       },
     },
     services: () => ({
-      get history(): never {
-        throw new Error("no history in this test");
-      },
       get files(): never {
         throw new Error("no workspace files in this test");
       },

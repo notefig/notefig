@@ -49,7 +49,7 @@ export function serverInstructions(): string {
     `\`line\`/\`limit\`. ` +
     `Prefer these tools over generic file or shell tools for this ` +
     `workspace's documents: they see live editor state (unsaved edits, open ` +
-    `tabs) and document history. A request about "this section" or "this ` +
+    `tabs). A request about "this section" or "this ` +
     `doc" expects you to edit the document, not to describe the edit, unless ` +
     `the user is asking a question, or the request could mean different ` +
     `things and the document doesn't settle which: then ask with a choice ` +

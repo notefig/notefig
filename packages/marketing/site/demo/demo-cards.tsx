@@ -1,6 +1,4 @@
-import { useCallback, useState } from "react";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
-import i18n from "@/utils/intl";
 import { describeTaskMeta } from "@/modules/agents/react";
 import { formatTimeAgo } from "@/utils/format";
 import { HarnessRow } from "@/components/agent/harness-settings";
@@ -10,9 +8,8 @@ import {
   type StatusGlyphState,
 } from "@/components/agent/status-glyph";
 import { HarnessLogo } from "@/components/agent/harness-logo";
-import { CheckpointsList } from "@/components/editor/git/checkpoint-panel";
 import { AppEmbed } from "./app-embed";
-import { DEMO_CHECKPOINTS, DEMO_SESSIONS } from "./demo-fixtures";
+import { DEMO_SESSIONS } from "./demo-fixtures";
 
 /*
  * Real app components on the marketing page. Each demo renders the app's own
@@ -126,53 +123,6 @@ export function DemoWorkspaces() {
             <HarnessLogo harnessId={harnessId} className="size-3 text-muted-foreground" />
           </div>
         ))}
-      </div>
-    </AppEmbed>
-  );
-}
-
-// ---------- Commit history, with a working (fake) revert ----------
-
-const t = (key: string, defaultValue: string) =>
-  i18n.t(key, { defaultValue });
-
-export function DemoHistory({ width }: { width: number }) {
-  const [checkpoints, setCheckpoints] = useState(DEMO_CHECKPOINTS);
-  const [reverting, setReverting] = useState<string | null>(null);
-
-  const revert = useCallback(
-    (checkpoint: (typeof DEMO_CHECKPOINTS)[number]) => {
-      setReverting(checkpoint.id);
-      window.setTimeout(() => {
-        setCheckpoints((current) => [
-          {
-            id: `revert-${checkpoint.id}-${current.length}`,
-            hash: Math.random().toString(16).slice(2, 9),
-            message: `Revert ${checkpoint.hash}`,
-            timestamp: new Date(),
-          },
-          ...current,
-        ]);
-        setReverting(null);
-      }, 900);
-    },
-    [],
-  );
-
-  return (
-    <AppEmbed zoom={0.95} width={width} height={250}>
-      <div className="flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card py-1 shadow-sm">
-        <CheckpointsList
-          panelState="ready"
-          checkpoints={checkpoints.slice(0, 6)}
-          actions={[]}
-          message={null}
-          isError={false}
-          t={t}
-          onRevert={revert}
-          isReverting={reverting !== null}
-          activeRevertId={reverting}
-        />
       </div>
     </AppEmbed>
   );

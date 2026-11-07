@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { withMockedTauri } from "@/testing/tauri-mock";
-import { createGitStorageHost } from "../git-storage-host";
 import { TauriPlatformAdapter } from "../tauri-adapter";
 
 // The adapter is ~800 lines and its full init touches LazyStore / window /
@@ -96,38 +95,6 @@ describe("ignore rules plumbing", () => {
         ignoreExtensions: ["mp4"],
       },
     ]);
-  });
-
-  it("git storage host readDir never opts into ignore filtering", async () => {
-    // The regression that matters: git must see the complete tree —
-    // .git internals AND dependency dirs — regardless of app ignore rules.
-    const tauri = withMockedTauri({
-      read_directory: () => ({
-        ok: true,
-        value: [
-          { path: "/ws/.git", type: "directory" as const },
-          { path: "/ws/node_modules", type: "directory" as const },
-        ],
-      }),
-    });
-    const adapter = new TauriPlatformAdapter();
-
-    const entries = await createGitStorageHost(adapter.fs, "/ws").readDir(
-      "/ws",
-    );
-
-    expect(tauri.calls("read_directory")).toEqual([
-      {
-        path: "/ws",
-        recursive: false,
-        includeFiles: true,
-        includeDirectories: true,
-        includeHidden: true,
-        ignoreDirectories: null,
-        ignoreExtensions: null,
-      },
-    ]);
-    expect(entries.map((e) => e.name)).toEqual([".git", "node_modules"]);
   });
 });
 

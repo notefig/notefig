@@ -78,7 +78,7 @@ export interface FilesDeps {
   workspacePath: string;
   fs: FileSystemSurface;
   queryClient: QueryClient;
-  /** Where `files:changed` and `git:stale` are announced. */
+  /** Where `files:changed` is announced. */
   hooks: Pick<Hooks, "emit">;
 }
 
@@ -334,7 +334,7 @@ export interface WorkspaceFiles {
    * a path with no content row.
    */
   updateLoadedContent(path: string, content: string): void;
-  /** Search results and git rows go stale (debounced): a write the
+  /** Search results go stale (debounced): a write the
    *  watcher suppresses, or a change the watcher reported. */
   invalidateDerived(): void;
   /** The watcher reported these paths changed, and their rows are
@@ -443,7 +443,6 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
       void queryClient.invalidateQueries({
         queryKey: ["search-content", workspacePath],
       });
-      hooks.emit("git:stale", { workspacePath });
     }, INVALIDATE_DEBOUNCE_MS);
   };
 

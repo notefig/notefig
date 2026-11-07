@@ -72,8 +72,8 @@ export function getRelativePath(path: string, workspaceRoot: string): string {
 
 /** The app's own directory is deliberately NOT hidden (MET-135) — it
  * appears in the tree — but the only child of it that is visible is the
- * scratchpads folder; everything else it holds (`.notefig/.git`, agent
- * state, …) is hidden by position rather than by name. Mirrors
+ * scratchpads folder; everything else it holds (agent state, …) is
+ * hidden by position rather than by name. Mirrors
  * walkdir_utils::{APP_DIR_NAME, APP_VISIBLE_CHILD_NAME} and
  * modules/scratchpads/scratchpads.ts. */
 const APP_DIR_NAME = ".notefig";

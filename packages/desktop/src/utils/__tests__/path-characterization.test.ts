@@ -10,7 +10,6 @@ import {
 } from "../fs";
 import { path as pathutil, workspaceKey } from "../path";
 import { isIgnoredPath } from "../ignore";
-import { historyGitDir } from "@/modules/history";
 
 /**
  * Characterization baseline for the Windows path migration (MET-157 B2).
@@ -158,11 +157,6 @@ describe("flatEntriesToTree", () => {
 });
 
 describe("key producers", () => {
-  it("historyGitDir spelling (persisted via git config/locks — must never drift on mac)", () => {
-    expect(historyGitDir(WS)).toBe(`${WS}/.notefig/.git`);
-    expect(historyGitDir(`${WS}/`)).toBe(`${WS}/.notefig/.git`);
-  });
-
   it("trust/TaskManager keys via workspaceKey are the identity on mac — persisted keys never change spelling", () => {
     expect(workspaceKey(WS)).toBe(WS);
     expect(`trust:${workspaceKey(WS)}`).toBe(`trust:${WS}`);

@@ -505,10 +505,10 @@ export class NotefigAcpClient implements Client {
    * For the beta we run fully silent: auto-approve every ACP permission
    * request so the agent isn't gated on a UI prompt for every action.
    * Deliberate (a product decision), with these load-bearing caveats:
-   *   - The metrists MCP tools that genuinely need consent (`history_restore`)
-   *     gate INTERNALLY through `dispatchToolCall` → the broker directly — a
+   *   - An MCP tool that genuinely needs consent (`requiresPermission`)
+   *     gates INTERNALLY through `dispatchToolCall` → the broker directly — a
    *     path that never reaches here — so this blanket grant does NOT defeat
-   *     them; they still prompt.
+   *     it; it still prompts.
    *   - Workspace trust is established once, up front, before any turn runs.
    *   - The pairing secret gates the whole tunnel; nothing untrusted can reach
    *     this method.

@@ -11,6 +11,7 @@ import { createCore, type AnyModule, type Core } from "@notefig/core";
 import { QueryClient } from "@tanstack/react-query";
 import { platformAdapter } from "@/adapters";
 import { agentStoreModule } from "@/modules/agents/agent-collections";
+import { appDirExcludeModule } from "@/modules/app-dir-exclude";
 import { agentDirectivesModule } from "@/modules/agents/agent-directives";
 import { harnessProbeModule } from "@/modules/agents/harness-probe";
 import { mockAgentModule } from "@/modules/agents/mock-harness";
@@ -26,7 +27,6 @@ import { diffBlocksModule } from "@/modules/diff-blocks";
 import { documentsModule } from "@/modules/documents";
 import { editorsModule } from "@/modules/editors";
 import { filesModule } from "@/modules/files";
-import { gitModule } from "@/modules/git";
 import { layoutModule, type UrlState } from "@/modules/layout";
 import { tabsModule } from "@/modules/tabs";
 import { promptRoundsModule } from "@/modules/prompt-rounds";
@@ -43,8 +43,6 @@ import {
   restoreWorkspacesModule,
   workspacesModule,
 } from "@/modules/workspaces";
-import { gitWorkerModule } from "@/modules/git-worker";
-import { historyModule } from "@/modules/history";
 import { kvModule } from "@/modules/kv";
 import { projectSettingsModule } from "@/modules/project-settings";
 import { lastToolModule, sidebarViewModule } from "@/modules/sidebar-view";
@@ -68,12 +66,11 @@ export function runtimeModules(): AnyModule[] {
     // What entering a workspace does, besides opening it.
     scratchpadLandingModule,
     sidebarViewModule,
-    // Per open workspace: `core.workspace(ws).files`, `.git`…
+    // Per open workspace: `core.workspace(ws).files`, `.scratchpads`…
     filesModule,
-    gitModule,
     scratchpadsModule,
-    gitWorkerModule,
-    historyModule,
+    // `.notefig/` stays out of the user's own git.
+    appDirExcludeModule,
     agentStoreModule,
     // `@model:` and `@skill:` in the composers (`core.directives`).
     agentDirectivesModule,
