@@ -173,11 +173,14 @@ export function createDocuments({
   };
 
   /** Push written content into the path's live editor, if one is open.
-   *  False when the editor kept local edits instead (typed meanwhile). */
+   *  False when the editor kept local edits instead (typed meanwhile).
+   *  `version`: sync's writes adopt only while the editor still holds it,
+   *  so a keystroke typed during the write is never diffed away. */
   const adoptIntoEditor = async (
     target: string,
     content: string,
     source: DocumentWriteSource,
+    version: DocumentVersion | undefined,
   ): Promise<boolean> => {
     const editor = editors.markdownEditor(target);
     if (!editor || editor.isDestroyed) return true;
@@ -185,6 +188,7 @@ export function createDocuments({
     const doc = await sync.prepareAdoption(content);
     if (editor.isDestroyed) return true;
     if (!doc) return false;
+    if (version !== undefined && editor.state.doc !== version) return false;
     const contentHash = calculateContentHash(content);
     const adoption = adoptExternalContent(editor, doc, {
       source: { path: target, contentHash, attribute },
@@ -245,14 +249,16 @@ export function createDocuments({
       const move = pendingMoves.get(path);
       const target = move ? await move : path;
       return trackWrite(target, async (): Promise<DocumentWriteResult> => {
+        let version: DocumentVersion | undefined;
         if (source === "sync") {
           const blocked = syncWriteBlocked(target, options?.expect);
           if (blocked) return blocked;
+          version = options?.expect ?? editors.markdownEditor(target)?.state.doc;
         }
         await writeToDisk(target, content);
         updateLoadedRows(target, content);
         hooks?.emit("files:written", { paths: [target], source });
-        const adopted = await adoptIntoEditor(target, content, source);
+        const adopted = await adoptIntoEditor(target, content, source, version);
         if (adopted || source !== "sync") return "written";
         return options?.expect !== undefined ? "stale" : "held";
       });

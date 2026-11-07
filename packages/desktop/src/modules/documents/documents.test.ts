@@ -216,6 +216,26 @@ describe("documents.write adoption (open editor)", () => {
     expect(liveMarkdown()).not.toContain("Agent.");
   });
 
+  it("never diffs away a keystroke typed while a sync write is landing", async () => {
+    let land!: () => void;
+    writeMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          land = () => resolve({ succeeded: [path], failed: [] });
+        }),
+    );
+    openEditor("# Doc\n\nOld.\n");
+    const editor = editors.markdownEditor(path)!;
+
+    const write = documents.write(path, "# Doc\n\nRemote.\n", { source: "sync" });
+    await vi.waitFor(() => expect(writeMock).toHaveBeenCalled());
+    editor.chain().insertContentAt(editor.state.doc.content.size - 1, " Typed.").run();
+    land();
+
+    await expect(write).resolves.toBe("held");
+    expect(liveMarkdown()).toContain("Old. Typed.");
+  });
+
   it("hands out the editor's text with its version, and writes only while it still holds it", async () => {
     writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
     expect(await documents.editorText(path)).toBeNull();
