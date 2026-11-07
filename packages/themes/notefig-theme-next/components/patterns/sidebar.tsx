@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ChapterNavigation } from "./chapter-navigation";
 import { useShare, type ChapterLike } from "@/lib/utils";
 import { MobileChapterDrawer } from "./mobile-chapter-drawer";
-import type { Chapter, Meta } from "@/.contentlayer/generated";
+import type { Chapter, Meta } from "content-collections";
 import type { ChapterNavigationProps } from "./chapter-navigation";
 
 export function Sidebar({

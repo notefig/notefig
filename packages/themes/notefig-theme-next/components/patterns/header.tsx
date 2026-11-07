@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ThemeSwitch } from "./theme-switch";
 import { Separator } from "@/components/ui/separator";
-import type { Meta } from "contentlayer/generated";
+import type { Meta } from "content-collections";
 
 export function Header({
   meta,
