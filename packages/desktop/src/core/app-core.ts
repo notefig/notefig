@@ -35,6 +35,7 @@ import { recentDocumentsModule } from "@/modules/recent-documents";
 import { scratchpadLandingModule } from "@/modules/scratchpads";
 import { scratchpadsModule } from "@/modules/scratchpads";
 import { seenModule } from "@/modules/seen";
+import { syncModule, syncRuntimeModule } from "@/modules/sync";
 import { sessionModule } from "@/modules/session";
 import { usageModule } from "@/modules/usage";
 import { feedbackModule } from "@/modules/feedback";
@@ -71,6 +72,11 @@ export function runtimeModules(): AnyModule[] {
     scratchpadsModule,
     // `.notefig/` stays out of the user's own git.
     appDirExcludeModule,
+    // A workspace with `.notefig/sync.json` syncs with its git remote; any
+    // other is inert and loads no sync code (`core.syncRuntime` is the one
+    // lazy door to the engine and its worker).
+    syncRuntimeModule,
+    syncModule,
     agentStoreModule,
     // `@model:` and `@skill:` in the composers (`core.directives`).
     agentDirectivesModule,

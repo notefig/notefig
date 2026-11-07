@@ -678,6 +678,7 @@ i18n
           telemetryDisabledInBuild:
             "Telemetry is disabled in this build — no data is ever sent.",
           usageSettingsTitle: "Usage",
+          syncSettingsTitle: "Sync",
           usageTokens: "Tokens",
           usageInput: "Input",
           usageCacheRead: "Cache read",

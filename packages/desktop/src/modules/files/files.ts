@@ -88,8 +88,19 @@ declare module "@notefig/core" {
      *  renamed or rewritten paths), already applied to its file rows. For
      *  state derived from particular files (project settings). */
     "files:changed": { workspacePath: string; paths: string[] };
+    /**
+     * The app wrote, created, deleted or moved these files (absolute
+     * paths) — once per save, never per keystroke. The watcher suppresses
+     * the app's own echoes, so this is how a listener (sync) learns of
+     * them. `source` says whose write: the app's own (autosave, the tree),
+     * an agent's (`core.documents`), or sync applying remote content.
+     */
+    "files:written": { paths: string[]; source: FileWriteSource };
   }
 }
+
+/** Who wrote a file through the app. */
+export type FileWriteSource = "app" | "agent" | "sync";
 
 /** The query keys a workspace's collections live under — also what the
  *  fetching hooks watch. */
@@ -446,6 +457,9 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
     }, INVALIDATE_DEBOUNCE_MS);
   };
 
+  const written = (paths: string[]) =>
+    hooks.emit("files:written", { paths, source: "app" });
+
   const changed = (paths: string[]) => {
     hooks.emit("files:changed", { workspacePath, paths });
     invalidateDerived();
@@ -501,8 +515,9 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
     }
 
     // App self-writes are suppressed by the fs watcher, so derived state
-    // (git status, search) must be invalidated here.
+    // (search) must be invalidated here, and listeners told.
     invalidateDerived();
+    written([filePath]);
   };
 
   const createFile = async (filePath: string, content = "") => {
@@ -526,6 +541,7 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
     }
 
     if (content) await write(filePath, content);
+    else written([filePath]);
 
     // Refresh metadata to get accurate timestamps
     const metadata = await restat(filePath);
@@ -581,6 +597,7 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
     if (collections.content.get(path)) {
       collections.content.delete(path);
     }
+    written([path]);
   };
 
   /**
@@ -590,6 +607,11 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
    */
   const rename = async (oldPath: string, newPath: string) => {
     if (oldPath === newPath) return;
+    await moveEntry(oldPath, newPath);
+    written([oldPath, newPath]);
+  };
+
+  const moveEntry = async (oldPath: string, newPath: string) => {
 
     const entry = collections.metadata.get(oldPath);
     if (!entry) {

@@ -24,6 +24,7 @@ import {
   type GitServiceDeps,
   type GitWriteRefInput,
   type GitAddInput,
+  type GitStatusInput,
   type GitCheckoutPathsInput,
   type GitCommitInput,
   type GitCreateBranchInput,
@@ -326,7 +327,7 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async status(): Promise<RepoStatus> {
+  async status(input?: GitStatusInput): Promise<RepoStatus> {
     try {
       let branch: string | null = null;
 
@@ -363,6 +364,7 @@ export class IsomorphicGitService implements GitService {
         dir: this.dir,
         gitdir: this.gitdir,
         cache: this.cache,
+        ...(input?.filepaths ? { filepaths: input.filepaths } : {}),
       });
 
       const staged: GitFileChange[] = [];
@@ -817,6 +819,18 @@ export class IsomorphicGitService implements GitService {
     } catch (error) {
       throw this.fail(error);
     }
+  }
+
+  async listFiles(input?: { ref?: string }): Promise<string[]> {
+    return this.run(() =>
+      git.listFiles({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        ref: input?.ref ?? "HEAD",
+      }),
+    );
   }
 
   async listRemoteRefs(

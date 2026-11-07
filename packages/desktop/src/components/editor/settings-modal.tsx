@@ -25,6 +25,7 @@ import {
   Sparkles,
   Shield,
   BarChart3,
+  GitBranch,
 } from "lucide-react";
 import {
   updateTelemetryConsent,
@@ -32,6 +33,7 @@ import {
 } from "@/telemetry/telemetry";
 import { HarnessSettings } from "@/components/agent/harness-settings";
 import { UsageSettings } from "@/components/agent/usage-settings";
+import { SyncSettings } from "@/components/sync/sync-settings";
 import { SettingsSection } from "./settings-section";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme-provider";
@@ -80,6 +82,7 @@ const SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
   { id: "hotkeys", label: "hotkeys", icon: Keyboard },
   { id: "harnesses", label: "harnessSettingsTitle", icon: Sparkles },
   { id: "usage", label: "usageSettingsTitle", icon: BarChart3 },
+  { id: "sync", label: "syncSettingsTitle", icon: GitBranch },
   { id: "privacy", label: "privacySettings", icon: Shield },
 ];
 
@@ -209,6 +212,10 @@ export function SettingsModal({
 
             <SettingsSection id="usage" title={t("usageSettingsTitle")}>
               <UsageSettings />
+            </SettingsSection>
+
+            <SettingsSection id="sync" title={t("syncSettingsTitle")}>
+              <SyncSettings />
             </SettingsSection>
 
             <SettingsSection id="privacy" last>
