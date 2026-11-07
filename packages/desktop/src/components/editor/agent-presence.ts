@@ -1,15 +1,13 @@
 /**
  * File-level "an agent is currently touching this file" presence, derived
  * from the same transcript rows the panel already renders — no separate
- * activity tracker. Native ACP tool calls carry `locations` from the
- * adapter; MCP app tools don't (confirmed absent on every MCP tool_call in
- * the Stage 3.5 pass-through spike), so `upsertToolEntry` in
- * agent-service.ts derives them from `rawInput.path` instead.
+ * activity tracker. Which calls count and what they touch is read by
+ * `modules/agents/tool-call-locations.ts`, which sync's presence shares to
+ * publish the same activity to collaborators (MET-272).
  */
 import { useLiveQuery, eq } from "@tanstack/react-db";
 import { useCore } from "@notefig/core/react";
-
-const ACTIVE_STATUSES = new Set(["pending", "in_progress"]);
+import { isActiveToolCall } from "@/modules/agents/tool-call-locations";
 
 export function useAgentEditingPaths(): Set<string> {
   const { entries } = useCore().agentStore;
@@ -21,9 +19,8 @@ export function useAgentEditingPaths(): Set<string> {
 
   const paths = new Set<string>();
   for (const entry of activeToolCalls) {
-    const status = entry.toolCall?.status;
-    if (!status || !ACTIVE_STATUSES.has(status)) continue;
-    for (const location of entry.toolCall?.locations ?? []) {
+    if (!entry.toolCall || !isActiveToolCall(entry.toolCall)) continue;
+    for (const location of entry.toolCall.locations ?? []) {
       paths.add(location.path);
     }
   }
