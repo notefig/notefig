@@ -122,7 +122,6 @@ export function createLeases(deps: LeasesDeps): Leases {
   let tips: SyncRefTip[] = [];
   let reads: SyncLeaseRead[] = [];
   let readHead: string | null | undefined;
-  let lastHead: string | null = null;
   let listKey = "[]";
   let list: SyncLease[] = [];
   /** Holders' payload sizes as last announced (ref → blocks). */
@@ -188,11 +187,8 @@ export function createLeases(deps: LeasesDeps): Leases {
    *  is gone (taken over) is dropped. */
   const adoptOwn = (polled: SyncLeaseRead[]) => {
     const polledOwn = new Map(polled.filter((r) => isOwnRef(r.ref) && r.payload).map((r) => [r.ref, r]));
-    for (const [ref, lease] of [...own]) {
-      if (!polledOwn.has(ref)) {
-        own.delete(ref);
-        announceReleased(lease.payload.holder, lease.payload.path, lease.payload.blocks.length);
-      }
+    for (const ref of [...own.keys()]) {
+      if (!polledOwn.has(ref)) own.delete(ref);
     }
     for (const [ref, found] of polledOwn) {
       const known = own.get(ref);
@@ -332,7 +328,6 @@ export function createLeases(deps: LeasesDeps): Leases {
     for (const update of updates) {
       const lease = own.get(update.ref);
       if (!lease) continue;
-      const released = lease.payload.blocks.length - update.keep.length;
       if (!update.payload) {
         own.delete(update.ref);
       } else {
@@ -344,7 +339,6 @@ export function createLeases(deps: LeasesDeps): Leases {
           publishedAt: now,
         });
       }
-      if (released > 0) announceReleased(lease.payload.holder, lease.payload.path, released);
     }
   };
 
@@ -441,9 +435,9 @@ export function createLeases(deps: LeasesDeps): Leases {
           return;
         }
         await publish(dueUpdates());
-        // The table and views follow the head and this device's own writes.
-        if (readHead !== head || lastHead !== head || own.size > 0) await read(head);
-        lastHead = head;
+        // The table and views follow the head and this device's own writes
+        // (cached in the worker: only new blobs are read, nothing fetched).
+        await read(head);
         announce();
         deliver();
       } catch (error) {
