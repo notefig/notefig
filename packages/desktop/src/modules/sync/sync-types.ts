@@ -9,8 +9,16 @@ import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import type { DocumentsApi } from "@/modules/documents";
 import type { WorkspaceFiles } from "@/modules/files";
 import type { SyncAuthor, SyncConfig } from "./sync-config";
+import type { SyncPresenceSettings } from "./presence-identity";
 import type { SyncCapabilities, SyncEvent } from "./sync-machine";
-import type { SyncIncomingContent } from "./document-channel";
+import type {
+  SyncAgentActivity,
+  SyncBlockPosition,
+  SyncDocumentPort,
+  SyncIncomingContent,
+} from "./document-channel";
+import type { EditorsApi } from "@/modules/editors";
+import type { AgentTaskRow } from "@notefig/shared/agent";
 
 /** An error that crossed the worker boundary, as data. `code` is a
  *  `GitErrorCode` when git raised it. */
@@ -128,9 +136,25 @@ export type SyncWorkerApi = {
     author: SyncAuthor;
     userName: string;
   }): Promise<SyncResult<{ oid: string | null; paths: string[] }>>;
-  /** One poll: the branch tip on the remote (null: no such branch) and
-   *  how many `refs/notefig/v1/` refs there are. */
-  poll(): Promise<SyncResult<{ remote: string | null; notefigRefs: number }>>;
+  /** One poll: the branch tip on the remote (null: no such branch), how
+   *  many `refs/notefig/v1/` refs there are, and the presence refs among
+   *  them. */
+  poll(): Promise<
+    SyncResult<{ remote: string | null; notefigRefs: number; presence: SyncRefTip[] }>
+  >;
+  /** Publish this device's presence on its own ref, in a request of its
+   *  own (never with a content push): a blob, CAS against `old` (null:
+   *  create). */
+  publishPresence(input: {
+    ref: string;
+    old: string | null;
+    draft: SyncPresenceDraft;
+  }): Promise<SyncResult<SyncPresencePublishOutcome>>;
+  /** Delete this device's presence ref (CAS against `old`). */
+  deletePresence(input: { ref: string; old: string }): Promise<SyncResult<{ deleted: boolean }>>;
+  /** Fetch presence blobs by oid (one request for those not here yet) and
+   *  map their positions onto the branch head. */
+  readPresence(input: { refs: SyncRefTip[] }): Promise<SyncResult<SyncPresenceRead[]>>;
   /** Fetch `remote` and bring the branch to it: a fast-forward, or a
    *  rebase of the local commits. Solo refuses files both sides changed;
    *  `merge` (shared) merges them. */
@@ -175,6 +199,90 @@ export type SyncWorkerApi = {
     spec: SyncSessionSpec;
   }): Promise<SyncResult<SyncVerifyOutcome>>;
 };
+
+// --- Presence (MET-272) ------------------------------------------------------
+
+/** One caret in a presence payload. `path` is `/`-separated, relative to
+ *  the workspace; positions are relative to the payload's `commit`. */
+export interface SyncPresenceCursor {
+  path: string;
+  anchor: SyncBlockPosition;
+  head?: SyncBlockPosition;
+}
+
+/** One of a device's running agent sessions in its presence payload. */
+export interface SyncPresenceAgent extends SyncAgentActivity {
+  /** The document it is working on (`/`-separated, relative). */
+  path?: string;
+  /** Where in it, relative to the payload's `commit`, when known. */
+  anchor?: SyncBlockPosition;
+}
+
+/**
+ * `refs/notefig/v1/presence/<deviceId>` points at a blob holding this, as
+ * JSON (decision 7). `seq` only makes a heartbeat move the ref; nothing in
+ * it is a timestamp, because liveness is judged by the reader's own clock.
+ */
+export interface SyncPresencePayload {
+  v: 1;
+  user: { name: string; color: string };
+  deviceId: string;
+  /** The branch commit the positions are relative to. */
+  commit: string | null;
+  seq: number;
+  /** The device's window has focus (a hint for the UI only). */
+  focused: boolean;
+  cursors: SyncPresenceCursor[];
+  agents: SyncPresenceAgent[];
+}
+
+/** What the main thread hands the worker to publish: the payload minus
+ *  `commit` (the worker stamps its branch head); an agent may name text it
+ *  is writing (`snippets`), which the worker finds a block for. */
+export interface SyncPresenceDraft
+  extends Omit<SyncPresencePayload, "commit" | "agents"> {
+  agents: Array<Omit<SyncPresenceAgent, "anchor"> & { snippets?: string[] }>;
+}
+
+/** A remote ref seen by a poll. */
+export interface SyncRefTip {
+  ref: string;
+  oid: string;
+}
+
+/** Another device's presence, read by the worker, its positions mapped
+ *  onto this clone's branch head (a block deleted since: dropped). */
+export interface SyncPresenceRead {
+  ref: string;
+  oid: string;
+  /** Null: not a presence payload this version reads. */
+  payload: SyncPresencePayload | null;
+}
+
+export type SyncPresencePublishOutcome =
+  | { status: "published"; oid: string }
+  /** Our own ref wasn't at `old` (a stale CAS): re-poll, publish again. */
+  | { status: "rejected" }
+  | { status: "unknown" };
+
+/**
+ * Another device as the app shows it: its live presence, positions mapped
+ * onto this clone's branch head, paths absolute.
+ */
+export interface SyncPeer {
+  deviceId: string;
+  name: string;
+  color: string;
+  focused: boolean;
+  cursors: Array<{ path: string; anchor: SyncBlockPosition; head?: SyncBlockPosition }>;
+  agents: Array<SyncAgentActivity & { path?: string; anchor?: SyncBlockPosition }>;
+  /**
+   * How many blocks this device's holders (the person and their agents)
+   * lease. Undefined until leases exist (MET-273 fills it; the presence
+   * list already has its slot).
+   */
+  holds?: number;
+}
 
 /** Which files a commit looks at. */
 export type SyncCommitScope = string[] | "scan" | "all";
@@ -223,6 +331,15 @@ export interface SyncEngineHost {
   delivered(path: string, event: SyncIncomingContent): void;
   /** A merge overwrote text (or a whole file the remote won). */
   overwritten(record: Omit<SyncOverwriteRecord, "id" | "at">): void;
+  /** The live peers changed (MET-272). */
+  presenceChanged(peers: readonly SyncPeer[]): void;
+  /** The name and colour settings (sync.json's `presence`), read live:
+   *  Settings → Sync can change them while sync runs. */
+  presenceSettings(): SyncPresenceSettings | undefined;
+  /** The open document channels' sync ends. */
+  ports(): SyncDocumentPort[];
+  /** The sync end of `path`'s channel, opened if it isn't. */
+  openPort(path: string): SyncDocumentPort;
 }
 
 /** Something a merge overwrote, as the app shows it. */
@@ -255,8 +372,18 @@ export interface SyncEngineDeps extends SyncEngineHost {
     FileSystemSurface,
     "readFiles" | "readBinaryFiles" | "writeBinaryFiles" | "deleteFiles"
   >;
+  /** The live editors: the presence plugin attaches to the workspace's
+   *  markdown editors at the shared level. */
+  editors?: Pick<EditorsApi, "markdownEditor" | "paths">;
+  /** This device's agent sessions in the workspace (`core.agentStore`). */
+  agentTasks?: () => readonly AgentTaskRow[];
   /** Window blur, for a commit when the user leaves. Default: `window`. */
   onBlur?: (listener: () => void) => () => void;
+  /** Whether the window has focus. Default: `document.hasFocus()`. */
+  isFocused?: () => boolean;
+  /** The page is going away (quit, reload): a best-effort goodbye.
+   *  Default: `pagehide`. */
+  onPageHide?: (listener: () => void) => () => void;
   /** Default: global timers, `Math.random`. */
   setTimer?: (run: () => void, ms: number) => () => void;
   random?: () => number;

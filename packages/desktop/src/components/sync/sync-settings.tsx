@@ -29,6 +29,8 @@ import {
   type WorkspaceSync,
 } from "@/modules/sync";
 import { turnOffSync, turnOnSync } from "@/modules/sync/turn-on";
+import { PRESENCE_COLORS } from "@/modules/sync/presence-identity";
+import { cn } from "@notefig/ui/utils";
 
 export function SyncSettings() {
   const workspacePath = useFocusedWorkspace();
@@ -299,6 +301,69 @@ function SyncOnPanel({ sync }: { sync: WorkspaceSync }) {
         )}
       </div>
       {capabilities.status === "auth-error" && <ReplaceToken sync={sync} />}
+      <PresenceIdentity sync={sync} />
+    </div>
+  );
+}
+
+/** How this device appears to collaborators: a name and a colour (its
+ *  agents carry the same colour, with an agent marker). */
+function PresenceIdentity({ sync }: { sync: WorkspaceSync }) {
+  const identity = sync.identity();
+  const [name, setName] = useState(identity?.settings.name ?? "");
+  const [color, setColor] = useState(identity?.settings.color ?? "");
+  if (!identity) return null;
+  const shown = color || identity.color;
+  const save = (next: { name?: string; color?: string }) =>
+    void sync.setIdentity({ name: next.name ?? name, color: next.color ?? color });
+  return (
+    <div className="space-y-2 border-t border-border pt-3" data-testid="sync-identity">
+      <p className="text-sm font-medium">How others see you</p>
+      <Field label="Name">
+        <Input
+          value={name}
+          placeholder={identity.settings.name ? undefined : identity.name}
+          onChange={(event) => setName(event.target.value)}
+          onBlur={() => save({})}
+        />
+      </Field>
+      <Field label="Colour">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {PRESENCE_COLORS.map((swatch) => (
+            <button
+              key={swatch}
+              type="button"
+              aria-label={`Colour ${swatch}`}
+              aria-pressed={shown === swatch}
+              onClick={() => {
+                setColor(swatch);
+                save({ color: swatch });
+              }}
+              className={cn(
+                "h-5 w-5 rounded-full ring-offset-2 ring-offset-background",
+                shown === swatch && "ring-2 ring-foreground",
+              )}
+              style={{ backgroundColor: swatch }}
+            />
+          ))}
+          {color && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setColor("");
+                save({ color: "" });
+              }}
+            >
+              Reset
+            </Button>
+          )}
+        </div>
+      </Field>
+      <p className="text-xs text-muted-foreground">
+        Shown next to your cursor and in the list of people here. Your agents appear in the same
+        colour.
+      </p>
     </div>
   );
 }

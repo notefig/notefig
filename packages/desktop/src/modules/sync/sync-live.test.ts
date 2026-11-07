@@ -175,4 +175,58 @@ describe.skipIf(!URL_ || !TOKEN)("sync worker against a live host", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("publishes, polls, reads and deletes presence refs (blob refs, one ref per request)", { timeout: 120_000 }, async () => {
+    const root = mkdtempSync(join(tmpdir(), "notefig-sync-live-"));
+    const branch = `notefig-sync-272-${Date.now()}`;
+    const deviceA = `live-a-${Date.now()}`;
+    const refA = `refs/notefig/v1/presence/${deviceA}`;
+    let published: string | null = null;
+    const a0 = { worker: null as SyncWorkerApi | null };
+    try {
+      const a = await cloneLive(root, "a", branch);
+      a0.worker = a.worker;
+      const b = await cloneLive(root, "b", branch);
+      await commitFile(a, "# Live\n\nFirst.\n\nSecond.\n", "live-a");
+      const created = value(await a.worker.push({ remote: null }));
+      expect(created.status).toBe("pushed");
+      await pause();
+      const draft = {
+        v: 1 as const,
+        user: { name: "Live A", color: "#8e4ec6" },
+        deviceId: deviceA,
+        seq: 1,
+        focused: true,
+        cursors: [{ path: FILE, anchor: { blockIndex: 2, offset: 3 } }],
+        agents: [],
+      };
+      const outcome = value(
+        await timed("presence-publish", () => a.worker.publishPresence({ ref: refA, old: null, draft })),
+      );
+      expect(outcome.status).toBe("published");
+      if (outcome.status !== "published") return;
+      published = outcome.oid;
+      await pause();
+      const polled = value(await timed("poll", () => b.worker.poll()));
+      expect(polled.presence).toContainEqual({ ref: refA, oid: outcome.oid });
+      const [read] = value(
+        await timed("presence-read", () => b.worker.readPresence({ refs: [{ ref: refA, oid: outcome.oid }] })),
+      );
+      expect(read.payload).toMatchObject({
+        user: { name: "Live A", color: "#8e4ec6" },
+        cursors: [{ path: FILE, anchor: { blockIndex: 2, offset: 3 } }],
+      });
+      await pause();
+      const deleted = value(
+        await timed("presence-delete", () => a.worker.deletePresence({ ref: refA, old: outcome.oid })),
+      );
+      expect(deleted.deleted).toBe(true);
+      published = null;
+      console.log("[sync-live] presence latencies (ms):", JSON.stringify(latencies));
+    } finally {
+      if (published && a0.worker) await a0.worker.deletePresence({ ref: refA, old: published });
+      await deleteBranch(join(root, "a"), branch);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

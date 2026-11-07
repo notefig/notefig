@@ -52,6 +52,9 @@ import type {
   SyncWrite,
 } from "../sync-types";
 import type { SyncFailsafe } from "../sync-machine";
+import { resolvePresenceIdentity } from "../presence-identity";
+import { createPresence } from "./presence";
+import { createPresenceEditors } from "./presence-editor";
 import {
   ApplyFailsafe,
   overwriteDocument,
@@ -101,11 +104,16 @@ const defaultTimer = (run: () => void, ms: number) => {
   return () => clearTimeout(handle);
 };
 
-const windowBlur = (listener: () => void) => {
+const windowEvent = (name: "blur" | "pagehide") => (listener: () => void) => {
   if (typeof window === "undefined") return () => {};
-  window.addEventListener("blur", listener);
-  return () => window.removeEventListener("blur", listener);
+  window.addEventListener(name, listener);
+  return () => window.removeEventListener(name, listener);
 };
+
+const documentFocused = () =>
+  typeof document === "undefined" || typeof document.hasFocus !== "function"
+    ? true
+    : document.hasFocus();
 
 export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
   start(): void;
@@ -116,7 +124,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
   const setTimer = deps.setTimer ?? defaultTimer;
   const random = deps.random ?? Math.random;
   const now = deps.now ?? (() => Date.now());
-  const onBlur = deps.onBlur ?? windowBlur;
+  const onBlur = deps.onBlur ?? windowEvent("blur");
+  const onPageHide = deps.onPageHide ?? windowEvent("pagehide");
 
   let author: SyncAuthor = deps.config.author ?? FALLBACK_AUTHOR;
   /** Tree paths written since the last commit; at start, a scan for what
@@ -145,6 +154,41 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
   let opened = false;
   /** The user resumed from a stop: the next pull keeps local files. */
   let keepLocalOnce = false;
+  /** The presence refs the last poll saw. */
+  let presenceTips: { ref: string; oid: string }[] | null = null;
+  /** The commit author was read from sync.json or the repo (not the
+   *  fallback): presence names the user after it by default. */
+  let authorKnown = deps.config.author !== undefined;
+
+  const presence = createPresence({
+    workspacePath: root,
+    deviceId: deps.config.deviceId,
+    api,
+    hooks: deps.hooks,
+    identity: () =>
+      resolvePresenceIdentity({
+        deviceId: deps.config.deviceId,
+        settings: deps.presenceSettings(),
+        authorName: authorKnown ? author.name : null,
+      }),
+    capabilities: () => deps.capabilities(),
+    setPeersPresent: (present) => deps.dispatch({ type: "peers", present }),
+    presenceChanged: (peers) => deps.presenceChanged(peers),
+    ports: () => deps.ports(),
+    agentTasks: () => deps.agentTasks?.() ?? [],
+    isFocused: deps.isFocused ?? documentFocused,
+    now,
+    setTimer,
+  });
+  const presenceEditors = deps.editors
+    ? createPresenceEditors({
+        workspacePath: root,
+        editors: deps.editors,
+        enabled: () => !stopped && deps.capabilities().presence,
+        openPort: (path) => deps.openPort(path),
+        setTimer,
+      })
+    : null;
 
   const treePath = (absolute: string): string | null => {
     const relative = pathutil.relative(root, absolute);
@@ -397,6 +441,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
     if (opened) return;
     const repo = await readRepoInfo(deps.fs, root);
     author = deps.config.author ?? repo?.author ?? FALLBACK_AUTHOR;
+    authorKnown = author !== FALLBACK_AUTHOR;
     if (repo?.branch !== deps.config.branch) {
       diverge(
         `This workspace has ${repo?.branch ?? "no branch"} checked out, but syncs ${deps.config.branch}. Check out ${deps.config.branch}, then resume.`,
@@ -430,7 +475,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
 
   /** One attempt: poll, pull if needed, push if ahead. */
   const reconcile = async (): Promise<boolean> => {
-    const { remote } = unwrap(await api.poll());
+    const { remote, presence: tips } = unwrap(await api.poll());
+    presenceTips = tips;
     if (remote && remote !== integrated && remote !== head) {
       await pullStep(remote);
     } else if (remote && remote === head) {
@@ -458,6 +504,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
         refused = await reconcile();
       }
       deps.dispatch({ type: "settled" });
+      await presenceStep();
     } catch (error) {
       if (!(error instanceof CycleStop)) {
         deps.dispatch({
@@ -467,6 +514,15 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
         });
       }
     }
+  };
+
+  /** After a poll: presence (liveness, levels, reads, publishing), then
+   *  the editors' plugin for the level that leaves. */
+  const presenceStep = async () => {
+    const tips = presenceTips;
+    presenceTips = null;
+    if (tips && !stopped) await presence.step(tips, head);
+    presenceEditors?.reconcile();
   };
 
   const schedulePoll = (ms?: number) => {
@@ -576,7 +632,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
         onBlur(() => {
           if (hasPendingWrites()) void syncNow();
         }),
+        // Quit or reload: say goodbye if there's time; else the others see
+        // this device go stale.
+        onPageHide(() => void presence.goodbye()),
       );
+      presence.start();
       void syncNow();
     },
     async resume() {
@@ -599,6 +659,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
       await syncNow();
     },
     levelChanged() {
+      presenceEditors?.reconcile();
       if (!running) schedulePoll();
     },
     syncNow,
@@ -608,7 +669,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & {
       cancelPoll?.();
       cancelQuiet?.();
       for (const cleanup of cleanups.splice(0)) cleanup();
+      presenceEditors?.stop();
+      presence.stop();
       await running?.catch(() => {});
+      await presence.goodbye();
       deps.worker.terminate();
     },
   };

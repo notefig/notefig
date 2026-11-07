@@ -75,14 +75,26 @@ export function mapBlockIndex(
   index: number,
 ): number | null {
   if (index < 0 || index >= from.length) return null;
-  const map = alignBlocks(from, to);
+  return mapBlockIndexWith(alignBlocks(from, to), to.length, index);
+}
+
+/**
+ * `mapBlockIndex` over an alignment already made (`alignBlocks(from, to)`),
+ * for callers mapping many positions between the same two versions.
+ */
+export function mapBlockIndexWith(
+  map: readonly number[],
+  toLength: number,
+  index: number,
+): number | null {
+  if (index < 0 || index >= map.length) return null;
   if (map[index] >= 0) return map[index];
   let prev = index - 1;
   while (prev >= 0 && map[prev] < 0) prev--;
   let next = index + 1;
-  while (next < from.length && map[next] < 0) next++;
+  while (next < map.length && map[next] < 0) next++;
   const lo = prev >= 0 ? map[prev] + 1 : 0;
-  const hi = next < from.length ? map[next] : to.length;
+  const hi = next < map.length ? map[next] : toLength;
   if (hi <= lo) return null;
   return Math.min(lo + (index - prev - 1), hi - 1);
 }

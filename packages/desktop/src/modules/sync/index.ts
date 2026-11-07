@@ -59,16 +59,35 @@
  *   `SyncWorkerWiring.policy.holderFor(path)` returns a per-block holder
  *   (`BlockHolder` in `merge/merge.ts`, asked per overlapping run of base
  *   blocks) or null for the default (the side already on the branch).
- * - Presence (MET-272): the engine sets `remoteCursors` from presence refs
- *   and reads `setCursor` (throttled) into its own presence ref. The
- *   machine's `peers` event moves solo ↔ shared.
+ * - Presence (MET-272, here): each device publishes
+ *   `refs/notefig/v1/presence/<deviceId>` → a JSON blob
+ *   (`SyncPresencePayload`: user name and colour, the branch commit, carets
+ *   as block + offset relative to that commit, its running agents with
+ *   the document and block they work on), in a request of its own, never
+ *   with a content push; on change at most once a second while shared
+ *   (5 s solo), else as a heartbeat (12 s shared and focused, 40 s
+ *   otherwise); deleted on close. The poll reads them; a device is live
+ *   while its ref moved within `PRESENCE_STALE_MS` as observed locally
+ *   (payload timestamps are never read). Another live device →
+ *   `setPeersPresent(true)` → shared; none → solo. The worker maps the
+ *   others' positions onto this clone's head (`merge/blocks.ts`); the
+ *   engine sets each open document's `remoteCursors` only when they
+ *   change. At the shared level the engine attaches the presence plugin
+ *   (`engine/presence-editor.ts`) to the workspace's open markdown editors
+ *   through `editor.registerPlugin`: it draws carets, selections and agent
+ *   holders, and reports the local caret with `setCursor` (throttled).
+ *   `sync.presence()` / `"sync:presence"` / `useSyncPresence` list the
+ *   peers (`SyncPeer`, with a `holds` slot for MET-273);
+ *   `identity()`/`setIdentity` are this device's name and colour.
  * - Leases (MET-273): `requestLease` runs the lease rule (one rule for
  *   humans and agents) against the next atomic push; `leases` drives the
- *   read-only decorations.
+ *   read-only decorations, drawn by the same plugin next to the holders;
+ *   `SyncPeer.holds` fills the presence list's slot.
  */
 export * from "./sync";
 export * from "./sync-runtime";
 export * from "./sync-machine";
 export * from "./sync-config";
 export * from "./document-channel";
+export * from "./presence-identity";
 export type * from "./sync-types";

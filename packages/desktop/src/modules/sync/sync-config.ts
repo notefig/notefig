@@ -12,6 +12,7 @@ import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { APP_DIR_NAME } from "@/utils/app-dir";
 import { path as pathutil } from "@/utils/path";
 import type { SyncSessionSpec } from "./sync-types";
+import { PRESENCE_COLOR_PATTERN, type SyncPresenceSettings } from "./presence-identity";
 
 /** A commit author. */
 export interface SyncAuthor {
@@ -29,6 +30,8 @@ export interface SyncConfig {
   deviceId: string;
   /** The commit author; the repo's `user.name`/`user.email` when absent. */
   author?: SyncAuthor;
+  /** The name and colour others see (MET-272); defaults when absent. */
+  presence?: SyncPresenceSettings;
 }
 
 export const SYNC_CONFIG_FILENAME = "sync.json";
@@ -53,6 +56,16 @@ function parseAuthor(value: unknown): SyncAuthor | undefined {
     : undefined;
 }
 
+function parsePresenceSettings(value: unknown): SyncPresenceSettings | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const { name, color } = value as Record<string, unknown>;
+  const settings: SyncPresenceSettings = {
+    ...(isNonEmptyString(name) ? { name: name.slice(0, 80) } : {}),
+    ...(typeof color === "string" && PRESENCE_COLOR_PATTERN.test(color) ? { color } : {}),
+  };
+  return Object.keys(settings).length > 0 ? settings : undefined;
+}
+
 /** A sync.json's text as a config; null when it is not one. */
 export function parseSyncConfig(text: string): SyncConfig | null {
   let raw: unknown;
@@ -62,15 +75,17 @@ export function parseSyncConfig(text: string): SyncConfig | null {
     return null;
   }
   if (typeof raw !== "object" || raw === null) return null;
-  const { remote, branch, deviceId, author } = raw as Record<string, unknown>;
+  const { remote, branch, deviceId, author, presence } = raw as Record<string, unknown>;
   if (!isNonEmptyString(remote) || !isNonEmptyString(branch)) return null;
   if (!isNonEmptyString(deviceId)) return null;
   const parsedAuthor = parseAuthor(author);
+  const parsedPresence = parsePresenceSettings(presence);
   return {
     remote,
     branch,
     deviceId,
     ...(parsedAuthor ? { author: parsedAuthor } : {}),
+    ...(parsedPresence ? { presence: parsedPresence } : {}),
   };
 }
 

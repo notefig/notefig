@@ -51,6 +51,15 @@ import {
   type SyncMergePolicy,
 } from "./sync-merge-driver";
 import {
+  createPresenceCache,
+  deletePresence,
+  publishPresence,
+  readPresence,
+  type PresenceContext,
+  type SplitBlocks,
+} from "./sync-worker-presence";
+import { PRESENCE_REF_PREFIX } from "./presence-payload";
+import {
   mergeTexts,
   reconcileFile,
   resetBranch,
@@ -308,22 +317,28 @@ export interface SyncWorkerWiring {
   log: SyncMergeLog;
   /** The markdown merge, loaded into the worker on first use. */
   loadMerge: () => Promise<MarkdownMerge>;
+  /** The block split presence maps positions with (the same codec). */
+  loadBlocks: () => Promise<SplitBlocks>;
   wrapHost: (host: GitStorageHost, repo: GitRepoRef) => GitStorageHost;
   deps: () => { http: GitHttpClient; mergeDriver: GitMergeDriver };
 }
 
-/** The worker's markdown merge, built on first use. */
-function lazyWorkerMerge(): () => Promise<MarkdownMerge> {
-  let merge: Promise<MarkdownMerge> | null = null;
+/** The worker's codec-backed markdown pieces, built on first use. */
+function lazyWorkerMarkdown() {
+  let markdown: Promise<import("../merge/worker-merge").WorkerMarkdown> | null = null;
   return () =>
-    (merge ??= import("../merge/worker-merge").then((m) => m.createWorkerMerge()));
+    (markdown ??= import("../merge/worker-merge").then((m) => m.createWorkerMarkdown()));
 }
 
 export function syncWorkerWiring(
   http: GitHttpClient,
   scanFs: ScanFs,
-  loadMerge: () => Promise<MarkdownMerge> = lazyWorkerMerge(),
+  mergeLoader?: () => Promise<MarkdownMerge>,
+  blocksLoader?: () => Promise<SplitBlocks>,
 ): SyncWorkerWiring {
+  const markdown = lazyWorkerMarkdown();
+  const loadMerge = mergeLoader ?? (() => markdown().then((m) => m.merge));
+  const loadBlocks = blocksLoader ?? (() => markdown().then((m) => m.splitBlocks));
   const capture = createWorktreeCapture();
   const policy = defaultMergePolicy();
   const log: SyncMergeLog = { tookRemote: [] };
@@ -335,6 +350,7 @@ export function syncWorkerWiring(
     policy,
     log,
     loadMerge,
+    loadBlocks,
     wrapHost: (host, repo) => capture.wrap(host, repo),
     deps: () => ({ http, mergeDriver }),
   };
@@ -346,8 +362,9 @@ export function createInProcessSyncWorker(
   http: GitHttpClient,
   scanFs: ScanFs,
   loadMerge?: () => Promise<MarkdownMerge>,
+  loadBlocks?: () => Promise<SplitBlocks>,
 ): SyncWorkerApi {
-  const wiring = syncWorkerWiring(http, scanFs, loadMerge);
+  const wiring = syncWorkerWiring(http, scanFs, loadMerge, loadBlocks);
   const git = createGitWorkerApi(
     (repo) => wiring.wrapHost(createHost(repo), repo),
     wiring.deps,
@@ -359,7 +376,7 @@ export function createSyncWorkerApi(
   git: GitWorkerApi,
   wiring: Pick<
     SyncWorkerWiring,
-    "http" | "scanFs" | "capture" | "policy" | "log" | "loadMerge"
+    "http" | "scanFs" | "capture" | "policy" | "log" | "loadMerge" | "loadBlocks"
   >,
 ): SyncWorkerApi {
   const { http, scanFs, capture, policy, log } = wiring;
@@ -376,6 +393,18 @@ export function createSyncWorkerApi(
 
   const readHead = (service: GitService, branch: string) =>
     service.readRef(branchRef(branch));
+
+  const presenceCache = createPresenceCache();
+  const presenceContext = (): PresenceContext => {
+    const { spec, service } = current();
+    return {
+      service,
+      remote: spec.remote,
+      head: () => readHead(service, spec.branch),
+      loadBlocks: wiring.loadBlocks,
+      cache: presenceCache,
+    };
+  };
 
   const mergeContext = (): MergeContext => ({
     service: current().service,
@@ -416,8 +445,17 @@ export function createSyncWorkerApi(
           remote: refs.find((ref) => ref.ref === wanted)?.oid ?? null,
           notefigRefs: refs.filter((ref) => ref.ref.startsWith(NOTEFIG_REFS_PREFIX))
             .length,
+          presence: refs
+            .filter((ref) => ref.ref.startsWith(PRESENCE_REF_PREFIX))
+            .map(({ ref, oid }) => ({ ref, oid })),
         };
       }),
+
+    publishPresence: (input) => attempt(() => publishPresence(presenceContext(), input)),
+
+    deletePresence: (input) => attempt(() => deletePresence(presenceContext(), input)),
+
+    readPresence: ({ refs }) => attempt(() => readPresence(presenceContext(), refs)),
 
     pull: ({ remote, keepLocal, merge, offline }) =>
       attempt(async () => {

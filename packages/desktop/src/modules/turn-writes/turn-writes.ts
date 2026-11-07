@@ -31,6 +31,7 @@ import {
 } from "@notefig/widgets";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { calculateContentHash } from "@/utils/hash";
+import { toolCallLocations } from "@/modules/agents/tool-call-locations";
 import { resolveWorkspacePath } from "@/utils/fs";
 import { defineModule, type CoreHookMap, type Hooks } from "@notefig/core";
 import { platformModule } from "@/core/services";
@@ -47,13 +48,7 @@ function toolCallPaths(
   toolCall: ToolCallUpdate,
   workspacePath: string,
 ): string[] {
-  const named = [
-    ...(toolCall.locations ?? []).map((location) => location.path),
-    ...(toolCall.content ?? []).flatMap((item) =>
-      item.type === "diff" ? [item.path] : [],
-    ),
-  ];
-  const paths = named.map((path) => {
+  const paths = toolCallLocations(toolCall).map((path) => {
     const resolved = resolveWorkspacePath(workspacePath, path);
     return resolved.ok ? resolved.absolute : path;
   });
