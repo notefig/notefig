@@ -17,6 +17,7 @@ import {
   type GitErrorCode,
   type GitRepoRef,
   type GitService,
+  type GitServiceDeps,
   type GitStorageHost,
 } from "./types";
 
@@ -28,8 +29,7 @@ export type GitBoundaryError =
   | { kind: "unknown"; message: string };
 
 export type GitCallResult =
-  | { ok: true; value: unknown }
-  | { ok: false; error: GitBoundaryError };
+  { ok: true; value: unknown } | { ok: false; error: GitBoundaryError };
 
 /** The host side's API surface; serve it over any RPC transport. */
 export interface GitWorkerApi {
@@ -78,17 +78,23 @@ export function serializeGitBoundaryError(error: unknown): GitBoundaryError {
 
 /**
  * Host side: one `IsomorphicGitService` per gitdir, created on first call
- * via the caller's storage-host factory, held until `disposeRepo`.
+ * via the caller's storage-host factory (and, optionally, its ports — the
+ * http client, auth and merge driver), held until `disposeRepo`.
  */
 export function createGitWorkerApi(
   createHost: (repo: GitRepoRef) => GitStorageHost,
+  createDeps?: (repo: GitRepoRef) => GitServiceDeps,
 ): GitWorkerApi {
   const services = new Map<string, IsomorphicGitService>();
 
   const serviceFor = (repo: GitRepoRef): IsomorphicGitService => {
     let service = services.get(repo.gitDir);
     if (!service) {
-      service = new IsomorphicGitService(createHost(repo), repo);
+      service = new IsomorphicGitService(
+        createHost(repo),
+        repo,
+        createDeps?.(repo),
+      );
       services.set(repo.gitDir, service);
     }
     return service;
@@ -156,9 +162,16 @@ const GIT_SERVICE_METHODS = [
   "checkoutPaths",
   "log",
   "readTextFile",
-  "fetch",
-  "pull",
-  "push",
+  "listRemoteRefs",
+  "fetchRefs",
+  "pushRefs",
+  "readRef",
+  "writeRef",
+  "deleteRef",
+  "writeBlob",
+  "readBlob",
+  "mergeBase",
+  "rebaseOnto",
 ] as const satisfies readonly GitServiceMethod[];
 
 /** Client side: a `GitService` whose methods all route through `call`. */
