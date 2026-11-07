@@ -10,7 +10,9 @@
  *   `document(path)`, the per-document channel below.
  * - Hooks (`CoreHookMap`): `sync:state`, `sync:committed`, `sync:pushed`,
  *   `sync:remote-applied`, `sync:overwritten` (a merge overwrote text;
- *   also kept in `overwrites()` until dismissed) and `sync:failsafe`.
+ *   also kept in `overwrites()` until dismissed), `sync:failsafe`,
+ *   `sync:presence`, and `sync:lease-acquired` / `sync:lease-released` /
+ *   `sync:lease-refused` (MET-273).
  *   Sync itself listens to `files:written` (every app write, with its
  *   `source`) and `files:changed` (the watcher).
  * - Levels: `setPeersPresent(present)` is the machine's presence input
@@ -79,10 +81,36 @@
  *   `sync.presence()` / `"sync:presence"` / `useSyncPresence` list the
  *   peers (`SyncPeer`, with a `holds` slot for MET-273);
  *   `identity()`/`setIdentity` are this device's name and colour.
- * - Leases (MET-273): `requestLease` runs the lease rule (one rule for
- *   humans and agents) against the next atomic push; `leases` drives the
- *   read-only decorations, drawn by the same plugin next to the holders;
- *   `SyncPeer.holds` fills the presence list's slot.
+ * - Leases (MET-273, shared level only; solo has none). One rule,
+ *   `lease-rules.ts` (`decideLease`): all or nothing, others' live leases
+ *   refuse (naming the holders), structural changes need their
+ *   neighbours, a cap per holder (`LEASE_MAX_BLOCKS`), idle release
+ *   (`LEASE_IDLE_MS`), takeover only once this client watched the lease
+ *   ref stand still for `LEASE_STALE_MS`. People and agents go through it
+ *   in the worker:
+ *   - a lease is `refs/notefig/v1/locks/<sha1(path)>/<holder>` → a JSON
+ *     blob (`SyncLeasePayload`: holder, path, commit, block indexes
+ *     relative to that commit), one per holder per document, mapped onto
+ *     each client's head with `merge/blocks.ts`'s alignment;
+ *   - people take leases implicitly: the push runs the rule over what its
+ *     commits change (each changed stretch attributed to the person, or to
+ *     the agent whose write covers it), and the granted leases go in the
+ *     same atomic push as the branch CAS — the branch picks one winner.
+ *     A loser's text is reconciled by the merge, where the lease holder
+ *     wins (`policy.holderFor`, `engine/sync-worker-leases.ts`), and
+ *     flagged. Renewals and releases go in a request of their own;
+ *   - agents: `core.writeGate` (`modules/write-gate`) wraps every ACP
+ *     `fs/write_text_file`; sync's gate (`engine/lease-gate.ts`) refuses a
+ *     write whose blocks someone else holds before anything is written
+ *     (`SyncLeaseRefusedError`, naming the holders), and reports a write
+ *     that was merged (`SyncWriteMergedError`, with the current text);
+ *   - the editor: the channel's `leases` (latest value, block indexes on
+ *     the head) drive a sibling plugin of presence's
+ *     (`engine/lease-editor.ts`): blocks others hold are drawn in their
+ *     colour with a label and are read-only (`filterTransaction`);
+ *     `requestLease` answers from the same view;
+ *   - `sync.leases()` / `useSyncLeases` list them; `SyncPeer.holds` (and
+ *     each agent's `holds`) fill the presence list.
  */
 export * from "./sync";
 export * from "./sync-runtime";

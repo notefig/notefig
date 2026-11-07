@@ -9,9 +9,11 @@ import {
   INITIAL_SYNC_STATE,
   syncCapabilities,
   transition,
+  type SyncLease,
   type SyncPeer,
   type WorkspaceSync,
 } from "@/modules/sync";
+import type { LeaseHolder } from "@/modules/sync/lease-rules";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -44,10 +46,13 @@ const ada: SyncPeer = {
   ],
 };
 
+const me: LeaseHolder = { id: "dev-me", kind: "human", deviceId: "dev-me", name: "Me", color: "#e5484d" };
+
 /** A workspace's sync with just what the cell reads. */
 function fakeSync(shared: boolean) {
   const listeners = new Set<() => void>();
   let peers: SyncPeer[] = [];
+  let leases: SyncLease[] = [];
   let state = transition(INITIAL_SYNC_STATE, { type: "enable" });
   if (shared) state = transition(state, { type: "peers", present: true });
   const capabilities = syncCapabilities(state);
@@ -59,10 +64,12 @@ function fakeSync(shared: boolean) {
       return () => void listeners.delete(listener);
     },
     presence: () => peers,
+    leases: () => leases,
     identity: () => ({ name: "Me", color: "#e5484d", settings: {} }),
   } as unknown as WorkspaceSync;
-  const show = (next: SyncPeer[]) => {
+  const show = (next: SyncPeer[], nextLeases: SyncLease[] = leases) => {
     peers = next;
+    leases = nextLeases;
     listeners.forEach((listener) => listener());
   };
   return { sync, show };
@@ -109,12 +116,28 @@ describe("the presence list", () => {
     expect(agent?.textContent).toContain("claude");
     expect(agent?.textContent).toContain("editing plan.md");
     expect(agent?.textContent).toContain("Tighten the intro");
-    // The lease slot stays empty until MET-273 fills `holds`.
+    // No leases: no lock counts.
     expect(document.querySelector("[data-testid=sync-presence-holds]")).toBeNull();
-    act(() => fake.show([{ ...ada, holds: 3 }]));
+    expect(document.querySelector("[data-testid=sync-presence-held]")).toBeNull();
+    // Ada takes 3 blocks, her agent 2 of them; this device holds 1.
+    act(() =>
+      fake.show(
+        [{ ...ada, holds: 3, agents: ada.agents.map((agent) => ({ ...agent, holds: 2 })) }],
+        [{ holder: me, path: "/ws/plan.md", blocks: [4], mine: true }],
+      ),
+    );
     expect(document.querySelector("[data-testid=sync-presence-holds]")?.textContent).toBe(
       "holds 3 blocks",
     );
+    expect(document.querySelector("[data-testid=sync-presence-agent-holds]")?.textContent).toBe(
+      "holds 2 blocks",
+    );
+    expect(document.querySelector("[data-testid=sync-presence-mine]")?.textContent).toBe("holds 1 block");
+    expect(cell()?.getAttribute("aria-label")).toBe("1 person here, 1 agent, 3 blocks held");
+    // Released: the counts go.
+    act(() => fake.show([ada], []));
+    expect(document.querySelector("[data-testid=sync-presence-holds]")).toBeNull();
+    expect(document.querySelector("[data-testid=sync-presence-mine]")).toBeNull();
     expect(document.body.textContent).toContain("You appear as Me");
   });
 

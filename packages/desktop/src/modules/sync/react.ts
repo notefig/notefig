@@ -9,11 +9,12 @@ import {
   type SyncCapabilities,
 } from "./sync-machine";
 import type { WorkspaceSync } from "./sync";
-import type { SyncOverwriteRecord, SyncPeer } from "./sync-types";
+import type { SyncLease, SyncOverwriteRecord, SyncPeer } from "./sync-types";
 
 const OFF: SyncCapabilities = syncCapabilities(INITIAL_SYNC_STATE);
 const NONE: readonly SyncOverwriteRecord[] = [];
 const ALONE: readonly SyncPeer[] = [];
+const UNLEASED: readonly SyncLease[] = [];
 
 /** Read `read(sync)` live: from the workspace's sync instance while it is
  *  open, through its own changes and the open set's. */
@@ -52,6 +53,7 @@ function useSyncValue<T>(
 const readCapabilities = (sync: WorkspaceSync) => sync.capabilities();
 const readOverwrites = (sync: WorkspaceSync) => sync.overwrites();
 const readPresence = (sync: WorkspaceSync) => sync.presence();
+const readLeases = (sync: WorkspaceSync) => sync.leases();
 
 /** The live capabilities of a workspace's sync: `off` while it is not
  *  open or not a sync workspace. */
@@ -70,4 +72,10 @@ export function useSyncOverwrites(
  *  document, where, and their agents. Empty unless shared. */
 export function useSyncPresence(workspacePath: string | null): readonly SyncPeer[] {
   return useSyncValue(workspacePath, readPresence, ALONE);
+}
+
+/** The live leases in a workspace (MET-273): who holds which blocks, this
+ *  device's included. Empty unless shared. */
+export function useSyncLeases(workspacePath: string | null): readonly SyncLease[] {
+  return useSyncValue(workspacePath, readLeases, UNLEASED);
 }

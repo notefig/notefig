@@ -10,7 +10,7 @@
  * stale, so presence never rides along with a content CAS (decision 5).
  */
 import { GitError, ZERO_OID, type GitRemote, type GitService } from "@notefig/git";
-import { alignBlocks, mapBlockIndexWith } from "../merge/blocks";
+import { blocksAt, createBlockCache, indexMapper, type BlockCache, type BlockContext } from "./worker-blocks";
 import type { SyncBlockPosition } from "../document-channel";
 import type {
   SyncPresenceAgent,
@@ -22,58 +22,19 @@ import type {
 } from "../sync-types";
 import { decodePresence, encodePresence, PRESENCE_FORMAT_VERSION } from "./presence-payload";
 
-export type SplitBlocks = (markdown: string) => string[];
+export type { SplitBlocks } from "./worker-blocks";
 
-export interface PresenceContext {
-  service: GitService;
+export interface PresenceContext extends BlockContext {
   remote: GitRemote;
   /** The local branch tip. */
   head(): Promise<string | null>;
-  loadBlocks(): Promise<SplitBlocks>;
-  cache: PresenceCache;
 }
 
-/** How many block splits and alignments a worker keeps. */
-const CACHE_LIMIT = 64;
-
-/** Splits and alignments per version, so mapping the same peers again
- *  (every poll, at the shared level) re-reads and re-aligns nothing. */
-export interface PresenceCache {
-  blocks: Map<string, string[] | null>;
-  alignments: Map<string, number[]>;
-}
-
-export function createPresenceCache(): PresenceCache {
-  return { blocks: new Map(), alignments: new Map() };
-}
-
-function remember<V>(map: Map<string, V>, key: string, value: V): V {
-  map.set(key, value);
-  if (map.size > CACHE_LIMIT) map.delete(map.keys().next().value!);
-  return value;
-}
-
-/** The blocks of `path` at `commit`; null when either isn't here. */
-async function blocksAt(
-  ctx: PresenceContext,
-  commit: string,
-  path: string,
-): Promise<string[] | null> {
-  const key = `${commit}:${path}`;
-  if (ctx.cache.blocks.has(key)) return ctx.cache.blocks.get(key)!;
-  let text: string;
-  try {
-    text = await ctx.service.readTextFile({ ref: commit, filepath: path });
-  } catch {
-    return remember(ctx.cache.blocks, key, null);
-  }
-  const split = await ctx.loadBlocks();
-  return remember(ctx.cache.blocks, key, split(text));
-}
+/** Splits and alignments per version (shared with leases). */
+export type PresenceCache = BlockCache;
+export const createPresenceCache = createBlockCache;
 
 type Mapper = (position: SyncBlockPosition) => SyncBlockPosition | null;
-
-const identity: Mapper = (position) => position;
 
 /** Positions of `path` at `from`, mapped onto `to`. A version this clone
  *  lacks (a commit not fetched yet) maps as-is: the next poll fixes it. */
@@ -83,19 +44,9 @@ async function mapperFor(
   from: string | null,
   to: string | null,
 ): Promise<Mapper> {
-  if (!from || !to || from === to) return identity;
-  const key = `${from}:${to}:${path}`;
-  let map = ctx.cache.alignments.get(key);
-  const target = await blocksAt(ctx, to, path);
-  if (!map) {
-    const source = await blocksAt(ctx, from, path);
-    if (!source || !target) return identity;
-    map = remember(ctx.cache.alignments, key, alignBlocks(source, target));
-  }
-  const toLength = target?.length ?? 0;
-  const aligned = map;
+  const map = await indexMapper(ctx, path, from, to);
   return (position) => {
-    const blockIndex = mapBlockIndexWith(aligned, toLength, position.blockIndex);
+    const blockIndex = map(position.blockIndex);
     return blockIndex === null ? null : { blockIndex, offset: position.offset };
   };
 }

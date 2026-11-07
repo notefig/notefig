@@ -26,6 +26,8 @@ import { nodeFs, runGit } from "@/testing/test-sync";
 import { createInProcessSyncWorker } from "./engine/sync-worker-api";
 import { remoteCredentialKey, sessionSpecOf } from "./sync-config";
 import type { SyncResult, SyncWorkerApi } from "./sync-types";
+import type { LeaseHolder } from "./lease-rules";
+import { docIdOf, lockRef } from "./engine/lease-payload";
 
 const URL_ = process.env.NOTEFIG_SYNC_LIVE_URL ?? "";
 const TOKEN = process.env.NOTEFIG_SYNC_LIVE_TOKEN ?? "";
@@ -225,6 +227,88 @@ describe.skipIf(!URL_ || !TOKEN)("sync worker against a live host", () => {
       console.log("[sync-live] presence latencies (ms):", JSON.stringify(latencies));
     } finally {
       if (published && a0.worker) await a0.worker.deletePresence({ ref: refA, old: published });
+      await deleteBranch(join(root, "a"), branch);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("takes a lease atomically with the branch, refuses the loser whole, and reads it back", { timeout: 120_000 }, async () => {
+    const root = mkdtempSync(join(tmpdir(), "notefig-sync-live-"));
+    const branch = `notefig-sync-273-${Date.now()}`;
+    const stamp = Date.now();
+    const holderA: LeaseHolder = { id: `live-a-${stamp}`, kind: "human", deviceId: `live-a-${stamp}`, name: "Live A", color: "#8e4ec6" };
+    const holderB: LeaseHolder = { id: `live-b-${stamp}`, kind: "human", deviceId: `live-b-${stamp}`, name: "Live B", color: "#46a758" };
+    const base = "# Live\n\nFirst paragraph.\n\nSecond paragraph.\n\nThird paragraph.\n";
+    const lockA = lockRef(await docIdOf(FILE), holderA.id);
+    let leaseOid: string | null = null;
+    const a0 = { worker: null as SyncWorkerApi | null };
+    try {
+      const a = await cloneLive(root, "a", branch);
+      a0.worker = a.worker;
+      const b = await cloneLive(root, "b", branch);
+      await commitFile(a, base, "live-a");
+      const created = value(await a.worker.push({ remote: null }));
+      const tip = created.status === "pushed" ? created.head : "";
+      await pause();
+      value(await b.worker.pull({ remote: tip }));
+      await fsp.writeFile(join(b.path, FILE), base);
+      value(await a.worker.readLeases({ refs: [], self: holderA.deviceId }));
+      value(await b.worker.readLeases({ refs: [], self: holderB.deviceId }));
+
+      // Both edit the same block; A pushes first, with its lease.
+      await commitFile(a, base.replace("Second paragraph.", "Second paragraph, by A."), "live-a");
+      await commitFile(b, base.replace("Second paragraph.", "Second paragraph, by B."), "live-b");
+      const pushedA = value(
+        await timed("push+lease", () => a.worker.push({ remote: tip, acquire: { human: holderA, agents: [] } })),
+      );
+      expect(pushedA).toMatchObject({ status: "pushed", leases: { refusals: [] } });
+      if (pushedA.status !== "pushed") return;
+      expect(pushedA.leases?.grants.map((grant) => [grant.ref, grant.payload.blocks])).toEqual([[lockA, [2]]]);
+      leaseOid = pushedA.leases!.grants[0].oid;
+      await pause();
+
+      // B's atomic push (branch + its lease) is refused whole.
+      const refusedB = value(await b.worker.push({ remote: tip, acquire: { human: holderB, agents: [] } }));
+      expect(refusedB.status).toBe("rejected");
+      await pause();
+      const polled = value(await timed("poll", () => b.worker.poll()));
+      expect(polled.locks).toEqual([{ ref: lockA, oid: leaseOid }]);
+      const [read] = value(
+        await timed("lease-read", () =>
+          b.worker.readLeases({ refs: [{ ref: lockA, oid: leaseOid!, live: true }], self: holderB.deviceId }),
+        ),
+      );
+      expect(read.payload).toMatchObject({ holder: { name: "Live A" }, blocks: [2] });
+      // B's merge gives A (the holder) the overlap; B's agent can't
+      // rewrite the file while A holds a block.
+      const merged = value(await b.worker.pull({ remote: polled.remote!, merge: true }));
+      expect(merged).toMatchObject({ status: "rebased", writes: [{ path: FILE, kind: "text" }] });
+      if (merged.status !== "rebased") return;
+      const current = merged.writes[0].kind === "text" ? merged.writes[0].text : base;
+      // Same-spot inserts are both kept, the holder's first.
+      expect(current).toContain("Second paragraph, by A, by B.");
+      const plan = value(
+        await b.worker.planWrite({
+          path: FILE,
+          current,
+          content: "# Rewritten\n\nAll new.\n",
+          holder: { ...holderB, id: `${holderB.id}/t1`, kind: "agent", taskId: "t1", harness: "claude" },
+        }),
+      );
+      expect(plan).toMatchObject({ granted: false, holders: [expect.objectContaining({ name: "Live A" })] });
+      await pause();
+
+      // A releases: a request of lease refs only.
+      const released = value(
+        await timed("lease-release", () =>
+          a.worker.publishLeases({ updates: [{ ref: lockA, old: leaseOid, payload: null }] }),
+        ),
+      );
+      expect(released.status).toBe("published");
+      leaseOid = null;
+      console.log("[sync-live] lease latencies (ms):", JSON.stringify(latencies));
+    } finally {
+      if (leaseOid && a0.worker) await a0.worker.publishLeases({ updates: [{ ref: lockA, old: leaseOid, payload: null }] });
       await deleteBranch(join(root, "a"), branch);
       rmSync(root, { recursive: true, force: true });
     }

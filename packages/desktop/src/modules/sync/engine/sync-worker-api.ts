@@ -22,6 +22,7 @@ import {
   createRpcGitService,
   type GitHttpClient,
   type GitMergeDriver,
+  type GitRefUpdate,
   type GitRebaseResult,
   type GitRepoRef,
   type GitService,
@@ -34,6 +35,7 @@ import { IGNORE_RULES } from "@/utils/ignore";
 import { path as pathutil } from "@/utils/path";
 import type { SyncAuthor } from "../sync-config";
 import type {
+  SyncAcquireInput,
   SyncOverwrite,
   SyncPullOutcome,
   SyncPushOutcome,
@@ -59,6 +61,17 @@ import {
   type SplitBlocks,
 } from "./sync-worker-presence";
 import { PRESENCE_REF_PREFIX } from "./presence-payload";
+import { LOCK_REF_PREFIX } from "./lease-payload";
+import {
+  createLeaseTable,
+  holderFor,
+  planAcquisitions,
+  planWrite,
+  prepareLeaseBlocks,
+  publishLeases,
+  readLeases,
+  type LeaseContext,
+} from "./sync-worker-leases";
 import {
   mergeTexts,
   reconcileFile,
@@ -303,6 +316,28 @@ async function canPush(
   throw new GitError("Network", `The remote answered ${response.status}.`);
 }
 
+/** One receive-pack request; atomic when it carries more than the branch.
+ *  "pushed", or what the remote said instead. */
+async function pushUpdates(
+  service: GitService,
+  remote: SyncSessionSpec["remote"],
+  updates: GitRefUpdate[],
+  known: string | null,
+): Promise<"pushed" | Exclude<SyncPushOutcome, { status: "pushed" | "up-to-date" }>> {
+  try {
+    const result = await service.pushRefs(remote, updates, {
+      haves: known ? [known] : [],
+      atomic: updates.length > 1,
+    });
+    if (result.ok) return "pushed";
+    const refused = result.refs.find((ref) => !ref.ok);
+    return { status: "rejected", reason: refused && !refused.ok ? refused.reason : result.unpack };
+  } catch (error) {
+    if (error instanceof GitError && error.code === "PushOutcomeUnknown") return { status: "unknown" };
+    throw error;
+  }
+}
+
 /** The pieces `startGitWorker` is wired with, shared by the worker entry
  * and the in-process test runtime. */
 export interface SyncWorkerWiring {
@@ -406,11 +441,28 @@ export function createSyncWorkerApi(
     };
   };
 
+  const leaseTable = createLeaseTable();
+  const leaseContext = (): LeaseContext => ({ ...presenceContext(), table: leaseTable });
+  // The merge's holder (decision 10): whoever leases the overlapping
+  // blocks; nobody: the merge's default. The table is empty below shared.
+  policy.holderFor = (path) => (session ? holderFor(leaseContext(), path) : null);
+
   const mergeContext = (): MergeContext => ({
     service: current().service,
     loadMerge: wiring.loadMerge,
     policy,
   });
+
+  /** The lease rule's ref updates for this push (none on failure: the
+   *  content still goes, as an unleased racing write). */
+  const acquisitions = async (remote: string, head: string, acquire: SyncAcquireInput) => {
+    try {
+      return await planAcquisitions(leaseContext(), { remote, head, acquire });
+    } catch (error) {
+      console.warn("[sync] lease planning failed; pushing without leases:", error);
+      return null;
+    }
+  };
 
   return {
     open: (spec) =>
@@ -448,6 +500,9 @@ export function createSyncWorkerApi(
           presence: refs
             .filter((ref) => ref.ref.startsWith(PRESENCE_REF_PREFIX))
             .map(({ ref, oid }) => ({ ref, oid })),
+          locks: refs
+            .filter((ref) => ref.ref.startsWith(LOCK_REF_PREFIX))
+            .map(({ ref, oid }) => ({ ref, oid })),
         };
       }),
 
@@ -457,12 +512,19 @@ export function createSyncWorkerApi(
 
     readPresence: ({ refs }) => attempt(() => readPresence(presenceContext(), refs)),
 
+    readLeases: (input) => attempt(() => readLeases(leaseContext(), input)),
+
+    publishLeases: (input) => attempt(() => publishLeases(leaseContext(), input)),
+
+    planWrite: (input) => attempt(() => planWrite(leaseContext(), input)),
+
     pull: ({ remote, keepLocal, merge, offline }) =>
       attempt(async () => {
         const { spec, repo, service } = current();
         await service.fetchRefs(spec.remote, [
           { ref: branchRef(spec.branch), oid: remote, localRef: trackingRef(spec.branch) },
         ]);
+        if (merge) await prepareLeaseBlocks(leaseContext());
         const previous = await readHead(service, spec.branch);
         if (!previous) throw new GitError("InvalidInput", "The branch has no commits.");
         policy.keepLocal = keepLocal === true;
@@ -471,7 +533,8 @@ export function createSyncWorkerApi(
         log.tookRemote = [];
         try {
           const rebase = await capture.run(repo, () =>
-            // Holder: the side already on the branch (MET-273: leases).
+            // Holder: the side already on the branch, unless a lease holds
+            // the blocks (`policy.holderFor`).
             service.rebaseOnto({ theirs: remote, holder: keepLocal ? "ours" : "theirs" }),
           );
           return await pullOutcome(service, previous, rebase, log);
@@ -485,10 +548,15 @@ export function createSyncWorkerApi(
     reconcile: (input) =>
       attempt(async () => {
         const { spec } = current();
+        await prepareLeaseBlocks(leaseContext());
         return reconcileFile(mergeContext(), branchRef(spec.branch), input);
       }),
 
-    mergeTexts: (input) => attempt(() => mergeTexts(mergeContext(), input)),
+    mergeTexts: (input) =>
+      attempt(async () => {
+        await prepareLeaseBlocks(leaseContext());
+        return mergeTexts(mergeContext(), input);
+      }),
 
     saveRecovery: () =>
       attempt(async () => {
@@ -507,7 +575,7 @@ export function createSyncWorkerApi(
         return resetBranch(service, branchRef(spec.branch), remote);
       }),
 
-    push: ({ remote }) =>
+    push: ({ remote, acquire }) =>
       attempt(async (): Promise<SyncPushOutcome> => {
         const { spec, service } = current();
         const head = await readHead(service, spec.branch);
@@ -517,24 +585,16 @@ export function createSyncWorkerApi(
         if (remote && (await service.mergeBase(head, remote)) !== remote) {
           return { status: "rejected", reason: "not a fast-forward" };
         }
-        try {
-          const result = await service.pushRefs(
-            spec.remote,
-            [{ ref: branchRef(spec.branch), old: remote ?? ZERO_OID, new: head }],
-            { haves: remote ? [remote] : [] },
-          );
-          if (result.ok) return { status: "pushed", head };
-          const refused = result.refs.find((ref) => !ref.ok);
-          return {
-            status: "rejected",
-            reason: refused && !refused.ok ? refused.reason : result.unpack,
-          };
-        } catch (error) {
-          if (error instanceof GitError && error.code === "PushOutcomeUnknown") {
-            return { status: "unknown" };
-          }
-          throw error;
-        }
+        // Leases ride in the same atomic push as the branch CAS: the
+        // branch picks one winner, and a loser takes none of them.
+        const plan = acquire && remote ? await acquisitions(remote, head, acquire) : null;
+        const updates = [
+          { ref: branchRef(spec.branch), old: remote ?? ZERO_OID, new: head },
+          ...(plan?.updates ?? []),
+        ];
+        const outcome = await pushUpdates(service, spec.remote, updates, remote);
+        if (outcome !== "pushed") return outcome;
+        return plan ? { status: "pushed", head, leases: plan.result } : { status: "pushed", head };
       }),
 
     verify: ({ spec }) =>

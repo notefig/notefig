@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createWriteGate, type GatedWrite } from "@/modules/write-gate";
 import { createLoopbackPair, type McpEndpoint } from "@notefig/agent";
 import { FakeAgent } from "../mock-harness";
 import {
@@ -350,6 +351,41 @@ describe("AgentTask vertical slice", () => {
     expect(writeFiles).toHaveBeenCalledWith([
       { path: "/ws/README.md", content: "# New title\n" },
     ]);
+  });
+
+  it("hands agent file writes to the write gate, which can refuse one before anything is written", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    // The fake resolves a JSON-RPC error response with no result.
+    let response: unknown = "unanswered";
+    agent.onPrompt = async (_params, a) => {
+      response = await a.request("fs/write_text_file", {
+        sessionId: "sess_test",
+        path: "README.md",
+        content: "# Nope\n",
+      });
+      return { stopReason: "end_turn" };
+    };
+    const writeGate = createWriteGate();
+    const seen: GatedWrite[] = [];
+    writeGate.register(async (write) => {
+      seen.push(write);
+      throw new Error("Refused: block 2 of README.md is being edited by Ada. Nothing was written.");
+    });
+    const task = new TaskManager({ ...deps, writeGate }, "/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "edit the readme");
+
+    expect(seen).toEqual([
+      {
+        workspacePath: "/ws",
+        path: "/ws/README.md",
+        content: "# Nope\n",
+        writer: { kind: "agent", taskId: task.taskId, harness: harness.id },
+      },
+    ]);
+    expect(response).toBeUndefined();
+    expect(writeFiles).not.toHaveBeenCalled();
   });
 
   it("auto-approves any permission request that offers an allow option (beta blanket grant)", async () => {
