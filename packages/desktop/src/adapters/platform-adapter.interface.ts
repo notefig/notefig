@@ -587,6 +587,55 @@ export interface PlatformUiSurface {
   removeEventListener(callback: PlatformEventListener): void;
 }
 
+/** One git smart-HTTP request (the `@notefig/git` http port's shape). */
+export interface GitHttpRequestSpec {
+  url: string;
+  method: "GET" | "POST";
+  headers: Record<string, string>;
+  body?: Uint8Array;
+  /**
+   * The opaque credential reference (`host/owner/repo`), never a secret.
+   * The platform resolves it and adds `Authorization` itself, and only to a
+   * request whose URL is under that remote.
+   */
+  credential?: string;
+}
+
+export interface GitHttpResponseSpec {
+  status: number;
+  headers: Record<string, string>;
+  body: Uint8Array;
+}
+
+/** Thrown by a surface the platform does not have (sync on the web). */
+export class PlatformUnsupportedError extends Error {
+  override name = "PlatformUnsupportedError";
+}
+
+/**
+ * Git's HTTP transport for sync. Desktop sends it from Rust: HTTPS only,
+ * keep-alive, a 10 s timeout, no CORS. Resolves with any status; rejects
+ * only when no response arrived (network failure, timeout).
+ */
+export interface GitHttpSurface {
+  readonly supported: boolean;
+  request(request: GitHttpRequestSpec): Promise<GitHttpResponseSpec>;
+}
+
+/**
+ * Tokens for git remotes, kept in the OS keychain. Write-only from JS:
+ * there is no `get` — the token never enters JS, the sync worker or an
+ * agent; the git HTTP surface uses it.
+ */
+export interface CredentialsSurface {
+  readonly supported: boolean;
+  /** Store a token for a remote (`host/owner/repo`); replaces any. */
+  set(remoteKey: string, username: string, token: string): Promise<void>;
+  has(remoteKey: string): Promise<boolean>;
+  /** Missing is not an error. */
+  delete(remoteKey: string): Promise<void>;
+}
+
 /**
  * Platform adapter: one object composed of per-concern surfaces, so each
  * surface is self-contained and can be reasoned about (and swapped) on its
@@ -599,4 +648,6 @@ export interface IPlatformAdapter {
   db: DbSurface;
   ui: PlatformUiSurface;
   updates: PlatformUpdater;
+  gitHttp: GitHttpSurface;
+  credentials: CredentialsSurface;
 }

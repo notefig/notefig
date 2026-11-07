@@ -23,6 +23,7 @@ import type {
 } from "./platform-adapter.interface";
 import { FsError } from "./platform-adapter.interface";
 import { createTauriDb } from "./tauri-db";
+import { createTauriCredentials, createTauriGitHttp } from "./tauri-git-remote";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import { path as pathutil } from "@/utils/path";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -135,6 +136,11 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     onFsEvent: this.onFsEvent.bind(this),
     searchContent: this.searchContent.bind(this),
   };
+
+  // Sync's transport and token store live in Rust (git_http.rs,
+  // credentials.rs): no CORS, and the token never enters JS.
+  readonly gitHttp = createTauriGitHttp(invoke);
+  readonly credentials = createTauriCredentials(invoke);
 
   readonly proc: ProcessSurface = {
     createAgentTransport: this.createAgentTransport.bind(this),

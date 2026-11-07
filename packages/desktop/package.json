@@ -33,6 +33,7 @@
     "@notefig/agent": "*",
     "@notefig/core": "*",
     "@notefig/dictation": "*",
+    "@notefig/git": "*",
     "@notefig/shared": "*",
     "@notefig/ui": "*",
     "@notefig/widgets": "*",

@@ -19,6 +19,10 @@ import type {
   IgnoreRulesOption,
 } from "./platform-adapter.interface";
 import { createBrowserDb } from "./browser-db";
+import {
+  createUnsupportedCredentials,
+  createUnsupportedGitHttp,
+} from "./browser-git-remote";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import type { HarnessDefinition } from "@notefig/shared/agent";
 import type {
@@ -214,6 +218,10 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   };
 
   readonly updates: PlatformUpdater = this.createUpdater();
+
+  // Sync is desktop-only (MET-275): no CORS-free transport, no keychain.
+  readonly gitHttp = createUnsupportedGitHttp();
+  readonly credentials = createUnsupportedCredentials();
 
   protected abstract pickDirectory(title: string): Promise<string | null>;
 
