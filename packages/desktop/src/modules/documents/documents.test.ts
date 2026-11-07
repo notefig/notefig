@@ -200,6 +200,44 @@ describe("documents.write adoption (open editor)", () => {
     expect(liveMarkdown()).toContain("Remote.");
     expect(written).toHaveBeenCalledWith({ paths: [path], source: "sync" });
   });
+
+  it("keeps a sync write out of the undo history; an agent write stays undoable", async () => {
+    writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
+    openEditor("# Doc\n\nOld.\n");
+    const editor = editors.markdownEditor(path)!;
+
+    await documents.write(path, "# Doc\n\nRemote.\n", { source: "sync" });
+    editor.commands.undo();
+    expect(liveMarkdown()).toContain("Remote.");
+
+    await documents.write(path, "# Doc\n\nAgent.\n");
+    editor.commands.undo();
+    expect(liveMarkdown()).toContain("Remote.");
+    expect(liveMarkdown()).not.toContain("Agent.");
+  });
+
+  it("hands out the editor's text with its version, and writes only while it still holds it", async () => {
+    writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
+    expect(await documents.editorText(path)).toBeNull();
+    openEditor("# Doc\n\nOld.\n");
+    const editor = editors.markdownEditor(path)!;
+
+    const snapshot = (await documents.editorText(path))!;
+    expect(snapshot.text).toBe("# Doc\n\nOld.");
+    editor.chain().insertContentAt(editor.state.doc.content.size - 1, " Typed.").run();
+
+    await expect(
+      documents.write(path, "# Doc\n\nMerged.\n", { source: "sync", expect: snapshot.version }),
+    ).resolves.toBe("stale");
+    expect(writeMock).not.toHaveBeenCalled();
+
+    const fresh = (await documents.editorText(path))!;
+    expect(fresh.text).toBe("# Doc\n\nOld. Typed.");
+    await expect(
+      documents.write(path, "# Doc\n\nOld. Typed. Merged.\n", { source: "sync", expect: fresh.version }),
+    ).resolves.toBe("written");
+    expect(liveMarkdown()).toContain("Old. Typed. Merged.");
+  });
 });
 
 describe("documents.read", () => {
