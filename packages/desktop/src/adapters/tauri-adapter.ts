@@ -137,11 +137,6 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     searchContent: this.searchContent.bind(this),
   };
 
-  // Sync's transport and token store live in Rust (git_http.rs,
-  // credentials.rs): no CORS, and the token never enters JS.
-  readonly gitHttp = createTauriGitHttp(invoke);
-  readonly credentials = createTauriCredentials(invoke);
-
   readonly proc: ProcessSurface = {
     createAgentTransport: this.createAgentTransport.bind(this),
     createMcpEndpoint: this.createMcpEndpoint.bind(this),
@@ -149,6 +144,11 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   };
 
   readonly db: DbSurface = createTauriDb();
+
+  // Sync's transport and token store live in Rust (git_http.rs,
+  // credentials.rs): no CORS, and the token never enters JS.
+  readonly gitHttp = createTauriGitHttp(invoke);
+  readonly credentials = createTauriCredentials(invoke);
 
   readonly ui: PlatformUiSurface = {
     pickDirectory: this.pickDirectory.bind(this),

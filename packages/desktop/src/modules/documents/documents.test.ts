@@ -168,6 +168,38 @@ describe("documents.write adoption (open editor)", () => {
     expect(liveMarkdown()).toContain("User draft.");
     expect(liveMarkdown()).not.toContain("Agent overwrite.");
   });
+
+  it("holds a sync write back from unsaved edits: nothing reaches disk", async () => {
+    writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
+    openEditor("# Doc\n\nUser draft.\n");
+    const editor = editors.markdownEditor(path)!;
+    const sync = getDocumentSync(path);
+    sync.writer = () => new Promise<void>(() => {});
+    sync.pushUpdate(() => editor.getJSON());
+
+    await expect(
+      documents.write(path, "# Doc\n\nRemote.\n", { source: "sync" }),
+    ).resolves.toBe("held");
+
+    expect(writeMock).not.toHaveBeenCalled();
+    expect(liveMarkdown()).toContain("User draft.");
+  });
+
+  it("applies a sync write to a clean editor and announces it as sync's", async () => {
+    writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
+    const hooks = createHooks();
+    const written = vi.fn();
+    hooks.on("files:written", written);
+    documents = createDocuments({ fs, openFiles: () => open, editors, hooks });
+    openEditor("# Doc\n\nOld.\n");
+
+    await expect(
+      documents.write(path, "# Doc\n\nRemote.\n", { source: "sync" }),
+    ).resolves.toBe("written");
+
+    expect(liveMarkdown()).toContain("Remote.");
+    expect(written).toHaveBeenCalledWith({ paths: [path], source: "sync" });
+  });
 });
 
 describe("documents.read", () => {

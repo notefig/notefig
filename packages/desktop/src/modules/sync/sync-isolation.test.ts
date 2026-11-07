@@ -102,7 +102,7 @@ describe("sync chunk isolation", () => {
         defineModule({ name: "syncRuntime", register: () => runtime }),
         syncModule,
       ],
-      platform: { fs: { readFiles } as never },
+      platform: { fs: { readFiles, exists: async () => [] } as never },
     });
     await core.boot();
     await core.workspace(WS).open();
@@ -147,7 +147,7 @@ describe("sync chunk isolation", () => {
         defineModule({ name: "syncRuntime", register: () => runtime }),
         syncModule,
       ],
-      platform: { fs: { readFiles } as never },
+      platform: { fs: { readFiles, exists: async () => [] } as never },
     });
     await core.boot();
     await core.workspace(WS).open();

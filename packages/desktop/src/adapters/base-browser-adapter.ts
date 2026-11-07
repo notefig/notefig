@@ -204,6 +204,10 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     runShellCommand: this.runShellCommand.bind(this),
   };
 
+  // Sync is desktop-only (MET-275): no CORS-free transport, no keychain.
+  readonly gitHttp = createUnsupportedGitHttp();
+  readonly credentials = createUnsupportedCredentials();
+
   // Shared by both web variants — the OPFS database is per-origin.
   readonly db: DbSurface = createBrowserDb();
 
@@ -218,10 +222,6 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   };
 
   readonly updates: PlatformUpdater = this.createUpdater();
-
-  // Sync is desktop-only (MET-275): no CORS-free transport, no keychain.
-  readonly gitHttp = createUnsupportedGitHttp();
-  readonly credentials = createUnsupportedCredentials();
 
   protected abstract pickDirectory(title: string): Promise<string | null>;
 

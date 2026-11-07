@@ -11,6 +11,7 @@
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { APP_DIR_NAME } from "@/utils/app-dir";
 import { path as pathutil } from "@/utils/path";
+import type { SyncSessionSpec } from "./sync-types";
 
 /** A commit author. */
 export interface SyncAuthor {
@@ -286,3 +287,18 @@ export function tokenCreationHelp(url: string): {
       "A token that can read and push to this repository, and nothing else.",
   };
 }
+
+/** The session a config describes. */
+export function sessionSpecOf(
+  workspacePath: string,
+  config: Pick<SyncConfig, "remote" | "branch">,
+): SyncSessionSpec {
+  const root = pathutil.normalize(workspacePath);
+  return {
+    workspacePath: root,
+    gitDir: pathutil.join(root, ".git"),
+    remote: { url: config.remote, credential: remoteCredentialKey(config.remote) },
+    branch: config.branch,
+  };
+}
+

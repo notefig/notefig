@@ -26,7 +26,7 @@ import {
   deleteSyncConfig,
   newDeviceId,
   readSyncConfig,
-  remoteCredentialKey,
+  sessionSpecOf,
   writeSyncConfig,
   type SyncConfig,
 } from "./sync-config";
@@ -49,7 +49,6 @@ import type {
   SyncEnableInput,
   SyncEngine,
   SyncResult,
-  SyncSessionSpec,
   SyncVerifyOutcome,
 } from "./sync-types";
 
@@ -120,20 +119,6 @@ export interface WorkspaceSyncDeps {
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
 }
 
-/** The session a config describes. */
-export function sessionSpecOf(
-  workspacePath: string,
-  config: Pick<SyncConfig, "remote" | "branch">,
-): SyncSessionSpec {
-  const root = pathutil.normalize(workspacePath);
-  return {
-    workspacePath: root,
-    gitDir: pathutil.join(root, ".git"),
-    remote: { url: config.remote, credential: remoteCredentialKey(config.remote) },
-    branch: config.branch,
-  };
-}
-
 export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
   const workspacePath = pathutil.normalize(deps.workspacePath);
   const listeners = new Set<() => void>();
@@ -165,6 +150,8 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     config = next;
     dispatch({ type: "enable" });
     const run = (async () => {
+      // `.notefig/` (sync.json among it) stays out of the user's repo.
+      await excludeAppDir(deps.fs, workspacePath);
       const factory = await deps.runtime.loadEngine();
       if (disposed || config !== next) return;
       const worker = await deps.runtime.launchWorker();
@@ -246,7 +233,6 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
         deviceId: config?.deviceId ?? newDeviceId(),
         ...(input.author ? { author: input.author } : {}),
       };
-      await excludeAppDir(deps.fs, workspacePath);
       await writeSyncConfig(deps.fs, workspacePath, next);
       dispatch({ type: "disable" });
       await start(next);

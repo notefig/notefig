@@ -139,7 +139,7 @@ export interface SyncEngineDeps extends SyncEngineHost {
   documents: Pick<DocumentsApi, "write">;
   /** The workspace's files: rows for created and deleted files. */
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
-  fs: Pick<FileSystemSurface, "writeBinaryFiles" | "deleteFiles">;
+  fs: Pick<FileSystemSurface, "readFiles" | "writeBinaryFiles" | "deleteFiles">;
   /** Window blur, for a commit when the user leaves. Default: `window`. */
   onBlur?: (listener: () => void) => () => void;
   /** Default: global timers, `Math.random`. */
