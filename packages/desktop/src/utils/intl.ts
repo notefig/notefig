@@ -700,10 +700,6 @@ i18n
           agentToolWorkspaceReadDocument: "Read Document",
           agentToolDocumentReadRange: "Read Document Range",
           agentToolWorkspaceOpenFiles: "Open Files",
-          agentToolHistoryLog: "Document History",
-          agentToolHistoryDiff: "Compare Versions",
-          agentToolHistoryCheckpoint: "Save Checkpoint",
-          agentToolHistoryRestore: "Restore Version",
           agentToolWidgetRespond: "Respond in Widget",
 
           // Telemetry consent + Privacy settings

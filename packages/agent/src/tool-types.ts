@@ -46,12 +46,12 @@ export interface ToolAgentsFacade {
 }
 
 /**
- * What the app hands its tools for the task's workspace (its history repo,
- * its files…). Empty here: the app widens it by declaration merging, so
+ * What the app hands its tools for the task's workspace (its files, its
+ * documents…). Empty here: the app widens it by declaration merging, so
  * this package never names the app's types —
  *
  *   declare module "@notefig/agent" {
- *     interface ToolServices { history: WorkspaceHistory }
+ *     interface ToolServices { files: WorkspaceFiles }
  *   }
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type

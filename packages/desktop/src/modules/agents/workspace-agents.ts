@@ -67,9 +67,6 @@ export const workspaceAgentsModule = defineModule({
       services: (workspacePath) => {
         const workspace = ctx.workspaceHandle(workspacePath);
         return {
-          get history() {
-            return workspace.history;
-          },
           get files() {
             return workspace.files;
           },
