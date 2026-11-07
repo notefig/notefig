@@ -18,6 +18,7 @@ import { path as pathutil, workspaceKey } from "@/utils/path";
 import { ensureExcludeLines, type ExcludeFs } from "@/utils/git-exclude";
 import { APP_DIR_NAME, SCRATCHPADS_REL_PATH } from "@/utils/app-dir";
 import { gitWorkerModule } from "@/modules/git-worker";
+import { excludeAppDir } from "@/modules/app-dir-exclude";
 import { platformModule } from "@/core/services";
 
 export function historyGitDir(workspacePath: string): string {
@@ -103,23 +104,10 @@ export function createWorkspaceHistory({
       );
     }
 
-    // Hide the whole app dir from the user's own repo via its gitdir-local
-    // exclude (never the tracked .gitignore) — scratchpads included; they
-    // are the app's, not the project's. Runs on every ensure call — this
-    // block re-executes per checkpoint, so a repo the user inits *after*
-    // history exists gets the exclude on the next turn.
-    try {
-      const userGitDir = pathutil.join(workspacePath, ".git");
-      const [userGit] = await fs.exists([userGitDir]);
-      if (userGit?.exists && userGit.type === "directory") {
-        await ensureExcludeLines(fs, userGitDir, [`${APP_DIR_NAME}/`]);
-      }
-    } catch (error) {
-      console.warn(
-        `Failed to update the user repo's exclude for '${workspacePath}':`,
-        error,
-      );
-    }
+    // The user's own repo keeps the app dir out too; this re-runs per
+    // checkpoint, so a repo the user inits *after* history exists gets the
+    // exclude on the next turn.
+    await excludeAppDir(fs, workspacePath);
   };
 
   const ready = async () => {

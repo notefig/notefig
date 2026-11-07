@@ -11,6 +11,7 @@ import { createCore, type AnyModule, type Core } from "@notefig/core";
 import { QueryClient } from "@tanstack/react-query";
 import { platformAdapter } from "@/adapters";
 import { agentStoreModule } from "@/modules/agents/agent-collections";
+import { appDirExcludeModule } from "@/modules/app-dir-exclude";
 import { agentDirectivesModule } from "@/modules/agents/agent-directives";
 import { harnessProbeModule } from "@/modules/agents/harness-probe";
 import { mockAgentModule } from "@/modules/agents/mock-harness";
@@ -74,6 +75,8 @@ export function runtimeModules(): AnyModule[] {
     scratchpadsModule,
     gitWorkerModule,
     historyModule,
+    // `.notefig/` stays out of the user's own git.
+    appDirExcludeModule,
     agentStoreModule,
     // `@model:` and `@skill:` in the composers (`core.directives`).
     agentDirectivesModule,
