@@ -31,6 +31,7 @@ import { path as pathutil } from "@/utils/path";
 import {
   deleteSyncConfig,
   newDeviceId,
+  readRepoInfo,
   readSyncConfig,
   sessionSpecOf,
   writeSyncConfig,
@@ -52,11 +53,16 @@ import {
   type SyncIncomingContent,
 } from "./document-channel";
 import { syncRuntimeModule, type SyncRuntime } from "./sync-runtime";
+import { editorsModule, type EditorsApi } from "@/modules/editors";
+import { agentStoreModule } from "@/modules/agents/agent-collections";
+import type { AgentTaskRow } from "@notefig/shared/agent";
+import { resolvePresenceIdentity, type SyncPresenceSettings } from "./presence-identity";
 import type {
   SyncEnableInput,
   SyncEngine,
   SyncEngineFactory,
   SyncOverwriteRecord,
+  SyncPeer,
   SyncWorkerConnection,
   SyncResult,
   SyncVerifyOutcome,
@@ -81,6 +87,9 @@ declare module "@notefig/core" {
     "sync:overwritten": { workspacePath: string; record: SyncOverwriteRecord };
     /** The failsafe stopped sync; the local state is on `recoveryRef`. */
     "sync:failsafe": SyncFailsafe & { workspacePath: string; detail: string };
+    /** The other devices present changed (MET-272): who, where, and
+     *  their agents. Empty when the last one left. */
+    "sync:presence": { workspacePath: string; peers: readonly SyncPeer[] };
   }
 }
 
@@ -119,6 +128,15 @@ export interface WorkspaceSync {
   /** The failsafe's "Accept all incoming": the local state is set aside
    *  on a recovery ref, then the files become the remote's. */
   acceptIncoming(): Promise<void>;
+  /** The other devices present (live presence, MET-272), with where they
+   *  are and their agents. Empty in a regular workspace or alone. */
+  presence(): readonly SyncPeer[];
+  /** The name and colour this device shows the others: the settings, with
+   *  the defaults filled in (null: not a sync workspace). */
+  identity(): { name: string; color: string; settings: SyncPresenceSettings } | null;
+  /** Change the name or colour (sync.json's `presence`; empty values go
+   *  back to the defaults). Published with the next presence update. */
+  setIdentity(settings: SyncPresenceSettings): Promise<void>;
   /** What merges overwrote, newest last, until dismissed. */
   overwrites(): readonly SyncOverwriteRecord[];
   dismissOverwrite(id: string): void;
@@ -144,6 +162,11 @@ export interface WorkspaceSyncDeps {
   hooks: Hooks;
   documents: Pick<DocumentsApi, "write" | "editorText">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
+  /** The live editors, for presence's editor plugin (shared level). */
+  editors?: Pick<EditorsApi, "markdownEditor" | "paths">;
+  /** This device's agent sessions (`core.agentStore.tasks`), published in
+   *  presence. */
+  agentTasks?: () => readonly AgentTaskRow[];
   /** Default: `Date.now`. */
   now?: () => number;
 }
@@ -162,6 +185,13 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
   let disposed = false;
   let overwrites: SyncOverwriteRecord[] = [];
   let overwriteCount = 0;
+  let peers: readonly SyncPeer[] = [];
+  /** sync.json's `presence`, kept apart from `config` (whose identity marks
+   *  which start is current) so Settings can change it while sync runs. */
+  let presenceSettings: SyncPresenceSettings | undefined;
+  /** The repo's `user.name`: the default presence name after sync.json's
+   *  author. */
+  let repoUserName: string | null = null;
   const now = deps.now ?? Date.now;
 
   const notify = () => {
@@ -187,6 +217,24 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     notify();
   };
 
+  const presenceChanged = (next: readonly SyncPeer[]) => {
+    peers = next;
+    deps.hooks.emit("sync:presence", { workspacePath, peers });
+    notify();
+  };
+
+  const openPort = (path: string): SyncDocumentPort => {
+    const open = ports.get(path);
+    if (open && !open.closed) return open;
+    const port = createDocumentPort(path, {
+      onClose: () => {
+        if (ports.get(path) === port) ports.delete(path);
+      },
+    });
+    ports.set(path, port);
+    return port;
+  };
+
   const delivered = (path: string, event: SyncIncomingContent) => {
     const port = ports.get(path);
     if (port) void port.deliver(event).catch(() => {});
@@ -208,11 +256,17 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
         capabilities: () => capabilities,
         delivered,
         overwritten,
+        presenceChanged,
+        presenceSettings: () => presenceSettings,
+        ports: () => [...ports.values()],
+        openPort,
         worker,
         hooks: deps.hooks,
         documents: deps.documents,
         files: deps.files,
         fs: deps.fs,
+        editors: deps.editors,
+        agentTasks: deps.agentTasks,
       });
     } catch (error) {
       worker.terminate();
@@ -222,6 +276,13 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
 
   const start = (next: SyncConfig, fullScan = false): Promise<void> => {
     config = next;
+    presenceSettings = next.presence;
+    void readRepoInfo(deps.fs, workspacePath)
+      .then((repo) => {
+        repoUserName = repo?.author?.name ?? null;
+        notify();
+      })
+      .catch(() => {});
     dispatch({ type: "enable" });
     const run = (async () => {
       // `.notefig/` (sync.json among it) stays out of the user's repo.
@@ -258,6 +319,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     engine = null;
     starting = null;
     await running?.stop();
+    if (peers.length > 0) presenceChanged([]);
   };
 
   const ready = (async () => {
@@ -273,17 +335,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       return () => void listeners.delete(listener);
     },
     config: () => config,
-    document(path) {
-      const open = ports.get(path);
-      if (open && !open.closed) return open.channel;
-      const port = createDocumentPort(path, {
-        onClose: () => {
-          if (ports.get(path) === port) ports.delete(path);
-        },
-      });
-      ports.set(path, port);
-      return port.channel;
-    },
+    document: (path) => openPort(path).channel,
     async verify(input) {
       const worker = await deps.runtime.launchWorker();
       try {
@@ -301,6 +353,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
         branch: input.branch,
         deviceId: config?.deviceId ?? newDeviceId(),
         ...(input.author ? { author: input.author } : {}),
+        ...(presenceSettings ? { presence: presenceSettings } : {}),
       };
       await writeSyncConfig(deps.fs, workspacePath, next);
       dispatch({ type: "disable" });
@@ -325,6 +378,32 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       await starting;
       await engine?.acceptIncoming();
     },
+    presence: () => peers,
+    identity() {
+      if (!config) return null;
+      const settings = presenceSettings ?? {};
+      return {
+        ...resolvePresenceIdentity({
+          deviceId: config.deviceId,
+          settings,
+          authorName: config.author?.name ?? repoUserName,
+        }),
+        settings,
+      };
+    },
+    async setIdentity(settings) {
+      if (!config) return;
+      const presence: SyncPresenceSettings = {
+        ...(settings.name?.trim() ? { name: settings.name.trim() } : {}),
+        ...(settings.color ? { color: settings.color } : {}),
+      };
+      const { presence: _old, ...rest } = config;
+      const empty = Object.keys(presence).length === 0;
+      await writeSyncConfig(deps.fs, workspacePath, empty ? rest : { ...rest, presence });
+      // The engine reads it live (`presenceSettings`).
+      presenceSettings = empty ? undefined : presence;
+      notify();
+    },
     overwrites: () => overwrites,
     dismissOverwrite(id) {
       const kept = overwrites.filter((record) => record.id !== id);
@@ -348,6 +427,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       ports.clear();
       listeners.clear();
       overwrites = [];
+      peers = [];
     },
   };
 }
@@ -360,18 +440,22 @@ declare module "@notefig/core" {
 
 export const syncModule = defineModule({
   name: "sync",
-  needs: [platformModule, documentsModule, syncRuntimeModule],
+  needs: [platformModule, documentsModule, syncRuntimeModule, editorsModule, agentStoreModule],
   workspace: {
     needs: [filesModule],
-    create: (ctx) =>
-      createWorkspaceSync({
+    create: (ctx) => {
+      const tasks = ctx.use("agentStore").tasks;
+      return createWorkspaceSync({
         workspacePath: ctx.workspace.path,
         fs: ctx.use("platform").fs,
         runtime: ctx.use("syncRuntime"),
         hooks: ctx.hooks,
         documents: ctx.use("documents"),
         files: ctx.useWorkspace("files"),
-      }),
+        editors: ctx.use("editors"),
+        agentTasks: () => tasks.toArray,
+      });
+    },
     dispose: (sync) => sync.dispose(),
   },
 });

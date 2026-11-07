@@ -230,7 +230,11 @@ describe("shared sync: the rebase loop and the merge", () => {
     // …which never reaches the remote.
     await b.sync.syncNow();
     expect(await runGit(remote.bare, ["for-each-ref", "refs/notefig-local/"])).toBe("");
-    expect(await runGit(remote.bare, ["for-each-ref", "--format=%(refname)"])).toBe("refs/heads/main");
+    // Only the branch and each device's presence ref are on the remote.
+    const remoteRefs = (await runGit(remote.bare, ["for-each-ref", "--format=%(refname)"]))
+      .split("\n")
+      .filter((ref) => !ref.startsWith("refs/notefig/v1/presence/"));
+    expect(remoteRefs).toEqual(["refs/heads/main"]);
 
     b.sync.dismissOverwrite(overwritten[0].id);
     expect(b.sync.overwrites()).toEqual([]);
