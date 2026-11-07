@@ -14,6 +14,12 @@
  * State lives in one pure machine (`sync-machine.ts`); consumers read its
  * capabilities (`capabilities()`, `"sync:state"`), never raw states.
  * `dispose` stops the engine: its timers, its listeners and the worker.
+ *
+ * Shared level: `setPeersPresent` is how presence (MET-272) moves the
+ * machine between solo and shared; tests call it to force shared. What a
+ * merge overwrote is kept in `overwrites()` (and announced as
+ * `"sync:overwritten"`) until dismissed; the failsafe is announced as
+ * `"sync:failsafe"` and resolved with `acceptIncoming` or `disable`.
  */
 import { defineModule, type Hooks } from "@notefig/core";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
@@ -36,6 +42,7 @@ import {
   transition,
   type SyncCapabilities,
   type SyncEvent,
+  type SyncFailsafe,
   type SyncMachineState,
 } from "./sync-machine";
 import {
@@ -49,6 +56,7 @@ import type {
   SyncEnableInput,
   SyncEngine,
   SyncEngineFactory,
+  SyncOverwriteRecord,
   SyncWorkerConnection,
   SyncResult,
   SyncVerifyOutcome,
@@ -68,6 +76,11 @@ declare module "@notefig/core" {
       commit: string;
       paths: string[];
     };
+    /** A merge overwrote text (the loser's side of an overlap), kept on a
+     *  local-only recovery ref. */
+    "sync:overwritten": { workspacePath: string; record: SyncOverwriteRecord };
+    /** The failsafe stopped sync; the local state is on `recoveryRef`. */
+    "sync:failsafe": SyncFailsafe & { workspacePath: string; detail: string };
   }
 }
 
@@ -97,6 +110,18 @@ export interface WorkspaceSync {
   disable(): Promise<void>;
   /** Leave a sticky fault (new token, or keep local files and go on). */
   resume(): void;
+  /**
+   * Another device's live presence appeared (true) or went away: the
+   * machine's solo ↔ shared input. Presence (MET-272) calls it; tests use
+   * it to force the shared level.
+   */
+  setPeersPresent(present: boolean): void;
+  /** The failsafe's "Accept all incoming": the local state is set aside
+   *  on a recovery ref, then the files become the remote's. */
+  acceptIncoming(): Promise<void>;
+  /** What merges overwrote, newest last, until dismissed. */
+  overwrites(): readonly SyncOverwriteRecord[];
+  dismissOverwrite(id: string): void;
   /** Run a cycle now. */
   syncNow(): Promise<void>;
   /** Resolves once the config was read and, for a sync workspace, the
@@ -112,13 +137,15 @@ export interface WorkspaceSyncDeps {
   workspacePath: string;
   fs: Pick<
     FileSystemSurface,
-    "readFiles" | "writeFiles" | "deleteFiles" | "writeBinaryFiles"
+    "readFiles" | "readBinaryFiles" | "writeFiles" | "deleteFiles" | "writeBinaryFiles"
   > &
     AppDirExcludeFs;
   runtime: SyncRuntime;
   hooks: Hooks;
-  documents: Pick<DocumentsApi, "write">;
+  documents: Pick<DocumentsApi, "write" | "editorText">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
+  /** Default: `Date.now`. */
+  now?: () => number;
 }
 
 export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
@@ -133,14 +160,31 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
   /** The engine start in flight, so stop waits for it. */
   let starting: Promise<void> | null = null;
   let disposed = false;
+  let overwrites: SyncOverwriteRecord[] = [];
+  let overwriteCount = 0;
+  const now = deps.now ?? Date.now;
+
+  const notify = () => {
+    for (const listener of [...listeners]) listener();
+  };
 
   const dispatch = (event: SyncEvent) => {
     const next = transition(state, event);
     if (next === state) return;
+    const levelMoved = next.level !== state.level;
     state = next;
     capabilities = syncCapabilities(state);
     deps.hooks.emit("sync:state", { workspacePath, capabilities });
-    for (const listener of [...listeners]) listener();
+    if (levelMoved) engine?.levelChanged();
+    notify();
+  };
+
+  const overwritten = (record: Omit<SyncOverwriteRecord, "id" | "at">) => {
+    overwriteCount += 1;
+    const full = { ...record, id: `overwrite-${overwriteCount}`, at: now() };
+    overwrites = [...overwrites, full];
+    deps.hooks.emit("sync:overwritten", { workspacePath, record: full });
+    notify();
   };
 
   const delivered = (path: string, event: SyncIncomingContent) => {
@@ -163,6 +207,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
         dispatch,
         capabilities: () => capabilities,
         delivered,
+        overwritten,
         worker,
         hooks: deps.hooks,
         documents: deps.documents,
@@ -273,6 +318,20 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       // A start that failed (the chunk or the worker didn't load) retries.
       else if (config && !disposed) retryStart(config);
     },
+    setPeersPresent(present) {
+      dispatch({ type: "peers", present });
+    },
+    async acceptIncoming() {
+      await starting;
+      await engine?.acceptIncoming();
+    },
+    overwrites: () => overwrites,
+    dismissOverwrite(id) {
+      const kept = overwrites.filter((record) => record.id !== id);
+      if (kept.length === overwrites.length) return;
+      overwrites = kept;
+      notify();
+    },
     syncNow: async () => {
       await starting;
       await engine?.syncNow();
@@ -288,6 +347,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       for (const port of [...ports.values()]) port.channel.close();
       ports.clear();
       listeners.clear();
+      overwrites = [];
     },
   };
 }
