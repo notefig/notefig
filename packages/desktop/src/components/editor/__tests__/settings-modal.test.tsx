@@ -21,6 +21,10 @@ vi.mock("@/components/agent/usage-settings", () => ({
   UsageSettings: () => null,
 }));
 
+vi.mock("@/components/sync/sync-settings", () => ({
+  SyncSettings: () => null,
+}));
+
 vi.mock("@/components/app-updater", () => ({
   useAppUpdater: () => ({
     status: "idle",
