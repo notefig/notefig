@@ -1,10 +1,9 @@
 import type { LucideIcon } from "lucide-react";
-import { ChevronRight, History, Users, Workflow } from "lucide-react";
+import { ChevronRight, Users, Workflow } from "lucide-react";
 import { DownloadButton } from "./download-app-link";
 import { APP_URL } from "./links";
 import {
   DemoHarnesses,
-  DemoHistory,
   DemoSessions,
   DemoWorkspaces,
 } from "./demo/demo-cards";
@@ -20,7 +19,7 @@ import {
 
 /**
  * Marketing beats below the product window: the agents it runs, the
- * workflow in three cards, two feature splits, a bento of the rest, and the
+ * workflow in three cards, a feature split, a bento of the rest, and the
  * harness field with the closing download.
  * No social proof — we don't have client logos or quotes yet.
  */
@@ -31,7 +30,6 @@ export function MarketingSections() {
       <div className="mk-white">
         <PromptSplit />
         <PillarsSection />
-        <HistorySplit />
       </div>
       <BentoSection />
       <AgentsSection />
@@ -147,46 +145,6 @@ function PromptSplit() {
           width={460}
           height={680}
         />
-      </div>
-    </section>
-  );
-}
-
-const HISTORY_POINTS = [
-  "Automatic commits",
-  "One-click revert",
-  "Separate from your own git history",
-];
-
-function HistorySplit() {
-  return (
-    <section className="site-column grid items-center gap-14 pb-[140px] pt-[100px] md:grid-cols-[1.15fr_1fr] md:gap-16">
-      <div className="mk-well mk-well-dots order-last min-h-[380px] min-w-0 p-6 md:order-first md:aspect-[524/480] md:p-10">
-        <DemoHistory width={400} />
-      </div>
-      <div>
-        <Kicker color="var(--mk-sage-text)" icon={History}>
-          History
-        </Kicker>
-        <h2 className="mk-h2 mt-4 max-w-[420px]">
-          See what changed, and undo it.
-        </h2>
-        <p className="mk-body mt-5 max-w-[420px]">
-          Every change is committed as you work, so any agent edit is one
-          click from undone.
-        </p>
-        <ul className="mt-9 space-y-2.5">
-          {HISTORY_POINTS.map((point) => (
-            <li
-              key={point}
-              className="flex items-center gap-2.5 text-[15px] font-medium text-[var(--mk-ink)]"
-            >
-              <span aria-hidden="true">✓</span>
-              {point}
-            </li>
-          ))}
-        </ul>
-        <WebAppLink className="mt-10" />
       </div>
     </section>
   );

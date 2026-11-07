@@ -289,48 +289,8 @@ i18n
           showBookmarks: "Show Bookmarks",
           recentFiles: "Recent Files",
 
-          // Tools Commands
-          gitStatus: "Git Status",
-          gitCommit: "Git Commit",
-
-          // Checkpoints (Git Sidebar)
-          saveCheckpoint: "Commit",
-          checkpointSaving: "Saving commit...",
-          saveCheckpointWithDescription: "Save commit with description",
-          checkpointDescriptionHint: "Add a brief description of what changed",
-          checkpointDescriptionPlaceholder: "What changed?",
-          autoSaveCheckpoints: "Auto-save commits",
-          autoSaveCheckpointsHint: "After each change",
-          loadingTimeline: "Loading commit history...",
-          noCheckpointsYet: "No commits yet. Save your first one!",
-          latest: "Latest",
-          compareCheckpoint: "Compare commit",
-          restoreCheckpoint: "Restore commit",
-          initializeTimeline: "Initialize commit history",
-          repairTimeline: "Repair commit history",
+          // Error recovery
           retry: "Retry",
-          timelineNotInitializedTitle: "Commit history not initialized",
-          timelineNotInitializedMessage:
-            "Project commit history is not initialized.",
-          timelineBusyTitle: "Commit history is busy",
-          timelineBusyMessage: "Project commit history is busy.",
-          timelineCorruptTitle: "Commit history needs repair",
-          timelineCorruptMessage:
-            "Project commit history metadata is inconsistent.",
-          timelineMergeRequiredTitle: "Revert needs attention",
-          timelineMergeRequiredMessage:
-            "Revert would conflict with current changes.",
-          timelineUnsupportedTitle: "Action unavailable",
-          timelineUnsupportedMessage:
-            "This action is not available in this environment.",
-          timelineInvalidInputTitle: "Invalid input",
-          timelineUnexpectedTitle: "Timeline error",
-          timelineStateUncommitted: "Unchecked",
-          timelineStateUnsynced: "Not synced",
-          timelineStateSynced: "Synced",
-          copyCommitHash: "Copy commit hash",
-          abortRevert: "Abort revert",
-          dismiss: "Dismiss",
 
           // Settings Commands
           openSettings: "Open Settings",
@@ -455,7 +415,6 @@ i18n
           // Workspace rail + sidebar panels
           goToWelcomePage: "Go to Welcome Page",
           files: "Files",
-          git: "Git",
           agentSessionsFull: "Agent Sessions",
           everything: "Everything",
           everythingHint: "Everything \u2014 all workspaces",
