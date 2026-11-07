@@ -14,7 +14,12 @@
  */
 import { test, expect, type Page } from "@playwright/test";
 import path from "node:path";
-import { perfWorkspace, resetLargeDocument, WIDGETS } from "./fixture";
+import {
+  perfWorkspace,
+  resetLargeDocument,
+  soloSyncWorkspace,
+  WIDGETS,
+} from "./fixture";
 import {
   autosave,
   installProbe,
@@ -159,14 +164,11 @@ async function openLargeDocument(
   page: Page,
   kind: WorkspaceKind,
 ): Promise<string> {
-  const workspace = await perfWorkspace();
+  // The one place "solo-sync" differs from "regular": a copy of the
+  // fixture that is a git repo with `.notefig/sync.json` (MET-270).
+  const workspace =
+    kind === "solo-sync" ? await soloSyncWorkspace() : await perfWorkspace();
   await resetLargeDocument(workspace);
-  if (kind === "solo-sync") {
-    // MET-270: the one place "solo-sync" differs from "regular". Until sync
-    // exists it is the same workspace. Then write its `.notefig/sync.json`
-    // here, in a copy of the fixture (this directory is shared, and reused,
-    // by the regular runs).
-  }
   await page.goto("/");
   await page.waitForFunction(() => Boolean(window.__notefigTest));
   await page.evaluate(
