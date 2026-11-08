@@ -31,16 +31,27 @@ function same(a?: Entry, b?: Entry): boolean {
   return a.oid === b.oid && a.mode === b.mode;
 }
 
-const decoder = new TextDecoder("utf-8", { fatal: false });
+/** Marks content the merge must not touch as text. */
+const BINARY = Symbol("binary");
+/** A side's file: its text, `null` when absent, or `BINARY`. */
+type Content = string | null | typeof BINARY;
 
-async function readText(
-  ctx: RepoContext,
-  entry?: Entry,
-): Promise<string | null | "binary"> {
+/** Strict and BOM-preserving, so decode → encode gives back the same bytes. */
+const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+function decodeText(blob: Uint8Array): string | typeof BINARY {
+  if (blob.subarray(0, 8000).includes(0)) return BINARY;
+  try {
+    return decoder.decode(blob);
+  } catch {
+    return BINARY;
+  }
+}
+
+async function readText(ctx: RepoContext, entry?: Entry): Promise<Content> {
   if (!entry) return null;
   const { blob } = await git.readBlob({ ...ctx.git, oid: entry.oid });
-  if (blob.subarray(0, 8000).includes(0)) return "binary";
-  return decoder.decode(blob);
+  return decodeText(blob);
 }
 
 async function blobEntry(
@@ -128,7 +139,7 @@ async function mergeFile(
   sides: Sides,
 ): Promise<Entry | null | undefined> {
   const texts = await Promise.all(sides.map((e) => readText(ctx, e)));
-  if (texts.includes("binary"))
+  if (texts.includes(BINARY))
     return conflict(state, path, { reason: "binary" });
   const mode = mergedMode(sides);
   return state.driver
