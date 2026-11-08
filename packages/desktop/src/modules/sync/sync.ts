@@ -34,6 +34,13 @@ import {
 } from "./sync-machine";
 import type { SyncEngine } from "./sync-engine";
 
+declare module "@notefig/agent" {
+  interface ToolServices {
+    /** The workspace's sync (`core.workspace(ws).sync`), as a gate on writes. */
+    sync?: Pick<WorkspaceSync, "checkWrite" | "state">;
+  }
+}
+
 declare module "@notefig/core" {
   interface CoreHookMap {
     /** Remote changes reached the worktree (absolute `paths`). */
@@ -64,6 +71,9 @@ export interface WorkspaceSync {
   /** Carry on from a stop (new credential, or go after the offline-return
    *  question). */
   resume(): void;
+  /** Why an agent's write of `next` to `path` is refused, naming who
+   *  holds the units; null when it may go on. */
+  checkWrite(path: string, next: string): Promise<string | null>;
   /** Clear the flags on text a merge overwrote. */
   dismissOverwritten(): void;
   syncNow(): Promise<void>;
@@ -327,6 +337,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       }
     },
     dismissOverwritten: () => dispatch({ type: "dismiss-overwritten" }),
+    checkWrite: async (path, next) => (engine ? engine.checkWrite(pathutil.normalize(path), next) : null),
     syncNow: async () => {
       await chain;
       await engine?.syncNow();

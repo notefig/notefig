@@ -17,7 +17,7 @@ import type { SessionNotification } from "@notefig/shared/agent";
 
 type Json = Record<string, unknown>;
 
-function makeClient(initializeResult?: Json, clientMeta?: Json) {
+function makeClient(initializeResult?: Json, clientMeta?: Json, refusesWrite?: (rawInput: unknown) => Promise<boolean>) {
   const [clientSide, agentSide] = createLoopbackPair();
   const agent = new FakeAgent(agentSide);
   if (initializeResult) agent.initializeResult = initializeResult;
@@ -32,11 +32,40 @@ function makeClient(initializeResult?: Json, clientMeta?: Json) {
     fs: { readTextFile, writeTextFile },
     onUnsupportedProtocolVersion,
     clientMeta,
+    refusesWrite,
   });
   return { client, agent, clientSide, agentSide };
 }
 
 describe("NotefigAcpClient", () => {
+  describe("requestPermission", () => {
+    const request = {
+      sessionId: "s",
+      toolCall: { toolCallId: "t", rawInput: { file_path: "/ws/a.md", content: "x" } },
+      options: [
+        { optionId: "allow", name: "Allow", kind: "allow_once" as const },
+        { optionId: "no", name: "No", kind: "reject_once" as const },
+      ],
+    };
+    const client = (refusesWrite: (input: unknown) => Promise<boolean>) =>
+      makeClient(undefined, undefined, refusesWrite).client;
+
+    it("refuses without prompting when the write is held", async () => {
+      const seen: unknown[] = [];
+      const response = await client(async (input) => {
+        seen.push(input);
+        return true;
+      }).requestPermission(request);
+      expect(response.outcome).toEqual({ outcome: "selected", optionId: "no" });
+      expect(seen).toEqual([request.toolCall.rawInput]);
+    });
+
+    it("grants as usual when it isn't", async () => {
+      const response = await client(async () => false).requestPermission(request);
+      expect(response.outcome).toEqual({ outcome: "selected", optionId: "allow" });
+    });
+  });
+
   it("rejects protocol calls before connect() establishes the connection", async () => {
     const { client } = makeClient();
     await expect(client.prompt("sess", [])).rejects.toThrow(

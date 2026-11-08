@@ -41,6 +41,7 @@ const context = (overrides: Partial<HarnessInvokeContext> = {}) => {
     workspacePath: "/ws",
     joinPath: (...parts) => parts.join("/"),
     appDir: APP_DIR,
+    gateWrites: false,
     harnessEnv: {},
     mcpServer: relay(),
     writeFiles: async (files) => {
@@ -61,6 +62,24 @@ const invoke = (id: string, overrides: Partial<HarnessInvokeContext> = {}) => {
     .onInvoke(ctx)
     .then((prep) => ({ prep, written, warnings }));
 };
+
+describe("claude-code's writes", () => {
+  const claudeCodeAdapter = adapterFor(harness("claude-code"));
+  it("names the write it is asked to make, for an Edit and a Write", () => {
+    const write = claudeCodeAdapter.pendingWrite!({ file_path: "/ws/a.md", content: "new" });
+    expect(write?.path).toBe("/ws/a.md");
+    expect(write?.text("old")).toBe("new");
+    const edit = claudeCodeAdapter.pendingWrite!({ file_path: "/ws/a.md", old_string: "b", new_string: "$&c" });
+    expect(edit?.text("abd")).toBe("a$&cd");
+    expect(claudeCodeAdapter.pendingWrite!({ command: "ls" })).toBeNull();
+  });
+
+  it("forces edits through the permission gate only where writes are gated", async () => {
+    const gated = await claudeCodeAdapter.onInvoke(context({ gateWrites: true }).ctx);
+    expect(gated.sessionParams).toMatchObject({ _meta: { claudeCode: { options: { settings: { permissions: { ask: ["Edit", "Write"] } } } } } });
+    expect((await claudeCodeAdapter.onInvoke(context().ctx)).sessionParams).toEqual({});
+  });
+});
 
 describe("harness adapters", () => {
   it("puts a session-new harness's server on the wire and nowhere else", async () => {

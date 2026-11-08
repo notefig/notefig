@@ -177,7 +177,8 @@ const THROTTLED_MAX_MS = 600_000;
 /** How long until the next poll (before jitter), backing off on faults. */
 export function pollInterval(state: SyncState): number {
   const backoff = 2 ** Math.min(state.failures, 6);
-  if (state.fault === "offline") return Math.min(POLL_MS * backoff, OFFLINE_MAX_MS);
+  const base = isShared(state) ? SHARED_POLL_MS : POLL_MS;
+  if (state.fault === "offline") return Math.min(base * backoff, OFFLINE_MAX_MS);
   if (state.fault === "throttled") return Math.min(THROTTLED_BASE_MS * backoff, THROTTLED_MAX_MS);
-  return isShared(state) ? SHARED_POLL_MS : POLL_MS;
+  return base;
 }

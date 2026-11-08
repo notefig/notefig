@@ -527,6 +527,7 @@ export class AgentTask {
       const prep = await invokeHarness(this.adapter, {
         workspacePath: this.workspacePath,
         harnessEnv: this.harness.env,
+        gateWrites: this.deps.services(this.workspacePath).sync?.state().setup === "on",
         mcpServer: mcpEndpoint.mcpServer,
         writeFiles: (files) => this.deps.fs.writeFiles(files),
         warn: (label, detail) => this.warn(label, detail),
@@ -600,11 +601,25 @@ export class AgentTask {
     }
   }
 
+  /** A tool call this harness writes to disk itself: refused when someone
+   *  else holds a unit it touches. A write the tool would fail anyway
+   *  (an old string that isn't there) is left to the tool. */
+  private async refusesWrite(rawInput: unknown): Promise<boolean> {
+    const write = this.adapter.pendingWrite?.(rawInput);
+    if (!write) return false;
+    const services = this.deps.services(this.workspacePath);
+    const resolved = resolveWorkspacePath(this.workspacePath, write.path);
+    if (!resolved.ok || !services.sync) return false;
+    const current = await services.documents.read(resolved.absolute).catch(() => "");
+    return (await services.sync.checkWrite(resolved.absolute, write.text(current))) !== null;
+  }
+
   private createClient(transport: AgentTransport): NotefigAcpClient {
     return new NotefigAcpClient({
       taskId: this.taskId,
       transport,
       permissionBroker: this.permissionBroker,
+      refusesWrite: (rawInput) => this.refusesWrite(rawInput),
       clientMeta: this.adapter.clientMeta,
       // A subagent's own reasoning and replies (Devin streams them, tagged,
       // once told the client supports subagents) aren't the session agent's
@@ -627,9 +642,10 @@ export class AgentTask {
               .services(this.workspacePath)
               .documents.read(path, options),
           writeTextFile: async (path, content) => {
-            await this.deps
-              .services(this.workspacePath)
-              .documents.write(path, content);
+            const services = this.deps.services(this.workspacePath);
+            const refused = await services.sync?.checkWrite(path, content);
+            if (refused) throw new Error(refused);
+            await services.documents.write(path, content);
           },
         },
         { workspacePath: this.workspacePath, path: pathutil },
@@ -1923,6 +1939,7 @@ export async function probeHarnessSession({
     const prep = await invokeHarness(adapter, {
       workspacePath: cwd,
       harnessEnv: harness.env,
+      gateWrites: false,
       mcpServer: undefined,
       writeFiles: refuse,
       warn: (label, detail) =>

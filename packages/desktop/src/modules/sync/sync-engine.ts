@@ -21,6 +21,10 @@
  *    push reruns the cycle (bounded, with jitter); a push with no answer
  *    may have landed, so the next poll comes soon.
  *
+ * Shared, a sitting's edits go to a WIP ref each poll (`sync-claims.ts`)
+ * and fold into one commit at idle or close; a fold from someone else
+ * that lands meanwhile folds this device's first, so the merge can run.
+ *
  * Only a user's stop (idle, blur, close, "sync now") commits; the poll just
  * polls, once every 12 s alone and every 1.5 s with someone else here
  * (`sync-presence.ts` reads and writes who is, in the same poll).
@@ -36,6 +40,7 @@ import type { EditorsApi } from "@/modules/editors";
 import type { WorkspaceFiles } from "@/modules/files";
 import { IGNORE_RULES } from "@/utils/ignore";
 import { path as pathutil } from "@/utils/path";
+import { createClaims, revertUnits, WIP_PREFIX } from "./sync-claims";
 import { createPresence, PRESENCE_PREFIX } from "./sync-presence";
 import { createSyncEditors } from "./sync-editor";
 import {
@@ -69,7 +74,7 @@ export interface SyncEngineDeps {
   documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
   editors: Pick<EditorsApi, "markdownEditor" | "paths">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
-  fs: Pick<FileSystemSurface, "readDirectory" | "getMetadata" | "writeBinaryFiles" | "deleteFiles">;
+  fs: Pick<FileSystemSurface, "readDirectory" | "getMetadata" | "writeBinaryFiles" | "deleteFiles" | "readFiles">;
   state(): SyncState;
   dispatch(event: SyncEvent): void;
   /** Keep the last successful sync (sync.json). */
@@ -84,6 +89,9 @@ export interface SyncEngine {
   syncNow(): Promise<void>;
   /** Leave a stop and go on (after `paused`, without asking again). */
   resume(): Promise<void>;
+  /** Why an agent's write to `path` may not go on, naming the holder;
+   *  null when it may. */
+  checkWrite(path: string, next: string): Promise<string | null>;
   /** Commit and push what's left (briefly), then stop. */
   stop(): Promise<void>;
 }
@@ -166,6 +174,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   let commitDue = true;
   /** The remote tip already taken in (pulled or pushed). */
   let integrated: string | null = null;
+  /** Paths changed since the last WIP was published. */
+  let wipDirty = new Set<string>();
+  /** A fold happened; the claims it carried end after its push. */
+  let releaseDue = false;
   let lastSynced = deps.lastSyncedAt;
   let lastRecorded = lastSynced ?? 0;
   let returnApproved = false;
@@ -196,9 +208,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     dispatch: deps.dispatch,
     now,
   });
+  const claims = createClaims({ root, deviceId: deps.deviceId, author, git, remote, branchRef, fs: deps.fs, state: deps.state });
   const sharedEditors = createSyncEditors({
     root,
     editors: deps.editors,
+    holds: claims.holds,
     onCursor: presence.setCursor,
     setTimer,
   });
@@ -269,6 +283,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     if (typeof dirty !== "string" && dirty.size === 0) return;
     const taken = dirty;
     dirty = new Set();
+    wipDirty = new Set();
     deps.dispatch({ type: "step", activity: "committing" });
     try {
       const paths = taken === "all" ? null : taken === "scan" ? await scan() : [...taken];
@@ -277,10 +292,44 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
         const all = await stageChanges(git, paths);
         if (all.length > 0) await git.commit({ message: commitMessage(author.name, all), author });
       }
+      releaseDue = true;
     } catch (error) {
       // Keep what wasn't committed for the next try.
       commitDue = true;
       dirty = typeof taken === "string" ? taken : new Set([...taken, ...(dirty as Set<string>)]);
+      throw error;
+    }
+  };
+
+  // --- Work in progress ------------------------------------------------------
+
+  /** A claim lost to a device that holds the unit: back to the base, the
+   *  text flagged. A write held by typing goes again on a coming poll. */
+  const settleLost = async () => {
+    for (const [path, lost] of claims.lost()) {
+      const [file] = (await deps.fs.readFiles([absolute(path)])).succeeded;
+      const base = await git.readFile({ ref: (await head()) ?? branchRef, filepath: path });
+      const reverted = file && base ? revertUnits(new TextDecoder().decode(base), file.content, lost) : null;
+      if (!reverted || (await deps.documents.write(absolute(path), reverted.text, { source: "sync" })) === "held") continue;
+      if (typeof dirty !== "string") dirty.add(path);
+      wipDirty.add(path);
+      deps.dispatch({ type: "overwritten", items: reverted.dropped.map((text) => ({ path, text })) });
+    }
+  };
+
+  /** Shared: this sitting's edits, as a WIP others can see. */
+  const wipStep = async () => {
+    if (typeof dirty === "string" || !isShared(deps.state())) return;
+    await settleLost();
+    if (wipDirty.size === 0) return;
+    const paths = [...wipDirty];
+    wipDirty = new Set();
+    try {
+      await stageByHash(paths);
+      await stageChanges(git, paths);
+      await claims.publish([...dirty]);
+    } catch (error) {
+      for (const path of paths) wipDirty.add(path);
       throw error;
     }
   };
@@ -479,13 +528,21 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
 
   /** Poll, pull if the remote moved, push if ahead. */
   const reconcile = async (): Promise<boolean> => {
-    const refs = await git.listRemoteRefs(remote, [branchRef, PRESENCE_PREFIX]);
+    const refs = await git.listRemoteRefs(remote, [branchRef, PRESENCE_PREFIX, WIP_PREFIX]);
     await presence.observe(refs);
-    sharedEditors.reconcile(deps.state());
+    await claims.observe(refs);
+    await sharedEditors.reconcile(deps.state());
     const theirs = refs.find((ref) => ref.ref === branchRef)?.oid ?? null;
-    const ours = await head();
+    let ours = await head();
     if (theirs) await checkReturn(theirs, ours);
-    if (theirs && theirs !== integrated && theirs !== ours) await pullStep();
+    if (theirs && theirs !== integrated && theirs !== ours) {
+      // A sitting's edits sit in the index: fold so the merge has them.
+      if (isShared(deps.state()) && typeof dirty !== "string" && dirty.size > 0) {
+        await commitStep();
+        ours = await head();
+      }
+      await pullStep();
+    }
     else if (theirs && theirs === ours) integrated = theirs;
     return pushStep(theirs);
   };
@@ -502,13 +559,17 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const cycle = async () => {
     if (!isRunning(deps.state())) return;
     try {
-      if (commitDue) await commitStep();
+      await (commitDue ? commitStep() : wipStep());
       let refused = await reconcile();
       for (let retry = 0; refused && retry < MAX_PUSH_RETRIES && !stopped; retry++) {
         await new Promise<void>((resume) => setTimer(resume, 200 + random() * 800));
         refused = await reconcile();
       }
       await presence.publish();
+      if (releaseDue && !refused) {
+        releaseDue = false;
+        await claims.release();
+      }
       if (refused) {
         deps.dispatch({ type: "failed", fault: "offline", detail: "The remote keeps moving; trying again soon." });
         return;
@@ -562,6 +623,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     const trees = paths.map(tree).filter((path): path is string => path !== null);
     if (trees.length === 0 || stopped) return;
     if (typeof dirty !== "string") for (const path of trees) dirty.add(path);
+    for (const path of trees) wipDirty.add(path);
     cancelIdle?.();
     cancelIdle = setTimer(() => void syncNow(), IDLE_COMMIT_MS);
   };
@@ -583,12 +645,19 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
           if (pathutil.normalize(workspacePath) === root) written(paths);
         }),
         onBlur(() => {
-          if (pending()) void syncNow();
+          // A sitting stays open across a blur at the shared level.
+          if (pending() && !isShared(deps.state())) void syncNow();
         }),
       );
       void syncNow();
     },
     syncNow: () => syncNow(),
+    async checkWrite(path, next) {
+      const filepath = tree(path);
+      if (!filepath || !isShared(deps.state()) || !MARKDOWN.test(filepath)) return null;
+      const [file] = (await deps.fs.readFiles([path])).succeeded;
+      return claims.refusal(filepath, file?.content ?? "", next);
+    },
     async resume() {
       returnApproved = true;
       deps.dispatch({ type: "resume" });

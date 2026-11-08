@@ -20,7 +20,9 @@ import { disposeEditor, getOrCreateEditor, type EditorFs } from "@/components/ed
 import { getDocumentSync } from "@/utils/markdown-conversion";
 import { IDLE_COMMIT_MS, POLL_MS, pollInterval, SHARED_POLL_MS, syncModule } from "@/modules/sync";
 import { OFFLINE_RETURN_MS } from "./sync-engine";
-import { caretDecorations, docUnits } from "./sync-editor";
+import { caretDecorations, docUnits, holdDecorations, touchesHeld } from "./sync-editor";
+import { changedKeys, revertUnits, unitKeys, unitTexts } from "./sync-claims";
+import { EditorState } from "@tiptap/pm/state";
 
 // Each test runs many git http-backend processes.
 vi.setConfig({ testTimeout: 30_000 });
@@ -623,5 +625,97 @@ describe("sync: presence", () => {
     const set = caretDecorations(doc, "note.md", [peer]);
     expect(set.find()).toHaveLength(1);
     expect(caretDecorations(doc, "other.md", [peer]).find()).toHaveLength(0);
+  });
+});
+
+describe("sync: claims and work in progress", { timeout: 60_000 }, () => {
+  async function twoDevices() {
+    const { sync: a, remote, open, ws, core, editors } = await setup();
+    const wsB = await remote.clone("device-b");
+    await writeDevice(wsB, { on: true });
+    const b = await open(wsB);
+    for (let i = 0; i < 3 && (a.state().peers.length === 0 || b.state().peers.length === 0); i++) {
+      await a.syncNow();
+      await b.syncNow();
+    }
+    return { a, b, remote, ws, wsB, core, editors };
+  }
+  const edit = async (core: Core, ws: string, text: string) => {
+    await fsp.writeFile(join(ws, "note.md"), text);
+    written(core, join(ws, "note.md"));
+  };
+  // The real poll, on real timers: a loaded machine runs it slowly.
+  const until = (check: () => Promise<void> | void) => vi.waitFor(check, { timeout: 45_000, interval: 250 });
+  const EDITED = "# Note\n\nAlice's paragraph.\n\nSecond paragraph.\n";
+
+  it("keeps a sitting on a WIP ref with its claims, and folds it into one commit", async () => {
+    const { a, remote, ws, core } = await twoDevices();
+    const tip = await remote.tip();
+    await edit(core, ws, EDITED);
+    await until(async () => expect(await runGit(remote.bare, ["rev-parse", "--verify", "refs/notefig/v1/wip/device-a"])).toBeTruthy());
+    expect(await remote.tip()).toBe(tip);
+    expect(await runGit(remote.bare, ["show", "refs/notefig/v1/wip/device-a:note.md"])).toContain("Alice's paragraph");
+    const claims = JSON.parse(await runGit(remote.bare, ["log", "-1", "--format=%s", "refs/notefig/v1/wip/device-a"])) as { claims: Record<string, string[]> };
+    expect(claims.claims["note.md"]).toEqual(changedKeys(SEED["note.md"], EDITED));
+
+    await a.syncNow();
+    expect(await runGit(remote.bare, ["rev-list", "--count", `${tip}..main`])).toBe("1");
+    await expect(runGit(remote.bare, ["rev-parse", "--verify", "refs/notefig/v1/wip/device-a"])).rejects.toThrow();
+  });
+
+  it("refuses an agent's write into a unit someone else holds, naming them", async () => {
+    const { b, ws, wsB, core } = await twoDevices();
+    await edit(core, ws, EDITED);
+    await until(async () => {
+      await expect(b.checkWrite(join(wsB, "note.md"), "# Note\n\nRewritten.\n\nSecond paragraph.\n")).resolves.toMatch(/User device-a is editing note\.md/);
+    });
+    // A targeted edit elsewhere goes through; an agent of the holder's too.
+    await expect(b.checkWrite(join(wsB, "note.md"), "# Note\n\nFirst paragraph.\n\nSecond paragraph, by Bob.\n")).resolves.toBeNull();
+    await expect(core.workspace(ws).sync.checkWrite(join(ws, "note.md"), "# Note\n\nMore.\n\nSecond paragraph.\n")).resolves.toBeNull();
+  });
+
+  it("settles a race deterministically: the lower device holds, the other's text is flagged", async () => {
+    const { b, ws, wsB, core } = await twoDevices();
+    await edit(core, ws, EDITED);
+    await edit(core, wsB, "# Note\n\nBob's paragraph.\n\nSecond paragraph.\n");
+    await until(async () => expect(await read(join(wsB, "note.md"))).toContain("First paragraph"));
+    expect(b.state().overwritten).toEqual([{ path: "note.md", text: "Bob's paragraph." }]);
+  });
+
+  it("merges a peer's fold with the sitting it interrupts, and folds that sitting first", async () => {
+    const { b, ws, wsB, core, remote } = await twoDevices();
+    await edit(core, wsB, "# Note\n\nFirst paragraph.\n\nBob's second.\n");
+    await until(async () => expect(await runGit(remote.bare, ["rev-parse", "--verify", "refs/notefig/v1/wip/device-b"])).toBeTruthy());
+    const a = core.workspace(ws).sync;
+    await edit(core, ws, EDITED);
+    await a.syncNow();
+    await until(async () => expect(await read(join(wsB, "note.md"))).toContain("Alice's paragraph"));
+    expect(await read(join(wsB, "note.md"))).toContain("Bob's second");
+    expect(b.state().fault).toBeNull();
+  });
+
+  it("reverts only the lost unit", () => {
+    const base = "# T\n\nOne.\n\nTwo.\n";
+    const next = "# T\n\nOne edited.\n\nTwo edited.\n";
+    const [lost] = changedKeys(base, next).slice(0, 1);
+    const reverted = revertUnits(base, next, new Set([lost]));
+    expect(reverted).toEqual({ text: "# T\n\nOne.\n\nTwo edited.\n", dropped: ["One edited."] });
+  });
+
+  it("draws what others hold and refuses edits there", () => {
+    const doc = createEditorDoc("# Note\n\nHeld paragraph.\n\nFree paragraph.\n");
+    const peer = { deviceId: "b", name: "Bob", color: "#000", cursor: null, agents: [] };
+    const md = "# Note\n\nHeld paragraph.\n\nFree paragraph.\n";
+    const hold = { peer, keys: new Set(unitKeys(unitTexts(md)).slice(1, 2)), text: "# Note\n\nBob's words.\n\nFree paragraph.\n" };
+    const state = holdDecorations(doc, md, [hold]);
+    expect(state.ranges).toHaveLength(1);
+    expect(state.set.find().some((d) => (d as unknown as { type: { attrs?: { class?: string } } }).type.attrs?.class === "sync-held")).toBe(true);
+    expect(state.set.find().some((d) => (d as unknown as { type: { attrs?: { class?: string } } }).type.attrs?.class === "sync-overlaid")).toBe(true);
+
+    const [range] = state.ranges;
+    const editor = EditorState.create({ doc });
+    expect(touchesHeld(editor.tr.insertText("x", range.from + 2), state.ranges)).toBe(true);
+    const free = docUnits(doc)[2];
+    expect(touchesHeld(editor.tr.insertText("x", free.from + 2), state.ranges)).toBe(false);
   });
 });
