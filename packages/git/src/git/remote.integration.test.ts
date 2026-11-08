@@ -136,6 +136,23 @@ describeIfGit("remote operations over git http-backend", () => {
     expect(await git(dir, "rev-parse", "refs/remotes/origin/main")).toBe(next);
   });
 
+  it("forgets the packs of a transient fetch, and only those", async () => {
+    const { dir, service } = await clone("transient");
+    const tip = await seedCommit("two\n");
+    await service.fetchRefs(remote, ["refs/heads/main"]);
+    await git(seed, "push", "-q", bare, "HEAD~1:refs/notefig/p");
+    await git(bare, "update-ref", "refs/notefig/q", tip);
+    const packs = async () => Number(/packs: (\d+)/.exec(await git(dir, "count-objects", "-v"))![1]);
+    const before = await packs();
+    await git(seed, ...SYSTEM_GIT_IDENTITY, "commit", "--allow-empty", "-qm", "peer");
+    await git(seed, "push", "-qf", bare, "HEAD:refs/notefig/p");
+    await service.fetchRefs(remote, ["refs/notefig/p"], { transient: true });
+    expect(await packs()).toBeGreaterThan(before);
+    await service.sweepTransient({ olderThanMs: 0 });
+    expect(await packs()).toBe(before);
+    expect(await service.readTextFile({ ref: tip, filepath: "note.md" })).toBe("two\n");
+  });
+
   it("creates a ref only if absent, at push time and on the remote", async () => {
     const { service } = await clone("a");
     const create = { ref: "refs/notefig/lease", oid: seedOid, expect: null };

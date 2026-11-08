@@ -21,6 +21,9 @@ import { splitUnits } from "./sync-merge";
 import type { SyncPeer, SyncState } from "./sync-machine";
 
 export const WIP_PREFIX = "refs/notefig/v1/wip/";
+/** A dead device's WIP stays this long: its owner may still return to it.
+ *  Judged by the commit's date, since no client watches a ref for a month. */
+export const WIP_RETENTION_MS = 30 * 24 * 60 * 60_000;
 
 const MARKDOWN = /\.(md|markdown)$/i;
 
@@ -136,6 +139,8 @@ export interface PeerHold {
 interface PeerWip {
   oid: string;
   claims: Record<string, string[]>;
+  /** The commit's date, ms; how long it has been since its owner wrote. */
+  writtenAt: number;
 }
 
 export interface ClaimsDeps {
@@ -147,6 +152,7 @@ export interface ClaimsDeps {
   branchRef: string;
   fs: { readFiles(paths: string[]): Promise<{ succeeded: { path: string; content: string }[] }> };
   state(): SyncState;
+  now(): number;
 }
 
 export function createClaims(deps: ClaimsDeps) {
@@ -182,6 +188,22 @@ export function createClaims(deps: ClaimsDeps) {
     return out;
   };
 
+  /** Take in a peer's WIP; past retention it may go (compare-and-swap). */
+  const readWip = async (ref: string, oid: string) => {
+    const [tip] = await git.log({ ref: oid, depth: 1 }).catch(() => []);
+    if (!tip) return;
+    try {
+      const claims = (JSON.parse(tip.commit.message) as { claims?: Record<string, string[]> }).claims ?? {};
+      const writtenAt = tip.commit.committer.timestamp * 1000;
+      peers.set(ref.slice(WIP_PREFIX.length), { oid, claims, writtenAt });
+      if (deps.now() - writtenAt > WIP_RETENTION_MS) {
+        await git.pushRef(remote, { ref, delete: true, force: true, expect: oid }).catch(() => {});
+      }
+    } catch {
+      // Not a payload this version reads: it holds nothing here.
+    }
+  };
+
   return {
     /** One poll's WIP refs: read the ones that moved, drop the rest. */
     async observe(refs: GitRemoteRef[]) {
@@ -197,16 +219,8 @@ export function createClaims(deps: ClaimsDeps) {
         if (!others.some((ref) => ref.ref === `${WIP_PREFIX}${id}`)) peers.delete(id);
       }
       if (moved.length === 0) return;
-      for (const { ref, oid } of await git.fetchRefs(remote, moved.map((m) => m.ref))) {
-        if (!oid) continue;
-        const [tip] = await git.log({ ref: oid, depth: 1 }).catch(() => []);
-        if (!tip) continue;
-        try {
-          const claims = (JSON.parse(tip.commit.message) as { claims?: Record<string, string[]> }).claims ?? {};
-          peers.set(ref.slice(WIP_PREFIX.length), { oid, claims });
-        } catch {
-          // Not a payload this version reads: it holds nothing here.
-        }
+      for (const { ref, oid } of await git.fetchRefs(remote, moved.map((m) => m.ref), { transient: true })) {
+        if (oid) await readWip(ref, oid);
       }
     },
 

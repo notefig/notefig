@@ -211,8 +211,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     state: deps.state,
     dispatch: deps.dispatch,
     now,
+    random,
   });
-  const claims = createClaims({ root, deviceId: deps.deviceId, author, git, remote, branchRef, fs: deps.fs, state: deps.state });
+  const claims = createClaims({ root, deviceId: deps.deviceId, author, git, remote, branchRef, fs: deps.fs, state: deps.state, now });
   const sharedEditors = createSyncEditors({
     root,
     editors: deps.editors,

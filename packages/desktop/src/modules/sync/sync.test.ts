@@ -8,7 +8,8 @@ import { promises as fsp } from "node:fs";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import { defineModule, type Core } from "@notefig/core";
+import { createHooks, defineModule, type Core } from "@notefig/core";
+import type { GitService } from "@notefig/git";
 import { createTestCore } from "@/testing/test-core";
 import { createTestRemote, inProcessGitWorker, nodeFs, runGit, type TestRemote } from "@/testing/test-sync";
 import { createDocuments } from "@/modules/documents";
@@ -18,8 +19,9 @@ import { projectSettingsModule } from "@/modules/project-settings";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { disposeEditor, getOrCreateEditor, type EditorFs } from "@/components/editor/editor-store";
 import { getDocumentSync } from "@/utils/markdown-conversion";
-import { IDLE_COMMIT_MS, POLL_MS, pollInterval, SHARED_POLL_MS, syncModule } from "@/modules/sync";
+import { IDLE_COMMIT_MS, INITIAL_SYNC_STATE, POLL_MS, pollInterval, SHARED_POLL_MS, syncModule } from "@/modules/sync";
 import { OFFLINE_RETURN_MS } from "./sync-engine";
+import { createPresence, PRESENCE_STALE_MS, STALE_DELETE_MS } from "./sync-presence";
 import { caretDecorations, docUnits, holdDecorations, touchesHeld } from "./sync-editor";
 import { changedKeys, revertUnits, unitKeys, unitTexts } from "./sync-claims";
 import { EditorState } from "@tiptap/pm/state";
@@ -586,7 +588,7 @@ describe("sync: presence", () => {
     expect(JSON.parse(await runGit(remote.bare, ["log", "-1", "--format=%s", ref]))).toMatchObject({ name: "User device-a" });
   });
 
-  it("a ref already there counts only when it moves, and goes when it stands still", async () => {
+  it("a ref already there doesn't count until it moves", async () => {
     const { a, b, remote, core, wsB } = await twoDevices();
     await core.workspace(wsB).close();
     await a.syncNow();
@@ -625,6 +627,91 @@ describe("sync: presence", () => {
     const set = caretDecorations(doc, "note.md", [peer]);
     expect(set.find()).toHaveLength(1);
     expect(caretDecorations(doc, "other.md", [peer]).find()).toHaveLength(0);
+  });
+});
+
+describe("sync: stale refs", () => {
+  const OID = "a".repeat(40);
+  const REF = "refs/notefig/v1/presence/ghost";
+
+  function presenceWith(now: { at: number }) {
+    const pushRef = vi.fn(async () => {});
+    const hooks = createHooks(() => {});
+    const presence = createPresence({
+      root: "/ws",
+      deviceId: "me",
+      name: "Me",
+      author: { name: "Me", email: "me@test.local" },
+      git: { pushRef, fetchRefs: vi.fn(async () => []), log: vi.fn(async () => []) } as unknown as GitService,
+      remote: { url: "https://example.test/r.git" },
+      branchRef: "refs/heads/main",
+      hooks,
+      state: () => INITIAL_SYNC_STATE,
+      dispatch: () => {},
+      now: () => now.at,
+      random: () => 0,
+    });
+    return { presence, pushRef };
+  }
+
+  it("sweeps a ref standing still past the window, with a compare-and-swap, once", async () => {
+    const now = { at: 1_000_000 };
+    const { presence, pushRef } = presenceWith(now);
+    await presence.observe([{ ref: REF, oid: OID }]);
+    now.at += STALE_DELETE_MS;
+    await presence.observe([{ ref: REF, oid: OID }]);
+    expect(pushRef).not.toHaveBeenCalled();
+
+    now.at += 1;
+    await presence.observe([{ ref: REF, oid: OID }]);
+    expect(pushRef).toHaveBeenCalledTimes(1);
+    expect(pushRef.mock.calls[0]).toEqual([expect.anything(), { ref: REF, delete: true, force: true, expect: OID }]);
+  });
+
+  it("judges liveness by when this client saw a ref move, not by the commit", async () => {
+    const now = { at: 1_000_000 };
+    let state = INITIAL_SYNC_STATE;
+    const commit = { message: JSON.stringify({ name: "Ghost" }), committer: { timestamp: 9_999_999_999 } };
+    const presence = createPresence({
+      root: "/ws",
+      deviceId: "me",
+      name: "Me",
+      author: { name: "Me", email: "me@test.local" },
+      git: {
+        pushRef: vi.fn(async () => {}),
+        fetchRefs: vi.fn(async (_remote: unknown, refs: string[]) => refs.map((ref) => ({ ref, oid: OID }))),
+        log: vi.fn(async () => [{ oid: OID, commit }]),
+      } as unknown as GitService,
+      remote: { url: "https://example.test/r.git" },
+      branchRef: "refs/heads/main",
+      hooks: createHooks(() => {}),
+      state: () => state,
+      dispatch: (event) => {
+        if (event.type === "peers") state = { ...state, peers: event.peers };
+      },
+      now: () => now.at,
+      random: () => 0,
+    });
+    await presence.observe([{ ref: REF, oid: OID }]);
+    expect(state.peers).toEqual([]);
+
+    await presence.observe([{ ref: REF, oid: "b".repeat(40) }]);
+    expect(state.peers).toMatchObject([{ deviceId: "ghost", name: "Ghost" }]);
+
+    // The commit's far-future date buys nothing once the ref stands still.
+    now.at += PRESENCE_STALE_MS;
+    await presence.observe([{ ref: REF, oid: "b".repeat(40) }]);
+    expect(state.peers).toEqual([]);
+  });
+
+  it("doesn't sweep a ref that keeps moving", async () => {
+    const now = { at: 1_000_000 };
+    const { presence, pushRef } = presenceWith(now);
+    for (const digit of ["a", "b", "c"]) {
+      await presence.observe([{ ref: REF, oid: digit.repeat(40) }]);
+      now.at += STALE_DELETE_MS;
+    }
+    expect(pushRef).not.toHaveBeenCalled();
   });
 });
 
