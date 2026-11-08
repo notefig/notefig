@@ -185,6 +185,32 @@ describe("documents.write adoption (open editor)", () => {
     expect(liveMarkdown()).toContain("User draft.");
   });
 
+  it("answers held when typing kept a sync write out of the editor", async () => {
+    writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
+    openEditor("# Doc\n\nOld.\n");
+    const sync = getDocumentSync(path);
+    vi.spyOn(sync, "prepareAdoption").mockResolvedValue(null);
+
+    await expect(
+      documents.write(path, "# Doc\n\nRemote.\n", { source: "sync" }),
+    ).resolves.toBe("held");
+  });
+
+  it("keeps a sync write out of undo, and an agent's in it", async () => {
+    writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
+    openEditor("# Doc\n\nOld.\n");
+    const editor = editors.markdownEditor(path)!;
+    const history: unknown[] = [];
+    editor.on("transaction", ({ transaction }) => {
+      if (transaction.docChanged) history.push(transaction.getMeta("addToHistory"));
+    });
+
+    await documents.write(path, "# Doc\n\nRemote.\n", { source: "sync" });
+    await documents.write(path, "# Doc\n\nAgent.\n");
+
+    expect(history).toEqual([false, undefined]);
+  });
+
   it("applies a sync write to a clean editor and announces it as sync's", async () => {
     writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
     const hooks = createHooks();
