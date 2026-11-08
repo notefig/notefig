@@ -14,6 +14,7 @@ import {
   chooseCapabilities,
   parseAdvertisedCapabilities,
   parseReportStatus,
+  receivePack,
   receivePackRequest,
 } from "./receivePack";
 import { lineMerge } from "../repo/lineMerge";
@@ -231,6 +232,59 @@ describe("receive-pack", () => {
     });
     expect(() => parseReportStatus(FLUSH_PKT, updates, false)).toThrow(
       /report-status/,
+    );
+  });
+
+  it("an incomplete or cut-off report is an unknown outcome, never a failure", async () => {
+    const updates = [
+      { ref: "refs/heads/main", old: A, new: B },
+      { ref: "refs/notefig/x", old: ZERO_OID, new: A },
+    ];
+    const unpackOk = encodePktLine("unpack ok\n");
+    const okMain = encodePktLine("ok refs/heads/main\n");
+    const ngX = encodePktLine("ng refs/notefig/x stale info\n");
+    const cut = (reply: Uint8Array) => reply.subarray(0, reply.length - 3);
+    const replies: Array<[string, Uint8Array, boolean]> = [
+      ["missing ref status", concatBytes([unpackOk, okMain, FLUSH_PKT]), false],
+      ["no flush", concatBytes([unpackOk, okMain, ngX]), false],
+      ["cut mid-packet", cut(concatBytes([unpackOk, okMain, ngX])), false],
+      ["cut mid-header", concatBytes([unpackOk, okMain, bytes("00")]), false],
+      [
+        "side-band cut mid-packet",
+        cut(concatBytes([band(1, concatBytes([unpackOk, okMain])), FLUSH_PKT])),
+        true,
+      ],
+      [
+        "side-band report missing a ref",
+        concatBytes([
+          band(1, concatBytes([unpackOk, okMain, FLUSH_PKT])),
+          FLUSH_PKT,
+        ]),
+        true,
+      ],
+    ];
+    const outcomes: Record<string, string> = {};
+    for (const [label, reply, sideband] of replies) {
+      const transport = {
+        advertise: async () => new Uint8Array(),
+        exchange: async () => reply,
+      };
+      const capabilities = sideband
+        ? ["report-status", "side-band-64k"]
+        : ["report-status"];
+      outcomes[label] = await receivePack(transport, {
+        updates,
+        capabilities,
+        pack: null,
+      }).then(
+        () => "resolved",
+        (error: Error) => error.name,
+      );
+    }
+    expect(outcomes).toEqual(
+      Object.fromEntries(
+        replies.map(([label]) => [label, "PushOutcomeUnknownError"]),
+      ),
     );
   });
 });

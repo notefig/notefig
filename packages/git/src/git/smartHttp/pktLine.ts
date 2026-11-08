@@ -62,7 +62,7 @@ export function decodePktLines(bytes: Uint8Array): {
     if (head === "PACK") break;
     const length = Number.parseInt(head, 16);
     if (!/^[0-9a-f]{4}$/i.test(head) || length === 3) {
-      throw new Error(`malformed pkt-line header "${head}"`);
+      throw new RemoteProtocolError(`malformed pkt-line header "${head}"`);
     }
     if (length < 4) {
       lines.push(SPECIAL[length]);
@@ -70,7 +70,7 @@ export function decodePktLines(bytes: Uint8Array): {
       continue;
     }
     if (offset + length > bytes.length) {
-      throw new Error("truncated pkt-line");
+      throw new RemoteProtocolError("truncated pkt-line");
     }
     lines.push({
       type: "data",

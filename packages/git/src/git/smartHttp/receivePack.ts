@@ -98,6 +98,15 @@ export function receivePackRequest(
   return concatBytes([...commands, FLUSH_PKT, ...(pack ? [pack] : [])]);
 }
 
+/** A whole pkt-line stream: ends in a flush with nothing after it. */
+function completeLines(bytes: Uint8Array): PktLine[] {
+  const { lines, rest } = decodePktLines(bytes);
+  if (rest.length > 0 || lines.at(-1)?.type !== "flush") {
+    throw new RemoteProtocolError("push reply was cut off");
+  }
+  return lines;
+}
+
 function statusLines(
   reply: Uint8Array,
   sideband: boolean,
@@ -105,19 +114,13 @@ function statusLines(
   lines: PktLine[];
   messages: string[];
 } {
-  const outer = decodePktLines(reply).lines;
+  const outer = completeLines(reply);
   if (!sideband) return { lines: outer, messages: [] };
   const { data, messages } = demuxSideband(outer);
-  return { lines: decodePktLines(data).lines, messages };
+  return { lines: completeLines(data), messages };
 }
 
-/** Parse report-status into per-ref results, in the order the refs were sent. */
-export function parseReportStatus(
-  reply: Uint8Array,
-  updates: GitRefUpdate[],
-  sideband: boolean,
-): GitPushRefsResult {
-  const { lines, messages } = statusLines(reply, sideband);
+function readReport(lines: PktLine[]) {
   let unpack: string | null = null;
   const byRef = new Map<string, GitRefUpdateStatus>();
   for (const line of lines) {
@@ -134,17 +137,34 @@ export function parseReportStatus(
       byRef.set(ref, { ref, ok: false, reason: reason.join(" ") });
     }
   }
+  return { unpack, byRef };
+}
+
+/**
+ * Parse report-status into per-ref results, in the order the refs were
+ * sent. Only a complete report is an answer: a reply cut off anywhere, or
+ * one missing a ref's status, throws a (non-remote) `RemoteProtocolError`,
+ * which `receivePack` turns into an unknown outcome.
+ */
+export function parseReportStatus(
+  reply: Uint8Array,
+  updates: GitRefUpdate[],
+  sideband: boolean,
+): GitPushRefsResult {
+  const { lines, messages } = statusLines(reply, sideband);
+  const { unpack, byRef } = readReport(lines);
   if (unpack === null) {
     throw new RemoteProtocolError("push reply has no report-status");
   }
-  const refs = updates.map(
-    (update): GitRefUpdateStatus =>
-      byRef.get(update.ref) ?? {
-        ref: update.ref,
-        ok: false,
-        reason: `no status reported (unpack ${unpack})`,
-      },
-  );
+  const refs = updates.map((update): GitRefUpdateStatus => {
+    const status = byRef.get(update.ref);
+    if (!status) {
+      throw new RemoteProtocolError(
+        `push reply has no status for ${update.ref}`,
+      );
+    }
+    return status;
+  });
   return {
     ok: unpack === "ok" && refs.every((r) => r.ok),
     unpack,
