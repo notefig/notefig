@@ -170,6 +170,8 @@ export const SHARED_POLL_MS = 1_500;
 /** Commit once per sitting: after this long without a save, on window
  *  blur, or when the workspace closes. */
 export const IDLE_COMMIT_MS = 180_000;
+/** Claims end after this long without a save, before the sitting does. */
+export const CLAIM_IDLE_MS = 10_000;
 const OFFLINE_MAX_MS = 120_000;
 const THROTTLED_BASE_MS = 60_000;
 const THROTTLED_MAX_MS = 600_000;
@@ -177,7 +179,8 @@ const THROTTLED_MAX_MS = 600_000;
 /** How long until the next poll (before jitter), backing off on faults. */
 export function pollInterval(state: SyncState): number {
   const backoff = 2 ** Math.min(state.failures, 6);
-  if (state.fault === "offline") return Math.min(POLL_MS * backoff, OFFLINE_MAX_MS);
+  const base = isShared(state) ? SHARED_POLL_MS : POLL_MS;
+  if (state.fault === "offline") return Math.min(base * backoff, OFFLINE_MAX_MS);
   if (state.fault === "throttled") return Math.min(THROTTLED_BASE_MS * backoff, THROTTLED_MAX_MS);
-  return isShared(state) ? SHARED_POLL_MS : POLL_MS;
+  return base;
 }

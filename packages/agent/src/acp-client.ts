@@ -207,6 +207,9 @@ export type AcpClientDeps = {
   /** Vendor capabilities advertised in `initialize` (the harness adapter's
    *  `clientMeta`). */
   clientMeta?: Record<string, unknown>;
+  /** A write the harness wants to make that must be refused without
+   *  asking anyone (someone else holds what it touches). */
+  refusesWrite?: (rawInput: unknown) => Promise<boolean>;
   /** False: grant nothing on our own — every permission request goes to
    *  the broker, allow options or not (a catalog probe, which asks for
    *  nothing). Default true: a request offering an allow option is
@@ -517,6 +520,14 @@ export class NotefigAcpClient implements Client {
   async requestPermission(
     request: RequestPermissionRequest,
   ): Promise<RequestPermissionResponse> {
+    if (await this.deps.refusesWrite?.(request.toolCall.rawInput)) {
+      const reject =
+        request.options.find((o) => o.kind === "reject_once") ??
+        request.options.find((o) => o.kind === "reject_always");
+      if (reject) {
+        return { outcome: { outcome: "selected", optionId: reject.optionId } };
+      }
+    }
     const grant =
       request.options.find((o) => o.kind === "allow_always") ??
       request.options.find((o) => o.kind === "allow_once");

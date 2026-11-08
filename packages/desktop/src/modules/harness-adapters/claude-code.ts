@@ -145,6 +145,10 @@ export function claudeUpdateModel(update: UsageUpdate): string | null {
   return typeof model === "string" ? model : null;
 }
 
+const WRITES_ASK = {
+  _meta: { claudeCode: { options: { settings: { permissions: { ask: ["Edit", "Write"] } } } } },
+};
+
 /**
  * Claude Code, through the bundled claude-agent-acp sidecar.
  *
@@ -160,10 +164,22 @@ export const claudeCodeAdapter: HarnessAdapter = {
   // text starting with "/" — anywhere else it is prose (MET-222 spike, on
   // 0.81.2). The blocks before it still reach the model.
   placeCommand: (blocks, name) => [...blocks, { type: "text", text: `/${name}` }],
-  onInvoke: async ({ mcpServer }) => ({
+  onInvoke: async ({ mcpServer, gateWrites }) => ({
     ...NO_PREP,
     passThroughSessionNew: mcpServer !== undefined,
+    // Ask rules hold even in auto-accept and bypass modes, so every write
+    // reaches `session/request_permission` and sync's gate answers it.
+    sessionParams: gateWrites ? WRITES_ASK : {},
   }),
+  pendingWrite(rawInput) {
+    const input = (rawInput ?? {}) as { file_path?: unknown; content?: unknown; old_string?: unknown; new_string?: unknown };
+    if (typeof input.file_path !== "string") return null;
+    const path = input.file_path;
+    if (typeof input.content === "string") return { path, text: () => input.content as string };
+    if (typeof input.old_string !== "string" || typeof input.new_string !== "string") return null;
+    const [from, to] = [input.old_string, input.new_string];
+    return { path, text: (current) => current.replace(from, () => to) };
+  },
   // Cost on `usage_update`; rate-limit windows in its `_meta`.
   reporting: { cost: true, limits: true },
   toolNamePrefixes: [CLAUDE_TOOL_PREFIX],

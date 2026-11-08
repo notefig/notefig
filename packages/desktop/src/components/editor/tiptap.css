@@ -244,3 +244,50 @@ ul[data-type="taskList"] > li > div p {
 .dark .ProseMirror pre code span[style] {
   color: var(--shiki-dark) !important;
 }
+
+/* Sync: what collaborators hold. Low-key by design: an edge, an initial,
+   their words fading in, and a note only when you try to type there. */
+.sync-held {
+  position: relative;
+  box-shadow: -2px 0 0 color-mix(in srgb, var(--sync-color) 45%, transparent);
+  transition: box-shadow 200ms ease;
+}
+.sync-held::before {
+  content: attr(data-initial);
+  position: absolute;
+  left: -1.25rem;
+  font-size: 10px;
+  line-height: inherit;
+  color: var(--sync-color);
+  opacity: 0.6;
+  user-select: none;
+}
+.sync-overlaid {
+  display: none;
+}
+.sync-overlay {
+  box-shadow: -2px 0 0 color-mix(in srgb, var(--sync-color) 45%, transparent);
+  animation: sync-fade-in 200ms ease;
+}
+.sync-held-note {
+  position: absolute;
+  right: 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  pointer-events: none;
+  animation: sync-note 2s ease forwards;
+}
+@keyframes sync-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes sync-note {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

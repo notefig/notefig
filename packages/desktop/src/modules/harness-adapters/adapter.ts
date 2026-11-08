@@ -62,6 +62,8 @@ export interface HarnessInvokeContext {
   /** The harness's static env, for dialects that must layer onto a value
    *  the user set themselves (OpenCode's `OPENCODE_CONFIG_CONTENT`). */
   harnessEnv: Record<string, string>;
+  /** The workspace syncs: writes must reach Notefig's gate. */
+  gateWrites: boolean;
   /** This task's app-tools endpoint; undefined when the app offers none. */
   mcpServer: McpServer | undefined;
   /** Write files, creating parents; failures come back, never throw. */
@@ -225,6 +227,10 @@ export interface HarnessAdapter {
   /** Put a command's `/name` where this harness runs it from. None: at the
    *  start of the prompt's first text block, where most harnesses look. */
   placeCommand?(blocks: ContentBlock[], name: string): ContentBlock[];
+  /** The file write a permission request's `rawInput` is asking to make:
+   *  the path and the text it would leave. For a harness that writes to
+   *  disk itself, so sync can gate it; none: no such writes to gate. */
+  pendingWrite?(rawInput: unknown): { path: string; text: (current: string) => string } | null;
 }
 
 /**
