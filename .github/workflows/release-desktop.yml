@@ -265,6 +265,14 @@ jobs:
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
+      # CEF, the macOS/Windows webview runtime (src-tauri/Cargo.toml), builds
+      # its C++ wrapper with CMake + Ninja whenever the Tauri crate compiles.
+      # The runners ship CMake; Ninja is installed here.
+      - name: Install Ninja
+        if: runner.os != 'Linux'
+        shell: bash
+        run: if [ "$RUNNER_OS" = macOS ]; then brew install ninja; else choco install ninja --no-progress -y; fi
+
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |

@@ -29,6 +29,13 @@ runs:
     - name: Install Rust stable
       uses: dtolnay/rust-toolchain@stable
 
+    # CEF, the macOS/Windows webview runtime (src-tauri/Cargo.toml), builds
+    # its C++ wrapper with CMake + Ninja whenever the Tauri crate compiles.
+    # The runners ship CMake; Ninja is installed here.
+    - name: Install Ninja
+      shell: bash
+      run: if [ "$RUNNER_OS" = macOS ]; then brew install ninja; else choco install ninja --no-progress -y; fi
+
     # Shared between the PR and post-merge workflows, so main's runs keep
     # the PRs' cache warm. One target dir serves every checkout.
     - name: Cache Rust build

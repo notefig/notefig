@@ -260,6 +260,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # CEF, the macOS/Windows webview runtime (src-tauri/Cargo.toml), builds
+      # its C++ wrapper with CMake + Ninja whenever the Tauri crate compiles.
+      # The runners ship CMake; Ninja is installed here.
+      - name: Install Ninja
+        shell: bash
+        run: if [ "$RUNNER_OS" = macOS ]; then brew install ninja; else choco install ninja --no-progress -y; fi
+
       # tauri-build verifies every `bundle.externalBin` entry exists for the
       # target triple, so the sidecar executables (MET-210) must be built
       # before anything compiles the Tauri crate.
@@ -305,6 +312,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # CEF, the macOS/Windows webview runtime (src-tauri/Cargo.toml), builds
+      # its C++ wrapper with CMake + Ninja whenever the Tauri crate compiles.
+      # The runners ship CMake; Ninja is installed here.
+      - name: Install Ninja
+        shell: bash
+        run: if [ "$RUNNER_OS" = macOS ]; then brew install ninja; else choco install ninja --no-progress -y; fi
 
       # The shim lives in the Tauri workspace, whose build script checks the
       # sidecar executables exist (see the Tauri job above).

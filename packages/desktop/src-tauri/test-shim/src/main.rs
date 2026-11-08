@@ -90,7 +90,7 @@ fn run_dispatch_loop(mut rx: mpsc::UnboundedReceiver<InvokeMsg>) {
                 cmd,
                 callback: tauri::ipc::CallbackFn(0),
                 error: tauri::ipc::CallbackFn(1),
-                url: "http://tauri.localhost".parse().unwrap(),
+                url: "tauri://localhost".parse().unwrap(),
                 body,
                 headers,
                 invoke_key: INVOKE_KEY.to_string(),
