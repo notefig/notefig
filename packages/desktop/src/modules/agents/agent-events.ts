@@ -1,8 +1,8 @@
 /**
  * The moments the agent runtime announces on core's hook bus. Each is a
  * moment, not a fact to query later — the collections remain the bus for
- * state. Listeners: prompt rounds, seen, turn writes and each workspace's
- * history; none of them is known here.
+ * state. Listeners: prompt rounds, seen, turn writes and the app dir's
+ * exclude; none of them is known here.
  */
 import type {
   AgentTurnStatus,
@@ -25,8 +25,7 @@ declare module "@notefig/core" {
       workspacePath: string;
       toolCall: ToolCallUpdate;
     };
-    /** A turn finished normally — not cancelled, not failed. Its
-     *  workspace's history checkpoints it. */
+    /** A turn finished normally — not cancelled, not failed. */
     "agent:turn-completed": {
       taskId: string;
       turnId: string;

@@ -1275,7 +1275,6 @@ export class AgentTask {
     this.currentTurn = null;
     this.setStatus(turnStatus === "error" ? "error" : "idle");
     if (turnStatus === "completed") {
-      // The workspace's history checkpoints it (one commit per turn).
       this.deps.hooks.emit("agent:turn-completed", {
         taskId: this.taskId,
         turnId: turn.turnId,

@@ -70,8 +70,6 @@ describe("restoring the open workspaces at boot", () => {
   it("reopens every persisted workspace: core opens its modules, focus kept", async () => {
     const stubs: Record<string, AnyModule> = {
       files: stubWorkspaceModule("files", (path) => filesCreated.push(path)),
-      git: stubWorkspaceModule("git"),
-      history: stubWorkspaceModule("history"),
     };
     // Built as `createAppCore` builds it, over this test's platform.
     const core = createCore({

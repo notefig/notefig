@@ -4,11 +4,10 @@
  * (Docker/Heroku-style "sunny-otter.md") in the app-owned
  * `.notefig/scratchpads/` folder; membership in that folder — not the
  * filename — is what makes a file a scratchpad. Scratchpads never reach the
- * user's git (the `.notefig/` exclude covers them) but ARE checkpointed by
- * the app's history repo, whose own exclude history-service narrows to this
- * one folder. Moving a file out of the folder is how it becomes a tracked
- * project file. Scratchpads are also the ONLY child of the app dir the fs
- * walkers and the watcher surface — everything else under `.notefig/` is
+ * user's git (the `.notefig/` exclude covers them). Moving a file out of
+ * the folder is how it becomes a tracked project file. Scratchpads are
+ * also the ONLY child of the app dir the fs walkers and the watcher
+ * surface — everything else under `.notefig/` is
  * hidden by position, so app-internal files need no dot prefix. Consumers
  * derive every path from the constants here.
  *
