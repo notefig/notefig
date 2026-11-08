@@ -168,6 +168,9 @@ function Overwritten({ sync, items }: { sync: WorkspaceSync; items: SyncOverwrit
           </li>
         ))}
       </ul>
+      <p className="select-text break-all text-muted-foreground">
+        {t("syncOverwrittenSaved", { ref: items[items.length - 1].ref })}
+      </p>
       <Switch onClick={() => sync.dismissOverwritten()}>{t("syncDismiss")}</Switch>
     </div>
   );

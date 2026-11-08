@@ -36,6 +36,7 @@ import {
   pollInterval,
   isRunning,
   type SyncEvent,
+  type SyncOverwrite,
   type SyncReturnSummary,
   type SyncState,
 } from "./sync-machine";
@@ -78,6 +79,8 @@ export interface SyncEngine {
 }
 
 const MAX_PUSH_RETRIES = 3;
+const RECOVERY_PREFIX = "refs/notefig/recovery/";
+const MAX_RECOVERY_REFS = 50;
 const UNKNOWN_PUSH_RECHECK_MS = 2_000;
 const CLOSE_SYNC_MS = 5_000;
 /** Away longer than this with local changes: ask before going on. */
@@ -313,7 +316,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   };
 
   /** Settle a file both sides changed; true when it was written here. */
-  const settleBoth = async (filepath: string, base: string, ours: string, theirs: string): Promise<boolean> => {
+  const settleBoth = async (
+    filepath: string,
+    base: string,
+    ours: string,
+    theirs: string,
+    replaced: Omit<SyncOverwrite, "ref">[],
+  ): Promise<boolean> => {
     const [b, o, t] = await Promise.all([base, ours, theirs].map((ref) => git.readFile({ ref, filepath })));
     // Deleted on one side, edited on the other: keep the edit.
     if (t === null) return false;
@@ -323,13 +332,23 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       const { mergeMarkdown } = await import("./sync-merge");
       const { text, overwritten } = mergeMarkdown((b && asText(b)) ?? "", mine, incoming);
       await writeMerged(filepath, text);
-      if (overwritten.length > 0) deps.dispatch({ type: "overwritten", items: overwritten.map((lost) => ({ path: filepath, text: lost })) });
+      for (const lost of overwritten) replaced.push({ path: filepath, text: lost });
       return true;
     }
     // Not markdown, or binary: the branch's version stands.
     await git.unstage({ filepath, ref: theirs });
-    if (o) deps.dispatch({ type: "overwritten", items: [{ path: filepath, text: mine ?? null }] });
+    if (o) replaced.push({ path: filepath, text: mine ?? null });
     return false;
+  };
+
+  /** Keep this side whole on a ref that is never pushed, before a replay
+   *  leaves it unreachable: the newest `MAX_RECOVERY_REFS` stay. */
+  const saveRecovery = async (oid: string): Promise<string> => {
+    const ref = `${RECOVERY_PREFIX}${now()}-${oid.slice(0, 8)}`;
+    await git.writeRef(ref, oid);
+    const refs = await git.listRefs(RECOVERY_PREFIX);
+    for (const old of refs.slice(0, -MAX_RECOVERY_REFS)) await git.deleteRef(old);
+    return ref;
   };
 
   const pullStep = async () => {
@@ -362,9 +381,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     const localFiles = await git.changedFiles(base!, ours);
     const local = new Set(localFiles);
     const written = new Set<string>();
+    const replaced: Omit<SyncOverwrite, "ref">[] = [];
     for (const filepath of remoteFiles) {
       if (!local.has(filepath)) await git.unstage({ filepath, ref: theirs });
-      else if (await settleBoth(filepath, base!, ours, theirs)) written.add(filepath);
+      else if (await settleBoth(filepath, base!, ours, theirs, replaced)) written.add(filepath);
+    }
+    if (replaced.length > 0) {
+      const ref = await saveRecovery(ours);
+      deps.dispatch({ type: "overwritten", items: replaced.map((item) => ({ ...item, ref })) });
     }
     const replayed = await git.commit({ message: commitMessage(author.name, localFiles), author, parent: [theirs] });
     integrated = theirs;

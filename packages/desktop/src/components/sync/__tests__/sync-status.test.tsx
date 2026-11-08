@@ -65,8 +65,9 @@ const click = (label: string) => act(async () => button(label).click());
 
 describe("the sync popover", () => {
   it("lists what a merge overwrote until dismissed", async () => {
-    const { sync, text } = await render({ setup: "on", overwritten: [{ path: "a.md", text: "Mine." }] });
+    const { sync, text } = await render({ setup: "on", overwritten: [{ path: "a.md", text: "Mine.", ref: "refs/notefig/recovery/1-abc" }] });
     expect(text()).toContain("A newer edit replaced this text of yours:");
+    expect(text()).toContain("refs/notefig/recovery/1-abc");
     expect(text()).toContain("Mine.");
     await click("Dismiss");
     expect(sync.dismissOverwritten).toHaveBeenCalled();

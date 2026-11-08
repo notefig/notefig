@@ -707,6 +707,7 @@ i18n
           syncOverwritten_one: "A newer edit replaced this text of yours:",
           syncOverwritten_other: "Newer edits replaced {{count}} pieces of your text:",
           syncOverwrittenBinary: "Your version of this file was replaced.",
+          syncOverwrittenSaved: "Your whole version is kept on this device at {{ref}}.",
           syncDismiss: "Dismiss",
           syncPausedSummary:
             "You have {{local}} local changes since {{when}}; the remote has {{remote}} from {{people}}. Sync when you're ready.",

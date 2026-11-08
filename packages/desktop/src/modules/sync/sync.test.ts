@@ -342,6 +342,8 @@ describe("sync: solo", () => {
   it("merges a file both sides changed, flagging what a collision overwrote", async () => {
     const { sync, remote, ws, core } = await setup();
     const path = join(ws, "note.md");
+    const seed = await runGit(ws, ["rev-parse", "HEAD"]);
+    for (let n = 0; n < 50; n++) await runGit(ws, ["update-ref", `refs/notefig/recovery/0000000000000-${n}`, seed]);
     remote.mode = "offline";
     await fsp.writeFile(path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
     written(core, path);
@@ -359,8 +361,16 @@ describe("sync: solo", () => {
     expect(await read(path)).toBe(merged);
     expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(merged.trimEnd());
     expect(await runGit(remote.bare, ["merge-base", "--is-ancestor", theirs, "main"])).toBe("");
-    expect(sync.state().overwritten).toEqual([{ path: "note.md", text: "First paragraph, mine." }]);
+    const kept = await runGit(ws, ["for-each-ref", "--format=%(refname)", "refs/notefig/recovery"]);
+    expect(kept.split("\n")).toHaveLength(50);
+    expect(kept).not.toContain("0000000000000-0\n");
+    const [lost] = sync.state().overwritten;
+    expect(lost).toMatchObject({ path: "note.md", text: "First paragraph, mine." });
     expect(await runGit(remote.bare, ["rev-list", "--merges", "--count", "main"])).toBe("0");
+
+    // The whole of this side stays on a ref that never leaves the device.
+    expect(await runGit(ws, ["show", `${lost.ref}:note.md`])).toContain("First paragraph, mine.");
+    expect(await runGit(remote.bare, ["for-each-ref", "refs/notefig/recovery"])).toBe("");
 
     sync.dismissOverwritten();
     expect(sync.state().overwritten).toEqual([]);
@@ -399,7 +409,7 @@ describe("sync: solo", () => {
     await sync.syncNow();
 
     expect(await read(path)).toBe("theirs\n");
-    expect(sync.state().overwritten).toEqual([{ path: "data.txt", text: "mine\n" }]);
+    expect(sync.state().overwritten).toEqual([{ path: "data.txt", text: "mine\n", ref: expect.stringMatching(/^refs\/notefig\/recovery\//) }]);
   });
 
   it("holds remote content back from an editor with unsaved edits, and stops", async () => {

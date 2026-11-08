@@ -42,6 +42,8 @@ export interface SyncOverwrite {
   path: string;
   /** What was lost; null for a binary file. */
   text: string | null;
+  /** The local-only ref holding the whole of this side as it was. */
+  ref: string;
 }
 
 export interface SyncState {

@@ -359,6 +359,20 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     await expect(service.isIgnored("notes.md")).resolves.toBe(false);
   });
 
+  it("writes, lists and deletes local refs under a prefix", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    await host.writeFileAtomic(join(repoDir, "a.md"), new TextEncoder().encode("a\n"));
+    const oid = (await service.addAllAndCommit({ message: "one", author: { name: "T", email: "t@x" } }))!;
+
+    await service.writeRef("refs/keep/2", oid);
+    await service.writeRef("refs/keep/1", oid);
+    await expect(service.listRefs("refs/keep/")).resolves.toEqual(["refs/keep/1", "refs/keep/2"]);
+    await service.deleteRef("refs/keep/1");
+    await expect(service.listRefs("refs/keep/")).resolves.toEqual(["refs/keep/2"]);
+    expect((await service.log({ ref: "refs/keep/2", depth: 1 }))[0]?.oid).toBe(oid);
+  });
+
   it("returns empty log for initialized repo without commits", async () => {
     const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
     await service.init({ defaultBranch: "main" });
