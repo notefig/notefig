@@ -288,6 +288,77 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     expect(before.untracked).toEqual(["note.md"]);
   });
 
+  it("limits status to the given paths", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    await host.writeFileAtomic(join(repoDir, "a.md"), encode("a\n"));
+    await host.createDir(join(repoDir, "notes"));
+    await host.writeFileAtomic(join(repoDir, "notes", "b.md"), encode("b\n"));
+    await host.writeFileAtomic(join(repoDir, "c.md"), encode("c\n"));
+
+    expect((await service.status({ filepaths: ["a.md", "notes"] })).untracked)
+      .toEqual(["a.md", "notes/b.md"]);
+    expect((await service.status()).untracked).toEqual([
+      "a.md",
+      "c.md",
+      "notes/b.md",
+    ]);
+  });
+
+  it("lists the files of a commit's tree", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    await host.createDir(join(repoDir, "notes"));
+    await host.writeFileAtomic(join(repoDir, "notes", "b.md"), encode("b\n"));
+    await host.writeFileAtomic(join(repoDir, "a.md"), encode("a\n"));
+    await service.addAllAndCommit({ message: "two", author: { name: "T", email: "t@x" } });
+
+    await expect(service.listFiles()).resolves.toEqual(["a.md", "notes/b.md"]);
+  });
+
+  it("lists the files that differ between two commits, and reads their bytes", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    const author = { name: "T", email: "t@x" };
+    await host.createDir(join(repoDir, "notes"));
+    await host.createDir(join(repoDir, "same"));
+    await host.writeFileAtomic(join(repoDir, "notes", "b.md"), encode("b\n"));
+    await host.writeFileAtomic(join(repoDir, "same", "c.md"), encode("c\n"));
+    await host.writeFileAtomic(join(repoDir, "a.md"), encode("a\n"));
+    const first = await service.addAllAndCommit({ message: "one", author });
+    await host.writeFileAtomic(join(repoDir, "notes", "b.md"), encode("b2\n"));
+    await host.deleteFile(join(repoDir, "a.md"));
+    await host.writeFileAtomic(join(repoDir, "d.md"), encode("d\n"));
+    const second = await service.addAllAndCommit({ message: "two", author });
+
+    await expect(service.changedFiles(first!, second!)).resolves.toEqual(["a.md", "d.md", "notes/b.md"]);
+    await expect(service.changedFiles(second!, second!)).resolves.toEqual([]);
+    await expect(service.readFile({ ref: second!, filepath: "notes/b.md" })).resolves.toEqual(encode("b2\n"));
+    await expect(service.readFile({ ref: second!, filepath: "a.md" })).resolves.toBeNull();
+    await expect(service.mergeBase(second!, first!)).resolves.toBe(first);
+    await expect(service.mergeBase("refs/heads/main", first!)).resolves.toBe(first);
+  });
+
+  it("reads the repo's config and checked-out branch", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    await host.writeFileAtomic(
+      join(repoDir, ".git", "config"),
+      new TextEncoder().encode('[remote "origin"]\n\turl = https://h/o/r.git\n[user]\n\tname = Ada\n'),
+    );
+
+    await expect(service.getConfig("remote.origin.url")).resolves.toBe("https://h/o/r.git");
+    await expect(service.getConfig("user.name")).resolves.toBe("Ada");
+    await expect(service.getConfig("user.email")).resolves.toBeUndefined();
+    await expect(service.currentBranch()).resolves.toBe("main");
+    await host.writeFileAtomic(join(repoDir, ".gitignore"), new TextEncoder().encode(".claude/\n"));
+    await expect(service.isIgnored(".claude/settings.json")).resolves.toBe(true);
+    await expect(service.isIgnored("notes.md")).resolves.toBe(false);
+  });
+
   it("returns empty log for initialized repo without commits", async () => {
     const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
     await service.init({ defaultBranch: "main" });

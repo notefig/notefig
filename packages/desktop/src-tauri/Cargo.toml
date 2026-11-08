@@ -42,6 +42,28 @@ getrandom = "0.2"
 grep = "0.3"
 grep-regex = "0.1"
 regex = "1.10"
+# Sync's git transport (git_http.rs): HTTPS with keep-alive, no CORS. Both
+# are already in the tree through tauri-plugin-updater, with the same
+# features, so they add no new crates; the ring provider is installed the
+# way the updater does it.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+base64 = "0.22"
+url = "2"
+
+# Sync tokens live in the OS keychain (credentials.rs), never in JS.
+[target.'cfg(target_os = "macos")'.dependencies.keyring]
+version = "3"
+features = ["apple-native"]
+
+[target.'cfg(windows)'.dependencies.keyring]
+version = "3"
+features = ["windows-native"]
+
+# Secret Service over zbus (pure Rust D-Bus, no libdbus to link).
+[target.'cfg(target_os = "linux")'.dependencies.keyring]
+version = "3"
+features = ["linux-native-async-persistent", "tokio", "crypto-rust"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # The menu-bar item (app_status.rs). macOS only: a template icon is a

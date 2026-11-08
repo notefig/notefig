@@ -7,7 +7,9 @@
  * byte-identical files. Bump FIXTURE_VERSION when the shape changes; the
  * numbers before and after are not comparable.
  */
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
+import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 
@@ -173,4 +175,40 @@ export async function perfWorkspace(): Promise<string> {
  */
 export async function resetLargeDocument(root: string): Promise<void> {
   await fs.writeFile(path.join(root, "large.md"), largeDocument());
+}
+
+const git = (cwd: string, ...args: string[]) =>
+  promisify(execFile)(
+    "git",
+    ["-c", "user.name=Perf", "-c", "user.email=perf@notefig.test", "-c", "commit.gpgsign=false", ...args],
+    { cwd },
+  );
+
+/**
+ * The perf workspace as a solo sync workspace (MET-270): a copy of it (the
+ * regular runs share and reuse the original) that is a git repo on `main`
+ * whose project syncs, on a device that said yes. Its remote is a port
+ * nothing listens on, so the engine commits for real (in the git worker,
+ * files served from the main thread) and every push fails fast as
+ * offline: the main-thread cost of solo sync, without a host's latency.
+ */
+export async function soloSyncWorkspace(): Promise<string> {
+  const source = await perfWorkspace();
+  const root = `${source}-solo-sync`;
+  await fs.rm(root, { recursive: true, force: true });
+  await fs.cp(source, root, { recursive: true });
+  await resetLargeDocument(root);
+  await fs.writeFile(path.join(root, "metrists.json"), JSON.stringify({ sync: { enabled: true } }));
+  await git(root, "init", "-q", "-b", "main");
+  await git(root, "remote", "add", "origin", "https://127.0.0.1:9/perf-solo-sync.git");
+  await fs.mkdir(path.join(root, ".git", "info"), { recursive: true });
+  await fs.writeFile(path.join(root, ".git", "info", "exclude"), ".notefig/\n");
+  await git(root, "add", "-A");
+  await git(root, "commit", "-q", "-m", "perf fixture");
+  await fs.mkdir(path.join(root, ".notefig"), { recursive: true });
+  await fs.writeFile(
+    path.join(root, ".notefig", "sync.json"),
+    JSON.stringify({ deviceId: "perf", on: true, lastSyncedAt: Date.now() }),
+  );
+  return root;
 }

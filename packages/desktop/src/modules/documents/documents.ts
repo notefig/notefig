@@ -21,7 +21,7 @@
  * state: the mover (`core.tabs.renameOpenFile`) announces the move with
  * `beginMove` and waits for `whenWritesSettled` before touching the file.
  */
-import { defineModule } from "@notefig/core";
+import { defineModule, type Hooks } from "@notefig/core";
 import {
   FsError,
   type FileSystemSurface,
@@ -49,8 +49,17 @@ export interface DocumentsApi {
   /** Write a file's text and bring every loaded copy of it forward: rows
    *  and an open editor. Writes to one path run one after another; a write
    *  that overlaps a move of its path (`beginMove`) lands where the file
-   *  settled. */
-  write(path: string, content: string): Promise<void>;
+   *  settled.
+   *
+   *  `source: "sync"` (remote content) never overwrites unsaved edits: when
+   *  the open editor has edits not yet saved, nothing is written and the
+   *  write answers `"held"` (the editor's save lands as usual). Any other
+   *  write keeps last-writer-wins and answers `"written"`. */
+  write(
+    path: string,
+    content: string,
+    options?: { source?: DocumentWriteSource },
+  ): Promise<DocumentWriteResult>;
   /** Resolves once every write in flight for `path` has landed (or failed). */
   whenWritesSettled(path: string): Promise<void>;
   /**
@@ -64,6 +73,10 @@ export interface DocumentsApi {
   beginMove(path: string): { settle(finalPath: string): void };
 }
 
+/** Who is writing: an agent (ACP), or sync applying remote content. */
+export type DocumentWriteSource = "agent" | "sync";
+export type DocumentWriteResult = "written" | "held";
+
 /** What documents are built from. */
 export interface DocumentsDeps {
   fs: Pick<FileSystemSurface, "readFiles" | "writeFiles">;
@@ -73,6 +86,8 @@ export interface DocumentsDeps {
   editors: Pick<EditorsApi, "markdownEditor">;
   /** Which prompt round wrote adopted bytes (`core.turnWrites.attribute`). */
   attribute?: AdoptionSource["attribute"];
+  /** Where `files:written` is announced. */
+  hooks?: Pick<Hooks, "emit">;
 }
 
 /**
@@ -99,6 +114,7 @@ export function createDocuments({
   openFiles,
   editors,
   attribute,
+  hooks,
 }: DocumentsDeps): DocumentsApi {
   /** path → the chain of writes in flight on it. */
   const inFlight = new Map<string, Promise<void>>();
@@ -106,10 +122,13 @@ export function createDocuments({
   const pendingMoves = new Map<string, Promise<string>>();
 
   /** Run `write`, serialized after any in-flight write to the same path. */
-  const trackWrite = (path: string, write: () => Promise<void>) => {
+  const trackWrite = <T>(path: string, write: () => Promise<T>) => {
     const previous = inFlight.get(path) ?? Promise.resolve();
     const op = previous.catch(() => {}).then(write);
-    const settled = op.catch(() => {});
+    const settled = op.then(
+      () => {},
+      () => {},
+    );
     inFlight.set(path, settled);
     void settled.then(() => {
       if (inFlight.get(path) === settled) inFlight.delete(path);
@@ -130,6 +149,42 @@ export function createDocuments({
     for (const files of openFiles()) files.updateLoadedContent(path, content);
   };
 
+  /** An open editor holds edits not on disk yet: in the autosave
+   *  debounce (flushed into a save now) or in a save still running. */
+  const hasUnsavedEdits = (path: string): boolean => {
+    const editor = editors.markdownEditor(path);
+    if (!editor || editor.isDestroyed) return false;
+    const sync = getDocumentSync(path);
+    sync.flushPendingEdits?.();
+    return sync.isDirty();
+  };
+
+  /** Push written content into the path's live editor, if one is open. */
+  const adoptIntoEditor = async (target: string, content: string) => {
+    const editor = editors.markdownEditor(target);
+    if (!editor || editor.isDestroyed) return;
+    const sync = getDocumentSync(target);
+    const doc = await sync.prepareAdoption(content);
+    if (!doc || editor.isDestroyed) return;
+    const contentHash = calculateContentHash(content);
+    const adoption = adoptExternalContent(editor, doc, {
+      source: { path: target, contentHash, attribute },
+    });
+    if (adoption.reinsertedWidgets === 0) {
+      sync.commitAdoption(content, contentHash);
+      return;
+    }
+    // Re-asserted widget markers exist only in the editor at this point.
+    // Repair the file INSIDE this tracked write — a fire-and-forget save
+    // could still be in flight when the next same-path agent write
+    // arrives, which would skip that write's adoption (sync busy) and then
+    // clobber its newer content.
+    const repaired = getEditorMarkdown(editor);
+    await writeToDisk(target, repaired);
+    updateLoadedRows(target, repaired);
+    sync.commitAdoption(repaired, calculateContentHash(repaired));
+  };
+
   return {
     async read(path, options) {
       assertAbsolute(path);
@@ -147,39 +202,21 @@ export function createDocuments({
       return lines.slice(start, end).join("\n");
     },
 
-    async write(path, content) {
+    async write(path, content, options) {
       assertAbsolute(path);
+      const source = options?.source ?? "agent";
       // The file may be moving right now — wait it out and write to
       // wherever it settled, so an overlapping agent write can't resurrect
       // the old path.
       const move = pendingMoves.get(path);
       const target = move ? await move : path;
-      return trackWrite(target, async () => {
+      return trackWrite(target, async (): Promise<DocumentWriteResult> => {
+        if (source === "sync" && hasUnsavedEdits(target)) return "held";
         await writeToDisk(target, content);
         updateLoadedRows(target, content);
-
-        const editor = editors.markdownEditor(target);
-        if (!editor || editor.isDestroyed) return;
-        const sync = getDocumentSync(target);
-        const doc = await sync.prepareAdoption(content);
-        if (!doc || editor.isDestroyed) return;
-        const contentHash = calculateContentHash(content);
-        const adoption = adoptExternalContent(editor, doc, {
-          source: { path: target, contentHash, attribute },
-        });
-        if (adoption.reinsertedWidgets === 0) {
-          sync.commitAdoption(content, contentHash);
-          return;
-        }
-        // Re-asserted widget markers exist only in the editor at this
-        // point. Repair the file INSIDE this tracked write — a
-        // fire-and-forget save could still be in flight when the next
-        // same-path agent write arrives, which would skip that write's
-        // adoption (sync busy) and then clobber its newer content.
-        const repaired = getEditorMarkdown(editor);
-        await writeToDisk(target, repaired);
-        updateLoadedRows(target, repaired);
-        sync.commitAdoption(repaired, calculateContentHash(repaired));
+        hooks?.emit("files:written", { paths: [target], source });
+        await adoptIntoEditor(target, content);
+        return "written";
       });
     },
 
@@ -222,6 +259,7 @@ export const documentsModule = defineModule({
       fs: ctx.use("platform").fs,
       editors: ctx.use("editors"),
       attribute: ctx.use("turnWrites").attribute,
+      hooks: ctx.hooks,
       openFiles: () =>
         ctx.workspaces
           .list()

@@ -1,15 +1,13 @@
 /**
- * The remote operations against system `git http-backend` (as a CGI behind
- * a tiny Node server that demands Basic auth), through the same
+ * The remote operations against system `git http-backend` (`../testing`,
+ * behind a check that demands Basic auth), through the same
  * `GitHttpClient` port and credential reference desktop uses.
  */
-import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { httpBackend } from "../testing";
 import { withBasicAuth } from "./httpClient";
 import { IsomorphicGitService } from "./isomorphicGitService";
 import {
@@ -24,80 +22,23 @@ import { createGitWorkerApi, createRpcGitService } from "./workerBoundary";
 
 const describeIfGit = hasSystemGit ? describe : describe.skip;
 
-const nodeHttp: GitHttpClient = {
-  async request({ url, method, headers, body }) {
-    const res = await fetch(url, { method, headers, body });
-    return {
-      status: res.status,
-      headers: Object.fromEntries(res.headers),
-      body: new Uint8Array(await res.arrayBuffer()),
-    };
-  },
+const AUTH = `Basic ${Buffer.from("tester:secret").toString("base64")}`;
+/** The bare repos the backend serves, set per test. */
+let root = "";
+/** The backend, refusing requests without the tester's Basic auth. */
+const host: GitHttpClient = {
+  request: (request) =>
+    request.headers.Authorization === AUTH
+      ? httpBackend(root).request(request)
+      : Promise.resolve({ status: 401, headers: {}, body: new Uint8Array(0) }),
 };
-const http = withBasicAuth(nodeHttp, {
+const http = withBasicAuth(host, {
   tester: { username: "tester", password: "secret" },
 });
-const AUTH = `Basic ${Buffer.from("tester:secret").toString("base64")}`;
-
-/** Serve `root`'s bare repos via `git http-backend`; 401 without AUTH. */
-async function listen(
-  handle: (
-    req: import("node:http").IncomingMessage,
-    body: Buffer,
-  ) => Promise<[number, Record<string, string>, Buffer]>,
-): Promise<{ url: string; server: Server }> {
-  const server = createServer(async (req, res) => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) chunks.push(chunk as Buffer);
-    const [status, headers, body] = await handle(req, Buffer.concat(chunks));
-    res.writeHead(status, headers).end(body);
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return {
-    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-    server,
-  };
-}
-
-function httpBackend(root: string) {
-  return listen(async (req, body) => {
-    if (req.headers.authorization !== AUTH) return [401, {}, Buffer.alloc(0)];
-    const url = new URL(req.url ?? "/", "http://localhost");
-    const child = spawn("git", ["http-backend"], {
-      env: {
-        PATH: process.env.PATH,
-        GIT_PROJECT_ROOT: root,
-        GIT_HTTP_EXPORT_ALL: "1",
-        GIT_CONFIG_NOSYSTEM: "1",
-        HOME: root,
-        PATH_INFO: url.pathname,
-        QUERY_STRING: url.search.slice(1),
-        REQUEST_METHOD: req.method ?? "GET",
-        CONTENT_TYPE: req.headers["content-type"] ?? "",
-        REMOTE_USER: "tester",
-      },
-    });
-    const out: Buffer[] = [];
-    child.stdout.on("data", (chunk: Buffer) => out.push(chunk));
-    child.stdin.end(body);
-    await new Promise((resolve) => child.on("close", resolve));
-    // CGI reply: headers (with an optional `Status:`), a blank line, body.
-    const reply = Buffer.concat(out);
-    const split = reply.indexOf("\r\n\r\n");
-    const head = reply.subarray(0, split).toString();
-    const headers = Object.fromEntries(
-      head.split("\r\n").map((line) => line.split(/:\s*/, 2)),
-    );
-    const status = Number(headers.Status?.slice(0, 3) ?? 200);
-    return [status, headers, reply.subarray(split + 4)];
-  });
-}
 
 describeIfGit("remote operations over git http-backend", () => {
-  let root: string;
   let bare: string;
   let seed: string;
-  let server: Server;
   let remote: GitRemote;
   let seedOid: string;
 
@@ -137,14 +78,11 @@ describeIfGit("remote operations over git http-backend", () => {
     await git(seed, ...SYSTEM_GIT_IDENTITY, "commit", "-qm", "seed");
     await git(seed, "push", "-q", bare, "main");
     seedOid = await git(seed, "rev-parse", "HEAD");
-    const backend = await httpBackend(root);
-    server = backend.server;
-    remote = { url: `${backend.url}/remote.git`, credential: "tester" };
+    await git(bare, "config", "http.receivepack", "true");
+    remote = { url: "https://127.0.0.1/remote.git", credential: "tester" };
   });
 
-  afterEach(async () => {
-    server.closeAllConnections();
-    await new Promise((resolve) => server.close(resolve));
+  afterEach(() => {
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -170,6 +108,7 @@ describeIfGit("remote operations over git http-backend", () => {
     await git(bare, "update-ref", "refs/notefig/blob", blob);
     const orphan = await git(
       bare,
+      ...SYSTEM_GIT_IDENTITY,
       "commit-tree",
       `${next}^{tree}`,
       "-m",
@@ -299,25 +238,38 @@ describeIfGit("remote operations over git http-backend", () => {
     ).rejects.toMatchObject({ code: "RepoNotFound" });
 
     let status = 0;
-    const fake = await listen(async () => [status, {}, Buffer.from("nope")]);
-    try {
-      for (const [code, expected] of [
-        [403, "AuthFailed"],
-        [429, "Throttled"],
-        [500, "RemoteError"],
-      ] as const) {
-        status = code;
-        await expect(
-          service.listRemoteRefs({ url: fake.url }),
-        ).rejects.toMatchObject({ code: expected });
-      }
-    } finally {
-      fake.server.closeAllConnections();
-      await new Promise((resolve) => fake.server.close(resolve));
+    const answering = serviceAt(join(root, "a"), {
+      http: {
+        request: async () => ({ status, headers: {}, body: new Uint8Array(0) }),
+      },
+    });
+    for (const [code, expected] of [
+      [403, "AuthFailed"],
+      [429, "Throttled"],
+      [500, "RemoteError"],
+    ] as const) {
+      status = code;
+      await expect(answering.listRemoteRefs(remote)).rejects.toMatchObject({
+        code: expected,
+      });
     }
+    const silent = serviceAt(join(root, "a"), {
+      http: { request: () => Promise.reject(new Error("timed out")) },
+    });
+    await expect(silent.listRemoteRefs(remote)).rejects.toMatchObject({
+      code: "Network",
+    });
+  });
+
+  it("asks for the push advertisement, which needs push access", async () => {
+    const { service } = await clone("a");
     await expect(
-      service.listRemoteRefs({ url: fake.url }),
-    ).rejects.toMatchObject({ code: "Network" });
+      service.listRemoteRefs(remote, ["refs/heads/main"], { forPush: true }),
+    ).resolves.toEqual([{ ref: "refs/heads/main", oid: seedOid }]);
+    await git(bare, "config", "http.receivepack", "false");
+    await expect(
+      service.listRemoteRefs(remote, [], { forPush: true }),
+    ).rejects.toMatchObject({ code: "AuthFailed" });
   });
 
   it("runs the remote operations through createRpcGitService", async () => {

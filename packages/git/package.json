@@ -10,6 +10,10 @@
       "require": "./dist/index.js",
       "default": "./src/index.ts",
       "types": "./dist/index.d.ts"
+    },
+    "./testing": {
+      "import": "./src/testing.ts",
+      "default": "./src/testing.ts"
     }
   },
   "scripts": {

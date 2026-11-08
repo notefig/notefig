@@ -19,6 +19,7 @@ import {
   createRpcGitService,
   type GitBoundaryCall,
   type GitBoundaryError,
+  type GitHttpClient,
   type GitRepoRef,
   type GitService,
   type GitWorkerApi,
@@ -29,6 +30,7 @@ import { type GitHostFs } from "@/adapters/git-storage-host";
 import {
   FsError,
   type FileSystemErrorType,
+  type GitHttpSurface,
 } from "@/adapters/platform-adapter.interface";
 import { getDesktopOs } from "@/utils/platform";
 import {
@@ -42,9 +44,18 @@ import { platformModule } from "@/core/services";
 /** Mapped alias: interfaces don't satisfy `WorkerApi`'s index constraint. */
 type GitWorkerRpc = { [K in keyof GitWorkerApi]: GitWorkerApi[K] };
 
-/** The fs slice the worker may call back into. */
-function hostFsApi(fs: GitHostFs): GitHostFs {
+/** What the worker may call back into: git's fs slice and, for remote
+ *  operations, the platform's git HTTP transport. */
+export type GitWorkerHost = GitHostFs & {
+  gitHttp: GitHttpClient["request"];
+};
+
+function hostApi(
+  fs: GitHostFs,
+  gitHttp: Pick<GitHttpSurface, "request">,
+): GitWorkerHost {
   return {
+    gitHttp: (request) => gitHttp.request(request),
     readBinaryFiles: (paths) => fs.readBinaryFiles(paths),
     writeBinaryFiles: (files) => fs.writeBinaryFiles(files),
     moveFile: (oldPath, newPath) => fs.moveFile(oldPath, newPath),
@@ -76,12 +87,12 @@ function reviveBoundaryFsError(error: GitBoundaryError): Error | undefined {
   );
 }
 
-function bootGitWorker(fs: GitHostFs): Promise<WorkerClient<GitWorkerRpc>> {
+function bootGitWorker(host: GitWorkerHost): Promise<WorkerClient<GitWorkerRpc>> {
   const worker = new Worker(
     new URL("../../workers/git.worker.ts", import.meta.url),
     { type: "module" },
   );
-  serveWorkerHost(worker, hostFsApi(fs), serializeHostError);
+  serveWorkerHost(worker, host, serializeHostError);
   // The one desktop-specific global the worker's import graph needs pinned
   // before it loads: utils/path binds its posix/win32 flavor from this.
   worker.postMessage({
@@ -106,12 +117,16 @@ export interface GitWorker {
   dispose(gitDir: string): void;
 }
 
-export function createGitWorker(fs: GitHostFs): GitWorker {
+export function createGitWorker(
+  fs: GitHostFs,
+  gitHttp: Pick<GitHttpSurface, "request">,
+): GitWorker {
+  const host = hostApi(fs, gitHttp);
   let gitWorkerPromise: Promise<WorkerClient<GitWorkerRpc>> | null = null;
 
   const getGitWorker = () => {
     if (!gitWorkerPromise) {
-      const boot = (async () => bootGitWorker(fs))();
+      const boot = (async () => bootGitWorker(host))();
       gitWorkerPromise = boot;
       // A failed boot doesn't pin the rejection: the next call retries.
       boot.catch(() => {
@@ -159,5 +174,6 @@ declare module "@notefig/core" {
 export const gitWorkerModule = defineModule({
   name: "gitWorker",
   needs: [platformModule],
-  register: (ctx) => createGitWorker(ctx.use("platform").fs),
+  register: (ctx) =>
+    createGitWorker(ctx.use("platform").fs, ctx.use("platform").gitHttp),
 });
