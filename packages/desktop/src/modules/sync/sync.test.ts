@@ -241,6 +241,33 @@ describe("sync: solo", () => {
     expect(await tree(remote.bare)).not.toContain("drafts/a.md");
   });
 
+  it("stages many files with one index write", async () => {
+    const { sync, ws, core, fs } = await setup();
+    const names = Array.from({ length: 30 }, (_, n) => `batch-${n}.md`);
+    await Promise.all(names.map((name) => fsp.writeFile(join(ws, name), name)));
+    written(core, ...names.map((name) => join(ws, name)));
+    const writes = vi.spyOn(fs, "writeBinaryFiles");
+    await sync.syncNow();
+    const indexWrites = writes.mock.calls.filter(([files]) => files.some((f) => /\/\.git\/index/.test(f.path)));
+    expect(indexWrites.length).toBe(1);
+  });
+
+  it("scans from the last sync, not the last commit: a clone's old files aren't changes", async () => {
+    const { core, ws, remote, open } = await setup();
+    await core.workspace(ws).close();
+    const lastSyncedAt = Date.now() - 60_000;
+    await writeDevice(ws, { on: true, lastSyncedAt });
+    const before = new Date(lastSyncedAt - 60_000);
+    await fsp.writeFile(join(ws, "older.md"), "From before the last sync.\n");
+    await fsp.utimes(join(ws, "older.md"), before, before);
+    await fsp.writeFile(join(ws, "newer.md"), "Since then.\n");
+
+    await open(ws);
+    const files = await tree(remote.bare);
+    expect(files).toContain("newer.md");
+    expect(files).not.toContain("older.md");
+  });
+
   it("commits and pushes what is left when the workspace closes", async () => {
     const { files, remote, ws, core } = await setup();
     await files.collections.content.preload();

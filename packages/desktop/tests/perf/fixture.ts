@@ -208,7 +208,7 @@ export async function soloSyncWorkspace(): Promise<string> {
   await fs.mkdir(path.join(root, ".notefig"), { recursive: true });
   await fs.writeFile(
     path.join(root, ".notefig", "sync.json"),
-    JSON.stringify({ deviceId: "perf", on: true }),
+    JSON.stringify({ deviceId: "perf", on: true, lastSyncedAt: Date.now() }),
   );
   return root;
 }

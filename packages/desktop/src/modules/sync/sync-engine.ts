@@ -85,8 +85,11 @@ export const OFFLINE_RETURN_MS = 60 * 60_000;
 /** Files changed on both sides, at or past which sync asks anyway. */
 export const LARGE_DIVERGENCE_FILES = 25;
 const RECORD_SYNCED_EVERY_MS = 5 * 60_000;
-/** Files changed this long before the last commit still count in a scan. */
-const SCAN_SLACK_MS = 120_000;
+/** Files changed this long before the last sync still count in a scan
+ *  (mtime granularity; both times are this machine's clock). */
+const SCAN_SLACK_MS = 2_000;
+/** The same against a commit's time, which came from another clock. */
+const COMMIT_SCAN_SLACK_MS = 120_000;
 const METADATA_BATCH = 500;
 const SUMMARY_DEPTH = 200;
 /** The app's folder and git's never sync. */
@@ -182,7 +185,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const scan = async (): Promise<string[] | null> => {
     const [last] = await git.log({ depth: 1 }).catch(() => []);
     if (!last) return null;
-    const since = last.commit.committer.timestamp * 1000 - SCAN_SLACK_MS;
+    // Not the last commit's time alone: a fresh clone's files are all newer.
+    const since =
+      deps.lastSyncedAt !== null
+        ? deps.lastSyncedAt - SCAN_SLACK_MS
+        : last.commit.committer.timestamp * 1000 - COMMIT_SCAN_SLACK_MS;
     const listing = await deps.fs.readDirectory(root, {
       recursive: true,
       includeFiles: true,
@@ -207,7 +214,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   };
 
   /** Stage `paths` by hashing them: status trusts the index's stat cache,
-   *  which misses a same-size save within the same second. */
+   *  which misses a same-size save within the same second. One `add` for
+   *  all of them, since each call rewrites the whole index. */
   const stageByHash = async (paths: string[]) => {
     const gone = new Set(
       await inBatches(paths, async (batch) =>
@@ -216,9 +224,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
           .map((failure) => tree(failure.path)),
       ),
     );
+    const present = paths.filter((filepath) => !gone.has(filepath));
+    if (present.length > 0) await git.add({ filepath: present });
     for (const filepath of paths) {
       if (gone.has(filepath)) await git.remove({ filepath });
-      else await git.add({ filepath });
     }
   };
 
@@ -393,7 +402,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const markSynced = () => {
     returnApproved = false;
     lastSynced = now();
-    if (lastSynced - lastRecorded < RECORD_SYNCED_EVERY_MS) return;
+    // The scan after a restart starts from this, so never past unsaved work.
+    if (pending() || lastSynced - lastRecorded < RECORD_SYNCED_EVERY_MS) return;
     lastRecorded = lastSynced;
     void deps.recordSynced(lastSynced).catch(() => {});
   };
@@ -515,14 +525,15 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
  *  the commit will hold. `.gitignore` and the sync excludes apply. */
 async function stageChanges(git: GitService, paths: string[] | null): Promise<string[]> {
   const status = await git.status(paths ? { filepaths: paths } : undefined);
-  for (const filepath of status.untracked) await git.add({ filepath });
+  const add = [...status.untracked];
   for (const change of status.unstaged) {
     // A tracked file the excludes name (`.claude/` committed before sync)
     // stays as it is on the remote.
     if (await git.isIgnored(change.path)) continue;
     if (change.type === "deleted") await git.remove({ filepath: change.path });
-    else await git.add({ filepath: change.path });
+    else add.push(change.path);
   }
+  if (add.length > 0) await git.add({ filepath: add });
   const after = await git.status(paths ? { filepaths: paths } : undefined);
   return after.staged.map((c) => c.path).filter((path) => !NEVER.test(path)).sort();
 }
