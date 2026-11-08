@@ -10,9 +10,9 @@
  * name a `notefig-sync-spike*` repo), NOTEFIG_LIVE_RESULTS (a JSON file to
  * append the latency numbers to).
  *
- * Rates stay low, enforced by the http port below: an upload-pack request
- * at most every 1 s and a receive-pack request at most every 3 s per
- * client, two clients. Any 429 fails the run (Throttled) and stops it.
+ * Rates stay low, enforced by the http port below: a poll or fetch at most
+ * every 1 s and a push at most every 3 s per client, two clients. Any 429
+ * fails the run (Throttled) and stops it.
  */
 import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -66,22 +66,28 @@ const HOSTS: Host[] = [
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Node fetch (keep-alive), paced per service, with a 20 s timeout. */
+/**
+ * Node fetch (keep-alive), paced: a poll or fetch (each starts with the
+ * upload-pack advertisement) at most every 1 s, a receive-pack POST at
+ * most every 3 s, with a 20 s timeout.
+ */
 function pacedClient(): GitHttpClient {
   const inner = createFetchHttpClient((url, init) =>
     fetch(url, { ...init, signal: AbortSignal.timeout(20_000) }),
   );
-  const last = { "git-upload-pack": 0, "git-receive-pack": 0 };
-  const gap = { "git-upload-pack": 1000, "git-receive-pack": 3000 };
+  const last = { poll: 0, push: 0 };
+  const gap = { poll: 1000, push: 3000 };
   return {
     async request(request) {
-      if (request.method !== "POST") return inner.request(request);
-      const service = request.url.endsWith("receive-pack")
-        ? "git-receive-pack"
-        : "git-upload-pack";
-      const wait = last[service] + gap[service] - Date.now();
+      const paced = request.url.endsWith("info/refs?service=git-upload-pack")
+        ? "poll"
+        : request.method === "POST" && request.url.endsWith("receive-pack")
+          ? "push"
+          : null;
+      if (!paced) return inner.request(request);
+      const wait = last[paced] + gap[paced] - Date.now();
       if (wait > 0) await sleep(wait);
-      last[service] = Date.now();
+      last[paced] = Date.now();
       return inner.request(request);
     },
   };
