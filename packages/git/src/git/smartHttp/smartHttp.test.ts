@@ -1,5 +1,4 @@
 import {
-  DELIM_PKT,
   FLUSH_PKT,
   RemoteProtocolError,
   concatBytes,
@@ -37,23 +36,21 @@ describe("pkt-line", () => {
     expect(text(encodePktLine(""))).toBe("0004");
   });
 
-  it("round-trips data, flush, delim and response-end", () => {
+  it("round-trips data and flush", () => {
     const wire = concatBytes([
-      encodePktLine("command=ls-refs\n"),
-      DELIM_PKT,
+      encodePktLine("unpack ok\n"),
+      FLUSH_PKT,
       encodePktLine(new Uint8Array([0, 1, 255])),
-      bytes("0002"),
       FLUSH_PKT,
     ]);
     const { lines, rest } = decodePktLines(wire);
     expect(lines.map((l) => l.type)).toEqual([
       "data",
-      "delim",
+      "flush",
       "data",
-      "response-end",
       "flush",
     ]);
-    expect(pktText(lines[0])).toBe("command=ls-refs");
+    expect(pktText(lines[0])).toBe("unpack ok");
     expect(lines[2]).toEqual({
       type: "data",
       data: new Uint8Array([0, 1, 255]),
@@ -74,6 +71,7 @@ describe("pkt-line", () => {
 
   it("rejects malformed and truncated lines", () => {
     expect(() => decodePktLines(bytes("zzzz"))).toThrow(/malformed/);
+    expect(() => decodePktLines(bytes("0001"))).toThrow(/malformed/);
     expect(() => decodePktLines(bytes("0010abc"))).toThrow(/truncated/);
     expect(() => encodePktLine(new Uint8Array(65517))).toThrow(/too long/);
   });

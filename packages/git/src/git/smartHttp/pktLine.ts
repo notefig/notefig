@@ -1,22 +1,16 @@
 /**
- * git's pkt-line framing (gitprotocol-common): each line is a 4-hex-digit
- * length (which counts itself) and a payload. Three special lengths carry
- * no payload: `0000` flush, `0001` delim (protocol v2 section separator)
- * and `0002` response-end. isomorphic-git doesn't export its codec.
+ * git's pkt-line framing (gitprotocol-common), as receive-pack (protocol
+ * v0) uses it: each line is a 4-hex-digit length (which counts itself) and
+ * a payload, or `0000`, a flush. isomorphic-git doesn't export its codec.
  */
 
-export type PktLine =
-  | { type: "data"; data: Uint8Array }
-  | { type: "flush" }
-  | { type: "delim" }
-  | { type: "response-end" };
+export type PktLine = { type: "data"; data: Uint8Array } | { type: "flush" };
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAX_PKT_PAYLOAD = 65516;
 
 export const FLUSH_PKT = encoder.encode("0000");
-export const DELIM_PKT = encoder.encode("0001");
 
 /** One data pkt-line around a string or bytes. */
 export function encodePktLine(payload: string | Uint8Array): Uint8Array {
@@ -41,12 +35,6 @@ export function concatBytes(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-const SPECIAL: Record<number, PktLine> = {
-  0: { type: "flush" },
-  1: { type: "delim" },
-  2: { type: "response-end" },
-};
-
 /**
  * Split bytes into pkt-lines. Stops at the first `PACK` signature (a v0
  * pack that follows the commands is not framed); `rest` holds what's left.
@@ -61,11 +49,11 @@ export function decodePktLines(bytes: Uint8Array): {
     const head = decoder.decode(bytes.subarray(offset, offset + 4));
     if (head === "PACK") break;
     const length = Number.parseInt(head, 16);
-    if (!/^[0-9a-f]{4}$/i.test(head) || length === 3) {
+    if (!/^[0-9a-f]{4}$/i.test(head) || (length > 0 && length < 4)) {
       throw new RemoteProtocolError(`malformed pkt-line header "${head}"`);
     }
-    if (length < 4) {
-      lines.push(SPECIAL[length]);
+    if (length === 0) {
+      lines.push({ type: "flush" });
       offset += 4;
       continue;
     }
