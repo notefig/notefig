@@ -6,11 +6,23 @@
  */
 import diff3Merge from "diff3";
 
-const LINES = /^.*(\r?\n|$)/gm;
 const MARKER = 7;
 
+/**
+ * Lines ending in LF, each keeping its terminator. Only LF splits: a lone
+ * CR, U+2028 and U+2029 stay inside their line, so joining the lines back
+ * gives exactly the input.
+ */
 function splitLines(text: string): string[] {
-  return text.match(LINES) ?? [];
+  const lines: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    const end = text.indexOf("\n", start);
+    const next = end < 0 ? text.length : end + 1;
+    lines.push(text.slice(start, next));
+    start = next;
+  }
+  return lines;
 }
 
 function withNewline(lines: string[]): string {
