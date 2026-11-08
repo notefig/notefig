@@ -14,6 +14,7 @@
  * started. The observer delivers long tasks late, so the probe keeps the
  * history of labels to look that up.
  */
+import { promises as fs } from "node:fs";
 import type { Page } from "@playwright/test";
 
 export interface PerfSamples {
@@ -219,4 +220,31 @@ export async function action(
     // action's input) must not land under this label.
     await setLabel(page, null);
   }
+}
+
+/**
+ * One autosave sample: press `key`, in the editor of `file`, and time it
+ * to the file being rewritten (its mtime), in ms. Timed from here rather
+ * than in the page, whose probe can't see the disk; the press's own round
+ * trip (a few ms) is in it, against a 500 ms debounce. Throws when the
+ * file isn't written, so a dead autosave fails the run.
+ */
+export async function autosave(
+  page: Page,
+  file: string,
+  key: string,
+): Promise<number> {
+  const before = (await fs.stat(file)).mtimeMs;
+  const start = Date.now();
+  await page.keyboard.press(key);
+  let written = before;
+  while (written <= before) {
+    if (Date.now() - start > 10_000)
+      throw new Error(`autosave: ${file} not written after ${key}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    written = (await fs.stat(file)).mtimeMs;
+  }
+  // Let the tail of the save settle before the next keystroke.
+  await page.waitForTimeout(KEY_INTERVAL_MS);
+  return written - start;
 }
