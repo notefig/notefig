@@ -26,7 +26,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@notefig/ui/popover";
 import { cn } from "@notefig/ui/utils";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import type { CredentialStatus } from "@/adapters/platform-adapter.interface";
-import type { SyncOverwrite, SyncState, WorkspaceSync } from "@/modules/sync";
+import type { SyncOverwrite, SyncPeer, SyncState, WorkspaceSync } from "@/modules/sync";
 import { useSyncState } from "@/modules/sync/react";
 
 interface Look {
@@ -86,12 +86,50 @@ export function SyncStatusCell({ workspacePath }: { workspacePath: string | null
           <Icon className={cn("h-3.5 w-3.5", look.tone, look.spin && "animate-spin")} />
           <span>{t(look.label)}</span>
           {state.overwritten.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-warning" />}
+          <PeerDots peers={state.peers} />
         </button>
       </PopoverTrigger>
       <PopoverContent side="top" align="start" className="w-80 space-y-3 p-3 text-xs">
         <SyncPanel sync={sync} state={state} />
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** Who else is here, as a few quiet dots in the status bar. */
+function PeerDots({ peers }: { peers: SyncPeer[] }) {
+  return (
+    <span className="flex -space-x-1">
+      {peers.slice(0, 4).map((peer) => (
+        <span key={peer.deviceId} data-testid="sync-peer" className="h-2 w-2 rounded-full ring-1 ring-background" style={{ backgroundColor: peer.color }} />
+      ))}
+    </span>
+  );
+}
+
+/** Who else is here, where, and what their agents are on. */
+function Peers({ peers }: { peers: SyncPeer[] }) {
+  const { t } = useTranslation();
+  const file = (path: string) => path.split("/").pop() ?? path;
+  if (peers.length === 0) return null;
+  return (
+    <div className="space-y-1">
+      <p className="text-muted-foreground">{t("syncHere")}</p>
+      <ul className="space-y-1">
+        {peers.map((peer) => (
+          <li key={peer.deviceId}>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: peer.color }} />
+              {peer.name}
+              {peer.cursor && <span className="text-muted-foreground">· {file(peer.cursor.path)}</span>}
+            </span>
+            {peer.agents.flatMap((agent) => agent.paths).map((path) => (
+              <div key={path} className="pl-3.5 text-muted-foreground">{t("syncAgentAt", { file: file(path) })}</div>
+            ))}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -138,6 +176,7 @@ export function SyncPanel({ sync, state }: { sync: WorkspaceSync; state: SyncSta
       {state.setup === "ask" && <p>{t("syncAskDescription")}</p>}
       {state.setup === "declined" && <p>{t("syncDeclinedDescription")}</p>}
       {state.setup === "on" && <SyncProblem sync={sync} state={state} />}
+      <Peers peers={state.peers} />
       {state.overwritten.length > 0 && <Overwritten sync={sync} items={state.overwritten} />}
       <CredentialRow sync={sync} state={state} />
       {action.error && <p className="text-destructive">{action.error}</p>}

@@ -21,6 +21,10 @@
  *    push reruns the cycle (bounded, with jitter); a push with no answer
  *    may have landed, so the next poll comes soon.
  *
+ * Only a user's stop (idle, blur, close, "sync now") commits; the poll just
+ * polls, once every 12 s alone and every 1.5 s with someone else here
+ * (`sync-presence.ts` reads and writes who is, in the same poll).
+ *
  * Back after more than an hour away with local changes, or far apart from
  * the remote, it pauses before taking anything in until the user says go.
  */
@@ -28,13 +32,17 @@ import type { Hooks } from "@notefig/core";
 import { GitError, type GitRemote, type GitService } from "@notefig/git";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import type { DocumentsApi } from "@/modules/documents";
+import type { EditorsApi } from "@/modules/editors";
 import type { WorkspaceFiles } from "@/modules/files";
 import { IGNORE_RULES } from "@/utils/ignore";
 import { path as pathutil } from "@/utils/path";
+import { createPresence, PRESENCE_PREFIX } from "./sync-presence";
+import { createSyncEditors } from "./sync-editor";
 import {
   IDLE_COMMIT_MS,
   pollInterval,
   isRunning,
+  isShared,
   type SyncEvent,
   type SyncOverwrite,
   type SyncReturnSummary,
@@ -52,12 +60,14 @@ export interface SyncEngineDeps {
   remote: GitRemote;
   branch: string;
   author: SyncAuthor;
+  deviceId: string;
   /** When this device last synced; null if never. */
   lastSyncedAt: number | null;
   /** Sync was just turned on: commit everything, not a scan. */
   fullScan: boolean;
   hooks: Hooks;
-  documents: Pick<DocumentsApi, "write">;
+  documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
+  editors: Pick<EditorsApi, "markdownEditor" | "paths">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
   fs: Pick<FileSystemSurface, "readDirectory" | "getMetadata" | "writeBinaryFiles" | "deleteFiles">;
   state(): SyncState;
@@ -173,6 +183,26 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     return NEVER.test(path) ? null : path;
   };
   const absolute = (path: string) => pathutil.join(root, pathutil.fromTreePath(path));
+  const presence = createPresence({
+    root,
+    deviceId: deps.deviceId,
+    name: author.name,
+    author,
+    git,
+    remote,
+    branchRef,
+    hooks: deps.hooks,
+    state: deps.state,
+    dispatch: deps.dispatch,
+    now,
+  });
+  const sharedEditors = createSyncEditors({
+    root,
+    editors: deps.editors,
+    onCursor: presence.setCursor,
+    setTimer,
+  });
+
   const stop = (event: SyncEvent): never => {
     deps.dispatch(event);
     throw new CycleStop();
@@ -242,11 +272,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     deps.dispatch({ type: "step", activity: "committing" });
     try {
       const paths = taken === "all" ? null : taken === "scan" ? await scan() : [...taken];
-      if (paths?.length === 0) return;
-      if (paths) await stageByHash(paths);
-      const all = await stageChanges(git, paths);
-      if (all.length === 0) return;
-      await git.commit({ message: commitMessage(author.name, all), author });
+      if (paths?.length !== 0) {
+        if (paths) await stageByHash(paths);
+        const all = await stageChanges(git, paths);
+        if (all.length > 0) await git.commit({ message: commitMessage(author.name, all), author });
+      }
     } catch (error) {
       // Keep what wasn't committed for the next try.
       commitDue = true;
@@ -368,6 +398,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       return;
     }
     const remoteFiles = await git.changedFiles(base!, theirs);
+    // Shared: someone typing in a file the remote changed is ordinary. Their
+    // autosave just got flushed; take it in on a coming poll instead of stopping.
+    if (isShared(deps.state()) && remoteFiles.some((filepath) => deps.documents.hasUnsavedEdits(absolute(filepath)))) return;
     const edited = await dirtyAmong(remoteFiles);
     if (edited.length > 0) {
       stop({ type: "diverged", detail: `Changed here and on the remote: ${edited.join(", ")}. Sync stopped so neither side is lost.` });
@@ -377,14 +410,18 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       integrated = theirs;
       return moveWorktree(ours, theirs);
     }
-    // Replay: the local commits since `base` as one commit on `theirs`.
-    const localFiles = await git.changedFiles(base!, ours);
+    await replay(base!, ours, theirs, remoteFiles);
+  };
+
+  /** The local commits since `base` as one commit on `theirs`. */
+  const replay = async (base: string, ours: string, theirs: string, remoteFiles: string[]) => {
+    const localFiles = await git.changedFiles(base, ours);
     const local = new Set(localFiles);
     const written = new Set<string>();
     const replaced: Omit<SyncOverwrite, "ref">[] = [];
     for (const filepath of remoteFiles) {
       if (!local.has(filepath)) await git.unstage({ filepath, ref: theirs });
-      else if (await settleBoth(filepath, base!, ours, theirs, replaced)) written.add(filepath);
+      else if (await settleBoth(filepath, base, ours, theirs, replaced)) written.add(filepath);
     }
     if (replaced.length > 0) {
       const ref = await saveRecovery(ours);
@@ -442,7 +479,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
 
   /** Poll, pull if the remote moved, push if ahead. */
   const reconcile = async (): Promise<boolean> => {
-    const refs = await git.listRemoteRefs(remote, [branchRef]);
+    const refs = await git.listRemoteRefs(remote, [branchRef, PRESENCE_PREFIX]);
+    await presence.observe(refs);
+    sharedEditors.reconcile(deps.state());
     const theirs = refs.find((ref) => ref.ref === branchRef)?.oid ?? null;
     const ours = await head();
     if (theirs) await checkReturn(theirs, ours);
@@ -469,6 +508,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
         await new Promise<void>((resume) => setTimer(resume, 200 + random() * 800));
         refused = await reconcile();
       }
+      await presence.publish();
       if (refused) {
         deps.dispatch({ type: "failed", fault: "offline", detail: "The remote keeps moving; trying again soon." });
         return;
@@ -564,6 +604,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       cancelPoll?.();
       for (const cleanup of cleanups.splice(0)) cleanup();
       await running?.catch(() => {});
+      sharedEditors.stop();
+      await Promise.race([presence.leave(), new Promise<void>((done) => setTimer(done, CLOSE_SYNC_MS))]);
     },
   };
 }

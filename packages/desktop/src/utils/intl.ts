@@ -682,6 +682,8 @@ i18n
           syncOff: "Sync",
           syncNotSyncing: "Not syncing",
           syncSynced: "Synced",
+          syncHere: "Here now",
+          syncAgentAt: "Their agent · {{file}}",
           "sync-committing": "Committing",
           "sync-pulling": "Pulling",
           "sync-pushing": "Pushing",

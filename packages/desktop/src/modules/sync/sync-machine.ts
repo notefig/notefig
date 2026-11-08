@@ -11,6 +11,8 @@
  * - `fault`: why it isn't simply in sync. `offline` and `throttled` clear
  *   on the next step that works; `auth-error`, `diverged` (the failsafe)
  *   and `paused` (back after a long time offline) wait for the user.
+ * - `peers`: who else is live on this remote. Anyone there makes the
+ *   workspace shared (`isShared`); nobody, solo.
  */
 
 export type SyncSetup = "unavailable" | "off" | "ask" | "declined" | "on";
@@ -46,6 +48,24 @@ export interface SyncOverwrite {
   ref: string;
 }
 
+/** Where someone is in a document: a unit (paragraph, list item, table
+ *  row) by its place among the document's units, and a character in it. */
+export interface SyncCursor {
+  path: string;
+  unit: number;
+  offset: number;
+}
+
+/** Another device live on this remote, and what its agents are touching. */
+export interface SyncPeer {
+  deviceId: string;
+  name: string;
+  color: string;
+  cursor: SyncCursor | null;
+  /** One entry per agent at work; `/`-separated paths. */
+  agents: { paths: string[] }[];
+}
+
 export interface SyncState {
   setup: SyncSetup;
   /** Why sync can't run here (`setup: "unavailable"`). */
@@ -60,6 +80,7 @@ export interface SyncState {
   /** Set while `paused`. */
   summary: SyncReturnSummary | null;
   overwritten: SyncOverwrite[];
+  peers: SyncPeer[];
 }
 
 export type SyncEvent =
@@ -71,7 +92,8 @@ export type SyncEvent =
   | { type: "paused"; detail: string; summary: SyncReturnSummary }
   | { type: "resume" }
   | { type: "overwritten"; items: SyncOverwrite[] }
-  | { type: "dismiss-overwritten" };
+  | { type: "dismiss-overwritten" }
+  | { type: "peers"; peers: SyncPeer[] };
 
 export const INITIAL_SYNC_STATE: SyncState = {
   setup: "off",
@@ -83,6 +105,7 @@ export const INITIAL_SYNC_STATE: SyncState = {
   detail: null,
   summary: null,
   overwritten: [],
+  peers: [],
 };
 
 const RUNNING_CLEAR = { activity: "idle", fault: null, failures: 0, detail: null, summary: null } as const;
@@ -90,6 +113,11 @@ const RUNNING_CLEAR = { activity: "idle", fault: null, failures: 0, detail: null
 /** Waiting on the user: nothing runs until `resume`. */
 export function isStuck(state: SyncState): boolean {
   return state.fault === "auth-error" || state.fault === "diverged" || state.fault === "paused";
+}
+
+/** Someone else is here: the workspace is at the shared level. */
+export function isShared(state: SyncState): boolean {
+  return state.peers.length > 0;
 }
 
 /** Whether the engine commits, polls and pushes. */
@@ -114,6 +142,7 @@ const WHILE_ON: Handlers = {
   resume: (state) => ({ ...state, ...RUNNING_CLEAR, activity: state.activity }),
   overwritten: (state, { items }) => ({ ...state, overwritten: [...state.overwritten, ...items] }),
   "dismiss-overwritten": (state) => (state.overwritten.length === 0 ? state : { ...state, overwritten: [] }),
+  peers: (state, { peers }) => ({ ...state, peers }),
 };
 
 export function sameRemote(a: SyncRemote | null, b: SyncRemote | null): boolean {
@@ -136,6 +165,8 @@ export function transition(state: SyncState, event: SyncEvent): SyncState {
 
 /** A slow poll: solo is one person, on one or more devices. */
 export const POLL_MS = 12_000;
+/** With someone else here. */
+export const SHARED_POLL_MS = 1_500;
 /** Commit once per sitting: after this long without a save, on window
  *  blur, or when the workspace closes. */
 export const IDLE_COMMIT_MS = 180_000;
@@ -148,5 +179,5 @@ export function pollInterval(state: SyncState): number {
   const backoff = 2 ** Math.min(state.failures, 6);
   if (state.fault === "offline") return Math.min(POLL_MS * backoff, OFFLINE_MAX_MS);
   if (state.fault === "throttled") return Math.min(THROTTLED_BASE_MS * backoff, THROTTLED_MAX_MS);
-  return POLL_MS;
+  return isShared(state) ? SHARED_POLL_MS : POLL_MS;
 }
