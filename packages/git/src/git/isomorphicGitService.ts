@@ -6,6 +6,7 @@ import { createIsomorphicGitFs } from "./isomorphicGitFs";
 import {
   GitError,
   type GitAddInput,
+  type GitStatusInput,
   type GitCheckoutPathsInput,
   type GitCommitInput,
   type GitCreateBranchInput,
@@ -345,7 +346,7 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async status(): Promise<RepoStatus> {
+  async status(input?: GitStatusInput): Promise<RepoStatus> {
     try {
       let branch: string | null = null;
 
@@ -382,6 +383,7 @@ export class IsomorphicGitService implements GitService {
         dir: this.dir,
         gitdir: this.gitdir,
         cache: this.cache,
+        ...(input?.filepaths ? { filepaths: input.filepaths } : {}),
       });
 
       const staged: GitFileChange[] = [];
@@ -838,6 +840,82 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
+  async listFiles(input?: { ref?: string }): Promise<string[]> {
+    try {
+      return await git.listFiles({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        ref: input?.ref ?? "HEAD",
+      });
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async readFile(input: GitReadTextFileInput): Promise<Uint8Array | null> {
+    try {
+      const { blob } = await git.readBlob({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        oid: input.ref,
+        filepath: input.filepath,
+      });
+      return blob;
+    } catch (error) {
+      if ((error as { name?: string }).name === "NotFoundError") return null;
+      throw this.fail(error);
+    }
+  }
+
+  async mergeBase(a: string, b: string): Promise<string | null> {
+    try {
+      const resolve = (ref: string) =>
+        /^[0-9a-f]{40}$/.test(ref)
+          ? ref
+          : git.resolveRef({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, ref });
+      const oids = await Promise.all([resolve(a), resolve(b)]);
+      const [base] = await git.findMergeBase({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        oids,
+      });
+      return base ?? null;
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async changedFiles(from: string, to: string): Promise<string[]> {
+    try {
+      const changed = await git.walk({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        trees: [git.TREE({ ref: from }), git.TREE({ ref: to })],
+        map: async (filepath, [a, b]) => {
+          if (filepath === ".") return undefined;
+          const [oidA, oidB] = await Promise.all([a?.oid(), b?.oid()]);
+          // Equal subtrees are skipped whole (null stops the descent).
+          if (oidA === oidB) return null;
+          const [typeA, typeB] = await Promise.all([a?.type(), b?.type()]);
+          if (typeA !== "tree" && typeB !== "tree") return filepath;
+          // A file replaced by a folder (or back) is a change too.
+          return typeA === "blob" || typeB === "blob" ? filepath : undefined;
+        },
+      });
+      return (changed as string[]).sort();
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
   private remote(remote: GitRemote) {
     if (!this.deps.http) {
       throw new GitError(
@@ -851,9 +929,37 @@ export class IsomorphicGitService implements GitService {
     };
   }
 
+  async getConfig(path: string): Promise<string | undefined> {
+    try {
+      const value: unknown = await git.getConfig({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        path,
+      });
+      return value === undefined || value === null ? undefined : String(value);
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async currentBranch(): Promise<string | null> {
+    try {
+      const branch = await git.currentBranch({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+      });
+      return branch ?? null;
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
   async listRemoteRefs(
     remote: GitRemote,
     prefixes: string[] = [],
+    options: { forPush?: boolean } = {},
   ): Promise<GitRemoteRef[]> {
     try {
       // Protocol v1 lists every ref in one GET, filtered here; v2 filters
@@ -861,6 +967,7 @@ export class IsomorphicGitService implements GitService {
       const refs = await git.listServerRefs({
         ...this.remote(remote),
         protocolVersion: 1,
+        forPush: options.forPush === true,
       });
       return refs
         .filter(
