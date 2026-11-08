@@ -9,6 +9,7 @@
  */
 
 import { type QueryClient } from "@tanstack/react-query";
+import type { Hooks } from "@notefig/core";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { defineModule } from "@notefig/core";
 import { path as pathutil } from "@/utils/path";
@@ -37,6 +38,12 @@ export interface ProjectSettings {
     version?: string;
   };
   settings?: Partial<ProjectSettingsValues>;
+  /** Sync (`modules/sync`): on for everyone who opens the project, and
+   *  gitignore patterns kept out of it on top of `.gitignore`. */
+  sync?: {
+    enabled?: boolean;
+    exclude?: string[];
+  };
 }
 
 /** Overlay the raw file contents onto the defaults. */
@@ -67,9 +74,12 @@ export interface ProjectSettingsApi {
 export function createProjectSettings({
   fs,
   queryClient,
+  hooks,
 }: {
   fs: Pick<FileSystemSurface, "readFiles" | "writeFiles">;
   queryClient: QueryClient;
+  /** Told of each write: the watcher suppresses the app's own. */
+  hooks?: Pick<Hooks, "emit">;
 }): ProjectSettingsApi {
   const read = async (workspacePath: string): Promise<ProjectSettings> => {
     const result = await fs.readFiles([projectSettingsPath(workspacePath)]);
@@ -102,6 +112,9 @@ export function createProjectSettings({
       if (patch.settings) {
         next.settings = { ...current.settings, ...patch.settings };
       }
+      if (patch.sync) {
+        next.sync = { ...current.sync, ...patch.sync };
+      }
 
       const result = await fs.writeFiles([
         {
@@ -115,6 +128,10 @@ export function createProjectSettings({
         );
       }
 
+      hooks?.emit("files:written", {
+        paths: [projectSettingsPath(workspacePath)],
+        source: "app",
+      });
       await queryClient.invalidateQueries({
         queryKey: projectSettingsQueryKey(workspacePath),
       });
@@ -126,11 +143,16 @@ declare module "@notefig/core" {
   interface CoreModules {
     projectSettings: ProjectSettingsApi;
   }
+  interface CoreHookMap {
+    /** A workspace's metrists.json changed: edited outside, written by the
+     *  app, or brought in by sync. */
+    "project-settings:changed": { workspacePath: string };
+  }
 }
 
-/** Reads and writes go through the platform's fs; an external edit of a
- *  workspace's metrists.json (the watcher reports it) drops the cached
- *  settings, so they are read again. */
+/** Reads and writes go through the platform's fs; any change to a
+ *  workspace's metrists.json (the watcher's, or a write through the app)
+ *  drops the cached settings and is announced. */
 export const projectSettingsModule = defineModule({
   name: "projectSettings",
   needs: [platformModule, queryClientModule],
@@ -138,14 +160,28 @@ export const projectSettingsModule = defineModule({
     createProjectSettings({
       fs: ctx.use("platform").fs,
       queryClient: ctx.use("queryClient"),
+      hooks: ctx.hooks,
     }),
   boot: (_api, ctx) => {
     const queryClient = ctx.use("queryClient");
-    return ctx.hooks.on("files:changed", ({ workspacePath, paths }) => {
-      if (!paths.includes(projectSettingsPath(workspacePath))) return;
+    const changed = (workspacePath: string) => {
       void queryClient.invalidateQueries({
         queryKey: projectSettingsQueryKey(workspacePath),
       });
+      ctx.hooks.emit("project-settings:changed", { workspacePath });
+    };
+    const offChanged = ctx.hooks.on("files:changed", ({ workspacePath, paths }) => {
+      if (paths.includes(projectSettingsPath(workspacePath))) changed(workspacePath);
     });
+    const offWritten = ctx.hooks.on("files:written", ({ paths }) => {
+      for (const path of paths) {
+        if (pathutil.basename(path) !== PROJECT_SETTINGS_FILENAME) continue;
+        changed(pathutil.dirname(path));
+      }
+    });
+    return () => {
+      offChanged();
+      offWritten();
+    };
   },
 });
