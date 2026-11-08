@@ -17,7 +17,10 @@ import type {
   SearchOptions,
   TextPromptOptions,
   IgnoreRulesOption,
+  CredentialsSurface,
+  GitHttpSurface,
 } from "./platform-adapter.interface";
+import { PlatformUnsupportedError } from "./platform-adapter.interface";
 import { createBrowserDb } from "./browser-db";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import type { HarnessDefinition } from "@notefig/shared/agent";
@@ -169,6 +172,9 @@ function getCurrentAppVersion(): string {
   return "0.0.0";
 }
 
+const syncUnsupported = () =>
+  Promise.reject(new PlatformUnsupportedError("Sync is available in the desktop app only."));
+
 export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   readonly fs: FileSystemSurface = {
     requestWorkspaceAccess: this.requestWorkspaceAccess.bind(this),
@@ -214,6 +220,16 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   };
 
   readonly updates: PlatformUpdater = this.createUpdater();
+
+  // No CORS-free git transport and no keychain on the web: sync is
+  // desktop-only until MET-275.
+  readonly gitHttp: GitHttpSurface = { supported: false, request: syncUnsupported };
+  readonly credentials: CredentialsSurface = {
+    supported: false,
+    status: syncUnsupported,
+    set: syncUnsupported,
+    delete: syncUnsupported,
+  };
 
   protected abstract pickDirectory(title: string): Promise<string | null>;
 

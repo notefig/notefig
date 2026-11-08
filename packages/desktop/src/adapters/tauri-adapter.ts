@@ -20,6 +20,11 @@ import type {
   SearchMatch,
   TextPromptOptions,
   IgnoreRulesOption,
+  CredentialStatus,
+  CredentialsSurface,
+  GitHttpRequestSpec,
+  GitHttpResponseSpec,
+  GitHttpSurface,
 } from "./platform-adapter.interface";
 import { FsError } from "./platform-adapter.interface";
 import { createTauriDb } from "./tauri-db";
@@ -95,6 +100,28 @@ function appStatusActivations(status: AppStatus): Map<string, () => void> {
   return new Map(items.map((item) => [item.id, item.activate]));
 }
 
+// ---------- Sync: git HTTP and credentials ----------
+// `git_http.rs` takes the body raw on the IPC channel and the rest in one
+// header, and answers with one buffer: a 4-byte big-endian length, the
+// JSON `{status, headers}` it measures, then the body.
+
+export const GIT_HTTP_META_HEADER = "x-notefig-git-http";
+
+export function encodeGitHttpMeta({ url, method, headers }: GitHttpRequestSpec): string {
+  return encodeURIComponent(JSON.stringify({ url, method, headers }));
+}
+
+export function decodeGitHttpResponse(buffer: ArrayBuffer): GitHttpResponseSpec {
+  const bytes = new Uint8Array(buffer);
+  const metaLength = bytes.length < 4 ? Infinity : new DataView(buffer).getUint32(0);
+  if (bytes.length < 4 + metaLength) throw new Error("Truncated git HTTP response.");
+  const meta = JSON.parse(new TextDecoder().decode(bytes.subarray(4, 4 + metaLength))) as {
+    status: number;
+    headers: Record<string, string>;
+  };
+  return { ...meta, body: bytes.slice(4 + metaLength) };
+}
+
 export class TauriPlatformAdapter implements IPlatformAdapter {
   // The last published status's callbacks by id, and what the native side
   // was last told to show — so a republish whose only change is a callback
@@ -159,6 +186,25 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   // plain object literal (the plugin imports are inside the methods), so
   // building it eagerly does no work at boot.
   readonly updates: PlatformUpdater = this.createUpdater();
+
+  // Sync's transport and tokens live in Rust (git_http.rs, credentials.rs).
+  readonly gitHttp: GitHttpSurface = {
+    supported: true,
+    request: async (request) =>
+      decodeGitHttpResponse(
+        await invoke<ArrayBuffer>("git_http_request", request.body ?? new Uint8Array(0), {
+          headers: { [GIT_HTTP_META_HEADER]: encodeGitHttpMeta(request) },
+        }),
+      ),
+  };
+  readonly credentials: CredentialsSurface = {
+    supported: true,
+    status: (remoteUrl) => invoke<CredentialStatus | null>("credentials_status", { remoteUrl }),
+    set: (remoteUrl, token) =>
+      invoke<CredentialStatus | null>("credentials_set", { remoteUrl, token }),
+    delete: (remoteUrl) =>
+      invoke<CredentialStatus | null>("credentials_delete", { remoteUrl }),
+  };
 
   private async pickDirectory(title: string): Promise<string | null> {
     const result = await open({
