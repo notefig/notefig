@@ -60,6 +60,8 @@ export interface DocumentsApi {
     content: string,
     options?: { source?: DocumentWriteSource },
   ): Promise<DocumentWriteResult>;
+  /** An open editor has edits not on disk yet (flushed into a save now). */
+  hasUnsavedEdits(path: string): boolean;
   /** Resolves once every write in flight for `path` has landed (or failed). */
   whenWritesSettled(path: string): Promise<void>;
   /**
@@ -192,6 +194,7 @@ export function createDocuments({
   };
 
   return {
+    hasUnsavedEdits,
     async read(path, options) {
       assertAbsolute(path);
       const result = await fs.readFiles([path]);

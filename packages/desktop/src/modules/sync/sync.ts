@@ -17,6 +17,7 @@ import { GitError, type GitService } from "@notefig/git";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { platformModule } from "@/core/services";
 import { documentsModule, type DocumentsApi } from "@/modules/documents";
+import { editorsModule, type EditorsApi } from "@/modules/editors";
 import { filesModule, type WorkspaceFiles } from "@/modules/files";
 import { gitWorkerModule, type GitWorker } from "@/modules/git-worker";
 import { projectSettingsModule, type ProjectSettingsApi } from "@/modules/project-settings";
@@ -81,7 +82,8 @@ export interface WorkspaceSyncDeps {
   gitWorker: GitWorker;
   /** The platform can sync (desktop). */
   supported: boolean;
-  documents: Pick<DocumentsApi, "write">;
+  documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
+  editors: Pick<EditorsApi, "markdownEditor" | "paths">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
   projectSettings: Pick<ProjectSettingsApi, "read" | "update">;
   /** Test seam: the engine's timers and window blur. */
@@ -193,10 +195,12 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       remote: { url: remote.url },
       branch: remote.branch,
       author: name && email ? { name, email } : FALLBACK_AUTHOR,
+      deviceId: device.deviceId,
       lastSyncedAt: device.lastSyncedAt ?? null,
       fullScan,
       hooks: deps.hooks,
       documents: deps.documents,
+      editors: deps.editors,
       files: deps.files,
       fs: deps.fs,
       state: () => state,
@@ -345,7 +349,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
 
 export const syncModule = defineModule({
   name: "sync",
-  needs: [platformModule, documentsModule, projectSettingsModule, gitWorkerModule],
+  needs: [platformModule, documentsModule, editorsModule, projectSettingsModule, gitWorkerModule],
   workspace: {
     needs: [filesModule],
     create: (ctx) =>
@@ -356,6 +360,7 @@ export const syncModule = defineModule({
         gitWorker: ctx.use("gitWorker"),
         supported: ctx.use("platform").gitHttp.supported,
         documents: ctx.use("documents"),
+        editors: ctx.use("editors"),
         files: ctx.useWorkspace("files"),
         projectSettings: ctx.use("projectSettings"),
       }),

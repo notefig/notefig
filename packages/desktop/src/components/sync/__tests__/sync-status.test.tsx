@@ -64,6 +64,16 @@ const button = (label: string) => [...document.querySelectorAll("button")].find(
 const click = (label: string) => act(async () => button(label).click());
 
 describe("the sync popover", () => {
+  it("lists who is here, where, and their agents", async () => {
+    const peers = [
+      { deviceId: "b", name: "Bob", color: "#000", cursor: { path: "docs/plan.md", unit: 1, offset: 0 }, agents: [{ paths: ["ideas.md"] }] },
+    ];
+    const { text } = await render({ setup: "on", peers });
+    expect(text()).toContain("Here now");
+    expect(text()).toContain("Bob· plan.md");
+    expect(text()).toContain("Their agent · ideas.md");
+  });
+
   it("lists what a merge overwrote until dismissed", async () => {
     const { sync, text } = await render({ setup: "on", overwritten: [{ path: "a.md", text: "Mine.", ref: "refs/notefig/recovery/1-abc" }] });
     expect(text()).toContain("A newer edit replaced this text of yours:");

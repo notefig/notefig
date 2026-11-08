@@ -5,7 +5,7 @@
  * over Node's fs, and a live editor where one matters.
  */
 import { promises as fsp } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { defineModule, type Core } from "@notefig/core";
@@ -18,8 +18,9 @@ import { projectSettingsModule } from "@/modules/project-settings";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { disposeEditor, getOrCreateEditor, type EditorFs } from "@/components/editor/editor-store";
 import { getDocumentSync } from "@/utils/markdown-conversion";
-import { IDLE_COMMIT_MS, POLL_MS, syncModule } from "@/modules/sync";
+import { IDLE_COMMIT_MS, POLL_MS, pollInterval, SHARED_POLL_MS, syncModule } from "@/modules/sync";
 import { OFFLINE_RETURN_MS } from "./sync-engine";
+import { caretDecorations, docUnits } from "./sync-editor";
 
 // Each test runs many git http-backend processes.
 vi.setConfig({ testTimeout: 30_000 });
@@ -29,6 +30,14 @@ const editorFs: EditorFs = {
   searchContent: vi.fn(async () => []),
   exists: vi.fn(async () => []),
   writeBinaryFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
+};
+const createEditorDoc = (markdown: string) => {
+  const editors = createEditors();
+  const path = `/doc-${Math.random()}.md`;
+  getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(markdown), basePath: "/" }, editorFs);
+  const doc = editors.markdownEditor(path)!.state.doc;
+  disposeEditor(editors, path);
+  return doc;
 };
 const SYNCED = { "metrists.json": '{\n  "sync": {\n    "enabled": true\n  }\n}\n' };
 const SEED = { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph.\n" };
@@ -45,7 +54,7 @@ afterEach(async () => {
 
 async function writeDevice(ws: string, device: { on: boolean; lastSyncedAt?: number }) {
   await fsp.mkdir(join(ws, ".notefig"), { recursive: true });
-  await fsp.writeFile(join(ws, ".notefig", "sync.json"), JSON.stringify({ deviceId: "dev", ...device }));
+  await fsp.writeFile(join(ws, ".notefig", "sync.json"), JSON.stringify({ deviceId: basename(ws), ...device }));
 }
 
 /** A clone open in a core. `synced`: the project syncs and this device
@@ -537,5 +546,82 @@ describe("sync: solo", () => {
 
     expect(await read(join(wsB, "from-a.md"))).toBe("Hello from A.\n");
     expect(await runGit(wsB, ["log", "-1", "--format=%an"])).toBe("User device-a");
+  });
+});
+
+describe("sync: presence", () => {
+  /** Two devices that have met: each saw the other's ref move. */
+  async function twoDevices() {
+    const { sync: a, remote, open, ...rest } = await setup();
+    const wsB = await remote.clone("device-b");
+    await writeDevice(wsB, { on: true });
+    const b = await open(wsB);
+    return { a, b, remote, open, wsB, ...rest };
+  }
+  const meet = async (a: { syncNow(): Promise<void>; state(): { peers: unknown[] } }, b: typeof a) => {
+    // A new device's ref is read on the second look at it.
+    for (let i = 0; i < 3 && (a.state().peers.length === 0 || b.state().peers.length === 0); i++) {
+      await a.syncNow();
+      await b.syncNow();
+    }
+  };
+
+  it("sees another device and shows the others' names, no ref of its own", async () => {
+    const { a, b } = await twoDevices();
+    await meet(a, b);
+    expect(a.state().peers).toMatchObject([{ deviceId: "device-b", name: "User device-b" }]);
+    expect(b.state().peers).toMatchObject([{ deviceId: "device-a", name: "User device-a" }]);
+  });
+
+  it("writes presence as a commit on the tip, replaced, with no branch history", async () => {
+    const { a, b, remote } = await twoDevices();
+    const before = await remote.tip();
+    await meet(a, b);
+    expect(await remote.tip()).toBe(before);
+    const ref = "refs/notefig/v1/presence/device-a";
+    const parent = await runGit(remote.bare, ["rev-parse", `${ref}^`]);
+    expect(parent).toBe(before);
+    expect(JSON.parse(await runGit(remote.bare, ["log", "-1", "--format=%s", ref]))).toMatchObject({ name: "User device-a" });
+  });
+
+  it("a ref already there counts only when it moves, and goes when it stands still", async () => {
+    const { a, b, remote, core, wsB } = await twoDevices();
+    await core.workspace(wsB).close();
+    await a.syncNow();
+    await vi.waitFor(() => expect(a.state().peers).toEqual([]));
+    void b;
+    // A leftover nobody moves: a commit in place of a device's ref.
+    const leftover = await runGit(remote.bare, ["rev-parse", "main"]);
+    await runGit(remote.bare, ["update-ref", "refs/notefig/v1/presence/ghost", leftover]);
+    await a.syncNow();
+    expect(a.state().peers).toEqual([]);
+  });
+
+  it("leaves when the workspace closes: the ref is deleted", async () => {
+    const { a, b, remote, core, wsB } = await twoDevices();
+    await meet(a, b);
+    await core.workspace(wsB).close();
+    await expect(runGit(remote.bare, ["rev-parse", "--verify", "refs/notefig/v1/presence/device-b"])).rejects.toThrow();
+    await a.syncNow();
+    expect(a.state().peers).toEqual([]);
+  });
+
+  it("polls quickly with someone here, and doesn't commit on a poll", async () => {
+    const { a, b, ws, core } = await twoDevices();
+    await meet(a, b);
+    expect(pollInterval(a.state())).toBe(SHARED_POLL_MS);
+    const commits = await runGit(ws, ["rev-list", "--count", "main"]);
+    written(core, join(ws, "note.md"));
+    await new Promise((settle) => setTimeout(settle, SHARED_POLL_MS * 2.5));
+    expect(await runGit(ws, ["rev-list", "--count", "main"])).toBe(commits);
+  });
+
+  it("draws a peer's caret on the unit it names", () => {
+    const doc = createEditorDoc("# Note\n\n- one\n- two\n\nA paragraph.\n");
+    expect(docUnits(doc)).toHaveLength(4);
+    const peer = { deviceId: "b", name: "Bob", color: "#000", cursor: { path: "note.md", unit: 2, offset: 2 }, agents: [] };
+    const set = caretDecorations(doc, "note.md", [peer]);
+    expect(set.find()).toHaveLength(1);
+    expect(caretDecorations(doc, "other.md", [peer]).find()).toHaveLength(0);
   });
 });
