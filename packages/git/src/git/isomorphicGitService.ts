@@ -255,6 +255,9 @@ export class IsomorphicGitService implements GitService {
     return gitError;
   }
 
+  /** Packs fetched only for a transient ref, with when. */
+  private transientPacks: { name: string; at: number }[] = [];
+
   private async ensureInitControlFiles(input?: GitInitInput): Promise<void> {
     const defaultBranch = input?.defaultBranch ?? "master";
     const gitDir = this.gitdir;
@@ -1014,6 +1017,49 @@ export class IsomorphicGitService implements GitService {
   }
 
   async fetchRefs(
+    remote: GitRemote,
+    refs: string[],
+    options: { transient?: boolean } = {},
+  ): Promise<GitRemoteRefResult[]> {
+    const before = options.transient ? await this.listPacks() : null;
+    try {
+      return await this.fetchEach(remote, refs);
+    } finally {
+      if (before) {
+        const known = new Set(before);
+        const at = Date.now();
+        for (const name of await this.listPacks()) {
+          if (!known.has(name)) this.transientPacks.push({ name, at });
+        }
+      }
+    }
+  }
+
+  /** The `pack-<sha>.pack` names under `objects/pack`. */
+  private async listPacks(): Promise<string[]> {
+    const entries = await this.host
+      .readDir(joinGitPath(this.gitdir, "objects/pack"))
+      .catch(() => []);
+    return entries.map((entry) => entry.name).filter((name) => name.endsWith(".pack"));
+  }
+
+  async sweepTransient(input: { olderThanMs: number; oids?: string[] }): Promise<void> {
+    const drop = (relative: string) =>
+      this.host.deleteFile(joinGitPath(this.gitdir, `objects/${relative}`)).catch(() => {});
+    for (const oid of input.oids ?? []) await drop(`${oid.slice(0, 2)}/${oid.slice(2)}`);
+    const cutoff = Date.now() - input.olderThanMs;
+    const expired = this.transientPacks.filter(({ at }) => at <= cutoff);
+    if (expired.length === 0) return;
+    this.transientPacks = this.transientPacks.filter(({ at }) => at > cutoff);
+    for (const { name } of expired) {
+      await drop(`pack/${name}`);
+      await drop(`pack/${name.replace(/\.pack$/, ".idx")}`);
+    }
+    // isomorphic-git caches each pack's index: don't keep what's gone.
+    this.cache = {};
+  }
+
+  private async fetchEach(
     remote: GitRemote,
     refs: string[],
   ): Promise<GitRemoteRefResult[]> {

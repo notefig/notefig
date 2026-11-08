@@ -172,6 +172,7 @@ const GIT_SERVICE_METHODS = [
   "isIgnored",
   "listRemoteRefs",
   "fetchRefs",
+  "sweepTransient",
   "pushRef",
   "merge",
 ] as const satisfies readonly GitServiceMethod[];

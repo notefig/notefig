@@ -258,7 +258,17 @@ export interface GitService {
    * for a ref the remote doesn't have. Branches also update their
    * `refs/remotes/origin/*` tracking refs; no other local ref is written.
    */
-  fetchRefs(remote: GitRemote, refs: string[]): Promise<GitRemoteRefResult[]>;
+  fetchRefs(
+    remote: GitRemote,
+    refs: string[],
+    options?: { transient?: boolean },
+  ): Promise<GitRemoteRefResult[]>;
+  /**
+   * Drop what a transient ref (presence, work in progress) left behind:
+   * the given loose objects, and the packs of `transient` fetches older
+   * than `olderThanMs`. Nothing else ever references them.
+   */
+  sweepTransient(input: { olderThanMs: number; oids?: string[] }): Promise<void>;
   /** Update one remote ref; see `GitPushRefInput` for what is refused. */
   pushRef(remote: GitRemote, input: GitPushRefInput): Promise<void>;
   /**

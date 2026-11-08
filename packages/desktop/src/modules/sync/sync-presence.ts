@@ -22,6 +22,15 @@ const HEARTBEAT_MS = 30_000;
 /** Standing still this long, by this client's clock: gone. */
 export const PRESENCE_STALE_MS = 75_000;
 
+/** A ref that stands still this long is swept (compare-and-swap), plus up
+ *  to `SWEEP_JITTER_MS` per client, and at most one per minute. */
+export const STALE_DELETE_MS = 10 * 60_000;
+const SWEEP_JITTER_MS = 5 * 60_000;
+const SWEEP_EVERY_MS = 60_000;
+/** Packs fetched for a transient ref outlive it by this much: an overlay
+ *  of the current WIP may still be reading them. */
+const TRANSIENT_OBJECTS_MS = 10 * 60_000;
+
 /** Quiet, legible on both themes. */
 const COLORS = ["#2f7ed8", "#c0562f", "#2f9e6e", "#9256c9", "#c79a2c", "#c24580"];
 
@@ -45,6 +54,7 @@ export interface PresenceDeps {
   state(): SyncState;
   dispatch(event: SyncEvent): void;
   now(): number;
+  random(): number;
 }
 
 interface Seen {
@@ -52,6 +62,10 @@ interface Seen {
   /** When this client saw it move; null: dormant, from the first poll. */
   movedAt: number | null;
   peer: SyncPeer | null;
+  /** When this client first saw it at this oid. */
+  since: number;
+  /** This client's own sweep delay, jitter included. */
+  sweepAfter: number;
 }
 
 function parsePeer(deviceId: string, message: string): SyncPeer | null {
@@ -73,6 +87,8 @@ export function createPresence(deps: PresenceDeps) {
   let first = true;
   let published: string | null = null;
   let publishedAt = 0;
+  let nextSweep = 0;
+  let publishedOid: string | null = null;
   /** A commit's oid is its content: a republish within a second must differ. */
   let beat = 0;
 
@@ -94,7 +110,7 @@ export function createPresence(deps: PresenceDeps) {
   /** Fetch the payloads of the refs that moved, one fetch each. */
   const readMoved = async (moved: GitRemoteRef[]) => {
     if (moved.length === 0) return;
-    const fetched = await git.fetchRefs(remote, moved.map((ref) => ref.ref));
+    const fetched = await git.fetchRefs(remote, moved.map((ref) => ref.ref), { transient: true });
     await Promise.all(
       fetched.map(async ({ ref, oid }) => {
         const entry = seen.get(ref);
@@ -103,6 +119,20 @@ export function createPresence(deps: PresenceDeps) {
         if (tip) entry.peer = parsePeer(ref.slice(PRESENCE_PREFIX.length), tip.commit.message) ?? entry.peer;
       }),
     );
+  };
+
+  /** Sweep the ref that has stood still longest past its window. */
+  const sweep = async (at: number) => {
+    if (at < nextSweep) return;
+    const stalest = [...seen.entries()]
+      .filter(([, entry]) => at - entry.since > entry.sweepAfter)
+      .sort(([, a], [, b]) => a.since - b.since)[0];
+    if (!stalest) return;
+    nextSweep = at + SWEEP_EVERY_MS;
+    const [ref, entry] = stalest;
+    // Moved in between, or lost the race to another client: harmless.
+    await git.pushRef(remote, { ref, delete: true, force: true, expect: entry.oid }).catch(() => {});
+    seen.delete(ref);
   };
 
   const live = (at: number) =>
@@ -122,13 +152,15 @@ export function createPresence(deps: PresenceDeps) {
         const entry = seen.get(ref);
         if (entry?.oid === oid) continue;
         if (!entry && !first) joined = true;
-        seen.set(ref, { oid, movedAt: first ? null : at, peer: entry?.peer ?? null });
+        const sweepAfter = STALE_DELETE_MS + deps.random() * SWEEP_JITTER_MS;
+        seen.set(ref, { oid, movedAt: first ? null : at, peer: entry?.peer ?? null, since: at, sweepAfter });
         moved.push({ ref, oid });
       }
       for (const ref of [...seen.keys()]) if (!present.some((r) => r.ref === ref)) seen.delete(ref);
       first = false;
       if (joined) published = null;
       await readMoved(moved);
+      await sweep(at);
       const peers = live(at);
       if (JSON.stringify(peers) !== JSON.stringify(deps.state().peers)) deps.dispatch({ type: "peers", peers });
     },
@@ -148,6 +180,10 @@ export function createPresence(deps: PresenceDeps) {
         noUpdateBranch: true,
       });
       await git.pushRef(remote, { ref: own, oid, force: true });
+      // What this replaced is unreachable now, and so are old fetched packs.
+      const replaced = publishedOid;
+      publishedOid = oid;
+      await git.sweepTransient({ olderThanMs: TRANSIENT_OBJECTS_MS, oids: replaced ? [replaced] : [] }).catch(() => {});
       published = payload;
       publishedAt = now();
     },
