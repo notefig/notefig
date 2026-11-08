@@ -1,14 +1,14 @@
 /**
- * The remote operations, over a `GitTransport` and the local repo. Pure
- * mechanism: one call is one exchange (plus a once-per-remote capability
- * lookup for push). No timers, polling or retries — those are the caller's.
+ * The remote operations over the local repo. Polling and fetching are
+ * isomorphic-git's (`listServerRefs`, `fetch`) over our http port; push is
+ * our own receive-pack over a `GitTransport`, for the per-ref
+ * compare-and-swap leases need. Pure mechanism: no timers, polling or
+ * retries — those are the caller's.
  */
-import git from "isomorphic-git";
+import git, { type HttpClient, type PromiseFsClient } from "isomorphic-git";
 
 import { objectsToPush } from "./repo/pushObjects";
 import { joinPath, type RepoContext } from "./repo/repoContext";
-import { fetchPack } from "./smartHttp/fetchPack";
-import { lsRefs } from "./smartHttp/lsRefs";
 import {
   chooseCapabilities,
   parseAdvertisedCapabilities,
@@ -23,10 +23,36 @@ import {
   type GitPushRefsOptions,
   type GitPushRefsResult,
   type GitRefUpdate,
+  type GitRemoteRef,
   ZERO_OID,
 } from "./types";
 
 const OID = /^[0-9a-f]{40}$/;
+
+/** isomorphic-git's view of one remote: our http port, and its URL. */
+export interface IsomorphicRemote {
+  http: HttpClient;
+  url: string;
+}
+
+/**
+ * The remote's refs under any of `prefixes` (all refs when empty). One
+ * request: the v1 advertisement lists every ref and is filtered here.
+ * Protocol v2 filters on the server but costs a capability round trip
+ * first, and `listServerRefs` takes one prefix per call.
+ */
+export async function listRemoteRefs(
+  remote: IsomorphicRemote,
+  prefixes: string[],
+): Promise<GitRemoteRef[]> {
+  const refs = await git.listServerRefs({ ...remote, protocolVersion: 1 });
+  return refs
+    .filter(
+      ({ ref }) =>
+        prefixes.length === 0 || prefixes.some((p) => ref.startsWith(p)),
+    )
+    .map(({ ref, oid }) => ({ ref, oid }));
+}
 
 async function hasObject(ctx: RepoContext, oid: string): Promise<boolean> {
   try {
@@ -37,69 +63,88 @@ async function hasObject(ctx: RepoContext, oid: string): Promise<boolean> {
   }
 }
 
-/** Local branch and remote-tracking tips: what a fetch can say it has. */
-async function localTips(ctx: RepoContext): Promise<string[]> {
-  const tips = new Set<string>();
-  for (const prefix of ["refs/heads", "refs/remotes"]) {
-    const names = await git
-      .listRefs({ ...ctx.git, filepath: prefix })
-      .catch(() => []);
-    for (const name of names) {
-      const oid = await git
-        .resolveRef({ ...ctx.git, ref: `${prefix}/${name}` })
-        .catch(() => null);
-      if (oid) tips.add(oid);
-    }
-  }
-  return [...tips];
+const FETCH_REMOTE = "notefig-fetch";
+const FETCH_SECTION = `\n[remote "${FETCH_REMOTE}"]\n\tfetch = +refs/notefig-fetch/none/*:refs/notefig-fetch/none/*\n`;
+
+/**
+ * isomorphic-git's `fetch` refuses a remote with no fetch refspec in the
+ * config, and writes whatever refs the refspec maps. It is shown one that
+ * maps nothing (we point `localRef`s ourselves), through this fs only: the
+ * repo's config file is never written.
+ */
+function fetchFs(ctx: RepoContext): PromiseFsClient {
+  const { promises } = ctx.git.fs as PromiseFsClient;
+  const configPath = `${ctx.git.gitdir}/config`;
+  return {
+    promises: {
+      ...promises,
+      async readFile(path: string, options?: unknown) {
+        if (path !== configPath) return promises.readFile(path, options);
+        const config = await promises
+          .readFile(path, { encoding: "utf8" })
+          .catch(() => "");
+        return `${config}${FETCH_SECTION}`;
+      },
+    },
+  };
 }
 
 function packObjectCount(pack: Uint8Array): number {
   return new DataView(pack.buffer, pack.byteOffset + 8, 4).getUint32(0);
 }
 
-/** Write a received pack under `objects/pack` and index it. */
-async function storePack(ctx: RepoContext, pack: Uint8Array): Promise<number> {
-  const count = packObjectCount(pack);
-  if (count === 0) return 0;
-  const sha = Array.from(pack.subarray(pack.length - 20), (b) =>
-    b.toString(16).padStart(2, "0"),
-  ).join("");
-  const packDir = joinPath(ctx.git.gitdir, "objects/pack");
-  const packPath = joinPath(packDir, `pack-${sha}.pack`);
-  await ctx.host.createDir(packDir);
-  await ctx.host.writeFileAtomic(packPath, pack);
-  try {
-    await git.indexPack({
-      ...ctx.git,
-      dir: packDir,
-      filepath: `pack-${sha}.pack`,
-    });
-  } catch (error) {
-    await ctx.host.deleteFile(packPath).catch(() => undefined);
-    throw error;
-  }
-  return count;
+function isMissingRef(error: unknown, ref: string): boolean {
+  const { name, data } = error as { name?: string; data?: { what?: string } };
+  return name === "NotFoundError" && data?.what === ref;
 }
 
-/** Fill in oids the caller didn't already know, with one `ls-refs`. */
-async function resolveFetchRefs(transport: GitTransport, refs: GitFetchRef[]) {
-  const unknown = refs.filter((r) => !r.oid).map((r) => r.ref);
-  const listed = unknown.length > 0 ? await lsRefs(transport, unknown) : [];
-  const remote = new Map(listed.map((r) => [r.ref, r.oid]));
-  const found: GitFetchRefsResult["refs"] = [];
-  const missing: string[] = [];
-  for (const ref of refs) {
-    const oid = ref.oid ?? remote.get(ref.ref);
-    if (oid) found.push({ ref: ref.ref, oid, localRef: ref.localRef });
-    else missing.push(ref.ref);
+/**
+ * One ref through isomorphic-git's `fetch` (singleBranch: the ref
+ * advertisement, then one upload-pack POST), telling the remote we have
+ * `have` (a ref or oid). Null when the remote has no such ref.
+ */
+async function fetchOne(
+  ctx: RepoContext,
+  remote: IsomorphicRemote,
+  ref: string,
+  have: string,
+): Promise<{ oid: string; objectCount: number } | null> {
+  let result;
+  try {
+    result = await git.fetch({
+      ...ctx.git,
+      ...remote,
+      fs: fetchFs(ctx),
+      remote: FETCH_REMOTE,
+      ref: have,
+      remoteRef: ref,
+      singleBranch: true,
+      tags: false,
+      corsProxy: "",
+    });
+  } catch (error) {
+    if (isMissingRef(error, ref)) return null;
+    throw error;
   }
-  return { found, missing };
+  const oid = result.fetchHead;
+  if (!oid) return null;
+  if (!(await hasObject(ctx, oid))) {
+    throw new GitError(
+      "RemoteError",
+      `The remote didn't send ${oid} (${ref}).`,
+    );
+  }
+  // Where it stored the pack (`objects/pack/…`): returned, though untyped.
+  const { packfile } = result as { packfile?: string };
+  const pack = packfile
+    ? await ctx.host.readFile(joinPath(ctx.git.gitdir, packfile))
+    : null;
+  return { oid, objectCount: pack ? packObjectCount(pack) : 0 };
 }
 
 export async function fetchRefs(
   ctx: RepoContext,
-  transport: GitTransport,
+  remote: IsomorphicRemote,
   refs: GitFetchRef[],
   options: GitFetchRefsOptions = {},
 ): Promise<GitFetchRefsResult> {
@@ -108,18 +153,24 @@ export async function fetchRefs(
       throw new GitError("InvalidInput", `Not an object id: ${ref.oid}`);
     }
   }
-  const { found, missing } = await resolveFetchRefs(transport, refs);
-  const wants: string[] = [];
-  for (const oid of new Set(found.map((r) => r.oid))) {
-    if (!(await hasObject(ctx, oid))) wants.push(oid);
-  }
+  // isomorphic-git takes one have, as a ref or oid; ZERO_OID resolves to
+  // nothing, for an explicit empty list.
+  const have = options.haves ? (options.haves[0] ?? ZERO_OID) : "HEAD";
+  const found: GitFetchRefsResult["refs"] = [];
+  const missing: string[] = [];
   let objectCount = 0;
-  if (wants.length > 0) {
-    const haves = options.haves ?? (await localTips(ctx));
-    objectCount = await storePack(
-      ctx,
-      await fetchPack(transport, wants, haves),
-    );
+  for (const { ref, oid: known, localRef } of refs) {
+    if (known && (await hasObject(ctx, known))) {
+      found.push({ ref, oid: known, localRef });
+      continue;
+    }
+    const fetched = await fetchOne(ctx, remote, ref, have);
+    if (!fetched) {
+      missing.push(ref);
+      continue;
+    }
+    objectCount += fetched.objectCount;
+    found.push({ ref, oid: fetched.oid, localRef });
   }
   for (const { localRef, oid } of found) {
     if (localRef)

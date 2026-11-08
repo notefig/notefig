@@ -3,17 +3,28 @@ import type { FsClient } from "isomorphic-git";
 
 import { toGitError } from "./errors";
 import { createIsomorphicGitFs } from "./isomorphicGitFs";
-import { fetchRefs, pushRefs, type CapabilityCache } from "./remoteOps";
+import {
+  fetchRefs,
+  listRemoteRefs,
+  pushRefs,
+  type CapabilityCache,
+  type IsomorphicRemote,
+} from "./remoteOps";
 import { rebaseOnto, resolveCommitish } from "./repo/rebase";
 import type { RepoContext } from "./repo/repoContext";
 import { defaultHttpClient } from "./smartHttp/httpPorts";
-import { lsRefs } from "./smartHttp/lsRefs";
-import { createHttpTransport, type GitTransport } from "./smartHttp/transport";
+import {
+  createHttpTransport,
+  createIsomorphicHttpClient,
+  remoteUrl,
+  type GitTransport,
+} from "./smartHttp/transport";
 import {
   GitError,
   type GitFetchRef,
   type GitFetchRefsOptions,
   type GitFetchRefsResult,
+  type GitHttpClient,
   type GitPushRefsOptions,
   type GitPushRefsResult,
   type GitRebaseOntoInput,
@@ -197,7 +208,7 @@ export class IsomorphicGitService implements GitService {
     };
   }
 
-  private transport(remote: GitRemote): GitTransport {
+  private httpPort(remote: GitRemote): GitHttpClient {
     const http = this.deps.http ?? defaultHttpClient();
     if (!http) {
       throw new GitError(
@@ -211,7 +222,22 @@ export class IsomorphicGitService implements GitService {
         `Only HTTP(S) remotes are supported: ${remote.url}`,
       );
     }
-    return createHttpTransport(remote, http, this.deps.auth);
+    return http;
+  }
+
+  private transport(remote: GitRemote): GitTransport {
+    return createHttpTransport(remote, this.httpPort(remote), this.deps.auth);
+  }
+
+  private isomorphicRemote(remote: GitRemote): IsomorphicRemote {
+    return {
+      http: createIsomorphicHttpClient(
+        remote,
+        this.httpPort(remote),
+        this.deps.auth,
+      ),
+      url: remoteUrl(remote),
+    };
   }
 
   /** Run `op`, classifying anything it throws. */
@@ -823,7 +849,9 @@ export class IsomorphicGitService implements GitService {
     remote: GitRemote,
     prefixes: string[],
   ): Promise<GitRemoteRef[]> {
-    return this.run(() => lsRefs(this.transport(remote), prefixes));
+    return this.run(() =>
+      listRemoteRefs(this.isomorphicRemote(remote), prefixes),
+    );
   }
 
   async fetchRefs(
@@ -832,7 +860,7 @@ export class IsomorphicGitService implements GitService {
     options?: GitFetchRefsOptions,
   ): Promise<GitFetchRefsResult> {
     return this.run(() =>
-      fetchRefs(this.ctx, this.transport(remote), refs, options),
+      fetchRefs(this.ctx, this.isomorphicRemote(remote), refs, options),
     );
   }
 

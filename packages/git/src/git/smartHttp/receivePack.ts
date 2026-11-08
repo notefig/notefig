@@ -197,9 +197,7 @@ export async function receivePack(
     input.pack,
   );
   try {
-    const reply = await transport.exchange("git-receive-pack", body, {
-      protocolV2: false,
-    });
+    const reply = await transport.exchange("git-receive-pack", body);
     return parseReportStatus(
       reply,
       input.updates,

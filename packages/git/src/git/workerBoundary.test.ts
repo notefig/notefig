@@ -161,7 +161,14 @@ describe("git worker boundary", () => {
     expect(
       missing.filter(
         (name) =>
-          !["fail", "transport", "run", "computeRevertChanges"].includes(name),
+          ![
+            "fail",
+            "httpPort",
+            "transport",
+            "isomorphicRemote",
+            "run",
+            "computeRevertChanges",
+          ].includes(name),
       ),
     ).toEqual([]);
   });
@@ -173,6 +180,20 @@ describe("git worker boundary", () => {
     const http: GitHttpClient = {
       async request(request) {
         requests.push(request);
+        if (request.url.endsWith("service=git-upload-pack")) {
+          return {
+            status: 200,
+            headers: {
+              "Content-Type": "application/x-git-upload-pack-advertisement",
+            },
+            body: concatBytes([
+              encodePktLine("# service=git-upload-pack\n"),
+              FLUSH_PKT,
+              encodePktLine(`${main} refs/heads/main\0ofs-delta\n`),
+              FLUSH_PKT,
+            ]),
+          };
+        }
         if (request.method === "GET") {
           return reply(
             concatBytes([
@@ -183,17 +204,12 @@ describe("git worker boundary", () => {
             ]),
           );
         }
-        if (request.url.endsWith("git-receive-pack")) {
-          return reply(
-            concatBytes([
-              encodePktLine("unpack ok\n"),
-              encodePktLine("ok refs/notefig/v1/presence/d\n"),
-              FLUSH_PKT,
-            ]),
-          );
-        }
         return reply(
-          concatBytes([encodePktLine(`${main} refs/heads/main\n`), FLUSH_PKT]),
+          concatBytes([
+            encodePktLine("unpack ok\n"),
+            encodePktLine("ok refs/notefig/v1/presence/d\n"),
+            FLUSH_PKT,
+          ]),
         );
       },
     };
@@ -219,15 +235,17 @@ describe("git worker boundary", () => {
     expect(await service.listRemoteRefs(remote, ["refs/heads/main"])).toEqual([
       { ref: "refs/heads/main", oid: main },
     ]);
-    expect(requests[0]).toMatchObject({
-      method: "POST",
-      url: "https://example.test/o/r.git/git-upload-pack",
-      credential: "example.test/o/r",
-      headers: { "Git-Protocol": "version=2" },
-    });
-    // Already local: resolves without fetching a pack.
+    expect(requests).toEqual([
+      expect.objectContaining({
+        method: "GET",
+        url: "https://example.test/o/r.git/info/refs?service=git-upload-pack",
+        credential: "example.test/o/r",
+        headers: { "User-Agent": "git/notefig" },
+      }),
+    ]);
+    // Already local: resolves without a request.
     expect(
-      await service.fetchRefs(remote, [{ ref: "refs/heads/main" }]),
+      await service.fetchRefs(remote, [{ ref: "refs/heads/main", oid: main }]),
     ).toEqual({
       refs: [{ ref: "refs/heads/main", oid: main, localRef: undefined }],
       missing: [],

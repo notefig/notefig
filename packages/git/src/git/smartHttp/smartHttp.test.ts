@@ -8,8 +8,6 @@ import {
   encodePktLine,
   pktText,
 } from "./pktLine";
-import { lsRefsRequest, parseLsRefs } from "./lsRefs";
-import { fetchRequest, parseFetchReply } from "./fetchPack";
 import {
   chooseCapabilities,
   parseAdvertisedCapabilities,
@@ -93,49 +91,6 @@ describe("pkt-line", () => {
     expect(() => demuxSideband(fatal)).toThrow(new RemoteProtocolError("boom"));
     const err = decodePktLines(encodePktLine("ERR access denied\n")).lines;
     expect(() => demuxSideband(err)).toThrow("access denied");
-  });
-});
-
-describe("ls-refs", () => {
-  it("asks for each prefix after the delim", () => {
-    expect(text(lsRefsRequest(["refs/heads/main", "refs/notefig/"]))).toBe(
-      "0014command=ls-refs\n0016agent=git/notefig\n0001" +
-        "001fref-prefix refs/heads/main\n001dref-prefix refs/notefig/\n0000",
-    );
-  });
-
-  it("parses ref lines, ignoring attributes", () => {
-    const reply = concatBytes([
-      encodePktLine(`${A} refs/heads/main symref-target:x\n`),
-      encodePktLine(`${B} refs/notefig/v1/presence/d\n`),
-      FLUSH_PKT,
-    ]);
-    expect(parseLsRefs(reply)).toEqual([
-      { oid: A, ref: "refs/heads/main" },
-      { oid: B, ref: "refs/notefig/v1/presence/d" },
-    ]);
-    expect(() => parseLsRefs(encodePktLine("ERR nope\n"))).toThrow("nope");
-  });
-});
-
-describe("v2 fetch", () => {
-  it("sends wants, haves and done in one request", () => {
-    const body = text(fetchRequest([A], [B]));
-    expect(body).toContain(`want ${A}\n`);
-    expect(body).toContain(`have ${B}\n`);
-    expect(body.endsWith("0009done\n0000")).toBe(true);
-  });
-
-  it("extracts the side-banded pack from the packfile section", () => {
-    const reply = concatBytes([
-      encodePktLine("packfile\n"),
-      band(2, "progress"),
-      band(1, "PACK\0\0\0\x02"),
-      band(1, "rest"),
-      FLUSH_PKT,
-    ]);
-    expect(text(parseFetchReply(reply))).toBe("PACK\0\0\0\x02rest");
-    expect(() => parseFetchReply(FLUSH_PKT)).toThrow(/no packfile/);
   });
 });
 
@@ -310,9 +265,25 @@ describe("toGitError", () => {
     [{ name: "GitHttpStatusError", status: 429, message: "" }, "Throttled"],
     [{ name: "GitHttpStatusError", status: 500, message: "" }, "Network"],
     [
+      { name: "HttpError", data: { statusCode: 401 }, message: "" },
+      "AuthRequired",
+    ],
+    [
+      { name: "HttpError", data: { statusCode: 403 }, message: "" },
+      "AuthFailed",
+    ],
+    [
+      { name: "HttpError", data: { statusCode: 404 }, message: "" },
+      "RepoNotFound",
+    ],
+    [
       { name: "HttpError", data: { statusCode: 429 }, message: "" },
       "Throttled",
     ],
+    [{ name: "HttpError", data: { statusCode: 503 }, message: "" }, "Network"],
+    [{ name: "SmartHttpError", message: "" }, "RemoteError"],
+    [{ name: "ParseError", message: "" }, "RemoteError"],
+    [{ name: "EmptyServerResponseError", message: "" }, "RemoteError"],
     [{ name: "GitTransportError", message: "" }, "Network"],
     [{ name: "PushOutcomeUnknownError", message: "" }, "PushOutcomeUnknown"],
     [{ name: "RemoteProtocolError", message: "" }, "RemoteError"],

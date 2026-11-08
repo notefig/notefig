@@ -35,6 +35,11 @@ const CODE_BY_NAME: Record<string, GitErrorCode> = {
   GitTransportError: "Network",
   PushOutcomeUnknownError: "PushOutcomeUnknown",
   MissingCapabilityError: "UnsupportedOperation",
+  RemoteProtocolError: "RemoteError",
+  // isomorphic-git: the remote answered, but not in the smart protocol.
+  SmartHttpError: "RemoteError",
+  ParseError: "RemoteError",
+  EmptyServerResponseError: "RemoteError",
 };
 
 /** Classify anything thrown by isomorphic-git or the smart-HTTP client. */
@@ -54,9 +59,6 @@ export function toGitError(error: unknown): GitError {
     (name === "GitHttpStatusError" || name === "HttpError")
   ) {
     return new GitError(codeForStatus(status), message, error);
-  }
-  if (name === "RemoteProtocolError") {
-    return new GitError("RemoteError", message, error);
   }
   return new GitError("CorruptRepository", message, error);
 }

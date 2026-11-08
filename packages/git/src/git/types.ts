@@ -201,15 +201,19 @@ export interface GitService {
 
   // ── Remote operations (smart HTTP; need a `GitHttpClient`) ─────────────
 
-  /** Protocol-v2 `ls-refs`: the remote's refs under any of `prefixes`. */
+  /**
+   * The remote's refs under any of `prefixes` (all when empty), from one
+   * ref advertisement: one request.
+   */
   listRemoteRefs(
     remote: GitRemote,
     prefixes: string[],
   ): Promise<GitRemoteRef[]>;
   /**
    * Fetch exactly the named remote refs (their objects, nothing else) and
-   * optionally point local refs at them. A ref given with the `oid` a poll
-   * already saw costs one request; objects already present cost none.
+   * optionally point local refs at them. Each ref whose objects aren't
+   * already present costs two requests (advertisement, then pack); a ref
+   * given with an `oid` that's already local costs none.
    */
   fetchRefs(
     remote: GitRemote,
@@ -351,7 +355,11 @@ export interface GitRemoteRef {
 export interface GitFetchRef {
   /** Full remote ref name, e.g. `refs/heads/main`. */
   ref: string;
-  /** The tip a poll already saw; skips the `ls-refs` lookup for this ref. */
+  /**
+   * The tip a poll already saw: when it's already local, the ref costs no
+   * request. Otherwise the ref's current tip is fetched (and reported),
+   * which may be newer.
+   */
   oid?: string;
   /** Local ref to point at the fetched tip, e.g. `refs/remotes/origin/main`. */
   localRef?: string;
@@ -359,8 +367,8 @@ export interface GitFetchRef {
 
 export interface GitFetchRefsOptions {
   /**
-   * Commits the remote can assume we have. Default: the tips of local
-   * `refs/heads/*` and `refs/remotes/**`.
+   * A commit the remote can assume we have; only the first is sent.
+   * Default: HEAD. An empty list sends none.
    */
   haves?: string[];
 }

@@ -1,8 +1,9 @@
 /**
- * The remote operations against real `git http-backend` (MET-269): ls-refs,
- * targeted fetch, multi-ref CAS pushes (atomic and not), create-if-absent,
- * CAS delete, blob refs, a two-client race, rebaseOnto with the default and
- * an injected merge driver, and HTTP status → GitError mapping.
+ * The remote operations against real `git http-backend` (MET-269): listing
+ * refs by prefix, targeted fetch, multi-ref CAS pushes (atomic and not),
+ * create-if-absent, CAS delete, blob refs, a two-client race, rebaseOnto
+ * with the default and an injected merge driver, and HTTP status →
+ * GitError mapping.
  */
 import { join } from "node:path";
 import {
@@ -97,7 +98,7 @@ describeGit("smart HTTP remote operations (git http-backend)", () => {
     ]);
   });
 
-  it("fetches exactly the named ref, in one request when the oid is known", async () => {
+  it("fetches exactly the named ref: a discovery GET and one upload-pack POST", async () => {
     const feature = await b.commitFiles({ "feature.md": "f\n" }, "feature");
     const other = await b.commitFiles({ "other.md": "o\n" }, "other");
     await runGit(b.repo.repoPath, [
@@ -112,6 +113,12 @@ describeGit("smart HTTP remote operations (git http-backend)", () => {
       "origin",
       `${other}:refs/heads/other`,
     ]);
+    const config = readFileSync(join(a.repo.gitDir, "config"), "utf8");
+    const refNames = async () =>
+      (
+        await runGit(a.repo.repoPath, ["for-each-ref", "--format=%(refname)"])
+      ).split("\n");
+    const refsBefore = await refNames();
 
     const before = fixture.server.requests.length;
     const result = await a.service.fetchRefs(remote, [
@@ -121,7 +128,10 @@ describeGit("smart HTTP remote operations (git http-backend)", () => {
         localRef: "refs/remotes/origin/feature",
       },
     ]);
-    expect(fixture.server.requests.length - before).toBe(1);
+    expect(fixture.server.requests.slice(before).map((r) => r.method)).toEqual([
+      "GET",
+      "POST",
+    ]);
     expect(result).toEqual({
       refs: [
         {
@@ -142,8 +152,13 @@ describeGit("smart HTTP remote operations (git http-backend)", () => {
     expect(
       await runGit(a.repo.repoPath, ["fsck", "--connectivity-only", feature]),
     ).toBe("");
+    // Only the asked-for local ref moved, and the config is untouched.
+    expect((await refNames()).sort()).toEqual(
+      [...refsBefore, "refs/remotes/origin/feature"].sort(),
+    );
+    expect(readFileSync(join(a.repo.gitDir, "config"), "utf8")).toBe(config);
 
-    // Already local: no request at all. Unknown oid: one ls-refs first.
+    // Already local: no request at all. A missing ref: just the discovery.
     const again = fixture.server.requests.length;
     await a.service.fetchRefs(remote, [
       { ref: "refs/heads/feature", oid: feature },
@@ -157,6 +172,21 @@ describeGit("smart HTTP remote operations (git http-backend)", () => {
       { ref: "refs/heads/other", oid: other, localRef: undefined },
     ]);
     expect(looked.missing).toEqual(["refs/heads/nope"]);
+    expect(fixture.server.requests.length - again).toBe(3);
+  });
+
+  it("a stale oid hint fetches the ref's current tip and reports it", async () => {
+    const first = await b.commitFiles({ "n.md": "1\n" }, "first");
+    const second = await b.commitFiles({ "n.md": "2\n" }, "second");
+    await runGit(b.repo.repoPath, ["push", "-q", "origin", "main"]);
+    const result = await a.service.fetchRefs(remote, [
+      { ref: MAIN, oid: first },
+    ]);
+    expect(result.refs).toEqual([
+      { ref: MAIN, oid: second, localRef: undefined },
+    ]);
+    // Sends HEAD as its have, so only the two new commits come back.
+    expect(result.objectCount).toBe(6);
   });
 
   it("atomic: one stale old value rejects the whole push", async () => {
@@ -317,6 +347,49 @@ describeGit("smart HTTP remote operations (git http-backend)", () => {
     expect(await b.service.readRef("refs/notefig-remote/presence/dev-a")).toBe(
       blob,
     );
+  });
+
+  it("fetches blob refs and a parentless commit into a repo with no remote configured", async () => {
+    const blob = await a.service.writeBlob(encode('{"lease":"a"}'));
+    const tree = await runGit(a.repo.repoPath, ["write-tree"]);
+    const orphan = await runGit(a.repo.repoPath, [
+      ...SYSTEM_GIT_IDENTITY,
+      "commit-tree",
+      tree,
+      "-m",
+      "orphan",
+    ]);
+    const lease = "refs/notefig/v1/locks/doc/a";
+    const root = "refs/notefig/v1/roots/a";
+    expect(
+      (
+        await a.service.pushRefs(remote, [
+          { ref: lease, old: ZERO_OID, new: blob },
+          { ref: root, old: ZERO_OID, new: orphan },
+        ])
+      ).ok,
+    ).toBe(true);
+
+    const dir = join(fixture.root, "fresh");
+    const fresh = new IsomorphicGitService(
+      new NodeGitStorageHost(dir),
+      { repoPath: dir, gitDir: join(dir, ".git") },
+      { http: nodeHttpClient() },
+    );
+    await fresh.init({ defaultBranch: "main" });
+    const result = await fresh.fetchRefs(remote, [
+      { ref: lease, localRef: lease },
+      { ref: root, localRef: root },
+    ]);
+    expect(result.refs.map((r) => r.oid)).toEqual([blob, orphan]);
+    expect(new TextDecoder().decode(await fresh.readBlob(blob))).toBe(
+      '{"lease":"a"}',
+    );
+    expect(await runGit(dir, ["cat-file", "-t", orphan])).toBe("commit");
+    expect(
+      await runGit(dir, ["fsck", "--connectivity-only", "--no-dangling"]),
+    ).toBe("");
+    expect(await runGit(dir, ["remote"])).toBe("");
   });
 
   it("two concurrent pushes from the same base: exactly one wins", async () => {
