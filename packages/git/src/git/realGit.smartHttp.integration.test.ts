@@ -16,8 +16,14 @@ import {
   type LocalClone,
   type RemoteFixture,
   type TestServer,
+  writeFileText,
 } from "./smartHttp.test-helpers";
-import { hasSystemGit, runGit, runGitAllowFail } from "./realGit.test-helpers";
+import {
+  SYSTEM_GIT_IDENTITY,
+  hasSystemGit,
+  runGit,
+  runGitAllowFail,
+} from "./realGit.test-helpers";
 import { createBasicAuthProvider } from "./smartHttp/httpPorts";
 import { IsomorphicGitService } from "./isomorphicGitService";
 import { NodeGitStorageHost } from "./realGit.test-helpers";
@@ -199,6 +205,44 @@ describeGit("smart HTTP remote operations (git http-backend)", () => {
       .find((r) => r.method === "POST")!;
     // commit + root tree + docs/ tree + docs/a.md blob
     expect(packObjectCount(post.body)).toBe(4);
+    expect(await runGit(fixture.bare, ["fsck", "--connectivity-only"])).toBe(
+      "",
+    );
+  });
+
+  it("a shallow clone can create a remote branch without naming a have", async () => {
+    await b.commitFiles({ "note.md": "second\n" }, "second");
+    await runGit(b.repo.repoPath, ["push", "-q", "origin", "main"]);
+    const repoPath = join(fixture.root, "shallow");
+    await runGit(fixture.root, [
+      "clone",
+      "-q",
+      "--depth",
+      "1",
+      `file://${fixture.bare}`,
+      repoPath,
+    ]);
+    const service = new IsomorphicGitService(
+      new NodeGitStorageHost(repoPath),
+      { repoPath, gitDir: join(repoPath, ".git") },
+      { http: nodeHttpClient() },
+    );
+    await writeFileText(join(repoPath, "new.md"), "new\n");
+    await runGit(repoPath, ["add", "new.md"]);
+    await runGit(repoPath, [
+      ...SYSTEM_GIT_IDENTITY,
+      "commit",
+      "-q",
+      "-m",
+      "on a shallow clone",
+    ]);
+    const tip = await runGit(repoPath, ["rev-parse", "HEAD"]);
+
+    const result = await service.pushRefs(remote, [
+      { ref: "refs/heads/feature", old: ZERO_OID, new: tip },
+    ]);
+    expect(result.ok).toBe(true);
+    expect(await bareRef(fixture, "refs/heads/feature")).toBe(tip);
     expect(await runGit(fixture.bare, ["fsck", "--connectivity-only"])).toBe(
       "",
     );

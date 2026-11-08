@@ -25,6 +25,14 @@ async function objectType(
   }
 }
 
+async function readCommitOrNull(ctx: RepoContext, oid: string) {
+  try {
+    return (await git.readCommit({ ...ctx.git, oid })).commit;
+  } catch {
+    return null;
+  }
+}
+
 interface Queued {
   oid: string;
   time: number;
@@ -38,11 +46,17 @@ class CommitWalk {
 
   constructor(private readonly ctx: RepoContext) {}
 
+  /**
+   * Queue a commit, or upgrade it to uninteresting. A commit missing
+   * locally (beyond a shallow boundary) is never marked: that line of
+   * history ends there, and the remote must already have it.
+   */
   async add(oid: string, uninteresting: boolean): Promise<void> {
     const prior = this.flags.get(oid);
     if (prior === true || (prior === false && !uninteresting)) return;
+    const commit = await readCommitOrNull(this.ctx, oid);
+    if (!commit) return;
     this.flags.set(oid, uninteresting);
-    const { commit } = await git.readCommit({ ...this.ctx.git, oid });
     this.parents.set(oid, commit.parent);
     this.queue.push({ oid, time: commit.committer.timestamp });
     this.queue.sort((a, b) => a.time - b.time);
@@ -58,8 +72,7 @@ class CommitWalk {
       const { oid } = this.queue.pop()!;
       const uninteresting = this.flags.get(oid) === true;
       for (const parent of this.parents.get(oid) ?? []) {
-        // A parent missing locally (shallow history) ends that line.
-        await this.add(parent, uninteresting).catch(() => undefined);
+        await this.add(parent, uninteresting);
       }
     }
     const commits: string[] = [];
