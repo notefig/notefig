@@ -104,8 +104,11 @@ export async function typeAndDelete(page: Page): Promise<void> {
 }
 
 /** Open the large document in a fresh app load; returns its path. */
-export async function openLargeDocument(page: Page): Promise<string> {
-  const workspace = await perfWorkspace();
+export async function openLargeDocument(
+  page: Page,
+  workspace?: string,
+): Promise<string> {
+  workspace ??= await perfWorkspace();
   await resetLargeDocument(workspace);
   const file = path.join(workspace, "large.md");
   await page.goto("/");
