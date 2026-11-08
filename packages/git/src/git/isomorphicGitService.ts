@@ -956,6 +956,14 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
+  async isIgnored(filepath: string): Promise<boolean> {
+    try {
+      return await git.isIgnored({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, filepath });
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
   async listRemoteRefs(
     remote: GitRemote,
     prefixes: string[] = [],

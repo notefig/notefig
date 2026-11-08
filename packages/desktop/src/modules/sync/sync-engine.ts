@@ -508,11 +508,14 @@ async function stageChanges(git: GitService, paths: string[] | null): Promise<st
   const status = await git.status(paths ? { filepaths: paths } : undefined);
   for (const filepath of status.untracked) await git.add({ filepath });
   for (const change of status.unstaged) {
+    // A tracked file the excludes name (`.claude/` committed before sync)
+    // stays as it is on the remote.
+    if (await git.isIgnored(change.path)) continue;
     if (change.type === "deleted") await git.remove({ filepath: change.path });
     else await git.add({ filepath: change.path });
   }
-  const all = [...status.untracked, ...status.unstaged.map((c) => c.path), ...status.staged.map((c) => c.path)];
-  return [...new Set(all)].filter((path) => !NEVER.test(path)).sort();
+  const after = await git.status(paths ? { filepaths: paths } : undefined);
+  return after.staged.map((c) => c.path).filter((path) => !NEVER.test(path)).sort();
 }
 
 /** What changed on each side since the common commit, and who changed

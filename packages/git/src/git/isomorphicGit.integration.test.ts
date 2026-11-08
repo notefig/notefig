@@ -354,6 +354,9 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     await expect(service.getConfig("user.name")).resolves.toBe("Ada");
     await expect(service.getConfig("user.email")).resolves.toBeUndefined();
     await expect(service.currentBranch()).resolves.toBe("main");
+    await host.writeFileAtomic(join(repoDir, ".gitignore"), new TextEncoder().encode(".claude/\n"));
+    await expect(service.isIgnored(".claude/settings.json")).resolves.toBe(true);
+    await expect(service.isIgnored("notes.md")).resolves.toBe(false);
   });
 
   it("returns empty log for initialized repo without commits", async () => {

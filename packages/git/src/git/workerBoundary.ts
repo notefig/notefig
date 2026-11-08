@@ -166,6 +166,7 @@ const GIT_SERVICE_METHODS = [
   "mergeBase",
   "getConfig",
   "currentBranch",
+  "isIgnored",
   "listRemoteRefs",
   "fetchRefs",
   "pushRef",

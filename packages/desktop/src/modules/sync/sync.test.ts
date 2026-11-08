@@ -202,16 +202,21 @@ describe("sync: solo", () => {
     await write(".gitignore", "*.tmp\n");
     await write("scratch.tmp", "ignored");
     await write(".notefig/scratchpads/pad.md", "mine");
+    // Committed before sync came along: it stays as the remote has it.
+    await remote.pushFromPlainGit(await remote.clone("plain"), { ".claude/settings.json": "{}" }, "old");
+    await sync.syncNow();
+    await write(".claude/settings.json", '{"local":true}');
     await write(".claude/settings.local.json", "{}");
     await write("notes.md", "Mine.\n");
     await sync.syncNow();
-    expect(await tree(remote.bare)).toEqual([".gitignore", "metrists.json", "note.md", "notes.md"]);
+    expect(await tree(remote.bare)).toEqual([".claude/settings.json", ".gitignore", "metrists.json", "note.md", "notes.md"]);
+    expect(await runGit(remote.bare, ["show", "main:.claude/settings.json"])).toBe("{}");
 
     await core.projectSettings.update(ws, { sync: { exclude: ["drafts/"] } });
     await sync.whenReady();
     await write("drafts/a.md", "Not yet.\n");
     await sync.syncNow();
-    expect(await tree(remote.bare)).toEqual([".gitignore", "metrists.json", "note.md", "notes.md"]);
+    expect(await tree(remote.bare)).not.toContain("drafts/a.md");
   });
 
   it("commits and pushes what is left when the workspace closes", async () => {

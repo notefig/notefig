@@ -236,6 +236,9 @@ export interface GitService {
   getConfig(path: string): Promise<string | undefined>;
   /** The checked-out branch's short name; null when HEAD is detached. */
   currentBranch(): Promise<string | null>;
+  /** Whether `.gitignore` / `info/exclude` patterns match a path, tracked
+   *  or not. */
+  isIgnored(filepath: string): Promise<boolean>;
   /** The remote's refs starting with any of `prefixes` (all when empty).
    *  `forPush` asks for the push advertisement, which a remote answers
    *  only to someone who may push (otherwise `AuthRequired`/`AuthFailed`). */
