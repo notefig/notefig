@@ -3,12 +3,12 @@ import type {
   branch as igBranch,
   checkout as igCheckout,
   commit as igCommit,
-  fetch as igFetch,
   init as igInit,
   listBranches as igListBranches,
   log as igLog,
-  pull as igPull,
-  push as igPush,
+  merge as igMerge,
+  MergeDriverCallback,
+  MergeResult,
   remove as igRemove,
   resetIndex as igResetIndex,
 } from "isomorphic-git";
@@ -33,12 +33,10 @@ type AddParams = Parameters<typeof igAdd>[0];
 type BranchParams = Parameters<typeof igBranch>[0];
 type CheckoutParams = Parameters<typeof igCheckout>[0];
 type CommitParams = Parameters<typeof igCommit>[0];
-type FetchParams = Parameters<typeof igFetch>[0];
 type InitParams = Parameters<typeof igInit>[0];
 type ListBranchesParams = Parameters<typeof igListBranches>[0];
 type LogParams = Parameters<typeof igLog>[0];
-type PullParams = Parameters<typeof igPull>[0];
-type PushParams = Parameters<typeof igPush>[0];
+type MergeParams = Parameters<typeof igMerge>[0];
 type RemoveParams = Parameters<typeof igRemove>[0];
 type ResetIndexParams = Parameters<typeof igResetIndex>[0];
 
@@ -58,7 +56,17 @@ export type GitErrorCode =
   | "RepoNotFound"
   | "UnsupportedOperation"
   | "CorruptRepository"
-  | "InvalidInput";
+  | "InvalidInput"
+  /** HTTP 429. */
+  | "Throttled"
+  /** No response from the remote (the http client rejected). */
+  | "Network"
+  /** Any other status, or a reply that isn't the git protocol. */
+  | "RemoteError"
+  /** The remote refused a ref update (its reason is in the message). */
+  | "PushRejected"
+  /** The remote ref isn't at the oid a push expected. */
+  | "RefConflict";
 
 export class GitError extends Error {
   readonly code: GitErrorCode;
@@ -173,9 +181,17 @@ export type GitCheckoutPathsInput = GitOpInput<
   >
 >;
 export type GitLogInput = GitOpInput<LogParams>;
-export type GitFetchInput = GitOpInput<FetchParams>;
-export type GitPullInput = GitOpInput<PullParams>;
-export type GitPushInput = GitOpInput<PushParams>;
+export type GitMergeInput = Pick<
+  MergeParams,
+  | "ours"
+  | "theirs"
+  | "message"
+  | "author"
+  | "committer"
+  | "fastForward"
+  | "fastForwardOnly"
+  | "allowUnrelatedHistories"
+>;
 export type GitReadTextFileInput = {
   /** Commit oid or ref to read the file at. */
   ref: string;
@@ -199,7 +215,90 @@ export interface GitService {
   log(input: GitLogInput): ReturnType<typeof igLog>;
   /** Read a text file's content as of a given ref/commit (for history diff/restore). */
   readTextFile(input: GitReadTextFileInput): Promise<string>;
-  fetch(input: GitFetchInput): ReturnType<typeof igFetch>;
-  pull(input: GitPullInput): ReturnType<typeof igPull>;
-  push(input: GitPushInput): ReturnType<typeof igPush>;
+  /** The remote's refs starting with any of `prefixes` (all when empty). */
+  listRemoteRefs(
+    remote: GitRemote,
+    prefixes?: string[],
+  ): Promise<GitRemoteRef[]>;
+  /**
+   * Fetch each ref's objects into the local store (a ref may point at any
+   * object: a commit, with or without parents, or a blob). `oid` is null
+   * for a ref the remote doesn't have. Branches also update their
+   * `refs/remotes/origin/*` tracking refs; no other local ref is written.
+   */
+  fetchRefs(remote: GitRemote, refs: string[]): Promise<GitRemoteRefResult[]>;
+  /** Update one remote ref; see `GitPushRefInput` for what is refused. */
+  pushRef(remote: GitRemote, input: GitPushRefInput): Promise<void>;
+  /**
+   * isomorphic-git's `merge`, with the injected `mergeDriver` deciding
+   * text conflicts (isomorphic-git's diff3 when none). Like isomorphic-git,
+   * it moves the branch ref but leaves the index and working tree alone.
+   */
+  merge(input: GitMergeInput): Promise<MergeResult>;
+}
+
+/**
+ * A remote, as plain data. `credential` is an opaque reference (a name,
+ * not a secret): the injected http client resolves it to an auth header
+ * itself, so no token passes through JS on desktop.
+ */
+export interface GitRemote {
+  url: string;
+  credential?: string;
+}
+
+export interface GitRemoteRef {
+  ref: string;
+  oid: string;
+}
+
+export interface GitRemoteRefResult {
+  ref: string;
+  oid: string | null;
+}
+
+/**
+ * One remote ref update; `oid` must be a commit (isomorphic-git can't push
+ * a ref to a blob). A push without `force` is refused
+ * (`NotFastForward`) unless the remote ref is absent or an ancestor of
+ * `oid`; `force` is for refs only this device writes (presence, WIP).
+ * `expect` compares the remote ref with what the caller last saw (`null`:
+ * must not exist) and refuses with `RefConflict` otherwise. Either check
+ * runs against the ref as the push finds it; the remote then applies the
+ * update only if the ref hasn't moved since, and refuses it with
+ * `PushRejected` otherwise.
+ */
+export type GitPushRefInput = {
+  ref: string;
+  force?: boolean;
+  expect?: string | null;
+} & ({ oid: string; delete?: never } | { delete: true; oid?: never });
+
+/** The http port: one request, the whole reply. */
+export interface GitHttpClient {
+  request(request: GitHttpRequest): Promise<GitHttpResponse>;
+}
+
+export interface GitHttpRequest {
+  url: string;
+  method: "GET" | "POST";
+  headers: Record<string, string>;
+  body?: Uint8Array;
+  /** `GitRemote.credential`, for the client to authenticate with. */
+  credential?: string;
+}
+
+export interface GitHttpResponse {
+  status: number;
+  headers: Record<string, string>;
+  body: Uint8Array;
+}
+
+export type GitMergeDriver = MergeDriverCallback;
+
+/** What a service is handed beyond its repo; functions, so worker-side. */
+export interface GitServiceDeps {
+  /** Needed by the remote operations, which fail without one. */
+  http?: GitHttpClient;
+  mergeDriver?: GitMergeDriver;
 }
