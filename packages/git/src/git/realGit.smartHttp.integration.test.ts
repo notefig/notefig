@@ -5,7 +5,14 @@
  * an injected merge driver, and HTTP status → GitError mapping.
  */
 import { join } from "node:path";
-import { readFileSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  readFileSync,
+  readlinkSync,
+  statSync,
+  symlinkSync,
+} from "node:fs";
 
 import {
   bareRef,
@@ -465,6 +472,53 @@ describeGit("smart HTTP remote operations (git http-backend)", () => {
       });
       expect(await runGit(dir, ["show", ":note.md"])).toBe("staged");
       expect(note(a)).toBe(committed);
+    });
+
+    /** Upstream makes note.md executable and adds `link` → note.md. */
+    const modesUpstream = () =>
+      upstream(async (up) => {
+        chmodSync(join(up, "note.md"), 0o755);
+        symlinkSync("note.md", join(up, "link"));
+      });
+    const stagedModes = async (dir: string) =>
+      (await runGit(dir, ["ls-files", "-s"])).replace(/ \S+ 0\t/g, " ");
+
+    it("applies mode-only changes and symlinks to the index and worktree", async () => {
+      const dir = a.repo.repoPath;
+      const oid = await modesUpstream();
+      expect(await a.service.rebaseOnto({ theirs: oid })).toEqual({
+        status: "fast-forward",
+        oid,
+        skippedDirty: [],
+      });
+      expect(await stagedModes(dir)).toBe("120000 link\n100755 note.md");
+      expect(statSync(join(dir, "note.md")).mode & 0o111).not.toBe(0);
+      expect(lstatSync(join(dir, "link")).isSymbolicLink()).toBe(true);
+      expect(readlinkSync(join(dir, "link"))).toBe("note.md");
+      expect(await runGit(dir, ["status", "--porcelain"])).toBe("");
+    });
+
+    it("records modes in the index on a host without chmod or symlinks", async () => {
+      class NoModesHost extends NodeGitStorageHost {
+        async chmod(): Promise<void> {
+          throw new Error("chmod is not supported");
+        }
+        async createSymlink(): Promise<void> {
+          throw new Error("createSymlink is not supported");
+        }
+      }
+      const dir = a.repo.repoPath;
+      const service = new IsomorphicGitService(new NoModesHost(dir), a.repo, {
+        http: nodeHttpClient(),
+      });
+      const oid = await modesUpstream();
+      expect(await service.rebaseOnto({ theirs: oid })).toMatchObject({
+        status: "fast-forward",
+        skippedDirty: [],
+      });
+      expect(await stagedModes(dir)).toBe("120000 link\n100755 note.md");
+      // core.symlinks=false style: the link is a file holding its target.
+      expect(readFileSync(join(dir, "link"), "utf8")).toBe("note.md");
     });
 
     it("fast-forwards, leaving an uncommitted edit alone", async () => {

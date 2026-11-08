@@ -16,7 +16,12 @@ import {
 } from "../types";
 import { joinPath, parentDir, type RepoContext } from "./repoContext";
 import { mergeTrees, type TreeMergeState } from "./treeMerge";
-import { diffTrees, type FileChange } from "./treeDiff";
+import {
+  diffTrees,
+  sameVersion,
+  type FileChange,
+  type FileVersion,
+} from "./treeDiff";
 
 const OID = /^[0-9a-f]{40}$/;
 
@@ -119,17 +124,23 @@ async function replayAll(
   return { status: "rebased", oid: tip, replayed, merged, skippedDirty: [] };
 }
 
+const SYMLINK = "120000";
+const EXECUTABLE = "100755";
+
 function bytesEqual(a: Uint8Array | null, b: Uint8Array | null): boolean {
   if (!a || !b) return a === b;
   return a.length === b.length && a.every((byte, i) => byte === b[i]);
 }
 
+/** A worktree file's bytes; a symlink's are its target, as git stores it. */
 async function readWorktree(
   ctx: RepoContext,
   path: string,
 ): Promise<Uint8Array | null> {
   const full = joinPath(ctx.git.dir, path);
-  const stat = await ctx.host.stat(full);
+  const stat = await ctx.host.lstat(full);
+  if (stat.isSymbolicLink)
+    return new TextEncoder().encode(await ctx.host.readLink(full));
   return stat.exists && stat.isFile ? ctx.host.readFile(full) : null;
 }
 
@@ -140,20 +151,22 @@ async function readBlobAt(
   return oid ? (await git.readBlob({ ...ctx.git, oid })).blob : null;
 }
 
-/** The index's blob oid for each of `paths` that it holds. */
-async function stagedOids(
+/** The index's entry for each of `paths` that it holds. */
+async function stagedVersions(
   ctx: RepoContext,
   paths: string[],
-): Promise<Map<string, string>> {
+): Promise<Map<string, FileVersion>> {
   const wanted = new Set(paths);
   const dirs = new Set(paths.flatMap(ancestors));
-  const staged = new Map<string, string>();
+  const staged = new Map<string, FileVersion>();
   await git.walk({
     ...ctx.git,
     trees: [git.STAGE()],
     map: async (filepath, [entry]) => {
-      if (entry && wanted.has(filepath))
-        staged.set(filepath, await entry.oid());
+      if (entry && wanted.has(filepath) && (await entry.type()) === "blob") {
+        const mode = (await entry.mode()).toString(8);
+        staged.set(filepath, { oid: await entry.oid(), mode });
+      }
       return filepath === "." || dirs.has(filepath) ? true : null;
     },
   });
@@ -171,7 +184,57 @@ async function worktreeClean(
   change: FileChange,
 ): Promise<boolean> {
   const onDisk = await readWorktree(ctx, change.path);
-  return bytesEqual(onDisk, await readBlobAt(ctx, change.from));
+  return bytesEqual(onDisk, await readBlobAt(ctx, change.from?.oid));
+}
+
+/** A symlink, where the host has them (else a file holding the target, as git does). */
+async function createSymlink(
+  ctx: RepoContext,
+  full: string,
+  blob: Uint8Array,
+): Promise<boolean> {
+  if ((await ctx.host.lstat(full)).exists) await ctx.host.deleteFile(full);
+  return ctx.host
+    .createSymlink(new TextDecoder().decode(blob), full)
+    .then(() => true)
+    .catch(() => false);
+}
+
+/** Write `version` at `full`, with its exec bit where the host supports chmod. */
+async function writeVersion(
+  ctx: RepoContext,
+  full: string,
+  version: FileVersion,
+): Promise<void> {
+  const blob = (await readBlobAt(ctx, version.oid))!;
+  await ctx.host.createDir(parentDir(full));
+  if (version.mode === SYMLINK && (await createSymlink(ctx, full, blob)))
+    return;
+  await ctx.host.writeFileAtomic(full, blob);
+  if (version.mode === EXECUTABLE)
+    await ctx.host.chmod(full, 0o755).catch(() => undefined);
+}
+
+/**
+ * Point the index entry at `to`. `resetIndex` takes the mode from the
+ * worktree file, which is wrong for a symlink, or an exec bit the host
+ * couldn't set, so a non-regular mode is written from the tree.
+ */
+async function updateIndexEntry(
+  ctx: RepoContext,
+  change: FileChange,
+  to: string,
+): Promise<void> {
+  await git.resetIndex({ ...ctx.git, filepath: change.path, ref: to });
+  if (change.to && change.to.mode !== "100644") {
+    await git.updateIndex({
+      ...ctx.git,
+      filepath: change.path,
+      oid: change.to.oid,
+      mode: Number.parseInt(change.to.mode, 8),
+      add: true,
+    });
+  }
 }
 
 /** Bring index and clean worktree files from commit `from` to `to`. */
@@ -186,24 +249,22 @@ async function updateWorktree(
     await treeOf(ctx, from),
     await treeOf(ctx, to),
   );
-  const staged = await stagedOids(
+  const staged = await stagedVersions(
     ctx,
     changes.map((c) => c.path),
   );
   for (const change of changes) {
     const full = joinPath(ctx.git.dir, change.path);
     // A staged edit is uncommitted work too: leave index and file alone.
-    const indexClean = staged.get(change.path) === change.from;
+    const indexClean = sameVersion(staged.get(change.path), change.from);
     if (!indexClean || !(await worktreeClean(ctx, change))) {
       skipped.push(change.path);
     } else if (change.to) {
-      await ctx.host.createDir(parentDir(full));
-      await ctx.host.writeFileAtomic(full, (await readBlobAt(ctx, change.to))!);
+      await writeVersion(ctx, full, change.to);
     } else if (change.from) {
       await ctx.host.deleteFile(full);
     }
-    if (indexClean)
-      await git.resetIndex({ ...ctx.git, filepath: change.path, ref: to });
+    if (indexClean) await updateIndexEntry(ctx, change, to);
   }
   return skipped;
 }
