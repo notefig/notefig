@@ -16,7 +16,7 @@ import {
 } from "../types";
 import { joinPath, parentDir, type RepoContext } from "./repoContext";
 import { mergeTrees, type TreeMergeState } from "./treeMerge";
-import { diffTrees } from "./treeDiff";
+import { diffTrees, type FileChange } from "./treeDiff";
 
 const OID = /^[0-9a-f]{40}$/;
 
@@ -140,6 +140,40 @@ async function readBlobAt(
   return oid ? (await git.readBlob({ ...ctx.git, oid })).blob : null;
 }
 
+/** The index's blob oid for each of `paths` that it holds. */
+async function stagedOids(
+  ctx: RepoContext,
+  paths: string[],
+): Promise<Map<string, string>> {
+  const wanted = new Set(paths);
+  const dirs = new Set(paths.flatMap(ancestors));
+  const staged = new Map<string, string>();
+  await git.walk({
+    ...ctx.git,
+    trees: [git.STAGE()],
+    map: async (filepath, [entry]) => {
+      if (entry && wanted.has(filepath))
+        staged.set(filepath, await entry.oid());
+      return filepath === "." || dirs.has(filepath) ? true : null;
+    },
+  });
+  return staged;
+}
+
+function ancestors(path: string): string[] {
+  const parts = path.split("/").slice(0, -1);
+  return parts.map((_, i) => parts.slice(0, i + 1).join("/"));
+}
+
+/** Whether the worktree file at `change.path` still holds `from`'s content. */
+async function worktreeClean(
+  ctx: RepoContext,
+  change: FileChange,
+): Promise<boolean> {
+  const onDisk = await readWorktree(ctx, change.path);
+  return bytesEqual(onDisk, await readBlobAt(ctx, change.from));
+}
+
 /** Bring index and clean worktree files from commit `from` to `to`. */
 async function updateWorktree(
   ctx: RepoContext,
@@ -152,18 +186,24 @@ async function updateWorktree(
     await treeOf(ctx, from),
     await treeOf(ctx, to),
   );
+  const staged = await stagedOids(
+    ctx,
+    changes.map((c) => c.path),
+  );
   for (const change of changes) {
     const full = joinPath(ctx.git.dir, change.path);
-    const onDisk = await readWorktree(ctx, change.path);
-    if (!bytesEqual(onDisk, await readBlobAt(ctx, change.from))) {
+    // A staged edit is uncommitted work too: leave index and file alone.
+    const indexClean = staged.get(change.path) === change.from;
+    if (!indexClean || !(await worktreeClean(ctx, change))) {
       skipped.push(change.path);
     } else if (change.to) {
       await ctx.host.createDir(parentDir(full));
       await ctx.host.writeFileAtomic(full, (await readBlobAt(ctx, change.to))!);
-    } else if (onDisk) {
+    } else if (change.from) {
       await ctx.host.deleteFile(full);
     }
-    await git.resetIndex({ ...ctx.git, filepath: change.path, ref: to });
+    if (indexClean)
+      await git.resetIndex({ ...ctx.git, filepath: change.path, ref: to });
   }
   return skipped;
 }

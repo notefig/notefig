@@ -353,6 +353,17 @@ describeGit("smart HTTP remote operations (git http-backend)", () => {
     }
     const note = (clone: LocalClone) =>
       readFileSync(join(clone.repo.repoPath, "note.md"), "utf8");
+    /** Commit `edit`'s changes in b, push, and fetch the tip into a. */
+    async function upstream(edit: (dir: string) => Promise<void>) {
+      const dir = b.repo.repoPath;
+      await edit(dir);
+      await runGit(dir, ["add", "-A"]);
+      await runGit(dir, [...SYSTEM_GIT_IDENTITY, "commit", "-q", "-m", "up"]);
+      await runGit(dir, ["push", "-q", "origin", "main"]);
+      const oid = await runGit(dir, ["rev-parse", "HEAD"]);
+      await a.service.fetchRefs(remote, [{ ref: MAIN, oid }]);
+      return oid;
+    }
 
     it("default driver: overlapping edits conflict with markers and nothing moves", async () => {
       const { base, upstream, local } = await diverge(
@@ -435,6 +446,25 @@ describeGit("smart HTTP remote operations (git http-backend)", () => {
       expect(readFileSync(join(a.repo.repoPath, "mine.md"), "utf8")).toBe(
         "mine\n",
       );
+    });
+
+    it("keeps a staged edit whose worktree file was put back", async () => {
+      const dir = a.repo.repoPath;
+      const committed = note(a);
+      await writeFileText(join(dir, "note.md"), "staged\n");
+      await runGit(dir, ["add", "note.md"]);
+      await writeFileText(join(dir, "note.md"), committed);
+      const oid = await upstream((up) =>
+        writeFileText(join(up, "note.md"), "new\n"),
+      );
+
+      expect(await a.service.rebaseOnto({ theirs: oid })).toEqual({
+        status: "fast-forward",
+        oid,
+        skippedDirty: ["note.md"],
+      });
+      expect(await runGit(dir, ["show", ":note.md"])).toBe("staged");
+      expect(note(a)).toBe(committed);
     });
 
     it("fast-forwards, leaving an uncommitted edit alone", async () => {
