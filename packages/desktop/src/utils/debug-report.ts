@@ -4,7 +4,6 @@
  * that renders the panel can still use it.
  */
 import type { LayoutNode } from "@/components/dockable";
-import type { GitRow } from "@/modules/git";
 
 export interface DebugConsoleEntry {
   level: "log" | "info" | "warn" | "error";
@@ -19,11 +18,6 @@ export interface DebugSnapshot {
   dockableLayout: LayoutNode[];
   openTabs: string[];
   activeTabId: string | null;
-  git: {
-    rows: GitRow[] | null;
-    error: { message: string } | null;
-    updatedAt: number;
-  };
 }
 
 export function formatDebugReport(
@@ -36,7 +30,7 @@ export function formatDebugReport(
     consoleEntries?: readonly DebugConsoleEntry[];
   } = {},
 ): string {
-  const { basePath, searchParams, dockableLayout, openTabs, activeTabId, git } =
+  const { basePath, searchParams, dockableLayout, openTabs, activeTabId } =
     snapshot;
   const rawUrl = window.location.pathname + window.location.search;
   let decoded: string;
@@ -87,16 +81,6 @@ export function formatDebugReport(
     lines.push(JSON.stringify(dockableLayout, null, 2));
     lines.push("");
   }
-
-  lines.push("── Git Status Cache ──");
-  lines.push(
-    `updatedAt: ${git.updatedAt ? new Date(git.updatedAt).toISOString() : "(none)"}`,
-  );
-  if (git.error) {
-    lines.push(`error: ${git.error.message}`);
-  }
-  lines.push(JSON.stringify(git.rows, null, 2));
-  lines.push("");
 
   if (consoleEntries.length > 0) {
     lines.push(`── Console Output (${consoleEntries.length} entries) ──`);

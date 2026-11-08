@@ -60,6 +60,27 @@ const nestedTool = {
   },
 } satisfies AgentTool<{ payload: { prompt: string } }, { prompt: string }>;
 
+/** A tool that asks the user before it runs, which no desktop tool does. */
+const guardedTool = {
+  name: "guarded_write",
+  title: "agentToolWidgetRespond",
+  description: "Write after the user agrees.",
+  requiresPermission: true,
+  input: z.object({ path: z.string() }),
+  async execute() {
+    return { ok: true, value: null };
+  },
+} satisfies AgentTool<{ path: string }, null>;
+
+/** The real registry plus the guarded stub. */
+const withGuardedTool = {
+  list: () => [...toolRegistry, guardedTool as unknown as AgentTool<unknown, unknown>],
+  get: (name: string) =>
+    name === guardedTool.name
+      ? (guardedTool as unknown as AgentTool<unknown, unknown>)
+      : getTool(name),
+};
+
 /** A tool call that failed as a tool execution error: its message. */
 function failure(response: { result?: unknown; error?: unknown } | null): string {
   expect(response?.error).toBeUndefined();
@@ -217,10 +238,7 @@ describe("createMcpRequestHandler", () => {
         "workspace_list_documents",
         "workspace_read_document",
         "workspace_open_files",
-        "history_log",
-        "history_diff",
-        "history_checkpoint",
-        "history_restore",
+        "document_read_range",
         "widget_respond",
       ]),
     );
@@ -339,14 +357,11 @@ describe("createMcpRequestHandler", () => {
 
   it("tools/call: a requiresPermission tool blocks on the broker and returns isError on deny", async () => {
     const broker = new PermissionBroker(ctx.taskId, store.permissionRequests);
-    const pending = handler(broker)({
+    const pending = handler(broker, withGuardedTool)({
       jsonrpc: "2.0",
       id: 6,
       method: "tools/call",
-      params: {
-        name: "history_restore",
-        arguments: { path: "notes.md", checkpoint: "abc123" },
-      },
+      params: { name: guardedTool.name, arguments: { path: "notes.md" } },
     });
 
     const row = store.permissionRequests.toArray.find(

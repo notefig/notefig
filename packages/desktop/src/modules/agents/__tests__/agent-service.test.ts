@@ -71,9 +71,6 @@ function createMcpEndpoint(): McpEndpoint {
   mcpEndpoints.push(endpoint);
   return endpoint as unknown as McpEndpoint;
 }
-// History auto-checkpointing (Stage 2) is exercised separately; keep these
-// tests focused on the turn machinery, not git plumbing.
-
 // A fresh agent layer per test, over the fakes above. Tasks reach their
 // workspace's documents through it, over the same fake fs.
 let deps: AgentRuntimeDeps;
@@ -1237,10 +1234,10 @@ describe("MCP tool calls (Stage 3.5)", () => {
       a.update("sess_test", {
         sessionUpdate: "tool_call",
         toolCallId: "call_1",
-        title: "mcp__notefig__history_restore",
-        kind: "edit",
+        title: "mcp__notefig__workspace_read_document",
+        kind: "read",
         status: "pending",
-        rawInput: { path: "notes.md", checkpoint: "abc123" },
+        rawInput: { path: "notes.md", line: 1 },
       });
       // A bare status flip with no rawInput at all — must not regress locations.
       a.update("sess_test", {
@@ -1253,7 +1250,7 @@ describe("MCP tool calls (Stage 3.5)", () => {
 
     const task = new TaskManager(deps, "/ws").createTask(harness);
     await task.start(() => client);
-    await runPrompt(task, "restore");
+    await runPrompt(task, "read");
 
     const tools = toolEntries(task.taskId);
     expect(tools[0].toolCall?.locations).toEqual([{ path: "/ws/notes.md" }]);

@@ -124,8 +124,8 @@ module list from `packages/desktop/src/core/app-core.ts`, then calls
   boundary rules (the root `.fallowrc.json`, which CI audits from) fail a
   commit that imports an adapter implementation from app code. There is no
   ambient core: code outside React is handed what it uses.
-- A per-workspace API is reached through core: `core.workspace(ws).git`,
-  or `useWorkspaceModule(ws, "git")` in React; an app-wide one and every
+- A per-workspace API is reached through core: `core.workspace(ws).files`,
+  or `useWorkspaceModule(ws, "files")` in React; an app-wide one and every
   service straight off core: `core.kv`, `const { kv, platform } =
   useCore()`. No hook only hands back what core already exposes
   (`useAgents()`, `usePlatform()`); a hook in `react.ts` earns its place by

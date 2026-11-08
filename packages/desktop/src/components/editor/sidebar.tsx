@@ -34,7 +34,6 @@ import {
 } from "@/components/editor/workspace-tools";
 import { SidebarSeparator } from "@/components/editor/tool-bar";
 import { SessionsPanel } from "@/components/agent/sessions-panel";
-import { CheckpointPanel } from "@/components/editor/git/checkpoint-panel";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { useAttention } from "@/hooks/use-attention";
 import {
@@ -306,8 +305,6 @@ function ToolContent({
       return (
         <SearchPanel ref={searchPanelRef} workspacePath={searchWorkspacePath} />
       );
-    case "git":
-      return <CheckpointPanel workspacePath={workspacePath} />;
     case "sessions":
       return (
         <SessionsPanel

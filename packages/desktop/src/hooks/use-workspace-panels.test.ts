@@ -7,7 +7,7 @@ describe("readSidebarView", () => {
   });
 
   it("reads every known view", () => {
-    for (const view of ["everything", "files", "search", "git", "sessions"]) {
+    for (const view of ["everything", "files", "search", "sessions"]) {
       expect(readSidebarView(new URLSearchParams({ sidebarView: view }))).toBe(
         view,
       );

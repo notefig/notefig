@@ -144,12 +144,3 @@ export const DEMO_TRANSCRIPT: AgentEntry[] = [
     text: "Done. **Three themes** from six interviews: onboarding friction, search, and small-team pricing. Each theme cites the interviews it came from.",
   }),
 ];
-
-/** The commit history panel's rows (newest first, as the app lists them). */
-export const DEMO_CHECKPOINTS = [
-  { id: "c5", hash: "a41f9c2", message: "Summarize customer interviews", timestamp: new Date(minutes(2)) },
-  { id: "c4", hash: "7be0d13", message: "Edit roadmap.md", timestamp: new Date(minutes(14)) },
-  { id: "c3", hash: "3f02a9e", message: "Draft the Q3 plan", timestamp: new Date(minutes(62)) },
-  { id: "c2", hash: "c9d71b4", message: "Action items from kickoff", timestamp: new Date(minutes(180)) },
-  { id: "c1", hash: "58e6d0a", message: "Initial notes", timestamp: new Date(minutes(1440)) },
-];
