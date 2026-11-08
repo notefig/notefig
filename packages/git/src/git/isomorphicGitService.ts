@@ -1,6 +1,7 @@
 import git from "isomorphic-git";
-import type { FsClient } from "isomorphic-git";
+import type { FsClient, MergeResult } from "isomorphic-git";
 
+import { toIsomorphicHttp } from "./httpClient";
 import { createIsomorphicGitFs } from "./isomorphicGitFs";
 import {
   GitError,
@@ -8,19 +9,23 @@ import {
   type GitCheckoutPathsInput,
   type GitCommitInput,
   type GitCreateBranchInput,
-  type GitFetchInput,
+  type GitErrorCode,
   type GitFileChange,
   type GitInitInput,
   type GitListBranchesInput,
   type GitLogInput,
-  type GitPullInput,
-  type GitPushInput,
+  type GitMergeInput,
+  type GitPushRefInput,
   type GitReadTextFileInput,
+  type GitRemote,
+  type GitRemoteRef,
+  type GitRemoteRefResult,
   type GitRemoveInput,
   type GitAddAllAndCommitInput,
   type GitRepoRef,
   type GitRevertCommitInput,
   type GitService,
+  type GitServiceDeps,
   type GitStorageHost,
   type RepoStatus,
   type GitSwitchBranchInput,
@@ -28,6 +33,15 @@ import {
 } from "./types";
 
 const textEncoder = new TextEncoder();
+
+const ZERO_OID = "0".repeat(40);
+
+/**
+ * The remote fetch reads its refspec from. isomorphic-git's `fetch` won't
+ * run without one in the config, and sync workspaces are clones, so they
+ * have `origin`'s; the URL is always the caller's.
+ */
+const FETCH_REMOTE = "origin";
 
 function joinGitPath(repoPath: string, relativePath: string): string {
   const base = repoPath.endsWith("/") ? repoPath.slice(0, -1) : repoPath;
@@ -52,15 +66,52 @@ function toGitError(error: unknown): GitError {
       ? String((error as { message: unknown }).message)
       : "Unknown git error";
 
-  switch (name) {
-    case "NotFoundError":
-      return new GitError("RepoNotFound", message, error);
-    case "FastForwardError":
-    case "PushRejectedError":
-      return new GitError("NotFastForward", message, error);
-    default:
-      return new GitError("CorruptRepository", message, error);
+  if (name === "HttpError") {
+    const status = (error as { data?: { statusCode?: number } }).data
+      ?.statusCode;
+    return new GitError(codeForStatus(status), message, error);
   }
+  return new GitError(
+    CODE_BY_NAME[name] ?? "CorruptRepository",
+    message,
+    error,
+  );
+}
+
+const CODE_BY_NAME: Record<string, GitErrorCode> = {
+  NotFoundError: "RepoNotFound",
+  FastForwardError: "NotFastForward",
+  PushRejectedError: "NotFastForward",
+  GitPushError: "PushRejected",
+  MergeConflictError: "MergeRequired",
+  MergeNotSupportedError: "UnsupportedOperation",
+  NoRefspecError: "InvalidInput",
+  ObjectTypeError: "InvalidInput",
+  // The remote answered, but not in the git protocol.
+  SmartHttpError: "RemoteError",
+  ParseError: "RemoteError",
+  EmptyServerResponseError: "RemoteError",
+  UnknownTransportError: "RemoteError",
+};
+
+function codeForStatus(status: number | undefined): GitErrorCode {
+  switch (status) {
+    case 401:
+      return "AuthRequired";
+    case 403:
+      return "AuthFailed";
+    case 404:
+      return "RepoNotFound";
+    case 429:
+      return "Throttled";
+    default:
+      return "RemoteError";
+  }
+}
+
+function isMissingRemoteRef(error: unknown, ref: string): boolean {
+  const { name, data } = error as { name?: string; data?: { what?: string } };
+  return name === "NotFoundError" && data?.what === ref;
 }
 
 function validateMessage(message: string): void {
@@ -184,6 +235,7 @@ export class IsomorphicGitService implements GitService {
   constructor(
     private readonly host: GitStorageHost,
     repo: GitRepoRef,
+    private readonly deps: GitServiceDeps = {},
   ) {
     this.fsClient = createIsomorphicGitFs(host);
     this.dir = repo.repoPath;
@@ -786,28 +838,125 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async fetch(
-    _input: GitFetchInput,
-  ): Promise<import("isomorphic-git").FetchResult> {
-    throw new GitError(
-      "UnsupportedOperation",
-      "Fetch is not implemented in v1.",
-    );
+  private remote(remote: GitRemote) {
+    if (!this.deps.http) {
+      throw new GitError(
+        "UnsupportedOperation",
+        "Remote operations need an http client.",
+      );
+    }
+    return {
+      http: toIsomorphicHttp(this.deps.http, remote.credential),
+      url: remote.url,
+    };
   }
 
-  async pull(_input: GitPullInput): Promise<void> {
-    throw new GitError(
-      "UnsupportedOperation",
-      "Pull is not implemented in v1.",
-    );
+  async listRemoteRefs(
+    remote: GitRemote,
+    prefixes: string[] = [],
+  ): Promise<GitRemoteRef[]> {
+    try {
+      // Protocol v1 lists every ref in one GET, filtered here; v2 filters
+      // on the server but costs a capability round trip and one prefix per call.
+      const refs = await git.listServerRefs({
+        ...this.remote(remote),
+        protocolVersion: 1,
+      });
+      return refs
+        .filter(
+          ({ ref }) =>
+            prefixes.length === 0 || prefixes.some((p) => ref.startsWith(p)),
+        )
+        .map(({ ref, oid }) => ({ ref, oid }));
+    } catch (error) {
+      throw this.fail(error);
+    }
   }
 
-  async push(
-    _input: GitPushInput,
-  ): Promise<import("isomorphic-git").PushResult> {
-    throw new GitError(
-      "UnsupportedOperation",
-      "Push is not implemented in v1.",
-    );
+  async fetchRefs(
+    remote: GitRemote,
+    refs: string[],
+  ): Promise<GitRemoteRefResult[]> {
+    const results: GitRemoteRefResult[] = [];
+    try {
+      // isomorphic-git fetches one remote ref per call (an advertisement
+      // GET, then an upload-pack POST).
+      for (const ref of refs) {
+        try {
+          const { fetchHead } = await git.fetch({
+            fs: this.fsClient,
+            dir: this.dir,
+            gitdir: this.gitdir,
+            cache: this.cache,
+            ...this.remote(remote),
+            remote: FETCH_REMOTE,
+            remoteRef: ref,
+            singleBranch: true,
+            tags: false,
+          });
+          results.push({ ref, oid: fetchHead });
+        } catch (error) {
+          if (!isMissingRemoteRef(error, ref)) throw error;
+          results.push({ ref, oid: null });
+        }
+      }
+      return results;
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  /**
+   * isomorphic-git's `push` sends a local ref; an oid stands in for one
+   * (it passes 40 hex digits through), so no temporary local ref is
+   * written. It does write a tracking ref `refs/remotes/origin/<remote ref
+   * minus refs/heads>` after each push, even for non-branch refs. It walks
+   * `oid` as a commit, so a blob can't be pushed (`InvalidInput`).
+   */
+  async pushRef(remote: GitRemote, input: GitPushRefInput): Promise<void> {
+    try {
+      await git.push({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        ...this.remote(remote),
+        ref: input.delete ? ZERO_OID : input.oid,
+        remoteRef: input.ref,
+        delete: input.delete,
+        force: input.force,
+        // The only hook isomorphic-git runs with the remote ref's oid as
+        // it found it, before sending anything.
+        onPrePush: ({ remoteRef }) => {
+          if (
+            input.expect !== undefined &&
+            remoteRef.oid !== (input.expect ?? ZERO_OID)
+          ) {
+            throw new GitError(
+              "RefConflict",
+              `${input.ref} is at ${remoteRef.oid}, not ${input.expect ?? "absent"}.`,
+            );
+          }
+          return true;
+        },
+      });
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async merge(input: GitMergeInput): Promise<MergeResult> {
+    try {
+      return await git.merge({
+        ...input,
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        mergeDriver: this.deps.mergeDriver,
+      });
+    } catch (error) {
+      throw this.fail(error);
+    }
   }
 }

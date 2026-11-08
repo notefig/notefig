@@ -15,7 +15,7 @@
 import { Buffer } from "buffer";
 
 import { createGitWorkerApi, type GitWorkerApi } from "./workerBoundary";
-import type { GitRepoRef, GitStorageHost } from "./types";
+import type { GitRepoRef, GitServiceDeps, GitStorageHost } from "./types";
 
 /** First message the main thread sends after constructing the worker. */
 export interface GitWorkerInitMessage {
@@ -27,6 +27,8 @@ export interface GitWorkerInitMessage {
 /** What the app supplies: its storage host and its RPC transport. */
 export interface GitWorkerWiring {
   createHost: (repo: GitRepoRef) => GitStorageHost;
+  /** The http client and merge driver, if the app provides them. */
+  deps?: GitServiceDeps;
   /** Serve the built API over the app's worker RPC. */
   expose: (api: GitWorkerApi) => void;
 }
@@ -65,7 +67,7 @@ export function startGitWorker(
       (globalThis as Record<string, unknown>)[key] = value;
     }
     const wiring = await createWiring();
-    wiring.expose(createGitWorkerApi(wiring.createHost));
+    wiring.expose(createGitWorkerApi(wiring.createHost, wiring.deps));
   };
 
   scope.addEventListener("message", onInit);
