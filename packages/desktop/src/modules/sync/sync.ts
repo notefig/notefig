@@ -60,9 +60,11 @@ export interface WorkspaceSync {
   decline(): Promise<void>;
   /** Commit `sync.enabled: false` and push it; every device stops. */
   turnOffForEveryone(): Promise<void>;
-  /** Carry on from a stop (new credential, keep local files, or go after
-   *  the offline-return question). */
+  /** Carry on from a stop (new credential, or go after the offline-return
+   *  question). */
   resume(): void;
+  /** Clear the flags on text a merge overwrote. */
+  dismissOverwritten(): void;
   syncNow(): Promise<void>;
   /** Resolves once the open-time read is done and the engine started. */
   whenReady(): Promise<void>;
@@ -320,6 +322,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
         void evaluate();
       }
     },
+    dismissOverwritten: () => dispatch({ type: "dismiss-overwritten" }),
     syncNow: async () => {
       await chain;
       await engine?.syncNow();

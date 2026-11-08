@@ -703,7 +703,11 @@ i18n
           syncStopHere: "Stop on this device",
           syncTurnOff: "Turn off for everyone",
           syncTurnOffConfirm: "Everyone stops syncing. Turn off?",
-          syncKeepMine: "Keep my versions and go on",
+          syncRetry: "Try again",
+          syncOverwritten_one: "A newer edit replaced this text of yours:",
+          syncOverwritten_other: "Newer edits replaced {{count}} pieces of your text:",
+          syncOverwrittenBinary: "Your version of this file was replaced.",
+          syncDismiss: "Dismiss",
           syncPausedSummary:
             "You have {{local}} local changes since {{when}}; the remote has {{remote}} from {{people}}. Sync when you're ready.",
           syncNever: "you started",
