@@ -29,6 +29,7 @@ import type {
 } from "@notefig/shared/agent";
 import type { DirectiveSource } from "./composer/mention-suggestion";
 import type { DictationHost } from "@notefig/dictation";
+import type { OpenIntent } from "@notefig/ui/open-intent";
 
 /** Where in the document a widget's prompt was sent from. */
 export interface WidgetPromptTarget {
@@ -168,8 +169,13 @@ export interface PromptWidgetHost {
   directives(args: { workspacePath: string; taskId: string | null }): DirectiveSource[];
 
   // ── app chrome ───────────────────────────────────────────────────────
-  openFile(path: string): void;
-  openAgentTab(taskId: string): void;
+  /**
+   * Open a document, or a session's chat, as the user's gesture asks
+   * (`openIntentOf`): in place of the tab in front unless it says
+   * "new-tab" — the way every link in the app opens.
+   */
+  openFile(path: string, intent?: OpenIntent): void;
+  openAgentTab(taskId: string, intent?: OpenIntent): void;
   /**
    * Claim focus for the document, through the app's focus arbiter — an
    * explicit hand-off, so `steal` is the widget's to ask for. The caret is

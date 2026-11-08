@@ -354,9 +354,12 @@ export function usePromptWidgetHost(): PromptWidgetHost {
           directiveContext(core, path, taskId, latest.current.defaultHarness.id),
         ),
 
-      openFile: (path) =>
-        void latest.current.tabs.open(path, { intent: "new-tab" }),
-      openAgentTab: (taskId) => latest.current.tabs.openAgent(taskId),
+      // Links in agent output open as every link does (ui/open-intent):
+      // in place of the tab in front, a new tab when the gesture asks.
+      openFile: (path, intent = "replace") =>
+        void latest.current.tabs.open(path, { intent }),
+      openAgentTab: (taskId, intent = "replace") =>
+        latest.current.tabs.openAgent(taskId, { intent }),
       // Kept alive until it can land: the widget's claim on a new document
       // is ambient, so it waits out a live text entry (the tree's create
       // field closing) instead of being dropped on the first refusal.

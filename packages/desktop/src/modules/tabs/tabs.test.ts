@@ -365,3 +365,46 @@ describe("the window in front", () => {
     }
   });
 });
+
+describe("tabs.openAgent", () => {
+  /** One window, a document in front. */
+  function oneWindow() {
+    const layout = createLayout(memoryUrlState());
+    let front: string | null = "w1";
+    const live = createTabs({
+      layout,
+      focusedWindow: {
+        get: () => front,
+        set: (id) => {
+          front = id;
+        },
+        subscribe: () => () => {},
+      },
+      canOpenFile: () => true,
+      editors: {
+        goTo: vi.fn(async () => true),
+        markdownEditor: () => undefined,
+      },
+      documents,
+    });
+    layout.update([
+      { type: "Window", id: "w1", children: ["/ws/a.md"], selected: "/ws/a.md" } as never,
+    ]);
+    return { live, layout };
+  }
+
+  it("opens a session the app opens on its own beside the tab in front", () => {
+    const { live, layout } = oneWindow();
+    live.openAgent("t1");
+    expect(layout.openTabIds()).toEqual(["/ws/a.md", "agent:t1"]);
+    expect(live.activeTabId()).toBe("agent:t1");
+  });
+
+  it("replaces the tab in front when the user's click asks to, as a file does", () => {
+    const { live, layout } = oneWindow();
+    live.openAgent("t1", { intent: "replace" });
+    expect(layout.openTabIds()).toEqual(["agent:t1"]);
+    live.openAgent("t2", { intent: "new-tab" });
+    expect(layout.openTabIds()).toEqual(["agent:t1", "agent:t2"]);
+  });
+});

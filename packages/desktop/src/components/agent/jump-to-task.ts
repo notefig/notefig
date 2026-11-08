@@ -9,6 +9,7 @@
 import type { PromptWidgetsApi } from "@notefig/widgets";
 import type { PromptRound } from "@/modules/prompt-rounds";
 import type { Core } from "@notefig/core";
+import type { OpenIntent } from "@notefig/ui/open-intent";
 
 export type JumpTarget = "widget" | "chat";
 
@@ -19,17 +20,24 @@ export interface Jumper {
   promptWidgets: Pick<PromptWidgetsApi, "findByTask">;
 }
 
+/** How a jump lands: in place of the tab in front, or as a new tab — the
+ *  gesture that asked for it (`openIntentOf`), "replace" by default. */
+interface JumpOptions {
+  intent?: OpenIntent;
+}
+
 export function jumpToTask(
   core: Jumper,
   taskId: string,
-  options: { turnId?: string | null } = {},
+  options: JumpOptions & { turnId?: string | null } = {},
 ): JumpTarget {
+  const intent = options.intent ?? "replace";
   const widget = core.promptWidgets.findByTask(taskId, options.turnId);
   if (widget) {
-    revealWidget(core, widget);
+    revealWidget(core, widget, intent);
     return "widget";
   }
-  core.tabs.openAgent(taskId);
+  core.tabs.openAgent(taskId, { intent });
   return "chat";
 }
 
@@ -40,12 +48,14 @@ export function jumpToTask(
 export function jumpToRound(
   core: Jumper,
   round: Pick<PromptRound, "taskId" | "turnId" | "documentPath">,
+  options: JumpOptions = {},
 ): void {
+  const intent = options.intent ?? "replace";
   const widget = core.promptWidgets.findByTask(round.taskId, round.turnId);
   if (widget && widget.boundTurnId === round.turnId) {
-    revealWidget(core, widget);
+    revealWidget(core, widget, intent);
   } else {
-    core.tabs.open(round.documentPath, { intent: "replace" });
+    core.tabs.open(round.documentPath, { intent });
   }
 }
 
@@ -54,10 +64,11 @@ export function jumpToRound(
 function revealWidget(
   core: Jumper,
   widget: { documentPath: string; blobId: string },
+  intent: OpenIntent,
 ): void {
   void core.tabs.reveal(
     widget.documentPath,
     { blockId: widget.blobId },
-    { intent: "new-tab", moveIfOpen: true },
+    { intent, moveIfOpen: true },
   );
 }

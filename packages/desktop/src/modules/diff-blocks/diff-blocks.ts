@@ -30,7 +30,12 @@ export const diffBlocksModule = defineModule({
         const label = relativeTreePath(workspace, absolute) ?? path;
         const row = ctx.workspaceHandle(workspace).files.collections.metadata.get(absolute);
         if (row?.type !== "file") return { label };
-        return { label, open: () => void tabs.open(absolute, { intent: "new-tab" }) };
+        // Opens like any link (ui/open-intent): in place, or a new tab on
+        // Mod+click or from the label's menu.
+        return {
+          label,
+          open: (intent = "replace") => void tabs.open(absolute, { intent }),
+        };
       },
       FileIcon: FileTypeIcon,
     };

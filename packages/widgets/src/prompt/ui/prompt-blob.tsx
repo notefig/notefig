@@ -37,6 +37,8 @@ import {
   DropdownMenuTrigger,
 } from "@notefig/ui/dropdown-menu";
 import { cn } from "@notefig/ui/utils";
+import { OpenInNewTabContextMenu } from "@notefig/ui/open-in-new-tab-item";
+import { openIntentOf, type OpenIntent } from "@notefig/ui/open-intent";
 import {
   sortEntriesChronologically,
   type AgentEntry,
@@ -588,10 +590,10 @@ interface PromptBlobFaceActions {
   escapeToEditor: () => void;
   /** Point this widget at a different session (the composer's picker). */
   rebindSession: (taskId: string) => void;
-  openBoundChat?: () => void;
+  openBoundChat?: (intent?: OpenIntent) => void;
   /** Open a touched document in a tab. */
-  openFile: (path: string) => void;
-  openAgentTab: (taskId: string) => void;
+  openFile: (path: string, intent?: OpenIntent) => void;
+  openAgentTab: (taskId: string, intent?: OpenIntent) => void;
 }
 
 /**
@@ -982,8 +984,10 @@ function SettledState({
         documentPath={documentPath}
         changeCounts={display.changeCounts}
         changes={display.changes}
-        onOpenFile={(path) => actions.openFile(path)}
-        onOpenChat={() => boundTaskId && actions.openAgentTab(boundTaskId)}
+        onOpenFile={(path, intent) => actions.openFile(path, intent)}
+        onOpenChat={(intent) =>
+          boundTaskId && actions.openAgentTab(boundTaskId, intent)
+        }
         onDismiss={actions.dismiss}
       />
     );
@@ -1020,9 +1024,9 @@ function SettledState({
 function openBoundChatAction(
   host: PromptWidgetHost,
   boundTaskId: string | null,
-): (() => void) | undefined {
+): ((intent?: OpenIntent) => void) | undefined {
   if (!boundTaskId) return undefined;
-  return () => host.openAgentTab(boundTaskId);
+  return (intent) => host.openAgentTab(boundTaskId, intent);
 }
 
 /**
@@ -1783,7 +1787,7 @@ function StatusRow({
   stopLabel?: string;
   /** Jump to the bound session's chat (MET-104) — present in every bound
    *  phase, so a pending prompt is one click from its full transcript. */
-  onOpenChat?: () => void;
+  onOpenChat?: (intent?: OpenIntent) => void;
 }) {
   const { t } = useTranslation();
   const secondLine = teaser ?? prompt;
@@ -1809,21 +1813,14 @@ function StatusRow({
           </div>
         )}
       </div>
-      <button
-        type="button"
-        title={t("promptBlobOpenChat")}
-        aria-label={t("promptBlobOpenChat")}
-        disabled={!onOpenChat}
+      <OpenChatButton
+        onOpenChat={onOpenChat}
         className={cn(
-          "shrink-0 rounded p-1 text-muted-foreground transition-colors",
-          onOpenChat
-            ? "cursor-pointer hover:bg-accent hover:text-foreground"
-            : "invisible",
+          "rounded p-1",
+          !onOpenChat && "invisible",
         )}
-        onClick={onOpenChat}
-      >
-        <MessageSquare className="size-3.5" />
-      </button>
+        iconClassName="size-3.5"
+      />
       <button
         type="button"
         title={t("promptBlobEdit")}
@@ -1938,7 +1935,7 @@ function TouchedFileChips({
   documentPath: string;
   changeCounts: ReadonlyMap<string, number>;
   changes: PromptChangeNavigation | undefined;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, intent?: OpenIntent) => void;
 }) {
   const { t } = useTranslation();
   if (paths.length === 0) return null;
@@ -1949,19 +1946,24 @@ function TouchedFileChips({
         const action = chipAction(path, documentPath, changeCounts, changes);
         if (action === "open" || !changes) {
           return (
-            <button
+            <OpenInNewTabContextMenu
               key={path}
-              type="button"
-              className={cn(fileChipClass, fileChipIdleClass)}
-              onClick={() => onOpenFile(path)}
+              label={t("openInNewTab")}
+              onOpenInNewTab={() => onOpenFile(path, "new-tab")}
             >
-              <FileText className="size-3" />
-              {basename(path)}
-            </button>
+              <button
+                type="button"
+                className={cn(fileChipClass, fileChipIdleClass)}
+                onClick={(event) => onOpenFile(path, openIntentOf(event))}
+              >
+                <FileText className="size-3" />
+                {basename(path)}
+              </button>
+            </OpenInNewTabContextMenu>
           );
         }
         const on = highlighting;
-        return (
+        const chip = (
           <button
             key={path}
             type="button"
@@ -1975,10 +1977,10 @@ function TouchedFileChips({
             // The dot and the tint take the colour of this widget's gutter
             // bars — the chip and the marks it shows read as one thing.
             style={{ "--prompt-change": changes.color } as CSSProperties}
-            onClick={() => {
+            onClick={(event) => {
               if (action === "toggle") return changes.toggleReview();
               changes.showChanges();
-              onOpenFile(path);
+              onOpenFile(path, openIntentOf(event));
             }}
           >
             <ChangeDot on={on} />
@@ -1988,8 +1990,62 @@ function TouchedFileChips({
             <span className="sr-only">{t("promptChangesHighlight")}</span>
           </button>
         );
+        // The toggle is this widget's own document, already in front.
+        if (action === "toggle") return chip;
+        return (
+          <OpenInNewTabContextMenu
+            key={path}
+            label={t("openInNewTab")}
+            onOpenInNewTab={() => {
+              changes.showChanges();
+              onOpenFile(path, "new-tab");
+            }}
+          >
+            {chip}
+          </OpenInNewTabContextMenu>
+        );
       })}
     </div>
+  );
+}
+
+/** The way into the bound session's transcript: a click opens its chat in
+ *  place of the tab in front, Mod+click or the menu in a new tab — as a
+ *  session row in the sidebar does. Without a session it is inert. */
+function OpenChatButton({
+  onOpenChat,
+  className,
+  iconClassName,
+}: {
+  onOpenChat?: (intent?: OpenIntent) => void;
+  className?: string;
+  iconClassName: string;
+}) {
+  const { t } = useTranslation();
+  const button = (
+    <button
+      type="button"
+      title={t("promptBlobOpenChat")}
+      aria-label={t("promptBlobOpenChat")}
+      disabled={!onOpenChat}
+      className={cn(
+        "shrink-0 text-muted-foreground transition-colors",
+        onOpenChat && "cursor-pointer hover:bg-accent hover:text-foreground",
+        className,
+      )}
+      onClick={(event) => onOpenChat?.(openIntentOf(event))}
+    >
+      <MessageSquare className={iconClassName} />
+    </button>
+  );
+  if (!onOpenChat) return button;
+  return (
+    <OpenInNewTabContextMenu
+      label={t("openInNewTab")}
+      onOpenInNewTab={() => onOpenChat("new-tab")}
+    >
+      {button}
+    </OpenInNewTabContextMenu>
   );
 }
 
@@ -2049,8 +2105,8 @@ export function DoneState({
   documentPath?: string;
   changeCounts?: ReadonlyMap<string, number>;
   changes?: PromptChangeNavigation;
-  onOpenFile: (path: string) => void;
-  onOpenChat: () => void;
+  onOpenFile: (path: string, intent?: OpenIntent) => void;
+  onOpenChat: (intent?: OpenIntent) => void;
   onDismiss: () => void;
 }) {
   const { t } = useTranslation();
@@ -2062,15 +2118,11 @@ export function DoneState({
       mark={mark}
       actions={
         <>
-          <button
-            type="button"
-            title={t("promptBlobOpenChat")}
-            aria-label={t("promptBlobOpenChat")}
-            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            onClick={onOpenChat}
-          >
-            <MessageSquare className="size-3" />
-          </button>
+          <OpenChatButton
+            onOpenChat={onOpenChat}
+            className="rounded p-0.5"
+            iconClassName="size-3"
+          />
           <button
             type="button"
             title={t("promptBlobDismiss")}

@@ -75,7 +75,10 @@ afterEach(() => {
 });
 
 describe("usePromptWidgetHost", () => {
-  it("returns the same object across re-renders", async () => {
+  // The first `await import` transforms the host's whole module graph (the
+  // widgets package included), which alone takes most of vitest's default
+  // 5s on a loaded machine; the assertion itself is instant.
+  it("returns the same object across re-renders", { timeout: 20_000 }, async () => {
     const { usePromptWidgetHost } = await import("../prompt-widget-host");
     const seen: PromptWidgetHost[] = [];
     let forceRender: () => void = () => {};

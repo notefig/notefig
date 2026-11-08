@@ -45,6 +45,8 @@ import {
   AlertDialogTitle,
 } from "@notefig/ui/alert-dialog";
 import { cn } from "@notefig/ui/utils";
+import { OpenInNewTabMenuItem } from "@notefig/ui/open-in-new-tab-item";
+import { openIntentOf, type OpenIntent } from "@notefig/ui/open-intent";
 import { copyTextToClipboard } from "@notefig/ui/clipboard";
 import type { AgentTaskRow } from "@/modules/agents/agent-collections";
 import {
@@ -191,8 +193,10 @@ export function useStartSession(workspacePath: string): {
 }
 
 /** A task from a session list, rendered as its row: the derived meta label,
- *  active when its chat tab is the active one, opening that tab on click.
- *  Shared by the workspace's sessions panel and the Everything view. */
+ *  active when its chat tab is the active one, opening that tab on click —
+ *  in place of the tab in front, or a new tab on Mod+click, as a file
+ *  opens from the tree. Shared by the workspace's sessions panel and the
+ *  Everything view. */
 export function SessionListRow({
   meta,
   activeTabId,
@@ -212,7 +216,7 @@ export function SessionListRow({
       isRunning={meta.isRunning}
       attention={byTask.get(meta.task.taskId) ?? null}
       active={agentTabId(meta.task.taskId) === activeTabId}
-      onOpen={() => tabs.openAgent(meta.task.taskId)}
+      onOpen={(intent) => tabs.openAgent(meta.task.taskId, { intent })}
     />
   );
 }
@@ -230,7 +234,8 @@ export function SessionRow({
   meta: string;
   isRunning: boolean;
   active: boolean;
-  onOpen: () => void;
+  /** Open the session's chat tab, as the gesture asks (`openIntentOf`). */
+  onOpen: (intent: OpenIntent) => void;
   className?: string;
   /** Something to point the user at here (utils/attention.ts). */
   attention?: AttentionKind | null;
@@ -245,7 +250,7 @@ export function SessionRow({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
-          onClick={onOpen}
+          onClick={(event) => onOpen(openIntentOf(event))}
           title={task.title}
           data-session-row={task.taskId}
           data-session-status={task.status}
@@ -294,23 +299,35 @@ export function SessionRow({
           )}
         </div>
       </ContextMenuTrigger>
-      <SessionRowMenu task={task} />
+      <SessionRowMenu task={task} onOpenInNewTab={() => onOpen("new-tab")} />
     </ContextMenu>
   );
 }
 
 /**
- * The session row's context menu: refresh from the harness store, copy the
- * session id / terminal resume command, delete. The right-click-then-click
+ * The session row's context menu: open its chat in a new tab (the item
+ * every openable row's menu leads with), refresh from the harness store,
+ * copy the session id / terminal resume command, delete. The right-click-then-click
  * gesture is deliberate enough that delete needs no extra confirm step (it
  * replaced the MET-91 two-step inline trash button).
  */
-export function SessionRowMenu({ task }: { task: AgentTaskRow }) {
+export function SessionRowMenu({
+  task,
+  onOpenInNewTab,
+}: {
+  task: AgentTaskRow;
+  onOpenInNewTab: () => void;
+}) {
   const { t } = useTranslation();
   const { agents } = useCore();
   const actions = useSessionActions(task);
   return (
     <ContextMenuContent>
+      <OpenInNewTabMenuItem
+        label={t("openInNewTab")}
+        onSelect={onOpenInNewTab}
+      />
+      <ContextMenuSeparator />
       <ContextMenuItem
         disabled={!actions.canRefresh}
         onSelect={() => agents.task(task.taskId).refresh()}

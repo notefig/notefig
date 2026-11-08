@@ -237,8 +237,13 @@ export interface TabsApi {
    * editor cannot open. A tab the open replaces is disposed.
    */
   open(tabId: string, options?: OpenTabOptions): boolean;
-  /** Open (or select) an agent session's chat tab, always as a new tab. */
-  openAgent(taskId: string): void;
+  /**
+   * Open (or select) an agent session's chat tab. A new tab unless the
+   * caller passes the user's gesture (`openIntentOf`): a session the app
+   * opens on its own (one just started) never replaces the tab in view,
+   * while a session row or link the user clicks opens like a file does.
+   */
+  openAgent(taskId: string, options?: Pick<OpenTabOptions, "intent">): void;
   /** Make an open tab its window's selected tab. */
   select(tabId: string): void;
   /** Move keyboard focus into a tab. */
@@ -508,9 +513,8 @@ export function createTabs({
       if (options.handoff) grantTabFocusHandoff(tabId);
       return true;
     },
-    openAgent(taskId) {
-      // A session must never replace the file tab in view.
-      tabs.open(agentTabId(taskId), { intent: "new-tab" });
+    openAgent(taskId, options = {}) {
+      tabs.open(agentTabId(taskId), { intent: options.intent ?? "new-tab" });
     },
     select(tabId) {
       if (!layout.openTabIds().includes(tabId)) return;

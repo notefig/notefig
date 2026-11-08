@@ -20,6 +20,8 @@ import { useTranslation } from "react-i18next";
 import { Braces, ChevronRight, FileDiff as FileDiffIcon } from "lucide-react";
 import { FileDiff, type FileDiffMetadata } from "@pierre/diffs";
 import { cn } from "@notefig/ui/utils";
+import { OpenInNewTabContextMenu } from "@notefig/ui/open-in-new-tab-item";
+import { openIntentOf, type OpenIntent } from "@notefig/ui/open-intent";
 import { diffStats } from "./patch";
 
 /** What a side needs besides its code: gutter, indicator, padding. */
@@ -54,8 +56,10 @@ const CSS = `
 export interface DiffFile {
   /** How to name it: workspace-relative where it is in one. */
   label: string;
-  /** Opens it; absent when it isn't a file of the workspace. */
-  open?: () => void;
+  /** Opens it — in place of the tab in front unless the gesture asks for
+   *  a new tab (`openIntentOf`); absent when it isn't a file of the
+   *  workspace. */
+  open?: (intent?: OpenIntent) => void;
 }
 
 /** What the card's header can do, numbered left to right as it shows
@@ -175,14 +179,29 @@ function Digit({ digit }: { digit: number | null }) {
   );
 }
 
-function FileLabel({ open, digit, children }: { open?: () => void; digit: number | null; children: ReactNode }) {
+function FileLabel({
+  open,
+  digit,
+  children,
+}: {
+  open?: (intent?: OpenIntent) => void;
+  digit: number | null;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
   const className = "min-w-0 truncate text-left";
   if (!open) return <span className={className}>{children}</span>;
   return (
-    <button type="button" className="flex min-w-0 cursor-pointer items-center gap-1 hover:text-foreground" onClick={open}>
-      <span className={cn(className, "hover:underline")}>{children}</span>
-      <Digit digit={digit} />
-    </button>
+    <OpenInNewTabContextMenu label={t("openInNewTab")} onOpenInNewTab={() => open("new-tab")}>
+      <button
+        type="button"
+        className="flex min-w-0 cursor-pointer items-center gap-1 hover:text-foreground"
+        onClick={(event) => open(openIntentOf(event))}
+      >
+        <span className={cn(className, "hover:underline")}>{children}</span>
+        <Digit digit={digit} />
+      </button>
+    </OpenInNewTabContextMenu>
   );
 }
 
