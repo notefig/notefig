@@ -35,6 +35,7 @@ import { recentDocumentsModule } from "@/modules/recent-documents";
 import { scratchpadLandingModule } from "@/modules/scratchpads";
 import { scratchpadsModule } from "@/modules/scratchpads";
 import { seenModule } from "@/modules/seen";
+import { syncModule } from "@/modules/sync";
 import { sessionModule } from "@/modules/session";
 import { usageModule } from "@/modules/usage";
 import { feedbackModule } from "@/modules/feedback";
@@ -73,6 +74,8 @@ export function runtimeModules(): AnyModule[] {
     scratchpadsModule,
     // `.notefig/` stays out of the user's own git.
     appDirExcludeModule,
+    // A project whose metrists.json says so syncs with its git remote.
+    syncModule,
     agentStoreModule,
     // `@model:` and `@skill:` in the composers (`core.directives`).
     agentDirectivesModule,
