@@ -393,7 +393,7 @@ static LOGIN_PATH: OnceCell<String> = OnceCell::const_new();
 /// Windows: a live registry read, NOT cached — re-resolved on every spawn so
 /// an install made mid-session is visible on the very next agent start, no
 /// app restart required. Other platforms keep the inherited PATH (None).
-async fn resolve_login_path() -> Result<Option<String>, String> {
+pub(crate) async fn resolve_login_path() -> Result<Option<String>, String> {
     #[cfg(target_os = "macos")]
     {
         LOGIN_PATH

@@ -9,9 +9,11 @@
 
 pub mod agent_proc;
 pub mod app_status;
+pub mod credentials;
 pub mod db_ops;
 pub mod file_watcher;
 pub mod fs_ops;
+pub mod git_http;
 pub mod line_stream;
 pub mod mcp_bridge;
 pub mod search;
@@ -65,6 +67,11 @@ pub fn register_handlers<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         db_ops::db_query,
         db_ops::db_close,
         db_ops::db_reset,
+        // Sync's git transport and its keychain tokens (MET-270)
+        git_http::git_http_request,
+        credentials::credentials_status,
+        credentials::credentials_set,
+        credentials::credentials_delete,
         // macOS traffic-light pinning (errors-as-values pattern)
         traffic_lights::place_traffic_lights,
         // The menu-bar item, drawn from the frontend's status
