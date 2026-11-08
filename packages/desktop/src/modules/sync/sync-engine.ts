@@ -14,8 +14,9 @@
  * 2. poll the branch (one ref advertisement);
  * 3. if the remote moved, fetch and take it in: a fast-forward, or the
  *    local commits replayed as one commit on the remote tip when they
- *    touch other files, so the branch stays linear. Files changed on both
- *    sides stop at `diverged` (the shared level brings the merge);
+ *    touch other files, so the branch stays linear. A file changed on both
+ *    sides is merged by units (`sync-merge.ts`), the replay carries the
+ *    result, and the text a collision overwrote is flagged;
  * 4. push if ahead, compare-and-swap against the polled tip. A refused
  *    push reruns the cycle (bounded, with jitter); a push with no answer
  *    may have landed, so the next poll comes soon.
@@ -35,6 +36,7 @@ import {
   pollInterval,
   isRunning,
   type SyncEvent,
+  type SyncOverwrite,
   type SyncReturnSummary,
   type SyncState,
 } from "./sync-machine";
@@ -70,14 +72,15 @@ export interface SyncEngineDeps {
 
 export interface SyncEngine {
   syncNow(): Promise<void>;
-  /** Leave a stop: after `diverged`, the next cycle keeps local files
-   *  where both sides changed; after `paused`, it goes on. */
+  /** Leave a stop and go on (after `paused`, without asking again). */
   resume(): Promise<void>;
   /** Commit and push what's left (briefly), then stop. */
   stop(): Promise<void>;
 }
 
 const MAX_PUSH_RETRIES = 3;
+const RECOVERY_PREFIX = "refs/notefig/recovery/";
+const MAX_RECOVERY_REFS = 50;
 const UNKNOWN_PUSH_RECHECK_MS = 2_000;
 const CLOSE_SYNC_MS = 5_000;
 /** Away longer than this with local changes: ask before going on. */
@@ -92,6 +95,7 @@ const SCAN_SLACK_MS = 2_000;
 const COMMIT_SCAN_SLACK_MS = 120_000;
 const METADATA_BATCH = 500;
 const SUMMARY_DEPTH = 200;
+const MARKDOWN = /\.(md|markdown)$/i;
 /** The app's folder and git's never sync. */
 const NEVER = /^(\.notefig|\.git)(\/|$)/;
 
@@ -154,7 +158,6 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   let integrated: string | null = null;
   let lastSynced = deps.lastSyncedAt;
   let lastRecorded = lastSynced ?? 0;
-  let keepLocalOnce = false;
   let returnApproved = false;
   let stopped = false;
   let running: Promise<void> | null = null;
@@ -265,12 +268,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   /** Bring index and worktree from `from` to `to` for the files that
    *  differ; the bytes are written through the documents write path, which
    *  holds back a file with unsaved edits. */
-  const moveWorktree = async (from: string, to: string) => {
+  const moveWorktree = async (from: string, to: string, written: ReadonlySet<string> = new Set()) => {
     const held: string[] = [];
     const created: string[] = [];
     const deleted: string[] = [];
     for (const filepath of await git.changedFiles(from, to)) {
-      if (NEVER.test(filepath)) continue;
+      if (NEVER.test(filepath) || written.has(filepath)) continue;
       const bytes = await git.readFile({ ref: to, filepath });
       await git.unstage({ filepath, ref: to });
       const path = absolute(filepath);
@@ -279,7 +282,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
         deleted.push(path);
         continue;
       }
-      const text = bytes.includes(0) ? null : decodeText(bytes);
+      const text = asText(bytes);
       if (text === null) {
         await deps.fs.writeBinaryFiles([{ path, data: bytes }]);
       } else if ((await deps.documents.write(path, text, { source: "sync" })) === "held") {
@@ -294,12 +297,58 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     }
     if (held.length > 0) {
       // The remote's version is committed; the unsaved edits stay in the
-      // editor. Without a merge (solo), that is a stop.
+      // editor, and saving them would overwrite it: stop.
       stop({
         type: "diverged",
         detail: `Unsaved edits kept in ${held.join(", ")} while the remote changed them. Sync stopped so neither side is lost.`,
       });
     }
+  };
+
+  /** The file holds the merge's text, staged, ready for the replay. A held
+   *  write stops the cycle; the path is re-staged when sync goes on. */
+  const writeMerged = async (filepath: string, text: string) => {
+    if (typeof dirty !== "string") dirty.add(filepath);
+    if ((await deps.documents.write(absolute(filepath), text, { source: "sync" })) === "held") {
+      stop({ type: "diverged", detail: `Unsaved edits in ${filepath} while the remote changed it. Sync stopped so neither side is lost.` });
+    }
+    await git.add({ filepath });
+  };
+
+  /** Settle a file both sides changed; true when it was written here. */
+  const settleBoth = async (
+    filepath: string,
+    base: string,
+    ours: string,
+    theirs: string,
+    replaced: Omit<SyncOverwrite, "ref">[],
+  ): Promise<boolean> => {
+    const [b, o, t] = await Promise.all([base, ours, theirs].map((ref) => git.readFile({ ref, filepath })));
+    // Deleted on one side, edited on the other: keep the edit.
+    if (t === null) return false;
+    const mine = o && asText(o);
+    const incoming = asText(t);
+    if (MARKDOWN.test(filepath) && mine != null && incoming !== null) {
+      const { mergeMarkdown } = await import("./sync-merge");
+      const { text, overwritten } = mergeMarkdown((b && asText(b)) ?? "", mine, incoming);
+      await writeMerged(filepath, text);
+      for (const lost of overwritten) replaced.push({ path: filepath, text: lost });
+      return true;
+    }
+    // Not markdown, or binary: the branch's version stands.
+    await git.unstage({ filepath, ref: theirs });
+    if (o) replaced.push({ path: filepath, text: mine ?? null });
+    return false;
+  };
+
+  /** Keep this side whole on a ref that is never pushed, before a replay
+   *  leaves it unreachable: the newest `MAX_RECOVERY_REFS` stay. */
+  const saveRecovery = async (oid: string): Promise<string> => {
+    const ref = `${RECOVERY_PREFIX}${now()}-${oid.slice(0, 8)}`;
+    await git.writeRef(ref, oid);
+    const refs = await git.listRefs(RECOVERY_PREFIX);
+    for (const old of refs.slice(0, -MAX_RECOVERY_REFS)) await git.deleteRef(old);
+    return ref;
   };
 
   const pullStep = async () => {
@@ -331,16 +380,19 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     // Replay: the local commits since `base` as one commit on `theirs`.
     const localFiles = await git.changedFiles(base!, ours);
     const local = new Set(localFiles);
-    const both = remoteFiles.filter((path) => local.has(path));
-    if (both.length > 0 && !keepLocalOnce) {
-      stop({ type: "diverged", detail: `Changed here and on the remote: ${both.join(", ")}. Sync stopped so neither side is lost.` });
-    }
+    const written = new Set<string>();
+    const replaced: Omit<SyncOverwrite, "ref">[] = [];
     for (const filepath of remoteFiles) {
       if (!local.has(filepath)) await git.unstage({ filepath, ref: theirs });
+      else if (await settleBoth(filepath, base!, ours, theirs, replaced)) written.add(filepath);
+    }
+    if (replaced.length > 0) {
+      const ref = await saveRecovery(ours);
+      deps.dispatch({ type: "overwritten", items: replaced.map((item) => ({ ...item, ref })) });
     }
     const replayed = await git.commit({ message: commitMessage(author.name, localFiles), author, parent: [theirs] });
     integrated = theirs;
-    await moveWorktree(ours, replayed);
+    await moveWorktree(ours, replayed, written);
   };
 
   // --- Offline return -------------------------------------------------------
@@ -498,14 +550,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     },
     syncNow: () => syncNow(),
     async resume() {
-      if (deps.state().fault !== "paused") keepLocalOnce = true;
       returnApproved = true;
       deps.dispatch({ type: "resume" });
-      try {
-        await syncNow();
-      } finally {
-        keepLocalOnce = false;
-      }
+      await syncNow();
     },
     async stop() {
       cancelIdle?.();
@@ -556,7 +603,9 @@ async function returnSummary(
   return { since, localFiles, remoteFiles, people };
 }
 
-function decodeText(bytes: Uint8Array): string | null {
+/** A file's text; null when it is binary. */
+function asText(bytes: Uint8Array): string | null {
+  if (bytes.includes(0)) return null;
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {

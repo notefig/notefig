@@ -36,6 +36,16 @@ export interface SyncReturnSummary {
   people: string[];
 }
 
+/** Text a merge replaced with the holder's, flagged until dismissed. */
+export interface SyncOverwrite {
+  /** `/`-separated path. */
+  path: string;
+  /** What was lost; null for a binary file. */
+  text: string | null;
+  /** The local-only ref holding the whole of this side as it was. */
+  ref: string;
+}
+
 export interface SyncState {
   setup: SyncSetup;
   /** Why sync can't run here (`setup: "unavailable"`). */
@@ -49,6 +59,7 @@ export interface SyncState {
   detail: string | null;
   /** Set while `paused`. */
   summary: SyncReturnSummary | null;
+  overwritten: SyncOverwrite[];
 }
 
 export type SyncEvent =
@@ -58,7 +69,9 @@ export type SyncEvent =
   | { type: "failed"; fault: "offline" | "throttled" | "auth-error"; detail: string }
   | { type: "diverged"; detail: string }
   | { type: "paused"; detail: string; summary: SyncReturnSummary }
-  | { type: "resume" };
+  | { type: "resume" }
+  | { type: "overwritten"; items: SyncOverwrite[] }
+  | { type: "dismiss-overwritten" };
 
 export const INITIAL_SYNC_STATE: SyncState = {
   setup: "off",
@@ -69,6 +82,7 @@ export const INITIAL_SYNC_STATE: SyncState = {
   failures: 0,
   detail: null,
   summary: null,
+  overwritten: [],
 };
 
 const RUNNING_CLEAR = { activity: "idle", fault: null, failures: 0, detail: null, summary: null } as const;
@@ -98,6 +112,8 @@ const WHILE_ON: Handlers = {
   diverged: (state, { detail }) => ({ ...state, activity: "idle", fault: "diverged", detail, summary: null }),
   paused: (state, { detail, summary }) => ({ ...state, activity: "idle", fault: "paused", detail, summary }),
   resume: (state) => ({ ...state, ...RUNNING_CLEAR, activity: state.activity }),
+  overwritten: (state, { items }) => ({ ...state, overwritten: [...state.overwritten, ...items] }),
+  "dismiss-overwritten": (state) => (state.overwritten.length === 0 ? state : { ...state, overwritten: [] }),
 };
 
 export function sameRemote(a: SyncRemote | null, b: SyncRemote | null): boolean {

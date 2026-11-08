@@ -956,6 +956,31 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
+  async writeRef(ref: string, oid: string): Promise<void> {
+    try {
+      await git.writeRef({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, ref, value: oid, force: true });
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async listRefs(prefix: string): Promise<string[]> {
+    try {
+      const names = await git.listRefs({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, filepath: prefix.replace(/\/$/, "") });
+      return names.map((name) => `${prefix.replace(/\/$/, "")}/${name}`).sort();
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async deleteRef(ref: string): Promise<void> {
+    try {
+      await git.deleteRef({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, ref });
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
   async isIgnored(filepath: string): Promise<boolean> {
     try {
       return await git.isIgnored({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, filepath });

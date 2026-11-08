@@ -236,6 +236,11 @@ export interface GitService {
   getConfig(path: string): Promise<string | undefined>;
   /** The checked-out branch's short name; null when HEAD is detached. */
   currentBranch(): Promise<string | null>;
+  /** Point a local ref at a commit, creating or moving it. */
+  writeRef(ref: string, oid: string): Promise<void>;
+  /** The full names of the local refs under a prefix (`refs/x/`), sorted. */
+  listRefs(prefix: string): Promise<string[]>;
+  deleteRef(ref: string): Promise<void>;
   /** Whether `.gitignore` / `info/exclude` patterns match a path, tracked
    *  or not. */
   isIgnored(filepath: string): Promise<boolean>;

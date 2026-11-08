@@ -26,6 +26,7 @@ function fakeSync(): WorkspaceSync {
     decline: vi.fn(async () => {}),
     turnOffForEveryone: vi.fn(async () => {}),
     resume: vi.fn(),
+    dismissOverwritten: vi.fn(),
     syncNow: vi.fn(async () => {}),
   } as unknown as WorkspaceSync;
 }
@@ -63,6 +64,15 @@ const button = (label: string) => [...document.querySelectorAll("button")].find(
 const click = (label: string) => act(async () => button(label).click());
 
 describe("the sync popover", () => {
+  it("lists what a merge overwrote until dismissed", async () => {
+    const { sync, text } = await render({ setup: "on", overwritten: [{ path: "a.md", text: "Mine.", ref: "refs/notefig/recovery/1-abc" }] });
+    expect(text()).toContain("A newer edit replaced this text of yours:");
+    expect(text()).toContain("refs/notefig/recovery/1-abc");
+    expect(text()).toContain("Mine.");
+    await click("Dismiss");
+    expect(sync.dismissOverwritten).toHaveBeenCalled();
+  });
+
   it("offers to turn on a project, naming the remote and the credential, and shows what to fix", async () => {
     const { sync, text } = await render({ setup: "off" });
     expect(text()).toContain("github.com/team/notes · main");
@@ -111,7 +121,7 @@ describe("the sync popover", () => {
   it("shows why sync stopped, and the way on", async () => {
     const diverged = await render({ setup: "on", fault: "diverged", detail: "Changed here and on the remote: a.md." });
     expect(diverged.text()).toContain("a.md");
-    await click("Keep my versions and go on");
+    await click("Try again");
     expect(diverged.sync.resume).toHaveBeenCalled();
     act(() => root?.unmount());
 

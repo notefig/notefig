@@ -26,7 +26,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@notefig/ui/popover";
 import { cn } from "@notefig/ui/utils";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import type { CredentialStatus } from "@/adapters/platform-adapter.interface";
-import type { SyncState, WorkspaceSync } from "@/modules/sync";
+import type { SyncOverwrite, SyncState, WorkspaceSync } from "@/modules/sync";
 import { useSyncState } from "@/modules/sync/react";
 
 interface Look {
@@ -85,6 +85,7 @@ export function SyncStatusCell({ workspacePath }: { workspacePath: string | null
         >
           <Icon className={cn("h-3.5 w-3.5", look.tone, look.spin && "animate-spin")} />
           <span>{t(look.label)}</span>
+          {state.overwritten.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-warning" />}
         </button>
       </PopoverTrigger>
       <PopoverContent side="top" align="start" className="w-80 space-y-3 p-3 text-xs">
@@ -137,6 +138,7 @@ export function SyncPanel({ sync, state }: { sync: WorkspaceSync; state: SyncSta
       {state.setup === "ask" && <p>{t("syncAskDescription")}</p>}
       {state.setup === "declined" && <p>{t("syncDeclinedDescription")}</p>}
       {state.setup === "on" && <SyncProblem sync={sync} state={state} />}
+      {state.overwritten.length > 0 && <Overwritten sync={sync} items={state.overwritten} />}
       <CredentialRow sync={sync} state={state} />
       {action.error && <p className="text-destructive">{action.error}</p>}
       <div className="flex flex-wrap items-center gap-2">
@@ -149,6 +151,28 @@ export function SyncPanel({ sync, state }: { sync: WorkspaceSync; state: SyncSta
         {state.setup === "on" && <SyncOnActions sync={sync} />}
       </div>
     </>
+  );
+}
+
+/** What a merge replaced with someone's newer text, to read or copy. */
+function Overwritten({ sync, items }: { sync: WorkspaceSync; items: SyncOverwrite[] }) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <p>{t("syncOverwritten", { count: items.length })}</p>
+      <ul className="max-h-40 space-y-1.5 overflow-y-auto">
+        {items.map((item, i) => (
+          <li key={i}>
+            <div className="text-muted-foreground">{item.path}</div>
+            <div className="select-text whitespace-pre-wrap">{item.text ?? t("syncOverwrittenBinary")}</div>
+          </li>
+        ))}
+      </ul>
+      <p className="select-text break-all text-muted-foreground">
+        {t("syncOverwrittenSaved", { ref: items[items.length - 1].ref })}
+      </p>
+      <Switch onClick={() => sync.dismissOverwritten()}>{t("syncDismiss")}</Switch>
+    </div>
   );
 }
 
@@ -179,7 +203,7 @@ function SyncProblem({ sync, state }: { sync: WorkspaceSync; state: SyncState })
       {state.detail && <p className={cn(state.fault === "diverged" && "text-destructive")}>{state.detail}</p>}
       {state.fault === "diverged" && (
         <Button size="sm" variant="outline" onClick={() => sync.resume()}>
-          {t("syncKeepMine")}
+          {t("syncRetry")}
         </Button>
       )}
     </div>
