@@ -44,6 +44,7 @@ import { createClaims, revertUnits, WIP_PREFIX } from "./sync-claims";
 import { createPresence, PRESENCE_PREFIX } from "./sync-presence";
 import { createSyncEditors } from "./sync-editor";
 import {
+  CLAIM_IDLE_MS,
   IDLE_COMMIT_MS,
   pollInterval,
   isRunning,
@@ -185,6 +186,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   let running: Promise<void> | null = null;
   let again = false;
   let cancelIdle: (() => void) | null = null;
+  let cancelClaimIdle: (() => void) | null = null;
+  /** No save for `CLAIM_IDLE_MS`: the next cycle lets the claims go. */
+  let claimIdleDue = false;
   let cancelPoll: (() => void) | null = null;
   const cleanups: (() => void)[] = [];
 
@@ -313,8 +317,19 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       if (!reverted || (await deps.documents.write(absolute(path), reverted.text, { source: "sync" })) === "held") continue;
       if (typeof dirty !== "string") dirty.add(path);
       wipDirty.add(path);
-      deps.dispatch({ type: "overwritten", items: reverted.dropped.map((text) => ({ path, text })) });
+      const ref = await saveRecovery(claims.ownWip()!);
+      deps.dispatch({ type: "overwritten", items: reverted.dropped.map((text) => ({ path, text, ref })) });
     }
+  };
+
+  /** Claims end `CLAIM_IDLE_MS` after the last save, or the last publish:
+   *  others always get that long to see one. */
+  const armClaimIdle = () => {
+    claimIdleDue = false;
+    cancelClaimIdle?.();
+    cancelClaimIdle = setTimer(() => {
+      claimIdleDue = true;
+    }, CLAIM_IDLE_MS);
   };
 
   /** Shared: this sitting's edits, as a WIP others can see. */
@@ -328,6 +343,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       await stageByHash(paths);
       await stageChanges(git, paths);
       await claims.publish([...dirty]);
+      armClaimIdle();
     } catch (error) {
       for (const path of paths) wipDirty.add(path);
       throw error;
@@ -568,7 +584,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       await presence.publish();
       if (releaseDue && !refused) {
         releaseDue = false;
+        claimIdleDue = false;
         await claims.release();
+      } else if (claimIdleDue) {
+        claimIdleDue = false;
+        await claims.idle();
       }
       if (refused) {
         deps.dispatch({ type: "failed", fault: "offline", detail: "The remote keeps moving; trying again soon." });
@@ -626,6 +646,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     for (const path of trees) wipDirty.add(path);
     cancelIdle?.();
     cancelIdle = setTimer(() => void syncNow(), IDLE_COMMIT_MS);
+    armClaimIdle();
   };
   const pending = () => typeof dirty === "string" || dirty.size > 0;
   const onBlur =
@@ -670,6 +691,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       }
       stopped = true;
       cancelIdle?.();
+      cancelClaimIdle?.();
       cancelPoll?.();
       for (const cleanup of cleanups.splice(0)) cleanup();
       await running?.catch(() => {});

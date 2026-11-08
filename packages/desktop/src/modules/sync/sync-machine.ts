@@ -170,6 +170,8 @@ export const SHARED_POLL_MS = 1_500;
 /** Commit once per sitting: after this long without a save, on window
  *  blur, or when the workspace closes. */
 export const IDLE_COMMIT_MS = 180_000;
+/** Claims end after this long without a save, before the sitting does. */
+export const CLAIM_IDLE_MS = 10_000;
 const OFFLINE_MAX_MS = 120_000;
 const THROTTLED_BASE_MS = 60_000;
 const THROTTLED_MAX_MS = 600_000;

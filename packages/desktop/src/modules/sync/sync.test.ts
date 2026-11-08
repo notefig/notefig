@@ -663,6 +663,20 @@ describe("sync: claims and work in progress", { timeout: 60_000 }, () => {
     await expect(runGit(remote.bare, ["rev-parse", "--verify", "refs/notefig/v1/wip/device-a"])).rejects.toThrow();
   });
 
+  it("lets claims go after 10 s without a save, and a further edit claims only what it changes", async () => {
+    const { b, ws, wsB, core } = await twoDevices();
+    const path = join(wsB, "note.md");
+    await edit(core, ws, EDITED);
+    await until(async () => expect(await b.checkWrite(path, "# Note\n\nRewritten.\n\nSecond paragraph.\n")).toMatch(/editing/));
+
+    await until(async () => expect(await b.checkWrite(path, "# Note\n\nRewritten.\n\nSecond paragraph.\n")).toBeNull());
+
+    await edit(core, ws, EDITED.replace("Second paragraph.", "Second paragraph, again."));
+    await until(async () => expect(await b.checkWrite(path, "# Note\n\nFirst paragraph.\n\nSecond, by Bob.\n")).toMatch(/editing/));
+    // The first paragraph is still uncommitted, and still free.
+    expect(await b.checkWrite(path, "# Note\n\nRewritten.\n\nSecond paragraph.\n")).toBeNull();
+  }, 60_000);
+
   it("refuses an agent's write into a unit someone else holds, naming them", async () => {
     const { b, ws, wsB, core } = await twoDevices();
     await edit(core, ws, EDITED);
@@ -679,7 +693,9 @@ describe("sync: claims and work in progress", { timeout: 60_000 }, () => {
     await edit(core, ws, EDITED);
     await edit(core, wsB, "# Note\n\nBob's paragraph.\n\nSecond paragraph.\n");
     await until(async () => expect(await read(join(wsB, "note.md"))).toContain("First paragraph"));
-    expect(b.state().overwritten).toEqual([{ path: "note.md", text: "Bob's paragraph." }]);
+    const [lost] = b.state().overwritten;
+    expect(lost).toMatchObject({ path: "note.md", text: "Bob's paragraph." });
+    expect(await runGit(wsB, ["show", `${lost.ref}:note.md`])).toContain("Bob's paragraph");
   });
 
   it("merges a peer's fold with the sitting it interrupts, and folds that sitting first", async () => {

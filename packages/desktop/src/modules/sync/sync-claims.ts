@@ -5,8 +5,10 @@
  * the units it holds: by the base version's text, so every device names a
  * unit the same way without aligning anything. Holding is having changed:
  * a unit edited or deleted is claimed, a unit created is simply yours. A
- * claim lasts as long as its device's presence, and the fold (one commit
- * per sitting) ends it by deleting the ref.
+ * claim lasts as long as its device's presence, ends after a short pause
+ * in saving (the text stays uncommitted, so a collision with it merges and
+ * is flagged), and the fold (one commit per sitting) ends what is left by
+ * deleting the ref.
  *
  * Who wins a race is deterministic, with no arbitration: of two devices
  * claiming one unit, the lower device id holds it, and the other's text
@@ -45,6 +47,23 @@ export function unitKeys(texts: string[]): string[] {
 export function changedKeys(base: string, next: string): string[] {
   const kept = new Set(unitKeys(unitTexts(next)));
   return unitKeys(unitTexts(base)).filter((key) => !kept.has(key));
+}
+
+/** `changedKeys`, without the units already let go: those whose text is
+ *  still as it was in `released`, the file when the claims last ended. */
+export function freshKeys(base: string, next: string, released: string): string[] {
+  const had = new Set(unitTexts(released));
+  const [baseTexts, nextTexts] = [unitTexts(base), unitTexts(next)];
+  const keys = unitKeys(baseTexts);
+  return unitHunks(baseTexts, nextTexts).flatMap((hunk) =>
+    pairs(hunk).flatMap(([from, count, to, added]) => {
+      const fresh =
+        added > 0
+          ? nextTexts.slice(to, to + added).some((text) => !had.has(text))
+          : baseTexts.slice(from, from + count).some((text) => had.has(text));
+      return fresh ? keys.slice(from, from + count) : [];
+    }),
+  );
 }
 
 /** A stretch of units `a` and `b` differ on: `a[from..from+removed]`
@@ -137,6 +156,10 @@ export function createClaims(deps: ClaimsDeps) {
   const absolute = (path: string) => pathutil.join(root, pathutil.fromTreePath(path));
   /** What this device published last: its claims, by document. */
   let mine: Record<string, string[]> = {};
+  /** Each document as it was when its claims last ended, this sitting. */
+  let released: Record<string, string> = {};
+  /** The last snapshot this device published. */
+  let wip: string | null = null;
   let active = false;
 
   const asText = (bytes: Uint8Array | null) => (bytes ? new TextDecoder().decode(bytes) : "");
@@ -196,7 +219,8 @@ export function createClaims(deps: ClaimsDeps) {
       const claims: Record<string, string[]> = {};
       for (const path of docs) {
         const base = asText(await git.readFile({ ref: tip.oid, filepath: path }));
-        const keys = changedKeys(base, current.get(absolute(path)) ?? "");
+        const text = current.get(absolute(path)) ?? "";
+        const keys = released[path] === undefined ? changedKeys(base, text) : freshKeys(base, text, released[path]);
         if (keys.length > 0) claims[path] = keys;
       }
       mine = claims;
@@ -208,11 +232,28 @@ export function createClaims(deps: ClaimsDeps) {
         noUpdateBranch: true,
       });
       await git.pushRef(remote, { ref: own, oid, force: true });
+      wip = oid;
+    },
+
+    ownWip: () => wip,
+
+    /** A pause in saving: others may edit these units again. Only a
+     *  further change to one claims it back. */
+    async idle() {
+      if (!active) return;
+      const paths = Object.keys(mine);
+      const { succeeded } = await deps.fs.readFiles(paths.map(absolute));
+      const current = new Map(succeeded.map((file) => [file.path, file.content]));
+      for (const path of paths) released[path] = current.get(absolute(path)) ?? "";
+      mine = {};
+      active = false;
+      await git.pushRef(remote, { ref: own, delete: true, force: true });
     },
 
     /** The sitting folded: the claims end with the ref. */
     async release() {
       mine = {};
+      released = {};
       if (!active) return;
       active = false;
       await git.pushRef(remote, { ref: own, delete: true, force: true });
