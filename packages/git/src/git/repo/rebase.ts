@@ -225,8 +225,18 @@ async function updateIndexEntry(
   change: FileChange,
   to: string,
 ): Promise<void> {
+  // Not resetIndex: where the path became a folder it would stage the tree.
+  if (!change.to) {
+    await git.updateIndex({
+      ...ctx.git,
+      filepath: change.path,
+      remove: true,
+      force: true,
+    });
+    return;
+  }
   await git.resetIndex({ ...ctx.git, filepath: change.path, ref: to });
-  if (change.to && change.to.mode !== "100644") {
+  if (change.to.mode !== "100644") {
     await git.updateIndex({
       ...ctx.git,
       filepath: change.path,
@@ -237,36 +247,85 @@ async function updateIndexEntry(
   }
 }
 
-/** Bring index and clean worktree files from commit `from` to `to`. */
+interface CheckoutPlan {
+  remove: FileChange[];
+  write: FileChange[];
+  /** Changes whose index entry follows `to` (the index held `from`). */
+  index: FileChange[];
+  /** Paths with uncommitted work, or in the way of one: left alone. */
+  skipped: string[];
+}
+
+async function planCheckout(
+  ctx: RepoContext,
+  changes: FileChange[],
+): Promise<CheckoutPlan> {
+  const staged = await stagedVersions(
+    ctx,
+    changes.map((c) => c.path),
+  );
+  const plan: CheckoutPlan = { remove: [], write: [], index: [], skipped: [] };
+  for (const change of changes) {
+    // A staged edit is uncommitted work too: leave index and file alone.
+    const indexClean = sameVersion(staged.get(change.path), change.from);
+    if (indexClean) plan.index.push(change);
+    if (!indexClean || !(await worktreeClean(ctx, change))) {
+      plan.skipped.push(change.path);
+    } else if (change.to) {
+      plan.write.push(change);
+    } else {
+      plan.remove.push(change);
+    }
+  }
+  return plan;
+}
+
+/** Delete a file, then each folder above it that this leaves empty. */
+async function removeFile(ctx: RepoContext, path: string): Promise<void> {
+  await ctx.host.deleteFile(joinPath(ctx.git.dir, path));
+  for (const dir of ancestors(path).reverse()) {
+    const full = joinPath(ctx.git.dir, dir);
+    if ((await ctx.host.readDir(full)).length > 0) return;
+    await ctx.host.removeDir(full);
+  }
+}
+
+/** A folder sits at `path`, or a file where one of its folders goes. */
+async function blocked(ctx: RepoContext, path: string): Promise<boolean> {
+  if ((await ctx.host.lstat(joinPath(ctx.git.dir, path))).isDir) return true;
+  for (const dir of ancestors(path)) {
+    const stat = await ctx.host.lstat(joinPath(ctx.git.dir, dir));
+    if (stat.exists && !stat.isDir) return true;
+  }
+  return false;
+}
+
+/**
+ * Bring index and clean worktree files from commit `from` to `to`.
+ * Removals go first, so the path a deletion frees (a file becoming a
+ * folder, or a folder a file) is free when the write needs it.
+ */
 async function updateWorktree(
   ctx: RepoContext,
   from: string,
   to: string,
 ): Promise<string[]> {
-  const skipped: string[] = [];
   const changes = await diffTrees(
     ctx,
     await treeOf(ctx, from),
     await treeOf(ctx, to),
   );
-  const staged = await stagedVersions(
-    ctx,
-    changes.map((c) => c.path),
-  );
-  for (const change of changes) {
-    const full = joinPath(ctx.git.dir, change.path);
-    // A staged edit is uncommitted work too: leave index and file alone.
-    const indexClean = sameVersion(staged.get(change.path), change.from);
-    if (!indexClean || !(await worktreeClean(ctx, change))) {
-      skipped.push(change.path);
-    } else if (change.to) {
-      await writeVersion(ctx, full, change.to);
-    } else if (change.from) {
-      await ctx.host.deleteFile(full);
-    }
-    if (indexClean) await updateIndexEntry(ctx, change, to);
+  const plan = await planCheckout(ctx, changes);
+  for (const change of plan.remove) await removeFile(ctx, change.path);
+  for (const change of plan.write) {
+    if (await blocked(ctx, change.path)) plan.skipped.push(change.path);
+    else
+      await writeVersion(ctx, joinPath(ctx.git.dir, change.path), change.to!);
   }
-  return skipped;
+  const removalsFirst = (c: FileChange) => (c.to ? 1 : 0);
+  plan.index.sort((a, b) => removalsFirst(a) - removalsFirst(b));
+  for (const change of plan.index) await updateIndexEntry(ctx, change, to);
+  return plan.skipped;
 }
 
 async function moveBranch(

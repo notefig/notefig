@@ -10,6 +10,7 @@ import {
   lstatSync,
   readFileSync,
   readlinkSync,
+  rmSync,
   statSync,
   symlinkSync,
 } from "node:fs";
@@ -519,6 +520,51 @@ describeGit("smart HTTP remote operations (git http-backend)", () => {
       expect(await stagedModes(dir)).toBe("120000 link\n100755 note.md");
       // core.symlinks=false style: the link is a file holding its target.
       expect(readFileSync(join(dir, "link"), "utf8")).toBe("note.md");
+    });
+
+    /** Upstream: docs/a.md, then note.md → note.md/inner.md and docs/ → docs. */
+    async function swapFilesAndFolders(beforeSwap?: () => Promise<void>) {
+      const first = await upstream((up) =>
+        writeFileText(join(up, "docs/a.md"), "a\n"),
+      );
+      await a.service.rebaseOnto({ theirs: first });
+      await beforeSwap?.();
+      return upstream(async (up) => {
+        rmSync(join(up, "note.md"));
+        rmSync(join(up, "docs"), { recursive: true });
+        await writeFileText(join(up, "note.md/inner.md"), "inner\n");
+        await writeFileText(join(up, "docs"), "docs\n");
+      });
+    }
+
+    it("replaces a file with a folder and a folder with a file", async () => {
+      const dir = a.repo.repoPath;
+      const oid = await swapFilesAndFolders();
+      expect(await a.service.rebaseOnto({ theirs: oid })).toEqual({
+        status: "fast-forward",
+        oid,
+        skippedDirty: [],
+      });
+      expect(readFileSync(join(dir, "note.md/inner.md"), "utf8")).toBe(
+        "inner\n",
+      );
+      expect(readFileSync(join(dir, "docs"), "utf8")).toBe("docs\n");
+      expect(await runGit(dir, ["status", "--porcelain"])).toBe("");
+    });
+
+    it("an edited file left in place blocks the file that would replace its folder", async () => {
+      const dir = a.repo.repoPath;
+      const oid = await swapFilesAndFolders(() =>
+        writeFileText(join(dir, "docs/a.md"), "edited\n"),
+      );
+      const result = await a.service.rebaseOnto({ theirs: oid });
+      expect(result).toMatchObject({ status: "fast-forward", oid });
+      if (result.status !== "fast-forward") return;
+      expect(result.skippedDirty.sort()).toEqual(["docs", "docs/a.md"]);
+      expect(readFileSync(join(dir, "docs/a.md"), "utf8")).toBe("edited\n");
+      expect(readFileSync(join(dir, "note.md/inner.md"), "utf8")).toBe(
+        "inner\n",
+      );
     });
 
     it("fast-forwards, leaving an uncommitted edit alone", async () => {
