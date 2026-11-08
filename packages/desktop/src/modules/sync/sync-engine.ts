@@ -144,6 +144,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
 
   /** Tree paths written since the last commit, or a scan / everything. */
   let dirty: Set<string> | "scan" | "all" = deps.fullScan ? "all" : "scan";
+  /** The next cycle commits: a sitting ended, or sync just started. A
+   *  poll alone only looks at the remote. */
+  let commitDue = true;
   /** The remote tip already taken in (pulled or pushed). */
   let integrated: string | null = null;
   let lastSynced = deps.lastSyncedAt;
@@ -220,6 +223,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   };
 
   const commitStep = async () => {
+    commitDue = false;
     if (typeof dirty !== "string" && dirty.size === 0) return;
     const taken = dirty;
     dirty = new Set();
@@ -233,6 +237,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       await git.commit({ message: commitMessage(author.name, all), author });
     } catch (error) {
       // Keep what wasn't committed for the next try.
+      commitDue = true;
       dirty = typeof taken === "string" ? taken : new Set([...taken, ...(dirty as Set<string>)]);
       throw error;
     }
@@ -396,7 +401,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const cycle = async () => {
     if (!isRunning(deps.state())) return;
     try {
-      await commitStep();
+      if (commitDue) await commitStep();
       let refused = await reconcile();
       for (let retry = 0; refused && retry < MAX_PUSH_RETRIES && !stopped; retry++) {
         await new Promise<void>((resume) => setTimer(resume, 200 + random() * 800));
@@ -420,20 +425,24 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     cancelPoll = setTimer(
       () => {
         cancelPoll = null;
-        void syncNow();
+        void syncNow(false);
       },
       ms ?? pollInterval(deps.state()) * (0.8 + random() * 0.4),
     );
   };
 
-  const syncNow = (): Promise<void> => {
+  /** Run a cycle; `commit` ends the sitting, a poll leaves it running. */
+  const syncNow = (commit = true): Promise<void> => {
     if (stopped) return Promise.resolve();
+    if (commit) {
+      commitDue = true;
+      cancelIdle?.();
+      cancelIdle = null;
+    }
     if (running) {
       again = true;
       return running;
     }
-    cancelIdle?.();
-    cancelIdle = null;
     running = (async () => {
       do {
         again = false;
@@ -477,7 +486,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       );
       void syncNow();
     },
-    syncNow,
+    syncNow: () => syncNow(),
     async resume() {
       if (deps.state().fault !== "paused") keepLocalOnce = true;
       returnApproved = true;

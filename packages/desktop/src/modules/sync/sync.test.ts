@@ -18,7 +18,7 @@ import { projectSettingsModule } from "@/modules/project-settings";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { disposeEditor, getOrCreateEditor, type EditorFs } from "@/components/editor/editor-store";
 import { getDocumentSync } from "@/utils/markdown-conversion";
-import { IDLE_COMMIT_MS, syncModule } from "@/modules/sync";
+import { IDLE_COMMIT_MS, POLL_MS, syncModule } from "@/modules/sync";
 import { OFFLINE_RETURN_MS } from "./sync-engine";
 
 const codec = createMarkdownCodec();
@@ -190,6 +190,28 @@ describe("sync: solo", () => {
     );
     expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nEdited again.");
     expect(sync.state()).toMatchObject({ fault: null, activity: "idle" });
+  });
+
+  it("polls through a sitting without committing, and commits when it ends", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { sync, files, remote, ws } = await setup();
+    await files.collections.content.preload();
+    const head = await runGit(ws, ["rev-parse", "HEAD"]);
+    await files.file(join(ws, "note.md")).write("# Note\n\nMid-sitting.\n");
+
+    const polls = () => remote.requests.filter((r) => r.includes("upload-pack")).length;
+    const before = polls();
+    await vi.advanceTimersByTimeAsync(POLL_MS * 1.3);
+    await vi.waitFor(() => expect(polls()).toBeGreaterThan(before));
+    await vi.waitFor(() => expect(sync.state().activity).toBe("idle"));
+    expect(await runGit(ws, ["rev-parse", "HEAD"])).toBe(head);
+
+    // The poll didn't cancel the sitting's end.
+    await vi.advanceTimersByTimeAsync(IDLE_COMMIT_MS);
+    await vi.waitFor(async () => expect(await runGit(ws, ["rev-parse", "HEAD"])).not.toBe(head), { timeout: 5_000 });
+    vi.useRealTimers();
+    await sync.syncNow();
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nMid-sitting.");
   });
 
   it("keeps .notefig/, ignored files, agent folders and the project's excludes out", async () => {
