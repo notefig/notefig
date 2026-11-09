@@ -27,6 +27,18 @@ use crate::fs_ops::percent_decode;
 pub const BRIDGE_HOST: &str = "ssh.notefig.invalid";
 const TIMEOUT: Duration = Duration::from_secs(120);
 const FLUSH: &[u8] = b"0000";
+/// Limits on what a server can make the app hold. Past them a session ends;
+/// stderr is only diagnostics, so the rest of it is read and dropped.
+#[cfg(not(test))]
+const MAX_ANSWER: usize = 1 << 30;
+#[cfg(not(test))]
+const MAX_ADVERTISEMENT: usize = 1 << 28;
+#[cfg(test)]
+const MAX_ANSWER: usize = 1 << 20;
+#[cfg(test)]
+const MAX_ADVERTISEMENT: usize = 1 << 16;
+const MAX_STDERR: usize = 1 << 16;
+const TOO_MUCH: &str = "The SSH server sent more data than Notefig can take.";
 const UNVERIFIED_HOST: u16 = 495;
 const NO_SSH: u16 = 501;
 
@@ -129,19 +141,33 @@ fn failure_status(stderr: &str) -> Option<u16> {
     None
 }
 
-/// Read pkt-lines through the flush that ends a ref advertisement.
-async fn read_advertisement(reader: &mut (impl AsyncBufRead + Unpin)) -> Option<Vec<u8>> {
+/// Read pkt-lines through the flush that ends a ref advertisement. `None` if
+/// the stream isn't one; an error if it's longer than any real one.
+async fn read_advertisement(reader: &mut (impl AsyncBufRead + Unpin)) -> Result<Option<Vec<u8>>, String> {
     let mut out = Vec::new();
     loop {
         let mut prefix = [0u8; 4];
-        reader.read_exact(&mut prefix).await.ok()?;
-        out.extend_from_slice(&prefix);
-        let length = usize::from_str_radix(std::str::from_utf8(&prefix).ok()?, 16).ok()?;
-        if length == 0 {
-            return Some(out);
+        if reader.read_exact(&mut prefix).await.is_err() {
+            return Ok(None);
         }
-        let mut line = vec![0u8; length.checked_sub(4)?];
-        reader.read_exact(&mut line).await.ok()?;
+        out.extend_from_slice(&prefix);
+        let length = std::str::from_utf8(&prefix).ok().and_then(|hex| usize::from_str_radix(hex, 16).ok());
+        let Some(length) = length else {
+            return Ok(None);
+        };
+        if length == 0 {
+            return Ok(Some(out));
+        }
+        let Some(size) = length.checked_sub(4) else {
+            return Ok(None);
+        };
+        if out.len() + size > MAX_ADVERTISEMENT {
+            return Err(TOO_MUCH.into());
+        }
+        let mut line = vec![0u8; size];
+        if reader.read_exact(&mut line).await.is_err() {
+            return Ok(None);
+        }
         out.extend_from_slice(&line);
     }
 }
@@ -163,10 +189,11 @@ async fn exchange(program: &Path, args: &[String], path: Option<&str>, input: Op
     };
     let errors = tokio::spawn(async move {
         let mut text = Vec::new();
-        let _ = stderr.read_to_end(&mut text).await;
+        let _ = (&mut stderr).take(MAX_STDERR as u64).read_to_end(&mut text).await;
+        let _ = tokio::io::copy(&mut stderr, &mut tokio::io::sink()).await;
         String::from_utf8_lossy(&text).into_owned()
     });
-    let advertised = read_advertisement(&mut stdout).await;
+    let advertised = read_advertisement(&mut stdout).await?;
     let answer = match (advertised, input) {
         (None, _) => Vec::new(),
         (Some(advertisement), None) => {
@@ -182,8 +209,12 @@ async fn exchange(program: &Path, args: &[String], path: Option<&str>, input: Op
                 drop(stdin);
             };
             let mut answer = Vec::new();
-            let (_, read) = tokio::join!(send, stdout.read_to_end(&mut answer));
+            let mut limited = (&mut stdout).take(MAX_ANSWER as u64 + 1);
+            let (_, read) = tokio::join!(send, limited.read_to_end(&mut answer));
             read.map_err(|e| e.to_string())?;
+            if answer.len() > MAX_ANSWER {
+                return Err(TOO_MUCH.into());
+            }
             answer
         }
     };
@@ -394,6 +425,34 @@ mod tests {
             let target = url(&remote, "info/refs?service=git-upload-pack");
             let error = answer_with(&ssh, None, &target, false, vec![]).await.unwrap_err();
             assert!(error.contains("Connection refused"));
+        }
+
+        async fn flooded(script: &str, suffix: &str, post: bool) -> Result<Answer, String> {
+            let (_dir, ssh, remote, _) = fixture(script);
+            let target = url(&remote, suffix);
+            let run = answer_with(&ssh, None, &target, post, vec![]);
+            tokio::time::timeout(Duration::from_secs(20), run).await.expect("a flood must end the session")
+        }
+
+        #[tokio::test]
+        async fn caps_what_it_keeps_of_stderr_but_keeps_reading_it() {
+            let script = "head -c 2000000 /dev/zero | tr '\\0' x >&2\nexit 255";
+            let error = flooded(script, "info/refs?service=git-upload-pack", false).await.unwrap_err();
+            assert_eq!(error.len(), MAX_STDERR);
+        }
+
+        #[tokio::test]
+        async fn ends_a_session_with_an_endless_advertisement() {
+            let script = "while :; do printf 0005x || exit; done";
+            let error = flooded(script, "info/refs?service=git-upload-pack", false).await.unwrap_err();
+            assert_eq!(error, TOO_MUCH);
+        }
+
+        #[tokio::test]
+        async fn ends_a_session_with_an_endless_answer() {
+            let script = "printf 0000\nexec cat /dev/zero";
+            let error = flooded(script, "git-upload-pack", true).await.unwrap_err();
+            assert_eq!(error, TOO_MUCH);
         }
 
         #[tokio::test]
