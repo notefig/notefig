@@ -34,6 +34,7 @@ import { promptWidgetsModule } from "@/modules/prompt-widgets";
 import { recentDocumentsModule } from "@/modules/recent-documents";
 import { scratchpadLandingModule } from "@/modules/scratchpads";
 import { scratchpadsModule } from "@/modules/scratchpads";
+import { gitRemoteModule } from "@/modules/git-remote";
 import { seenModule } from "@/modules/seen";
 import { sessionModule } from "@/modules/session";
 import { usageModule } from "@/modules/usage";
@@ -73,6 +74,7 @@ export function runtimeModules(): AnyModule[] {
     scratchpadsModule,
     // `.notefig/` stays out of the user's own git.
     appDirExcludeModule,
+    gitRemoteModule,
     agentStoreModule,
     // `@model:` and `@skill:` in the composers (`core.directives`).
     agentDirectivesModule,
