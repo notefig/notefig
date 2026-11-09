@@ -23,6 +23,9 @@ import {
   Home,
   MessageSquare,
   BarChart3,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  KeyRound,
 } from "lucide-react";
 import {
   Command,
@@ -46,6 +49,10 @@ import { useHotkey, formatForDisplay } from "@tanstack/react-hotkeys";
 import { useTheme } from "../theme-provider";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import { toast } from "sonner";
+import type { Core } from "@notefig/core";
+import type { CredentialStatus } from "@/adapters/platform-adapter.interface";
 import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
 import { getLocalizedCommandKeywords } from "@/utils/command-keywords";
 import { useOpenProjectFromPicker } from "@/hooks/use-open-project";
@@ -86,6 +93,69 @@ interface CommandType {
   icon: ElementType;
   shortcut?: string;
   action?: () => void | Promise<void>;
+}
+
+/** Push, pull and the credential they use, for the workspace's remote. */
+function gitCommands(core: Core, workspacePath: string, t: TFunction): CommandType[] {
+  const { credentials, gitHttp, ui } = core.platform;
+  if (!gitHttp.supported) return [];
+  const remote = () => core.workspace(workspacePath).gitRemote;
+  const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+  const showCredential = (status: CredentialStatus | null) => {
+    if (!status) toast.error(t("gitCredentialNone"));
+    else toast.success(t(`gitCredential_${status.source.replace("-", "_")}`, { username: status.username }));
+  };
+  /** Change the remote's credential, reporting what's in use after. */
+  const onCredential = (change: (url: string) => Promise<CredentialStatus | null | undefined>) => async () => {
+    try {
+      const found = await remote().target();
+      if ("problem" in found) throw new Error(found.problem);
+      const status = await change(found.url);
+      if (status !== undefined) showCredential(status);
+    } catch (error) {
+      toast.error(errorText(error));
+    }
+  };
+
+  const git = (id: string, labelKey: string, icon: ElementType, action: () => void | Promise<void>): CommandType => ({
+    id,
+    labelKey,
+    groupKey: "git",
+    keywordKey: `commandKeywords.${labelKey}`,
+    icon,
+    action,
+  });
+  return [
+    git("git-push", "gitPush", ArrowUpFromLine, () => {
+      toast.promise(remote().push(), {
+        loading: t("gitPushing"),
+        success: ({ branch, pushed }) => (pushed ? t("gitPushed", { branch }) : t("gitUpToDate")),
+        error: errorText,
+      });
+    }),
+    git("git-pull", "gitPull", ArrowDownToLine, () => {
+      toast.promise(remote().pull(), {
+        loading: t("gitPulling"),
+        success: (count) => (count === 0 ? t("gitUpToDate") : t("gitPulled", { count })),
+        error: errorText,
+      });
+    }),
+    git(
+      "git-use-token",
+      "gitUseToken",
+      KeyRound,
+      onCredential(async (url) => {
+        const token = await ui.promptText({
+          title: t("gitTokenTitle", { where: url.replace(/^https:\/\//, "").replace(/\.git$/, "") }),
+          message: t("gitTokenMessage"),
+          secret: true,
+        });
+        return token?.trim() ? credentials.set(url, token) : undefined;
+      }),
+    ),
+    git("git-use-credentials", "gitUseCredentials", KeyRound, onCredential((url) => credentials.delete(url))),
+  ];
 }
 
 /** "Send Feedback", in builds that ship with a support URL. */
@@ -378,6 +448,7 @@ function usePaletteCommands(props: PaletteCommandProps): CommandType[] {
         icon: Moon,
         action: swapTheme,
       },
+      ...gitCommands(core, workspacePath, t),
       ...helpCommands(core.feedback),
     ];
     return commands;
@@ -397,6 +468,8 @@ function usePaletteCommands(props: PaletteCommandProps): CommandType[] {
     onSearchInFiles,
     swapTheme,
     handleOpenFolder,
+    core,
+    t,
     core.feedback,
     core.workspace,
   ]);
@@ -458,6 +531,7 @@ function CommandPaletteGroups({
     "file",
     "edit",
     "view",
+    "git",
     "tools",
     "settings",
     "help",

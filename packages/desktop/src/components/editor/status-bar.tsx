@@ -4,11 +4,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@notefig/ui/utils";
 import { TunnelStatus } from "@/components/tunnel/tunnel-status";
 import { useContentFetching, useOpenFileRows } from "@/modules/files/react";
-import {
-  useFocusedWorkspace,
-  useWorkspaceOfPath,
-} from "@/modules/workspaces/react";
-import { GitRemoteCell } from "@/components/git-remote/git-remote-status";
+import { useWorkspaceOfPath } from "@/modules/workspaces/react";
 import { fileTabPath } from "@/modules/tabs";
 
 interface StatusBarProps {
@@ -74,7 +70,6 @@ export function StatusBar({ activeTabId, direction = "ltr" }: StatusBarProps) {
   const content = useActiveFileContent(activeTabId);
   const wordCount = useMemo(() => countWords(content), [content]);
   const debouncedSynced = useDebouncedSyncState(!useContentFetching());
-  const focusedWorkspace = useFocusedWorkspace();
 
   return (
     <div
@@ -84,7 +79,6 @@ export function StatusBar({ activeTabId, direction = "ltr" }: StatusBarProps) {
       )}
     >
       <SaveCell synced={debouncedSynced} />
-      <GitRemoteCell workspacePath={focusedWorkspace} />
       {wordCount !== null && <WordCountCell count={wordCount} />}
       <TunnelStatus />
     </div>

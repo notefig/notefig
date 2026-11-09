@@ -6,6 +6,7 @@ import { createIsomorphicGitFs } from "./isomorphicGitFs";
 import {
   GitError,
   type GitAddInput,
+  type GitStatusInput,
   type GitCheckoutPathsInput,
   type GitCommitInput,
   type GitCreateBranchInput,
@@ -345,7 +346,7 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async status(): Promise<RepoStatus> {
+  async status(input?: GitStatusInput): Promise<RepoStatus> {
     try {
       let branch: string | null = null;
 
@@ -382,6 +383,7 @@ export class IsomorphicGitService implements GitService {
         dir: this.dir,
         gitdir: this.gitdir,
         cache: this.cache,
+        ...(input?.filepaths ? { filepaths: input.filepaths } : {}),
       });
 
       const staged: GitFileChange[] = [];
@@ -849,6 +851,68 @@ export class IsomorphicGitService implements GitService {
       http: toIsomorphicHttp(this.deps.http, remote.credential),
       url: remote.url,
     };
+  }
+
+  async readFile(input: GitReadTextFileInput): Promise<Uint8Array | null> {
+    try {
+      const { blob } = await git.readBlob({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        oid: input.ref,
+        filepath: input.filepath,
+      });
+      return blob;
+    } catch (error) {
+      if ((error as { name?: string }).name === "NotFoundError") return null;
+      throw this.fail(error);
+    }
+  }
+
+  async mergeBase(a: string, b: string): Promise<string | null> {
+    try {
+      const resolve = (ref: string) =>
+        /^[0-9a-f]{40}$/.test(ref)
+          ? ref
+          : git.resolveRef({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, ref });
+      const oids = await Promise.all([resolve(a), resolve(b)]);
+      const [base] = await git.findMergeBase({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        oids,
+      });
+      return base ?? null;
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async changedFiles(from: string, to: string): Promise<string[]> {
+    try {
+      const changed = await git.walk({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        trees: [git.TREE({ ref: from }), git.TREE({ ref: to })],
+        map: async (filepath, [a, b]) => {
+          if (filepath === ".") return undefined;
+          const [oidA, oidB] = await Promise.all([a?.oid(), b?.oid()]);
+          // Equal subtrees are skipped whole (null stops the descent).
+          if (oidA === oidB) return null;
+          const [typeA, typeB] = await Promise.all([a?.type(), b?.type()]);
+          if (typeA !== "tree" && typeB !== "tree") return filepath;
+          // A file replaced by a folder (or back) is a change too.
+          return typeA === "blob" || typeB === "blob" ? filepath : undefined;
+        },
+      });
+      return (changed as string[]).sort();
+    } catch (error) {
+      throw this.fail(error);
+    }
   }
 
   async getConfig(path: string): Promise<string | undefined> {

@@ -76,6 +76,8 @@ export type TextPromptOptions = {
   defaultValue?: string;
   placeholder?: string;
   confirmLabel?: string;
+  /** Mask what is typed (a token). */
+  secret?: boolean;
 };
 
 export type MetadataChange = {

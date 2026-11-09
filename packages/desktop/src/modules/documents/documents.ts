@@ -51,6 +51,8 @@ export interface DocumentsApi {
    *  that overlaps a move of its path (`beginMove`) lands where the file
    *  settled. */
   write(path: string, content: string): Promise<void>;
+  /** The open editor holds edits not on disk yet. */
+  hasUnsavedEdits(path: string): boolean;
   /** Resolves once every write in flight for `path` has landed (or failed). */
   whenWritesSettled(path: string): Promise<void>;
   /**
@@ -131,6 +133,14 @@ export function createDocuments({
   };
 
   return {
+    hasUnsavedEdits(path) {
+      const editor = editors.markdownEditor(path);
+      if (!editor || editor.isDestroyed) return false;
+      const sync = getDocumentSync(path);
+      sync.flushPendingEdits?.();
+      return sync.isDirty();
+    },
+
     async read(path, options) {
       assertAbsolute(path);
       const result = await fs.readFiles([path]);

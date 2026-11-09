@@ -153,6 +153,10 @@ export interface GitStorageHost {
   unlock(name: string): Promise<void>;
 }
 
+export interface GitStatusInput {
+  /** Repo-relative, `/`-separated paths or folders; omitted, the whole tree. */
+  filepaths?: string[];
+}
 export type GitAddInput = GitOpInput<AddParams>;
 export type GitInitInput = GitOpInput<InitParams>;
 export type GitUnstageInput = GitOpInput<ResetIndexParams>;
@@ -200,7 +204,8 @@ export type GitReadTextFileInput = {
 
 export interface GitService {
   init(input?: GitInitInput): ReturnType<typeof igInit>;
-  status(): Promise<RepoStatus>;
+  /** `filepaths` limits the walk to these paths (or folders under them). */
+  status(input?: GitStatusInput): Promise<RepoStatus>;
   add(input: GitAddInput): ReturnType<typeof igAdd>;
   remove(input: GitRemoveInput): ReturnType<typeof igRemove>;
   unstage(input: GitUnstageInput): ReturnType<typeof igResetIndex>;
@@ -215,6 +220,14 @@ export interface GitService {
   log(input: GitLogInput): ReturnType<typeof igLog>;
   /** Read a text file's content as of a given ref/commit (for history diff/restore). */
   readTextFile(input: GitReadTextFileInput): Promise<string>;
+  /** A file's bytes as of a ref/commit; null when it isn't there. */
+  readFile(input: GitReadTextFileInput): Promise<Uint8Array | null>;
+  /** The file paths whose content differs between two commits (oids or
+   *  refs): added, modified or deleted, `/`-separated, sorted. */
+  changedFiles(from: string, to: string): Promise<string[]>;
+  /** The best common ancestor of two commits (oids or refs); null when
+   *  they share no history. */
+  mergeBase(a: string, b: string): Promise<string | null>;
   /** A config value (`remote.origin.url`), from the repo's own config;
    *  undefined when unset. */
   getConfig(path: string): Promise<string | undefined>;

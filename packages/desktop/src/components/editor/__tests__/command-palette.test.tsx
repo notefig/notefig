@@ -125,6 +125,7 @@ beforeEach(async () => {
       workspacesModule,
       defineModule({ name: "feedback", register: () => feedback }),
     ],
+    platform: { gitHttp: { supported: false, request: vi.fn() } },
   });
   testCore.boot();
   await testCore.workspace(WS).open();
