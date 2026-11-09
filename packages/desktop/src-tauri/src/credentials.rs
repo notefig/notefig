@@ -113,7 +113,7 @@ fn find_tool(name: &str, path: Option<&str>) -> Option<PathBuf> {
 }
 
 /// Run a tool non-interactively; its stdout on success.
-async fn run_tool(name: &str, args: &[&str], input: Option<String>) -> Option<String> {
+async fn run_tool(name: &str, args: &[&str], input: Option<String>, repo: Option<&str>) -> Option<String> {
     let path = crate::agent_proc::resolve_login_path().await.ok().flatten().or_else(|| std::env::var("PATH").ok());
     let program = find_tool(name, path.as_deref())?;
     let mut command = Command::new(program);
@@ -128,6 +128,10 @@ async fn run_tool(name: &str, args: &[&str], input: Option<String>) -> Option<St
         .kill_on_drop(true);
     if let Some(path) = path {
         command.env("PATH", path);
+    }
+    // From inside the repository, so its own config and includes apply.
+    if let Some(dir) = repo.filter(|dir| Path::new(dir).is_dir()) {
+        command.current_dir(dir);
     }
     #[cfg(windows)]
     command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
@@ -147,22 +151,22 @@ fn parse_fill(output: &str) -> Option<(String, String)> {
     Some((field("username").unwrap_or("x-access-token").to_string(), field("password")?.to_string()))
 }
 
-async fn git_fill(key: &str) -> Option<Credential> {
+async fn git_fill(key: &str, repo: Option<&str>) -> Option<Credential> {
     let (host, path) = key.split_once('/')?;
     let input = format!("protocol=https\nhost={host}\npath={path}.git\n\n");
-    let (username, token) = parse_fill(&run_tool("git", &["credential", "fill"], Some(input)).await?)?;
+    let (username, token) = parse_fill(&run_tool("git", &["credential", "fill"], Some(input), repo).await?)?;
     Some(Credential { username, token, source: Source::Git })
 }
 
 async fn github_cli(key: &str) -> Option<Credential> {
     let (host, _) = key.split_once('/')?;
-    let token = run_tool("gh", &["auth", "token", "--hostname", host], None).await?.trim().to_string();
+    let token = run_tool("gh", &["auth", "token", "--hostname", host], None, None).await?.trim().to_string();
     (!token.is_empty()).then(|| Credential { username: "x-access-token".into(), token, source: Source::GithubCli })
 }
 
 // ── Resolution ──────────────────────────────────────────────────────────
 
-async fn resolve(key: &str, ask_again: bool) -> Option<Credential> {
+async fn resolve(key: &str, ask_again: bool, repo: Option<&str>) -> Option<Credential> {
     let _one = RESOLVING.lock().await;
     let (found, missing) = session(|s| (s.found.get(key).cloned(), s.missing.contains(key)));
     if found.is_some() || (missing && !ask_again) {
@@ -176,7 +180,7 @@ async fn resolve(key: &str, ask_again: bool) -> Option<Credential> {
     let refused = |source| session(|s| s.refused.contains(&(key.to_string(), source)));
     let found = match stored {
         Some(found) => Some(found),
-        None if !refused(Source::Git) => match git_fill(key).await {
+        None if !refused(Source::Git) => match git_fill(key, repo).await {
             Some(found) => Some(found),
             None if !refused(Source::GithubCli) => github_cli(key).await,
             None => None,
@@ -197,17 +201,20 @@ async fn resolve(key: &str, ask_again: bool) -> Option<Credential> {
 }
 
 /// The credential for a request to the remote `key`.
-pub(crate) async fn for_remote(key: &str) -> Option<Credential> {
-    resolve(key, false).await
+pub(crate) async fn for_remote(key: &str, repo: Option<&str>) -> Option<Credential> {
+    resolve(key, false, repo).await
 }
 
 /// The remote answered 401: try the next source next time.
-pub(crate) fn refused(key: &str) {
+pub(crate) fn refused(key: &str, used: &Credential) {
     session(|s| {
-        if let Some(found) = s.found.remove(key) {
-            if found.source != Source::Stored {
-                s.refused.insert((key.to_string(), found.source));
-            }
+        // The user may have switched credentials while this request ran.
+        if s.found.get(key).is_none_or(|found| found.token != used.token) {
+            return;
+        }
+        s.found.remove(key);
+        if used.source != Source::Stored {
+            s.refused.insert((key.to_string(), used.source));
         }
     });
 }
@@ -216,19 +223,19 @@ fn key_of(remote_url: &str) -> Result<String, String> {
     remote_key(&validate_url(remote_url)?)
 }
 
-async fn status_of(key: &str) -> Option<Status> {
-    resolve(key, true).await.map(|found| Status { source: found.source, username: found.username })
+async fn status_of(key: &str, repo: &str) -> Option<Status> {
+    resolve(key, true, Some(repo)).await.map(|found| Status { source: found.source, username: found.username })
 }
 
 /// What a request to this remote would use now.
 #[tauri::command]
-pub async fn credentials_status(remote_url: String) -> Result<Option<Status>, String> {
-    Ok(status_of(&key_of(&remote_url)?).await)
+pub async fn credentials_status(remote_url: String, repo_path: String) -> Result<Option<Status>, String> {
+    Ok(status_of(&key_of(&remote_url)?, &repo_path).await)
 }
 
 /// Keep a pasted token for the remote; it comes first from then on.
 #[tauri::command]
-pub async fn credentials_set(remote_url: String, token: String) -> Result<Option<Status>, String> {
+pub async fn credentials_set(remote_url: String, repo_path: String, token: String) -> Result<Option<Status>, String> {
     let key = key_of(&remote_url)?;
     let token = token.trim().to_string();
     if token.is_empty() || token.contains(char::is_whitespace) {
@@ -236,19 +243,19 @@ pub async fn credentials_set(remote_url: String, token: String) -> Result<Option
     }
     keychain(move |entry| entry.set_password(&token), &key).await?;
     session(|s| s.found.remove(&key));
-    Ok(status_of(&key).await)
+    Ok(status_of(&key, &repo_path).await)
 }
 
 /// Forget the pasted token: back to the user's git credentials.
 #[tauri::command]
-pub async fn credentials_delete(remote_url: String) -> Result<Option<Status>, String> {
+pub async fn credentials_delete(remote_url: String, repo_path: String) -> Result<Option<Status>, String> {
     let key = key_of(&remote_url)?;
     keychain(|entry| entry.delete_credential(), &key).await?;
     session(|s| {
         s.found.remove(&key);
         s.refused.retain(|(k, _)| k != &key);
     });
-    Ok(status_of(&key).await)
+    Ok(status_of(&key, &repo_path).await)
 }
 
 #[cfg(test)]
@@ -274,17 +281,28 @@ mod tests {
     #[test]
     fn a_refused_helper_credential_is_skipped_but_a_stored_one_is_only_dropped() {
         let key = "example.test/o/r".to_string();
-        let insert = |source| {
-            session(|s| s.found.insert(key.clone(), Credential { username: "u".into(), token: "t".into(), source }))
-        };
-        insert(Source::Git);
-        refused(&key);
-        insert(Source::Stored);
-        refused(&key);
+        let credential = |source, token: &str| Credential { username: "u".into(), token: token.into(), source };
+        let insert = |found: &Credential| session(|s| s.found.insert(key.clone(), found.clone()));
+        let git = credential(Source::Git, "a");
+        insert(&git);
+        refused(&key, &git);
+        let stored = credential(Source::Stored, "b");
+        insert(&stored);
+        refused(&key, &stored);
         session(|s| {
             assert!(s.found.get(&key).is_none());
             assert!(s.refused.contains(&(key.clone(), Source::Git)));
             assert!(!s.refused.contains(&(key.clone(), Source::Stored)));
         });
+    }
+
+    #[test]
+    fn an_old_request_cant_refuse_the_credential_chosen_since() {
+        let key = "example.test/o/switched".to_string();
+        let old = Credential { username: "u".into(), token: "old".into(), source: Source::Stored };
+        let new = Credential { username: "u".into(), token: "new".into(), source: Source::Git };
+        session(|s| s.found.insert(key.clone(), new.clone()));
+        refused(&key, &old);
+        session(|s| assert_eq!(s.found.get(&key).map(|f| f.token.as_str()), Some("new")));
     }
 }

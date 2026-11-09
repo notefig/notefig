@@ -288,24 +288,6 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     expect(before.untracked).toEqual(["note.md"]);
   });
 
-  it("limits status to the given paths", async () => {
-    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
-    await service.init({ defaultBranch: "main" });
-    const encode = (text: string) => new TextEncoder().encode(text);
-    await host.writeFileAtomic(join(repoDir, "a.md"), encode("a\n"));
-    await host.createDir(join(repoDir, "notes"));
-    await host.writeFileAtomic(join(repoDir, "notes", "b.md"), encode("b\n"));
-    await host.writeFileAtomic(join(repoDir, "c.md"), encode("c\n"));
-
-    expect((await service.status({ filepaths: ["a.md", "notes"] })).untracked)
-      .toEqual(["a.md", "notes/b.md"]);
-    expect((await service.status()).untracked).toEqual([
-      "a.md",
-      "c.md",
-      "notes/b.md",
-    ]);
-  });
-
   it("lists the files that differ between two commits, and reads their bytes", async () => {
     const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
     await service.init({ defaultBranch: "main" });
@@ -322,12 +304,25 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     await host.writeFileAtomic(join(repoDir, "d.md"), encode("d\n"));
     const second = await service.addAllAndCommit({ message: "two", author });
 
-    await expect(service.changedFiles(first!, second!)).resolves.toEqual(["a.md", "d.md", "notes/b.md"]);
+    expect((await service.changedFiles(first!, second!)).map((change) => change.path)).toEqual(["a.md", "d.md", "notes/b.md"]);
     await expect(service.changedFiles(second!, second!)).resolves.toEqual([]);
     await expect(service.readFile({ ref: second!, filepath: "notes/b.md" })).resolves.toEqual(encode("b2\n"));
     await expect(service.readFile({ ref: second!, filepath: "a.md" })).resolves.toBeNull();
     await expect(service.mergeBase(second!, first!)).resolves.toBe(first);
     await expect(service.mergeBase("refs/heads/main", first!)).resolves.toBe(first);
+  });
+
+  it("reports a change of file mode alone", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const author = { name: "T", email: "t@x" };
+    await host.writeFileAtomic(join(repoDir, "run.sh"), new TextEncoder().encode("echo\n"));
+    const first = await service.addAllAndCommit({ message: "one", author });
+    await host.chmod(join(repoDir, "run.sh"), 0o755);
+    await service.add({ filepath: "run.sh" });
+    const second = await service.commit({ message: "two", author });
+
+    await expect(service.changedFiles(first!, second)).resolves.toEqual([{ path: "run.sh", modeChanged: true }]);
   });
 
   it("reads the repo's config and checked-out branch", async () => {

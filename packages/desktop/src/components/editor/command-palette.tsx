@@ -151,10 +151,10 @@ function gitCommands(core: Core, workspacePath: string, t: TFunction): CommandTy
           message: t("gitTokenMessage"),
           secret: true,
         });
-        return token?.trim() ? credentials.set(url, token) : undefined;
+        return token?.trim() ? credentials.set(url, workspacePath, token) : undefined;
       }),
     ),
-    git("git-use-credentials", "gitUseCredentials", KeyRound, onCredential((url) => credentials.delete(url))),
+    git("git-use-credentials", "gitUseCredentials", KeyRound, onCredential((url) => credentials.delete(url, workspacePath))),
   ];
 }
 

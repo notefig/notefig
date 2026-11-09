@@ -99,13 +99,13 @@ describe("tauri credentials surface", () => {
     const { credentials } = new TauriPlatformAdapter();
     const url = "https://github.com/o/r.git";
 
-    await expect(credentials.status(url)).resolves.toEqual(using);
-    await expect(credentials.set(url, "secret")).resolves.toMatchObject({ source: "stored" });
-    await expect(credentials.delete(url)).resolves.toEqual(using);
+    await expect(credentials.status(url, "/repo")).resolves.toEqual(using);
+    await expect(credentials.set(url, "/repo", "secret")).resolves.toMatchObject({ source: "stored" });
+    await expect(credentials.delete(url, "/repo")).resolves.toEqual(using);
     expect(tauri.invocations.map(({ cmd, payload }) => [cmd, payload])).toEqual([
-      ["credentials_status", { remoteUrl: url }],
-      ["credentials_set", { remoteUrl: url, token: "secret" }],
-      ["credentials_delete", { remoteUrl: url }],
+      ["credentials_status", { remoteUrl: url, repoPath: "/repo" }],
+      ["credentials_set", { remoteUrl: url, repoPath: "/repo", token: "secret" }],
+      ["credentials_delete", { remoteUrl: url, repoPath: "/repo" }],
     ]);
   });
 });
@@ -118,7 +118,7 @@ describe("browser git remote surfaces", () => {
     await expect(
       gitHttp.request({ url: "https://h/r.git", method: "GET", headers: {} }),
     ).rejects.toBeInstanceOf(PlatformUnsupportedError);
-    await expect(credentials.status("https://h/r.git")).rejects.toBeInstanceOf(
+    await expect(credentials.status("https://h/r.git", "/repo")).rejects.toBeInstanceOf(
       PlatformUnsupportedError,
     );
   });

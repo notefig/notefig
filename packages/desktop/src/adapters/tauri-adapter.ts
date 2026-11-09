@@ -107,8 +107,8 @@ function appStatusActivations(status: AppStatus): Map<string, () => void> {
 
 export const GIT_HTTP_META_HEADER = "x-notefig-git-http";
 
-export function encodeGitHttpMeta({ url, method, headers }: GitHttpRequestSpec): string {
-  return encodeURIComponent(JSON.stringify({ url, method, headers }));
+export function encodeGitHttpMeta({ url, method, headers, credential }: GitHttpRequestSpec): string {
+  return encodeURIComponent(JSON.stringify({ url, method, headers, credential }));
 }
 
 export function decodeGitHttpResponse(buffer: ArrayBuffer): GitHttpResponseSpec {
@@ -199,11 +199,12 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   };
   readonly credentials: CredentialsSurface = {
     supported: true,
-    status: (remoteUrl) => invoke<CredentialStatus | null>("credentials_status", { remoteUrl }),
-    set: (remoteUrl, token) =>
-      invoke<CredentialStatus | null>("credentials_set", { remoteUrl, token }),
-    delete: (remoteUrl) =>
-      invoke<CredentialStatus | null>("credentials_delete", { remoteUrl }),
+    status: (remoteUrl, repoPath) =>
+      invoke<CredentialStatus | null>("credentials_status", { remoteUrl, repoPath }),
+    set: (remoteUrl, repoPath, token) =>
+      invoke<CredentialStatus | null>("credentials_set", { remoteUrl, repoPath, token }),
+    delete: (remoteUrl, repoPath) =>
+      invoke<CredentialStatus | null>("credentials_delete", { remoteUrl, repoPath }),
   };
 
   private async pickDirectory(title: string): Promise<string | null> {

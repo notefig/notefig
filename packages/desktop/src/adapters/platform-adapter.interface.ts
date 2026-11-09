@@ -595,6 +595,8 @@ export interface GitHttpRequestSpec {
   method: "GET" | "POST";
   headers: Record<string, string>;
   body?: Uint8Array;
+  /** The repository whose git config applies when finding the credential. */
+  credential?: string;
 }
 
 export interface GitHttpResponseSpec {
@@ -636,12 +638,12 @@ export interface CredentialStatus {
  */
 export interface CredentialsSurface {
   readonly supported: boolean;
-  status(remoteUrl: string): Promise<CredentialStatus | null>;
+  status(remoteUrl: string, repoPath: string): Promise<CredentialStatus | null>;
   /** Keep a pasted token for the remote (in the OS keychain); it comes
    *  first from then on. */
-  set(remoteUrl: string, token: string): Promise<CredentialStatus | null>;
+  set(remoteUrl: string, repoPath: string, token: string): Promise<CredentialStatus | null>;
   /** Forget the pasted token: back to the user's git credentials. */
-  delete(remoteUrl: string): Promise<CredentialStatus | null>;
+  delete(remoteUrl: string, repoPath: string): Promise<CredentialStatus | null>;
 }
 
 /**

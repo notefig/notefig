@@ -37,6 +37,9 @@ struct RequestMeta {
     method: String,
     #[serde(default)]
     headers: HashMap<String, String>,
+    /// The repository whose git config applies when finding the credential.
+    #[serde(default)]
+    credential: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -61,10 +64,8 @@ pub fn validate_url(raw: &str) -> Result<Url, String> {
 /// service suffix, a trailing `.git` and `/` dropped, the host lowercased.
 /// A remote's URL and every request git makes to it give the same key.
 pub fn remote_key(url: &Url) -> Result<String, String> {
-    let mut path = url.path().trim_end_matches('/');
-    if let Some(at) = SERVICE_SUFFIXES.iter().find_map(|suffix| path.find(suffix)) {
-        path = &path[..at];
-    }
+    let path = url.path().trim_end_matches('/');
+    let path = SERVICE_SUFFIXES.iter().find_map(|suffix| path.strip_suffix(suffix)).unwrap_or(path);
     let path = path.trim_end_matches(".git").trim_matches('/');
     let host = url.host_str().ok_or("The remote URL has no host.")?.to_ascii_lowercase();
     if path.is_empty() {
@@ -132,7 +133,7 @@ pub async fn git_http_request(request: RawRequest) -> Result<tauri::ipc::Respons
             builder = builder.header(name, value);
         }
     }
-    let credential = credentials::for_remote(&key).await;
+    let credential = credentials::for_remote(&key, meta.credential.as_deref()).await;
     if let Some(found) = &credential {
         builder = builder.header(reqwest::header::AUTHORIZATION, basic_auth(&found.username, &found.token));
     }
@@ -142,8 +143,8 @@ pub async fn git_http_request(request: RawRequest) -> Result<tauri::ipc::Respons
 
     let response = builder.send().await.map_err(|e| e.to_string())?;
     let status = response.status().as_u16();
-    if status == 401 && credential.is_some() {
-        credentials::refused(&key);
+    if let (401, Some(used)) = (status, &credential) {
+        credentials::refused(&key, used);
     }
     let headers = response
         .headers()
@@ -177,6 +178,9 @@ mod tests {
         assert_eq!(key("https://github.com/notefig/notes.git/info/refs?service=git-receive-pack"), "github.com/notefig/notes");
         assert_eq!(key("https://github.com/notefig/notes/git-upload-pack"), "github.com/notefig/notes");
         assert_eq!(key("https://git.example.com:8443/team/sub/notes.git/git-receive-pack"), "git.example.com:8443/team/sub/notes");
+        // A repo whose name starts like a service is still that repo.
+        assert_eq!(key("https://github.com/team/git-upload-pack-notes.git"), "github.com/team/git-upload-pack-notes");
+        assert_eq!(key("https://github.com/team/git-upload-pack-notes.git/info/refs?service=git-upload-pack"), "github.com/team/git-upload-pack-notes");
         // A look-alike repo is another key, so it never gets the token.
         assert_eq!(key("https://github.com/notefig/notes-other.git/info/refs"), "github.com/notefig/notes-other");
         assert!(remote_key(&Url::parse("https://github.com/").unwrap()).is_err());

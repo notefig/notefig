@@ -6,7 +6,7 @@ import { createIsomorphicGitFs } from "./isomorphicGitFs";
 import {
   GitError,
   type GitAddInput,
-  type GitStatusInput,
+  type GitFileDifference,
   type GitCheckoutPathsInput,
   type GitCommitInput,
   type GitCreateBranchInput,
@@ -346,7 +346,7 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async status(input?: GitStatusInput): Promise<RepoStatus> {
+  async status(): Promise<RepoStatus> {
     try {
       let branch: string | null = null;
 
@@ -383,7 +383,6 @@ export class IsomorphicGitService implements GitService {
         dir: this.dir,
         gitdir: this.gitdir,
         cache: this.cache,
-        ...(input?.filepaths ? { filepaths: input.filepaths } : {}),
       });
 
       const staged: GitFileChange[] = [];
@@ -890,7 +889,7 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async changedFiles(from: string, to: string): Promise<string[]> {
+  async changedFiles(from: string, to: string): Promise<GitFileDifference[]> {
     try {
       const changed = await git.walk({
         fs: this.fsClient,
@@ -900,16 +899,23 @@ export class IsomorphicGitService implements GitService {
         trees: [git.TREE({ ref: from }), git.TREE({ ref: to })],
         map: async (filepath, [a, b]) => {
           if (filepath === ".") return undefined;
-          const [oidA, oidB] = await Promise.all([a?.oid(), b?.oid()]);
+          const [oidA, oidB, typeA, typeB, modeA, modeB] = await Promise.all([
+            a?.oid(),
+            b?.oid(),
+            a?.type(),
+            b?.type(),
+            a?.mode(),
+            b?.mode(),
+          ]);
+          const modeChanged = a !== null && b !== null && typeA === "blob" && typeB === "blob" && modeA !== modeB;
           // Equal subtrees are skipped whole (null stops the descent).
-          if (oidA === oidB) return null;
-          const [typeA, typeB] = await Promise.all([a?.type(), b?.type()]);
-          if (typeA !== "tree" && typeB !== "tree") return filepath;
+          if (oidA === oidB) return modeChanged ? { path: filepath, modeChanged } : null;
+          if (typeA !== "tree" && typeB !== "tree") return { path: filepath, modeChanged };
           // A file replaced by a folder (or back) is a change too.
-          return typeA === "blob" || typeB === "blob" ? filepath : undefined;
+          return typeA === "blob" || typeB === "blob" ? { path: filepath, modeChanged: false } : undefined;
         },
       });
-      return (changed as string[]).sort();
+      return (changed as GitFileDifference[]).sort((x, y) => (x.path < y.path ? -1 : 1));
     } catch (error) {
       throw this.fail(error);
     }
