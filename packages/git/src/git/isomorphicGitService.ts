@@ -904,7 +904,18 @@ export class IsomorphicGitService implements GitService {
     const ours = await this.headOf(ref);
     const refs = await this.listRemoteRefs(remote, [ref]);
     const theirs = refs.find((entry) => entry.ref === ref)?.oid ?? null;
-    if (theirs === ours) return false;
+    if (theirs === ours) {
+      // As git does: a push whose reply was lost left this behind.
+      await git.writeRef({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        ref: `refs/remotes/${remote.name ?? DEFAULT_REMOTE}/${target.branch}`,
+        value: ours,
+        force: true,
+      });
+      return false;
+    }
     await this.pushRef(remote, { ref, oid: ours, expect: theirs });
     return true;
   }

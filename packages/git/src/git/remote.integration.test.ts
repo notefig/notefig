@@ -470,6 +470,18 @@ describeIfGit("remote operations over git http-backend", () => {
       expect(await git(dir, "rev-parse", "refs/remotes/fork/main")).toBe(await git(dir, "rev-parse", "HEAD"));
     });
 
+    it("catches the tracking ref up when the remote already has the branch", async () => {
+      const { dir, service } = await clone("a");
+      const before = await git(dir, "rev-parse", "HEAD");
+      write(dir, "mine.md", "mine\n");
+      await git(dir, "add", "-A");
+      await git(dir, ...SYSTEM_GIT_IDENTITY, "commit", "-qm", "local");
+      await service.pushBranch(remote, { ...target, url: remote.url });
+      await git(dir, "update-ref", "refs/remotes/origin/main", before);
+      await expect(service.pushBranch(remote, { ...target, url: remote.url })).resolves.toBe(false);
+      expect(await git(dir, "rev-parse", "refs/remotes/origin/main")).toBe(await git(dir, "rev-parse", "HEAD"));
+    });
+
     it("refuses to move a branch that got a commit during the checkout", async () => {
       const { dir, service } = await clone("a");
       await remoteChange(editNote);
