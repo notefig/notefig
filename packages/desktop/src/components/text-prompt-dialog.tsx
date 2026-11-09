@@ -62,6 +62,8 @@ export function TextPromptDialog() {
           <div className="py-4">
             <Input
               autoFocus
+              type={request?.secret ? "password" : "text"}
+              autoComplete="off"
               value={value}
               placeholder={request?.placeholder}
               onChange={(e) => setValue(e.target.value)}

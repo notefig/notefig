@@ -66,7 +66,9 @@ export type GitErrorCode =
   /** The remote refused a ref update (its reason is in the message). */
   | "PushRejected"
   /** The remote ref isn't at the oid a push expected. */
-  | "RefConflict";
+  | "RefConflict"
+  /** A pull stopped before changing anything (the message says why). */
+  | "PullRefused";
 
 export class GitError extends Error {
   readonly code: GitErrorCode;
@@ -215,6 +217,16 @@ export interface GitService {
   log(input: GitLogInput): ReturnType<typeof igLog>;
   /** Read a text file's content as of a given ref/commit (for history diff/restore). */
   readTextFile(input: GitReadTextFileInput): Promise<string>;
+  /** Where a push or pull of the checked-out branch goes, as git picks it
+   *  from the repo's config; or why there's nowhere. */
+  remoteTarget(direction: GitDirection): Promise<GitBranchTarget | { problem: string }>;
+  /** Push the branch, only ever forward, over the remote tip it reads.
+   *  False when the remote already has it. */
+  pushBranch(remote: GitRemote, target: GitBranchTarget): Promise<boolean>;
+  /** Fast-forward the branch from its upstream; how many files changed.
+   *  Refuses (`PullRefused`) before moving anything if local work is in
+   *  the way. The files are updated first and the branch moved last. */
+  pullBranch(remote: GitRemote, target: GitBranchTarget): Promise<number>;
   /** The remote's refs starting with any of `prefixes` (all when empty). */
   listRemoteRefs(
     remote: GitRemote,
@@ -242,7 +254,23 @@ export interface GitService {
  * not a secret): the injected http client resolves it to an auth header
  * itself, so no token passes through JS on desktop.
  */
+export type GitDirection = "push" | "pull";
+
+/** The checked-out branch and where it goes. */
+export interface GitBranchTarget {
+  /** The configured remote's name. */
+  remote: string;
+  url: string;
+  branch: string;
+  /** Its name on the remote (`refs/heads/…`). */
+  remoteRef: string;
+  /** It tracks a differently named branch there, which a push won't touch. */
+  upstreamRenamed: boolean;
+}
+
 export interface GitRemote {
+  /** The configured remote whose refspec/tracking namespace applies. */
+  name?: string;
   url: string;
   credential?: string;
 }

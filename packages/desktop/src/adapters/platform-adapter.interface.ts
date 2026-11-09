@@ -76,6 +76,8 @@ export type TextPromptOptions = {
   defaultValue?: string;
   placeholder?: string;
   confirmLabel?: string;
+  /** Mask what is typed (a token). */
+  secret?: boolean;
 };
 
 export type MetadataChange = {
@@ -587,6 +589,63 @@ export interface PlatformUiSurface {
   removeEventListener(callback: PlatformEventListener): void;
 }
 
+/** One git smart-HTTP request (the `@notefig/git` http port's shape). */
+export interface GitHttpRequestSpec {
+  url: string;
+  method: "GET" | "POST";
+  headers: Record<string, string>;
+  body?: Uint8Array;
+  /** The repository whose git config applies when finding the credential. */
+  credential?: string;
+}
+
+export interface GitHttpResponseSpec {
+  status: number;
+  headers: Record<string, string>;
+  body: Uint8Array;
+}
+
+/** Thrown by a surface the platform does not have (git remotes on the web). */
+export class PlatformUnsupportedError extends Error {
+  override name = "PlatformUnsupportedError";
+}
+
+/**
+ * Git's HTTP transport. Desktop sends it from Rust: HTTPS only,
+ * no CORS, and the remote's credential added there, so a token never
+ * reaches JS. Resolves with any status; rejects only when no response
+ * arrived (network failure, timeout).
+ */
+export interface GitHttpSurface {
+  readonly supported: boolean;
+  request(request: GitHttpRequestSpec): Promise<GitHttpResponseSpec>;
+}
+
+/** Where a remote's credential comes from, in the order tried: a token
+ *  pasted into Notefig, git's credential helper, the GitHub CLI. */
+export type CredentialSource = "stored" | "git" | "github-cli";
+
+/** The credential used for a remote: never the secret. */
+export interface CredentialStatus {
+  source: CredentialSource;
+  username: string;
+}
+
+/**
+ * Credentials for git remotes, resolved and used in Rust. Write-only from
+ * JS: each call answers with the credential now in use (null: none found,
+ * paste a token), never with a secret.
+ */
+export interface CredentialsSurface {
+  readonly supported: boolean;
+  status(remoteUrl: string, repoPath: string): Promise<CredentialStatus | null>;
+  /** Keep a pasted token for the remote (in the OS keychain); it comes
+   *  first from then on. */
+  set(remoteUrl: string, repoPath: string, token: string): Promise<CredentialStatus | null>;
+  /** Forget the pasted token: back to the user's git credentials. */
+  delete(remoteUrl: string, repoPath: string): Promise<CredentialStatus | null>;
+}
+
 /**
  * Platform adapter: one object composed of per-concern surfaces, so each
  * surface is self-contained and can be reasoned about (and swapped) on its
@@ -603,4 +662,6 @@ export interface IPlatformAdapter {
   db: DbSurface;
   ui: PlatformUiSurface;
   updates: PlatformUpdater;
+  gitHttp: GitHttpSurface;
+  credentials: CredentialsSurface;
 }

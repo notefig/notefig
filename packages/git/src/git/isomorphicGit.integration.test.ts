@@ -288,6 +288,46 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     expect(before.untracked).toEqual(["note.md"]);
   });
 
+  describe("remoteTarget", () => {
+    const withConfig = async (config: string) => {
+      const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+      await service.init({ defaultBranch: "main" });
+      await host.writeFileAtomic(join(repoDir, ".git", "config"), new TextEncoder().encode(config));
+      return service;
+    };
+    const REF = "refs/heads/main";
+
+    it("falls back to origin", async () => {
+      const service = await withConfig('[remote "origin"]\n\turl = https://h/o.git\n');
+      await expect(service.remoteTarget("push")).resolves.toEqual({ remote: "origin", url: "https://h/o.git", branch: "main", remoteRef: REF, upstreamRenamed: false });
+    });
+
+    it("pushes to the push remote and push URL, and pulls from the upstream", async () => {
+      const service = await withConfig(
+        '[branch "main"]\n\tremote = up\n\tpushRemote = fork\n[remote "up"]\n\turl = https://h/up.git\n[remote "fork"]\n\turl = https://h/f.git\n\tpushurl = https://h/fp.git\n',
+      );
+      await expect(service.remoteTarget("push")).resolves.toMatchObject({ remote: "fork", url: "https://h/fp.git" });
+      await expect(service.remoteTarget("pull")).resolves.toMatchObject({ remote: "up", url: "https://h/up.git" });
+    });
+
+    it("honours remote.pushDefault", async () => {
+      const service = await withConfig('[remote]\n\tpushDefault = fork\n[remote "origin"]\n\turl = https://h/o.git\n[remote "fork"]\n\turl = https://h/f.git\n');
+      await expect(service.remoteTarget("push")).resolves.toMatchObject({ url: "https://h/f.git" });
+      await expect(service.remoteTarget("pull")).resolves.toMatchObject({ url: "https://h/o.git" });
+    });
+
+    it("pulls a differently named upstream and marks it for push", async () => {
+      const service = await withConfig('[branch "main"]\n\tremote = origin\n\tmerge = refs/heads/trunk\n[remote "origin"]\n\turl = https://h/o.git\n');
+      await expect(service.remoteTarget("pull")).resolves.toMatchObject({ remoteRef: "refs/heads/trunk" });
+      await expect(service.remoteTarget("push")).resolves.toMatchObject({ remoteRef: REF, upstreamRenamed: true });
+    });
+
+    it("says when there's no remote", async () => {
+      const service = await withConfig("");
+      await expect(service.remoteTarget("push")).resolves.toEqual({ problem: expect.stringMatching(/no remote/) });
+    });
+  });
+
   it("returns empty log for initialized repo without commits", async () => {
     const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
     await service.init({ defaultBranch: "main" });

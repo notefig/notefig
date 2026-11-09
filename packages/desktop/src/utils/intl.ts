@@ -334,6 +334,10 @@ i18n
 
           // Command Keywords
           commandKeywords: {
+            gitPush: ["git", "push", "upload", "remote"],
+            gitPull: ["git", "pull", "download", "fetch", "remote"],
+            gitUseToken: ["git", "token", "credentials", "access", "login"],
+            gitUseCredentials: ["git", "credentials", "keychain", "login"],
             newScratchpad: [
               "new",
               "scratchpad",
@@ -678,6 +682,23 @@ i18n
           telemetryDisabledInBuild:
             "Telemetry is disabled in this build — no data is ever sent.",
           usageSettingsTitle: "Usage",
+          git: "Git",
+          gitPush: "Git: Push",
+          gitPull: "Git: Pull",
+          gitUseToken: "Git: Use a Token for This Remote",
+          gitUseCredentials: "Git: Use My Git Credentials",
+          gitPushing: "Pushing…",
+          gitPushed: "Pushed {{branch}}",
+          gitPulling: "Pulling…",
+          gitPulled_one: "Pulled 1 file",
+          gitPulled_other: "Pulled {{count}} files",
+          gitUpToDate: "Already up to date",
+          gitTokenTitle: "Token for {{where}}",
+          gitTokenMessage: "It needs read and write access to this repository's contents. It's kept in your system keychain.",
+          gitCredential_git: "Using your git credentials ({{username}})",
+          gitCredential_github_cli: "Using the GitHub CLI's sign-in",
+          gitCredential_stored: "Using the token you pasted",
+          gitCredentialNone: "No git credentials found for this remote",
           usageTokens: "Tokens",
           usageInput: "Input",
           usageCacheRead: "Cache read",
