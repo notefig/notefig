@@ -11,7 +11,7 @@
  */
 import { startGitWorker } from "@notefig/git";
 import type { FileSystemErrorType } from "@/adapters/platform-adapter.interface";
-import type { GitHostFs } from "@/adapters/git-storage-host";
+import type { GitWorkerHost } from "@/modules/git-worker";
 import type { WorkerApi } from "@notefig/worker";
 
 /** Wire form of a main-thread FsError; see git-worker-client's serializer. */
@@ -38,7 +38,7 @@ startGitWorker(async () => {
     import("@notefig/worker"),
   ]);
 
-  const hostFs = createHostClient<GitHostFs>((error) => {
+  const host = createHostClient<GitWorkerHost>((error) => {
     if (isSerializedFsError(error)) {
       const { type, path, message } = error.fsError;
       return new FsError(type, path, message);
@@ -47,7 +47,9 @@ startGitWorker(async () => {
   });
 
   return {
-    createHost: (repo) => createGitStorageHost(hostFs, repo.gitDir),
+    createHost: (repo) => createGitStorageHost(host, repo.gitDir),
+    // Remote operations: the request goes out on the main thread.
+    deps: { http: { request: (request) => host.gitHttp(request) } },
     expose: (api) => exposeWorkerApi(api as unknown as WorkerApi),
   };
 });

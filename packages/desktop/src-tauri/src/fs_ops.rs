@@ -774,7 +774,7 @@ pub async fn write_binary_file(
 
 /// Minimal percent-decoder for the path header (the frontend encodes with
 /// `encodeURIComponent`); returns None on malformed input.
-fn percent_decode(input: &str) -> Option<String> {
+pub(crate) fn percent_decode(input: &str) -> Option<String> {
     let bytes = input.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
