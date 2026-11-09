@@ -1,4 +1,4 @@
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useState, type ComponentType, type MouseEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ChevronsDown,
@@ -9,6 +9,8 @@ import {
   MessageSquareText,
 } from "lucide-react";
 import { DropdownMenuTrigger } from "@notefig/ui/dropdown-menu";
+import { OpenInNewTabContextMenu } from "@notefig/ui/open-in-new-tab-item";
+import { openIntentOf, type OpenIntent } from "@notefig/ui/open-intent";
 import { cn } from "@notefig/ui/utils";
 import { jumpToRound, jumpToTask } from "@/components/agent/jump-to-task";
 import {
@@ -211,17 +213,25 @@ const GLYPH_SLOT_CLASS =
 
 /**
  * The one row shape every list here uses: a leading glyph, a label that
- * truncates, a muted trailing note.
+ * truncates, a muted trailing note. A row that opens something opens it
+ * the way the file tree does — a click in place of the tab in front,
+ * Mod+click in a new tab — and offers the same on its right-click menu.
  */
-function NavRow({
-  leading,
-  label,
-  trailing,
-  active,
-  emphasis,
-  title,
-  onClick,
-}: {
+function NavRow(props: NavRowProps & { onOpen?: (intent: OpenIntent) => void }) {
+  const { t } = useTranslation();
+  const { onOpen, ...row } = props;
+  if (!onOpen) return <NavRowButton {...row} />;
+  return (
+    <OpenInNewTabContextMenu
+      label={t("openInNewTab")}
+      onOpenInNewTab={() => onOpen("new-tab")}
+    >
+      <NavRowButton {...row} onClick={(event) => onOpen(openIntentOf(event))} />
+    </OpenInNewTabContextMenu>
+  );
+}
+
+interface NavRowProps {
   leading: ReactNode;
   label: string;
   trailing?: ReactNode;
@@ -229,10 +239,23 @@ function NavRow({
   /** Weighted label — the row has news the user has not seen. */
   emphasis?: boolean;
   title?: string;
-  onClick: () => void;
-}) {
+  onClick?: (event: MouseEvent) => void;
+}
+
+function NavRowButton({
+  leading,
+  label,
+  trailing,
+  active,
+  emphasis,
+  title,
+  onClick,
+  ...trigger
+}: NavRowProps) {
   return (
     <button
+      // A context-menu trigger's own handlers (asChild) come through here.
+      {...trigger}
       type="button"
       onClick={onClick}
       title={title ?? label}
@@ -307,16 +330,24 @@ function askLabel(
 /** Where an ask is answered. A widget's question is in its document, which
  *  opens even before its widget has mounted this run; the others go
  *  through their session. */
-function jumpToAsk(core: Parameters<typeof jumpToTask>[0], item: AttentionItem) {
+function jumpToAsk(
+  core: Parameters<typeof jumpToTask>[0],
+  item: AttentionItem,
+  intent: OpenIntent,
+) {
   if (item.ask === "question" && item.turnId) {
-    jumpToRound(core, {
-      taskId: item.taskId,
-      turnId: item.turnId,
-      documentPath: item.target.id,
-    });
+    jumpToRound(
+      core,
+      {
+        taskId: item.taskId,
+        turnId: item.turnId,
+        documentPath: item.target.id,
+      },
+      { intent },
+    );
     return;
   }
-  jumpToTask(core, item.taskId, { turnId: item.turnId });
+  jumpToTask(core, item.taskId, { turnId: item.turnId, intent });
 }
 
 /**
@@ -345,7 +376,7 @@ function AttentionGroup({ items }: { items: AttentionItem[] }) {
             label={askLabel(item, t)}
             title={`${askLabel(item, t)} · ${deriveProjectName(item.task?.workspacePath ?? "")}`}
             trailing={formatTimeAgo(item.since)}
-            onClick={() => jumpToAsk(core, item)}
+            onOpen={(intent) => jumpToAsk(core, item, intent)}
           />
         ))}
       </div>
@@ -394,7 +425,7 @@ function PromptRoundRow({
       label={label}
       title={`${label} · ${getFileName(round.documentPath)} · ${deriveProjectName(round.workspacePath)}`}
       trailing={describePromptRound(round) ?? formatTimeAgo(round.startedAt)}
-      onClick={() => jumpToRound(core, round)}
+      onOpen={(intent) => jumpToRound(core, round, { intent })}
     />
   );
 }
@@ -433,7 +464,7 @@ function RecentDocumentRow({
       title={`${document.path} · ${deriveProjectName(document.workspacePath)}`}
       active={active}
       trailing={deriveProjectName(document.workspacePath)}
-      onClick={() => tabs.open(document.path, { intent: "replace" })}
+      onOpen={(intent) => tabs.open(document.path, { intent })}
     />
   );
 }

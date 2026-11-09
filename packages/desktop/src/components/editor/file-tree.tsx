@@ -12,11 +12,13 @@ import {
 // Pierre's set, matching the rows @pierre/trees draws underneath this menu.
 // `menuButton` sizes them via [&_svg]:size-3.5 and they default to
 // `currentcolor`, so nothing is passed at the call sites.
+import { IconBin, IconPencil } from "@pierre/icons";
 import {
-  IconArrowUpRight,
-  IconBin,
-  IconPencil,
-} from "@pierre/icons";
+  contextMenuItemClass,
+  contextMenuSeparatorClass,
+  contextMenuSurfaceClass,
+} from "@notefig/ui/context-menu";
+import { OpenInNewTabIcon, openIntentOf } from "@notefig/ui/open-intent";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -352,8 +354,7 @@ function FileTreeInner({
       event.preventDefault();
       event.stopPropagation();
       if (row.type === "file") {
-        const newTab = event.metaKey || event.ctrlKey;
-        openFileAtPath(row.path, newTab ? { intent: "new-tab" } : undefined);
+        openFileAtPath(row.path, { intent: openIntentOf(event) });
       } else {
         const item = model.getItem(row.path);
         if (item && "toggle" in item) item.toggle();
@@ -612,15 +613,17 @@ function FileTreeInner({
       // App-owned paths (.notefig and its scratchpads folder) can't be
       // renamed or deleted; creating files inside them stays allowed.
       const isProtected = isProtectedTreePath(item.path.replace(/\/+$/, ""));
-      // Mirrors ui/context-menu.tsx's ContextMenuItem styling (this menu is
-      // hand-rolled — @pierre/trees owns its rendering) so the file tree and
-      // the sessions panel read as the same menu.
-      const menuButton =
-        "flex w-full items-center gap-2 whitespace-nowrap rounded-sm px-1.5 py-1 text-left text-xs hover:bg-accent hover:text-accent-foreground disabled:opacity-50 [&_svg]:size-3.5 [&_svg]:shrink-0";
+      // ui/context-menu.tsx's classes (this menu is hand-rolled —
+      // @pierre/trees owns its rendering) so the file tree reads as the
+      // same menu as every other row's.
+      const menuButton = cn(
+        contextMenuItemClass,
+        "w-full text-left hover:bg-accent hover:text-accent-foreground disabled:opacity-50",
+      );
       return (
         <div
           role="menu"
-          className="w-max min-w-[7rem] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+          className={cn(contextMenuSurfaceClass, "w-max")}
           data-file-tree-context-menu-root="true"
         >
           {item.kind === "file" && (
@@ -633,8 +636,8 @@ function FileTreeInner({
                 openFileAtPath(item.path, { intent: "new-tab" });
               }}
             >
-              <IconArrowUpRight />
-              {t("openInNewTab", "Open in New Tab")}
+              <OpenInNewTabIcon />
+              {t("openInNewTab")}
             </button>
           )}
           {item.kind === "directory" && (
@@ -688,7 +691,7 @@ function FileTreeInner({
                 <IconPencil />
                 {t("rename", "Rename")}
               </button>
-              <div role="separator" className="-mx-1 my-1 h-px bg-border" />
+              <div role="separator" className={contextMenuSeparatorClass} />
               <button
                 type="button"
                 role="menuitem"

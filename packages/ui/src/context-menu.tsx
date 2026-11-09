@@ -4,6 +4,17 @@ import { Check, ChevronRight, Circle } from "lucide-react";
 
 import { cn } from "./utils";
 
+/**
+ * The menu's look, as classes, for a menu this file cannot render: the
+ * file tree's, which @pierre/trees owns. Every right-click menu in the app
+ * shares these, whatever entity it is for, so they read as one menu.
+ */
+export const contextMenuSurfaceClass =
+  "min-w-[7rem] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md";
+export const contextMenuItemClass =
+  "flex items-center gap-2 whitespace-nowrap rounded-sm px-1.5 py-1 text-xs [&_svg]:size-3.5 [&_svg]:shrink-0";
+export const contextMenuSeparatorClass = "-mx-1 my-1 h-px bg-border";
+
 const ContextMenu = ContextMenuPrimitive.Root;
 
 const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
@@ -82,7 +93,8 @@ const ContextMenuContent = React.forwardRef<
         ref={ref}
         alignOffset={alignOffset}
         className={cn(
-          "z-50 max-h-[--radix-context-menu-content-available-height] min-w-[7rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-context-menu-content-transform-origin]",
+          contextMenuSurfaceClass,
+          "z-50 max-h-[--radix-context-menu-content-available-height] overflow-y-auto overflow-x-hidden animate-in fade-in-80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-context-menu-content-transform-origin]",
           className,
         )}
         onPointerDownCapture={onPointerDownCapture}
@@ -103,7 +115,8 @@ const ContextMenuItem = React.forwardRef<
   <ContextMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-default select-none items-center gap-2 rounded-sm px-1.5 py-1 text-xs outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:size-3.5 [&_svg]:shrink-0",
+      contextMenuItemClass,
+      "relative cursor-default select-none outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       inset && "pl-7",
       className,
     )}
@@ -182,7 +195,7 @@ const ContextMenuSeparator = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ContextMenuPrimitive.Separator
     ref={ref}
-    className={cn("-mx-1 my-1 h-px bg-border", className)}
+    className={cn(contextMenuSeparatorClass, className)}
     {...props}
   />
 ));
