@@ -6,8 +6,8 @@ import { createIsomorphicGitFs } from "./isomorphicGitFs";
 import {
   GitError,
   type GitAddInput,
-  type GitFileDifference,
-  type GitStatusInput,
+  type GitBranchTarget,
+  type GitDirection,
   type GitCheckoutPathsInput,
   type GitCommitInput,
   type GitCreateBranchInput,
@@ -219,6 +219,16 @@ function hasRevertConflict(change: RevertChange): boolean {
  * construction (`GitRepoRef`) — operations cannot be aimed at another repo's
  * gitdir by a call-site mistake.
  */
+const PLAIN_FILE_MODE = 0o100644;
+
+function listPaths(paths: string[]): string {
+  return paths.length > 3 ? `${paths.slice(0, 3).join(", ")} and ${paths.length - 3} more` : paths.join(", ");
+}
+
+function localChangesError(paths: string[]): GitError {
+  return new GitError("PullRefused", `Local changes in ${listPaths(paths)} would be overwritten. Commit them first.`);
+}
+
 export class IsomorphicGitService implements GitService {
   private readonly fsClient;
   private readonly dir: string;
@@ -347,7 +357,7 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async status(input?: GitStatusInput): Promise<RepoStatus> {
+  async status(): Promise<RepoStatus> {
     try {
       let branch: string | null = null;
 
@@ -384,7 +394,6 @@ export class IsomorphicGitService implements GitService {
         dir: this.dir,
         gitdir: this.gitdir,
         cache: this.cache,
-        ...(input?.filepaths ? { filepaths: input.filepaths } : {}),
       });
 
       const staged: GitFileChange[] = [];
@@ -854,97 +863,120 @@ export class IsomorphicGitService implements GitService {
     };
   }
 
-  async readFile(input: GitReadTextFileInput): Promise<Uint8Array | null> {
+  private async config(path: string): Promise<string | undefined> {
+    const value: unknown = await git.getConfig({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, path });
+    return value === undefined || value === null ? undefined : String(value);
+  }
+
+  /** The remote's name and URL for this direction, as git picks them. */
+  private async pickRemote(branch: string, direction: GitDirection, tracking: string | undefined) {
+    if (direction === "pull") {
+      const name = tracking ?? "origin";
+      return { name, url: await this.config(`remote.${name}.url`) };
+    }
+    const name =
+      (await this.config(`branch.${branch}.pushRemote`)) ?? (await this.config("remote.pushDefault")) ?? tracking ?? "origin";
+    return { name, url: (await this.config(`remote.${name}.pushurl`)) ?? (await this.config(`remote.${name}.url`)) };
+  }
+
+  async remoteTarget(direction: GitDirection): Promise<GitBranchTarget | { problem: string }> {
     try {
-      const { blob } = await git.readBlob({
-        fs: this.fsClient,
-        dir: this.dir,
-        gitdir: this.gitdir,
-        cache: this.cache,
-        oid: input.ref,
-        filepath: input.filepath,
-      });
-      return blob;
-    } catch (error) {
-      if ((error as { name?: string }).name === "NotFoundError") return null;
-      throw this.fail(error);
+      const branch = await git.currentBranch({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir });
+      if (!branch) return { problem: "Check out a branch first." };
+      const tracking = await this.config(`branch.${branch}.remote`);
+      const { name, url } = await this.pickRemote(branch, direction, tracking);
+      if (!url) return { problem: `This repository has no remote for ${branch}.` };
+      const own = `refs/heads/${branch}`;
+      const upstream = (await this.config(`branch.${branch}.merge`)) ?? own;
+      if (direction === "pull") return { url, branch, remoteRef: upstream, upstreamRenamed: false };
+      return { url, branch, remoteRef: own, upstreamRenamed: name === tracking && upstream !== own };
+    } catch {
+      return { problem: "This folder isn't a git repository." };
     }
   }
 
-  async mergeBase(a: string, b: string): Promise<string | null> {
+  private async headOf(ref: string): Promise<string> {
+    const oid = await git.resolveRef({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, ref }).catch(() => null);
+    if (!oid) throw new GitError("PullRefused", "This branch has no commits yet.");
+    return oid;
+  }
+
+  async pushBranch(remote: GitRemote, target: GitBranchTarget): Promise<boolean> {
+    if (target.upstreamRenamed) {
+      throw new GitError("PushRejected", `${target.branch} tracks a branch with another name. Push it from a terminal.`);
+    }
+    const ref = `refs/heads/${target.branch}`;
+    const ours = await this.headOf(ref);
+    const refs = await this.listRemoteRefs(remote, [ref]);
+    const theirs = refs.find((entry) => entry.ref === ref)?.oid ?? null;
+    if (theirs === ours) return false;
+    await this.pushRef(remote, { ref, oid: ours, expect: theirs });
+    return true;
+  }
+
+  /** How many files a pull changes. Refuses what a checkout wouldn't catch:
+   *  an edit staged on one of them, a file swapped with a folder, and a
+   *  file mode the storage host can't set. */
+  private async inspectPull(ours: string, theirs: string): Promise<number> {
+    const swapped: string[] = [];
+    const staged: string[] = [];
+    const modes: string[] = [];
+    let changed = 0;
+    await git.walk({
+      fs: this.fsClient,
+      dir: this.dir,
+      gitdir: this.gitdir,
+      cache: this.cache,
+      trees: [git.TREE({ ref: ours }), git.TREE({ ref: theirs }), git.STAGE()],
+      map: async (filepath, [a, b, index]) => {
+        if (filepath === ".") return undefined;
+        const [typeA, typeB] = await Promise.all([a?.type(), b?.type()]);
+        if (typeA === "tree" || typeB === "tree") {
+          if (typeA === "blob" || typeB === "blob") swapped.push(filepath);
+          return undefined;
+        }
+        const [oidA, oidB, oidIndex, modeA, modeB] = await Promise.all([a?.oid(), b?.oid(), index?.oid(), a?.mode(), b?.mode()]);
+        if (oidA === oidB && modeA === modeB) return undefined;
+        changed += 1;
+        if (oidIndex !== oidA) staged.push(filepath);
+        if (b && modeA !== modeB && (a || modeB !== PLAIN_FILE_MODE)) modes.push(filepath);
+        return undefined;
+      },
+    });
+    if (swapped.length > 0) {
+      throw new GitError("PullRefused", `${listPaths(swapped)} changed between a file and a folder. Pull it in a terminal.`);
+    }
+    if (staged.length > 0) throw localChangesError(staged);
+    if (modes.length > 0) throw new GitError("PullRefused", `File permissions changed for ${listPaths(modes)}. Pull it in a terminal.`);
+    return changed;
+  }
+
+  private async checkoutTree(oid: string, dryRun: boolean): Promise<void> {
     try {
-      const resolve = (ref: string) =>
-        /^[0-9a-f]{40}$/.test(ref)
-          ? ref
-          : git.resolveRef({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, ref });
-      const oids = await Promise.all([resolve(a), resolve(b)]);
-      const [base] = await git.findMergeBase({
-        fs: this.fsClient,
-        dir: this.dir,
-        gitdir: this.gitdir,
-        cache: this.cache,
-        oids,
-      });
-      return base ?? null;
+      await git.checkout({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, cache: this.cache, ref: oid, noUpdateHead: true, dryRun });
     } catch (error) {
-      throw this.fail(error);
+      const conflicts = (error as { code?: string; data?: { filepaths?: string[] } });
+      if (conflicts.code === "CheckoutConflictError") throw localChangesError(conflicts.data?.filepaths ?? []);
+      throw error;
     }
   }
 
-  async changedFiles(from: string, to: string): Promise<GitFileDifference[]> {
+  async pullBranch(remote: GitRemote, target: GitBranchTarget): Promise<number> {
+    const ref = `refs/heads/${target.branch}`;
+    const [fetched] = await this.fetchRefs(remote, [target.remoteRef]);
+    const theirs = fetched?.oid;
+    if (!theirs) throw new GitError("PullRefused", `The remote has no ${target.remoteRef.replace("refs/heads/", "")} branch.`);
+    const ours = await this.headOf(ref);
+    if (ours === theirs) return 0;
     try {
-      const changed = await git.walk({
-        fs: this.fsClient,
-        dir: this.dir,
-        gitdir: this.gitdir,
-        cache: this.cache,
-        trees: [git.TREE({ ref: from }), git.TREE({ ref: to })],
-        map: async (filepath, [a, b]) => {
-          if (filepath === ".") return undefined;
-          const [oidA, oidB, typeA, typeB, modeA, modeB] = await Promise.all([
-            a?.oid(),
-            b?.oid(),
-            a?.type(),
-            b?.type(),
-            a?.mode(),
-            b?.mode(),
-          ]);
-          const modeChanged = a !== null && b !== null && typeA === "blob" && typeB === "blob" && modeA !== modeB;
-          // Equal subtrees are skipped whole (null stops the descent).
-          if (oidA === oidB) return modeChanged ? { path: filepath, modeChanged } : null;
-          if (typeA !== "tree" && typeB !== "tree") return { path: filepath, modeChanged };
-          // A file replaced by a folder (or back) is a change too.
-          return typeA === "blob" || typeB === "blob" ? { path: filepath, modeChanged: false } : undefined;
-        },
-      });
-      return (changed as GitFileDifference[]).sort((x, y) => (x.path < y.path ? -1 : 1));
-    } catch (error) {
-      throw this.fail(error);
-    }
-  }
-
-  async getConfig(path: string): Promise<string | undefined> {
-    try {
-      const value: unknown = await git.getConfig({
-        fs: this.fsClient,
-        dir: this.dir,
-        gitdir: this.gitdir,
-        path,
-      });
-      return value === undefined || value === null ? undefined : String(value);
-    } catch (error) {
-      throw this.fail(error);
-    }
-  }
-
-  async currentBranch(): Promise<string | null> {
-    try {
-      const branch = await git.currentBranch({
-        fs: this.fsClient,
-        dir: this.dir,
-        gitdir: this.gitdir,
-      });
-      return branch ?? null;
+      const [base] = await git.findMergeBase({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, cache: this.cache, oids: [ours, theirs] });
+      if (base === theirs) return 0;
+      if (base !== ours) throw new GitError("PullRefused", "This branch and the remote have both moved. Merge them in a terminal.");
+      const changed = await this.inspectPull(ours, theirs);
+      await this.checkoutTree(theirs, true);
+      await this.checkoutTree(theirs, false);
+      await git.writeRef({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, ref, value: theirs, force: true });
+      return changed;
     } catch (error) {
       throw this.fail(error);
     }

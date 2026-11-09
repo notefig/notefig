@@ -288,65 +288,44 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     expect(before.untracked).toEqual(["note.md"]);
   });
 
-  it("lists the files that differ between two commits, and reads their bytes", async () => {
-    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
-    await service.init({ defaultBranch: "main" });
-    const encode = (text: string) => new TextEncoder().encode(text);
-    const author = { name: "T", email: "t@x" };
-    await host.createDir(join(repoDir, "notes"));
-    await host.createDir(join(repoDir, "same"));
-    await host.writeFileAtomic(join(repoDir, "notes", "b.md"), encode("b\n"));
-    await host.writeFileAtomic(join(repoDir, "same", "c.md"), encode("c\n"));
-    await host.writeFileAtomic(join(repoDir, "a.md"), encode("a\n"));
-    const first = await service.addAllAndCommit({ message: "one", author });
-    await host.writeFileAtomic(join(repoDir, "notes", "b.md"), encode("b2\n"));
-    await host.deleteFile(join(repoDir, "a.md"));
-    await host.writeFileAtomic(join(repoDir, "d.md"), encode("d\n"));
-    const second = await service.addAllAndCommit({ message: "two", author });
+  describe("remoteTarget", () => {
+    const withConfig = async (config: string) => {
+      const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+      await service.init({ defaultBranch: "main" });
+      await host.writeFileAtomic(join(repoDir, ".git", "config"), new TextEncoder().encode(config));
+      return service;
+    };
+    const REF = "refs/heads/main";
 
-    expect((await service.changedFiles(first!, second!)).map((change) => change.path)).toEqual(["a.md", "d.md", "notes/b.md"]);
-    await expect(service.changedFiles(second!, second!)).resolves.toEqual([]);
-    await expect(service.readFile({ ref: second!, filepath: "notes/b.md" })).resolves.toEqual(encode("b2\n"));
-    await expect(service.readFile({ ref: second!, filepath: "a.md" })).resolves.toBeNull();
-    await expect(service.mergeBase(second!, first!)).resolves.toBe(first);
-    await expect(service.mergeBase("refs/heads/main", first!)).resolves.toBe(first);
-  });
+    it("falls back to origin", async () => {
+      const service = await withConfig('[remote "origin"]\n\turl = https://h/o.git\n');
+      await expect(service.remoteTarget("push")).resolves.toEqual({ url: "https://h/o.git", branch: "main", remoteRef: REF, upstreamRenamed: false });
+    });
 
-  it("limits status to the given paths", async () => {
-    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
-    await service.init({ defaultBranch: "main" });
-    const encode = (text: string) => new TextEncoder().encode(text);
-    await host.writeFileAtomic(join(repoDir, "a.md"), encode("a\n"));
-    await host.writeFileAtomic(join(repoDir, "c.md"), encode("c\n"));
+    it("pushes to the push remote and push URL, and pulls from the upstream", async () => {
+      const service = await withConfig(
+        '[branch "main"]\n\tremote = up\n\tpushRemote = fork\n[remote "up"]\n\turl = https://h/up.git\n[remote "fork"]\n\turl = https://h/f.git\n\tpushurl = https://h/fp.git\n',
+      );
+      await expect(service.remoteTarget("push")).resolves.toMatchObject({ url: "https://h/fp.git" });
+      await expect(service.remoteTarget("pull")).resolves.toMatchObject({ url: "https://h/up.git" });
+    });
 
-    expect((await service.status({ filepaths: ["a.md"] })).untracked).toEqual(["a.md"]);
-    expect((await service.status()).untracked).toEqual(["a.md", "c.md"]);
-  });
+    it("honours remote.pushDefault", async () => {
+      const service = await withConfig('[remote]\n\tpushDefault = fork\n[remote "origin"]\n\turl = https://h/o.git\n[remote "fork"]\n\turl = https://h/f.git\n');
+      await expect(service.remoteTarget("push")).resolves.toMatchObject({ url: "https://h/f.git" });
+      await expect(service.remoteTarget("pull")).resolves.toMatchObject({ url: "https://h/o.git" });
+    });
 
-  it("reports a change of file mode alone", async () => {
-    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
-    await service.init({ defaultBranch: "main" });
-    const author = { name: "T", email: "t@x" };
-    await host.writeFileAtomic(join(repoDir, "run.sh"), new TextEncoder().encode("echo\n"));
-    const first = await service.addAllAndCommit({ message: "one", author });
-    await host.chmod(join(repoDir, "run.sh"), 0o755);
-    await service.add({ filepath: "run.sh" });
-    const second = await service.commit({ message: "two", author });
+    it("pulls a differently named upstream and marks it for push", async () => {
+      const service = await withConfig('[branch "main"]\n\tremote = origin\n\tmerge = refs/heads/trunk\n[remote "origin"]\n\turl = https://h/o.git\n');
+      await expect(service.remoteTarget("pull")).resolves.toMatchObject({ remoteRef: "refs/heads/trunk" });
+      await expect(service.remoteTarget("push")).resolves.toMatchObject({ remoteRef: REF, upstreamRenamed: true });
+    });
 
-    await expect(service.changedFiles(first!, second)).resolves.toEqual([{ path: "run.sh", modeChanged: true }]);
-  });
-
-  it("reads the repo's config and checked-out branch", async () => {
-    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
-    await service.init({ defaultBranch: "main" });
-    await host.writeFileAtomic(
-      join(repoDir, ".git", "config"),
-      new TextEncoder().encode('[remote "origin"]\n\turl = https://h/o/r.git\n'),
-    );
-
-    await expect(service.getConfig("remote.origin.url")).resolves.toBe("https://h/o/r.git");
-    await expect(service.getConfig("user.email")).resolves.toBeUndefined();
-    await expect(service.currentBranch()).resolves.toBe("main");
+    it("says when there's no remote", async () => {
+      const service = await withConfig("");
+      await expect(service.remoteTarget("push")).resolves.toEqual({ problem: expect.stringMatching(/no remote/) });
+    });
   });
 
   it("returns empty log for initialized repo without commits", async () => {

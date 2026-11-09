@@ -4,11 +4,11 @@
  * `GitHttpClient` port and credential reference desktop uses.
  */
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { withBasicAuth } from "./httpClient";
 import { IsomorphicGitService } from "./isomorphicGitService";
@@ -319,6 +319,131 @@ describeIfGit("remote operations over git http-backend", () => {
     await expect(
       service.listRemoteRefs({ url: fake.url }),
     ).rejects.toMatchObject({ code: "Network" });
+  });
+
+  describe("pullBranch", () => {
+    const target = { url: "", branch: "main", remoteRef: "refs/heads/main", upstreamRenamed: false };
+    const write = (dir: string, file: string, text: string) => {
+      mkdirSync(dirname(join(dir, file)), { recursive: true });
+      writeFileSync(join(dir, file), text);
+    };
+    /** Commit a change to the seed and push it. */
+    async function remoteChange(change: (dir: string) => void) {
+      change(seed);
+      await git(seed, "add", "-A");
+      await git(seed, ...SYSTEM_GIT_IDENTITY, "commit", "-qm", "remote");
+      await git(seed, "push", "-q", bare, "main");
+      return git(seed, "rev-parse", "HEAD");
+    }
+    const pull = (service: IsomorphicGitService) => service.pullBranch(remote, { ...target, url: remote.url });
+    const editNote = (dir: string) => write(dir, "note.md", "remote\n");
+    const addNew = (dir: string) => write(dir, "new.md", "remote\n");
+
+    it("updates the files and the branch, and keeps unrelated local edits", async () => {
+      const { dir, service } = await clone("a");
+      write(dir, "other.md", "local\n");
+      const tip = await remoteChange((d) => {
+        editNote(d);
+        addNew(d);
+      });
+      await expect(pull(service)).resolves.toBe(2);
+      expect(await git(dir, "rev-parse", "HEAD")).toBe(tip);
+      expect(readFileSync(join(dir, "note.md"), "utf8")).toBe("remote\n");
+      expect(readFileSync(join(dir, "new.md"), "utf8")).toBe("remote\n");
+      expect(await git(dir, "status", "--porcelain")).toBe("?? other.md");
+      await expect(pull(service)).resolves.toBe(0);
+    });
+
+    it("deletes what the remote deleted", async () => {
+      const { dir, service } = await clone("a");
+      await remoteChange((d) => rmSync(join(d, "note.md")));
+      await expect(pull(service)).resolves.toBe(1);
+      expect(existsSync(join(dir, "note.md"))).toBe(false);
+      expect(await git(dir, "status", "--porcelain")).toBe("");
+    });
+
+    const stage = (text: string) => async (dir: string) => {
+      write(dir, "note.md", text);
+      await git(dir, "add", "note.md");
+    };
+    it.each<[string, (d: string) => void, (d: string) => void | Promise<void>, RegExp]>([
+      ["an unstaged edit", editNote, (d) => write(d, "note.md", "local\n"), /Local changes in note.md/],
+      ["a staged edit", editNote, stage("staged\n"), /Local changes in note.md/],
+      [
+        "a staged edit with the file put back",
+        editNote,
+        async (d) => {
+          await stage("staged\n")(d);
+          write(d, "note.md", "one\n");
+        },
+        /Local changes in note.md/,
+      ],
+      ["an untracked file in the way", addNew, (d) => write(d, "new.md", "local\n"), /Local changes in new.md/],
+      [
+        "an ignored file in the way",
+        addNew,
+        (d) => {
+          writeFileSync(join(d, ".git/info/exclude"), "new.md\n");
+          write(d, "new.md", "local\n");
+        },
+        /Local changes in new.md/,
+      ],
+      ["a mode change", (d) => chmodSync(join(d, "note.md"), 0o755), () => {}, /permissions changed for note.md/],
+      [
+        "a new executable",
+        (d) => {
+          write(d, "run.sh", "echo\n");
+          chmodSync(join(d, "run.sh"), 0o755);
+        },
+        () => {},
+        /permissions changed for run.sh/,
+      ],
+      [
+        "a file becoming a folder",
+        (d) => {
+          rmSync(join(d, "note.md"));
+          write(d, "note.md/inner.md", "x\n");
+        },
+        () => {},
+        /between a file and a folder/,
+      ],
+    ])("refuses %s without moving anything", async (_name, change, prepare, message) => {
+      const { dir, service } = await clone("a");
+      await remoteChange(change);
+      const head = await git(dir, "rev-parse", "HEAD");
+      await prepare(dir);
+      const before = await git(dir, "status", "--porcelain", "--ignored");
+      const staged = await git(dir, "ls-files", "-s");
+
+      await expect(pull(service)).rejects.toMatchObject({ code: "PullRefused", message: expect.stringMatching(message) });
+      expect(await git(dir, "rev-parse", "HEAD")).toBe(head);
+      expect(await git(dir, "status", "--porcelain", "--ignored")).toBe(before);
+      expect(await git(dir, "ls-files", "-s")).toBe(staged);
+    });
+
+    it("refuses when both sides moved, and has nothing to do when ahead", async () => {
+      const { dir, service } = await clone("a");
+      write(dir, "mine.md", "mine\n");
+      await git(dir, "add", "-A");
+      await git(dir, ...SYSTEM_GIT_IDENTITY, "commit", "-qm", "local");
+      await expect(pull(service)).resolves.toBe(0);
+      await remoteChange(editNote);
+      await expect(pull(service)).rejects.toMatchObject({ code: "PullRefused", message: expect.stringMatching(/both moved/) });
+    });
+
+    it("pushes forward only, and says when there is nothing to push", async () => {
+      const { dir, service } = await clone("a");
+      const push = () => service.pushBranch(remote, { ...target, url: remote.url });
+      await expect(push()).resolves.toBe(false);
+      write(dir, "mine.md", "mine\n");
+      await git(dir, "add", "-A");
+      await git(dir, ...SYSTEM_GIT_IDENTITY, "commit", "-qm", "local");
+      await expect(push()).resolves.toBe(true);
+      expect(await bareRef("refs/heads/main")).toBe(await git(dir, "rev-parse", "HEAD"));
+
+      await remoteChange(editNote).catch(() => {});
+      await expect(service.pushBranch(remote, { ...target, url: remote.url, upstreamRenamed: true })).rejects.toThrow(/another name/);
+    });
   });
 
   it("runs the remote operations through createRpcGitService", async () => {

@@ -66,7 +66,9 @@ export type GitErrorCode =
   /** The remote refused a ref update (its reason is in the message). */
   | "PushRejected"
   /** The remote ref isn't at the oid a push expected. */
-  | "RefConflict";
+  | "RefConflict"
+  /** A pull stopped before changing anything (the message says why). */
+  | "PullRefused";
 
 export class GitError extends Error {
   readonly code: GitErrorCode;
@@ -153,19 +155,6 @@ export interface GitStorageHost {
   unlock(name: string): Promise<void>;
 }
 
-export interface GitStatusInput {
-  /** Repo-relative, `/`-separated paths or folders; omitted, the whole tree. */
-  filepaths?: string[];
-}
-
-/** A path two commits differ on. */
-export interface GitFileDifference {
-  /** `/`-separated. */
-  path: string;
-  /** Its file mode differs (executable or not). */
-  modeChanged: boolean;
-}
-
 export type GitAddInput = GitOpInput<AddParams>;
 export type GitInitInput = GitOpInput<InitParams>;
 export type GitUnstageInput = GitOpInput<ResetIndexParams>;
@@ -213,8 +202,7 @@ export type GitReadTextFileInput = {
 
 export interface GitService {
   init(input?: GitInitInput): ReturnType<typeof igInit>;
-  /** `filepaths` limits the walk to these paths (or folders under them). */
-  status(input?: GitStatusInput): Promise<RepoStatus>;
+  status(): Promise<RepoStatus>;
   add(input: GitAddInput): ReturnType<typeof igAdd>;
   remove(input: GitRemoveInput): ReturnType<typeof igRemove>;
   unstage(input: GitUnstageInput): ReturnType<typeof igResetIndex>;
@@ -229,19 +217,16 @@ export interface GitService {
   log(input: GitLogInput): ReturnType<typeof igLog>;
   /** Read a text file's content as of a given ref/commit (for history diff/restore). */
   readTextFile(input: GitReadTextFileInput): Promise<string>;
-  /** A file's bytes as of a ref/commit; null when it isn't there. */
-  readFile(input: GitReadTextFileInput): Promise<Uint8Array | null>;
-  /** The files that differ between two commits (oids or refs): added,
-   *  modified, deleted or with a new mode, sorted by path. */
-  changedFiles(from: string, to: string): Promise<GitFileDifference[]>;
-  /** The best common ancestor of two commits (oids or refs); null when
-   *  they share no history. */
-  mergeBase(a: string, b: string): Promise<string | null>;
-  /** A config value (`remote.origin.url`), from the repo's own config;
-   *  undefined when unset. */
-  getConfig(path: string): Promise<string | undefined>;
-  /** The checked-out branch's short name; null when HEAD is detached. */
-  currentBranch(): Promise<string | null>;
+  /** Where a push or pull of the checked-out branch goes, as git picks it
+   *  from the repo's config; or why there's nowhere. */
+  remoteTarget(direction: GitDirection): Promise<GitBranchTarget | { problem: string }>;
+  /** Push the branch, only ever forward, over the remote tip it reads.
+   *  False when the remote already has it. */
+  pushBranch(remote: GitRemote, target: GitBranchTarget): Promise<boolean>;
+  /** Fast-forward the branch from its upstream; how many files changed.
+   *  Refuses (`PullRefused`) before moving anything if local work is in
+   *  the way. The files are updated first and the branch moved last. */
+  pullBranch(remote: GitRemote, target: GitBranchTarget): Promise<number>;
   /** The remote's refs starting with any of `prefixes` (all when empty). */
   listRemoteRefs(
     remote: GitRemote,
@@ -269,6 +254,18 @@ export interface GitService {
  * not a secret): the injected http client resolves it to an auth header
  * itself, so no token passes through JS on desktop.
  */
+export type GitDirection = "push" | "pull";
+
+/** The checked-out branch and where it goes. */
+export interface GitBranchTarget {
+  url: string;
+  branch: string;
+  /** Its name on the remote (`refs/heads/…`). */
+  remoteRef: string;
+  /** It tracks a differently named branch there, which a push won't touch. */
+  upstreamRenamed: boolean;
+}
+
 export interface GitRemote {
   url: string;
   credential?: string;
