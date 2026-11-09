@@ -170,6 +170,7 @@ describeIfGit("remote operations over git http-backend", () => {
     await git(bare, "update-ref", "refs/notefig/blob", blob);
     const orphan = await git(
       bare,
+      ...SYSTEM_GIT_IDENTITY,
       "commit-tree",
       `${next}^{tree}`,
       "-m",
