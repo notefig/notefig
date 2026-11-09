@@ -99,26 +99,34 @@ export function createWorkspaceGitRemote(deps: GitRemoteDeps): WorkspaceGitRemot
   const service = () => (git ??= deps.gitWorker.create({ repoPath: root, gitDir }));
   const absolute = (path: string) => pathutil.join(root, pathutil.fromTreePath(path));
 
+  const config = (path: string) => service().getConfig(path);
+
+  /** The remote's name and URL for this direction, as git picks them. */
+  const pickRemote = async (branch: string, direction: Direction, tracking: string | undefined) => {
+    if (direction === "pull") {
+      const name = tracking ?? "origin";
+      return { name, url: await config(`remote.${name}.url`) };
+    }
+    const name = (await config(`branch.${branch}.pushRemote`)) ?? (await config("remote.pushDefault")) ?? tracking ?? "origin";
+    return { name, url: (await config(`remote.${name}.pushurl`)) ?? (await config(`remote.${name}.url`)) };
+  };
+
   const target = async (direction: Direction = "push"): Promise<GitRemoteTarget | { problem: string }> => {
-    const config = (path: string) => service().getConfig(path);
     try {
       const branch = await service().currentBranch();
       if (!branch) return { problem: "Check out a branch first." };
       const tracking = await config(`branch.${branch}.remote`);
-      const name =
-        direction === "push"
-          ? ((await config(`branch.${branch}.pushRemote`)) ?? (await config("remote.pushDefault")) ?? tracking ?? "origin")
-          : (tracking ?? "origin");
-      const url = (direction === "push" ? await config(`remote.${name}.pushurl`) : undefined) ?? (await config(`remote.${name}.url`));
+      const { name, url } = await pickRemote(branch, direction, tracking);
       if (!url) return { problem: `This repository has no remote for ${branch}.` };
       if (!/^https:\/\/[^/@\s]+\/\S+/.test(url)) return { problem: "Only HTTPS remotes are supported for now." };
       const own = `refs/heads/${branch}`;
-      const upstream = await config(`branch.${branch}.merge`);
+      const upstream = (await config(`branch.${branch}.merge`)) ?? own;
+      if (direction === "pull") return { url, branch, remoteRef: upstream };
       // As git's default does: it won't push to a differently named upstream.
-      if (direction === "push" && name === tracking && upstream && upstream !== own) {
+      if (name === tracking && upstream !== own) {
         return { problem: `${branch} tracks a branch with another name. Push it from a terminal.` };
       }
-      return { url, branch, remoteRef: direction === "pull" ? (upstream ?? own) : own };
+      return { url, branch, remoteRef: own };
     } catch {
       return { problem: "This folder isn't a git repository." };
     }
