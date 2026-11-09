@@ -851,6 +851,33 @@ export class IsomorphicGitService implements GitService {
     };
   }
 
+  async getConfig(path: string): Promise<string | undefined> {
+    try {
+      const value: unknown = await git.getConfig({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        path,
+      });
+      return value === undefined || value === null ? undefined : String(value);
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async currentBranch(): Promise<string | null> {
+    try {
+      const branch = await git.currentBranch({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+      });
+      return branch ?? null;
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
   async listRemoteRefs(
     remote: GitRemote,
     prefixes: string[] = [],

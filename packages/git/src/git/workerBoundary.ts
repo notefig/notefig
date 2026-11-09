@@ -160,6 +160,8 @@ const GIT_SERVICE_METHODS = [
   "checkoutPaths",
   "log",
   "readTextFile",
+  "getConfig",
+  "currentBranch",
   "listRemoteRefs",
   "fetchRefs",
   "pushRef",

@@ -215,6 +215,11 @@ export interface GitService {
   log(input: GitLogInput): ReturnType<typeof igLog>;
   /** Read a text file's content as of a given ref/commit (for history diff/restore). */
   readTextFile(input: GitReadTextFileInput): Promise<string>;
+  /** A config value (`remote.origin.url`), from the repo's own config;
+   *  undefined when unset. */
+  getConfig(path: string): Promise<string | undefined>;
+  /** The checked-out branch's short name; null when HEAD is detached. */
+  currentBranch(): Promise<string | null>;
   /** The remote's refs starting with any of `prefixes` (all when empty). */
   listRemoteRefs(
     remote: GitRemote,

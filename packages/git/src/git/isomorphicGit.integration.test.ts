@@ -288,6 +288,19 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     expect(before.untracked).toEqual(["note.md"]);
   });
 
+  it("reads the repo's config and checked-out branch", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    await host.writeFileAtomic(
+      join(repoDir, ".git", "config"),
+      new TextEncoder().encode('[remote "origin"]\n\turl = https://h/o/r.git\n'),
+    );
+
+    await expect(service.getConfig("remote.origin.url")).resolves.toBe("https://h/o/r.git");
+    await expect(service.getConfig("user.email")).resolves.toBeUndefined();
+    await expect(service.currentBranch()).resolves.toBe("main");
+  });
+
   it("returns empty log for initialized repo without commits", async () => {
     const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
     await service.init({ defaultBranch: "main" });
