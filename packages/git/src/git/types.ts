@@ -61,6 +61,7 @@ export type GitErrorCode =
   | "Throttled"
   /** No response from the remote (the http client rejected). */
   | "Network"
+  | "HostUnverified"
   /** Any other status, or a reply that isn't the git protocol. */
   | "RemoteError"
   /** The remote refused a ref update (its reason is in the message). */

@@ -14,6 +14,7 @@ pub mod db_ops;
 pub mod file_watcher;
 pub mod fs_ops;
 pub mod git_http;
+mod git_ssh;
 pub mod line_stream;
 pub mod mcp_bridge;
 pub mod search;

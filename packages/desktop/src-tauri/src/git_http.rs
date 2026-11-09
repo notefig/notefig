@@ -10,6 +10,8 @@
 //!   `credentials::retry_after`.
 //!   Auth and cookie headers from the frontend are dropped.
 //!
+//! - SSH remotes arrive as a bridge URL and are served by `git_ssh.rs`.
+//!
 //! Wire: the body travels raw, `{url, method, headers}` in the
 //! percent-encoded `x-notefig-git-http` header. The answer is one buffer: a
 //! 4-byte big-endian length, the JSON `{status, headers}` it measures, then
@@ -25,6 +27,7 @@ use url::Url;
 
 use crate::credentials;
 use crate::fs_ops::{percent_decode, RawRequest};
+use crate::git_ssh;
 
 const META_HEADER: &str = "x-notefig-git-http";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -122,12 +125,16 @@ pub async fn git_http_request(request: RawRequest) -> Result<tauri::ipc::Respons
     let json = percent_decode(encoded).ok_or("Malformed git request metadata.")?;
     let meta: RequestMeta = serde_json::from_str(&json).map_err(|e| format!("Malformed git request metadata: {e}"))?;
     let url = validate_url(&meta.url)?;
-    let key = remote_key(&url)?;
     let post = match meta.method.as_str() {
         "GET" => false,
         "POST" => true,
         other => return Err(format!("Unsupported method {other}.")),
     };
+    if url.host_str() == Some(git_ssh::BRIDGE_HOST) {
+        let (status, headers, body) = git_ssh::request(&url, post, request.body).await?;
+        return Ok(tauri::ipc::Response::new(frame_response(status, headers, &body)));
+    }
+    let key = remote_key(&url)?;
 
     let mut builder = shared_client()?.request(if post { reqwest::Method::POST } else { reqwest::Method::GET }, url);
     for (name, value) in &meta.headers {

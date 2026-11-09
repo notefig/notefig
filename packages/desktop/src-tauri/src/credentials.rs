@@ -107,7 +107,7 @@ async fn keychain<T: Send + 'static>(
 
 // ── 2 and 3. The user's tools ───────────────────────────────────────────
 
-fn find_tool(name: &str, path: Option<&str>) -> Option<PathBuf> {
+pub(crate) fn find_tool(name: &str, path: Option<&str>) -> Option<PathBuf> {
     let exe = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
     let dirs = path.map(|p| std::env::split_paths(p).collect::<Vec<_>>()).unwrap_or_default();
     let found = dirs

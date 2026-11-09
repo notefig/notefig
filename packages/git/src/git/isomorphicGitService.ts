@@ -1,7 +1,7 @@
 import git from "isomorphic-git";
 import type { FsClient, MergeResult } from "isomorphic-git";
 
-import { toIsomorphicHttp } from "./httpClient";
+import { isSshRemote, sshBridgeUrl, toIsomorphicHttp } from "./httpClient";
 import { createIsomorphicGitFs } from "./isomorphicGitFs";
 import {
   GitError,
@@ -101,6 +101,10 @@ function codeForStatus(status: number | undefined): GitErrorCode {
       return "RepoNotFound";
     case 429:
       return "Throttled";
+    case 495:
+      return "HostUnverified";
+    case 501:
+      return "UnsupportedOperation";
     default:
       return "RemoteError";
   }
@@ -854,7 +858,7 @@ export class IsomorphicGitService implements GitService {
     }
     return {
       http: toIsomorphicHttp(this.deps.http, remote.credential),
-      url: remote.url,
+      url: isSshRemote(remote.url) ? sshBridgeUrl(remote.url) : remote.url,
     };
   }
 
