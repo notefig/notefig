@@ -322,7 +322,7 @@ describeIfGit("remote operations over git http-backend", () => {
   });
 
   describe("pullBranch", () => {
-    const target = { url: "", branch: "main", remoteRef: "refs/heads/main", upstreamRenamed: false };
+    const target = { remote: "origin", url: "", branch: "main", remoteRef: "refs/heads/main", upstreamRenamed: false };
     const write = (dir: string, file: string, text: string) => {
       mkdirSync(dirname(join(dir, file)), { recursive: true });
       writeFileSync(join(dir, file), text);
@@ -443,6 +443,47 @@ describeIfGit("remote operations over git http-backend", () => {
 
       await remoteChange(editNote).catch(() => {});
       await expect(service.pushBranch(remote, { ...target, url: remote.url, upstreamRenamed: true })).rejects.toThrow(/another name/);
+    });
+
+    it("uses a non-origin remote's refspec and tracking namespace", async () => {
+      const { dir, service } = await clone("a");
+      await git(dir, "remote", "rename", "origin", "up");
+      const tip = await remoteChange(editNote);
+      const pullTarget = await service.remoteTarget("pull");
+      if ("problem" in pullTarget) throw new Error(pullTarget.problem);
+      expect(pullTarget.remote).toBe("up");
+      await service.pullBranch({ ...remote, name: pullTarget.remote }, { ...pullTarget, url: remote.url });
+      expect(await git(dir, "rev-parse", "refs/remotes/up/main")).toBe(tip);
+      await expect(git(dir, "rev-parse", "refs/remotes/origin/main")).rejects.toThrow();
+
+      await git(dir, "remote", "add", "fork", bare);
+      await git(dir, "config", "branch.main.pushRemote", "fork");
+      write(dir, "mine.md", "mine\n");
+      await git(dir, "add", "-A");
+      await git(dir, ...SYSTEM_GIT_IDENTITY, "commit", "-qm", "local");
+      const pushTarget = await service.remoteTarget("push");
+      if ("problem" in pushTarget) throw new Error(pushTarget.problem);
+      expect(pushTarget.remote).toBe("fork");
+      await service.pushBranch({ ...remote, name: pushTarget.remote }, { ...pushTarget, url: remote.url });
+      expect(await git(dir, "rev-parse", "refs/remotes/fork/main")).toBe(await git(dir, "rev-parse", "HEAD"));
+    });
+
+    it("recognizes a push applied before its response was lost", async () => {
+      const { dir } = await clone("a");
+      write(dir, "mine.md", "mine\n");
+      await git(dir, "add", "-A");
+      await git(dir, ...SYSTEM_GIT_IDENTITY, "commit", "-qm", "local");
+      const lostReply: GitHttpClient = {
+        async request(request) {
+          const response = await http.request(request);
+          if (request.url.endsWith("/git-receive-pack")) throw new Error("reply lost");
+          return response;
+        },
+      };
+      const service = serviceAt(dir, { http: lostReply });
+      await expect(service.pushBranch(remote, { ...target, url: remote.url })).resolves.toBe(true);
+      expect(await bareRef("refs/heads/main")).toBe(await git(dir, "rev-parse", "HEAD"));
+      expect(await git(dir, "rev-parse", "refs/remotes/origin/main")).toBe(await git(dir, "rev-parse", "HEAD"));
     });
   });
 

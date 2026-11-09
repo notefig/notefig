@@ -3,7 +3,8 @@
 //! reaches JS.
 //!
 //! - HTTPS only, no userinfo in the URL; one shared keep-alive client; a
-//!   10 s timeout (a push that times out has an unknown outcome: JS polls).
+//!   10 s connect timeout and 120 s whole-request timeout. Ambiguous pushes
+//!   are reconciled by reading the remote ref back.
 //! - The remote is read off the URL (`remote_key`), and its credential
 //!   (`credentials.rs`) is added as `Authorization: Basic …` — so a token
 //!   only ever goes to its own repository. A 401 drops it for the session.
@@ -26,7 +27,8 @@ use crate::credentials;
 use crate::fs_ops::{percent_decode, RawRequest};
 
 const META_HEADER: &str = "x-notefig-git-http";
-const TIMEOUT: Duration = Duration::from_secs(10);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const DROPPED_HEADERS: [&str; 5] = ["authorization", "cookie", "host", "proxy-authorization", "content-length"];
 /// What git's smart-HTTP protocol appends to a repository URL.
 const SERVICE_SUFFIXES: [&str; 3] = ["/info/refs", "/git-upload-pack", "/git-receive-pack"];
@@ -100,8 +102,8 @@ fn shared_client() -> Result<&'static reqwest::Client, String> {
             }
             reqwest::Client::builder()
                 .https_only(true)
-                .timeout(TIMEOUT)
-                .connect_timeout(TIMEOUT)
+                .timeout(REQUEST_TIMEOUT)
+                .connect_timeout(CONNECT_TIMEOUT)
                 .pool_idle_timeout(Duration::from_secs(90))
                 .build()
                 .map_err(|e| e.to_string())
@@ -127,32 +129,41 @@ pub async fn git_http_request(request: RawRequest) -> Result<tauri::ipc::Respons
         other => return Err(format!("Unsupported method {other}.")),
     };
 
-    let mut builder = shared_client()?.request(if post { reqwest::Method::POST } else { reqwest::Method::GET }, url);
-    for (name, value) in &meta.headers {
-        if !DROPPED_HEADERS.contains(&name.to_ascii_lowercase().as_str()) {
-            builder = builder.header(name, value);
+    // Stored token, git helper, GitHub CLI, then unauthenticated. Auth-like
+    // failures advance to the next source within this one git request.
+    for attempt in 0..4 {
+        let credential = credentials::for_remote(&key, meta.credential.as_deref()).await;
+        let mut builder = shared_client()?.request(if post { reqwest::Method::POST } else { reqwest::Method::GET }, url.clone());
+        for (name, value) in &meta.headers {
+            if !DROPPED_HEADERS.contains(&name.to_ascii_lowercase().as_str()) {
+                builder = builder.header(name, value);
+            }
         }
-    }
-    let credential = credentials::for_remote(&key, meta.credential.as_deref()).await;
-    if let Some(found) = &credential {
-        builder = builder.header(reqwest::header::AUTHORIZATION, basic_auth(&found.username, &found.token));
-    }
-    if post {
-        builder = builder.body(request.body);
-    }
+        if let Some(found) = &credential {
+            builder = builder.header(reqwest::header::AUTHORIZATION, basic_auth(&found.username, &found.token));
+        }
+        if post {
+            builder = builder.body(request.body.clone());
+        }
 
-    let response = builder.send().await.map_err(|e| e.to_string())?;
-    let status = response.status().as_u16();
-    if let (401, Some(used)) = (status, &credential) {
-        credentials::refused(&key, used);
+        let response = builder.send().await.map_err(|e| e.to_string())?;
+        let status = response.status().as_u16();
+        if attempt < 3 && matches!(status, 401 | 403 | 404) {
+            if let Some(used) = &credential {
+                credentials::refused(&key, meta.credential.as_deref(), used);
+                let _ = response.bytes().await; // keep the connection reusable
+                continue;
+            }
+        }
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| Some((name.as_str().to_string(), value.to_str().ok()?.to_string())))
+            .collect();
+        let body = response.bytes().await.map_err(|e| e.to_string())?;
+        return Ok(tauri::ipc::Response::new(frame_response(status, headers, &body)));
     }
-    let headers = response
-        .headers()
-        .iter()
-        .filter_map(|(name, value)| Some((name.as_str().to_string(), value.to_str().ok()?.to_string())))
-        .collect();
-    let body = response.bytes().await.map_err(|e| e.to_string())?;
-    Ok(tauri::ipc::Response::new(frame_response(status, headers, &body)))
+    Err("Git credential resolution exhausted unexpectedly.".into())
 }
 
 #[cfg(test)]

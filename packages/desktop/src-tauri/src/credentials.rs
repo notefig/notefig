@@ -48,6 +48,16 @@ pub struct Credential {
     source: Source,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct Context {
+    remote: String,
+    repo: String,
+}
+
+fn context(remote: &str, repo: Option<&str>) -> Context {
+    Context { remote: remote.to_string(), repo: repo.unwrap_or_default().to_string() }
+}
+
 #[derive(Serialize)]
 pub struct Status {
     source: Source,
@@ -56,11 +66,16 @@ pub struct Status {
 
 #[derive(Default)]
 struct Session {
-    found: HashMap<String, Credential>,
+    /// Helper results are repository-local: conditional git config may pick
+    /// a different helper/account for two clones of the same remote.
+    found: HashMap<Context, Credential>,
     /// Remotes nothing was found for: requests go without a credential
     /// instead of running the helpers each time; an explicit status asks again.
-    missing: HashSet<String>,
-    refused: HashSet<(String, Source)>,
+    missing: HashSet<Context>,
+    refused: HashSet<(Context, Source)>,
+    /// A pasted token is global to the remote. Skip a rejected value until
+    /// the user replaces it rather than re-reading it on every request.
+    refused_stored: HashMap<String, String>,
 }
 
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
@@ -168,16 +183,18 @@ async fn github_cli(key: &str) -> Option<Credential> {
 
 async fn resolve(key: &str, ask_again: bool, repo: Option<&str>) -> Option<Credential> {
     let _one = RESOLVING.lock().await;
-    let (found, missing) = session(|s| (s.found.get(key).cloned(), s.missing.contains(key)));
+    let context = context(key, repo);
+    let (found, missing) = session(|s| (s.found.get(&context).cloned(), s.missing.contains(&context)));
     if found.is_some() || (missing && !ask_again) {
         return found;
     }
-    let stored = keychain(|entry| entry.get_password(), key).await.ok().flatten().map(|token| Credential {
-        username: token_username(key).into(),
-        token,
-        source: Source::Stored,
-    });
-    let refused = |source| session(|s| s.refused.contains(&(key.to_string(), source)));
+    let stored = keychain(|entry| entry.get_password(), key)
+        .await
+        .ok()
+        .flatten()
+        .filter(|token| session(|s| s.refused_stored.get(key) != Some(token)))
+        .map(|token| Credential { username: token_username(key).into(), token, source: Source::Stored });
+    let refused = |source| session(|s| s.refused.contains(&(context.clone(), source)));
     let found = match stored {
         Some(found) => Some(found),
         None if !refused(Source::Git) => match git_fill(key, repo).await {
@@ -190,11 +207,11 @@ async fn resolve(key: &str, ask_again: bool, repo: Option<&str>) -> Option<Crede
     };
     session(|s| match &found {
         Some(found) => {
-            s.missing.remove(key);
-            s.found.insert(key.to_string(), found.clone());
+            s.missing.remove(&context);
+            s.found.insert(context, found.clone());
         }
         None => {
-            s.missing.insert(key.to_string());
+            s.missing.insert(context);
         }
     });
     found
@@ -205,17 +222,32 @@ pub(crate) async fn for_remote(key: &str, repo: Option<&str>) -> Option<Credenti
     resolve(key, false, repo).await
 }
 
-/// The remote answered 401: try the next source next time.
-pub(crate) fn refused(key: &str, used: &Credential) {
+/// The remote refused this credential: try the next source.
+pub(crate) fn refused(key: &str, repo: Option<&str>, used: &Credential) {
+    let context = context(key, repo);
     session(|s| {
         // The user may have switched credentials while this request ran.
-        if s.found.get(key).is_none_or(|found| found.token != used.token) {
+        if s.found.get(&context).is_none_or(|found| found.token != used.token) {
             return;
         }
-        s.found.remove(key);
-        if used.source != Source::Stored {
-            s.refused.insert((key.to_string(), used.source));
+        s.found.remove(&context);
+        if used.source == Source::Stored {
+            s.refused_stored.insert(key.to_string(), used.token.clone());
+            s.found.retain(|ctx, found| {
+                ctx.remote != key || found.source != Source::Stored || found.token != used.token
+            });
+        } else {
+            s.refused.insert((context, used.source));
         }
+    });
+}
+
+fn clear_remote_session(key: &str) {
+    session(|s| {
+        s.found.retain(|ctx, _| ctx.remote != key);
+        s.missing.retain(|ctx| ctx.remote != key);
+        s.refused.retain(|(ctx, _)| ctx.remote != key);
+        s.refused_stored.remove(key);
     });
 }
 
@@ -242,7 +274,7 @@ pub async fn credentials_set(remote_url: String, repo_path: String, token: Strin
         return Err("That doesn't look like a token.".into());
     }
     keychain(move |entry| entry.set_password(&token), &key).await?;
-    session(|s| s.found.remove(&key));
+    clear_remote_session(&key);
     Ok(status_of(&key, &repo_path).await)
 }
 
@@ -251,10 +283,7 @@ pub async fn credentials_set(remote_url: String, repo_path: String, token: Strin
 pub async fn credentials_delete(remote_url: String, repo_path: String) -> Result<Option<Status>, String> {
     let key = key_of(&remote_url)?;
     keychain(|entry| entry.delete_credential(), &key).await?;
-    session(|s| {
-        s.found.remove(&key);
-        s.refused.retain(|(k, _)| k != &key);
-    });
+    clear_remote_session(&key);
     Ok(status_of(&key, &repo_path).await)
 }
 
@@ -279,30 +308,44 @@ mod tests {
     }
 
     #[test]
-    fn a_refused_helper_credential_is_skipped_but_a_stored_one_is_only_dropped() {
+    fn refused_credentials_are_skipped_in_the_right_scope() {
         let key = "example.test/o/r".to_string();
+        let repo = Some("/repo");
+        let context = context(&key, repo);
         let credential = |source, token: &str| Credential { username: "u".into(), token: token.into(), source };
-        let insert = |found: &Credential| session(|s| s.found.insert(key.clone(), found.clone()));
+        let insert = |found: &Credential| session(|s| s.found.insert(context.clone(), found.clone()));
         let git = credential(Source::Git, "a");
         insert(&git);
-        refused(&key, &git);
+        refused(&key, repo, &git);
         let stored = credential(Source::Stored, "b");
         insert(&stored);
-        refused(&key, &stored);
+        refused(&key, repo, &stored);
         session(|s| {
-            assert!(s.found.get(&key).is_none());
-            assert!(s.refused.contains(&(key.clone(), Source::Git)));
-            assert!(!s.refused.contains(&(key.clone(), Source::Stored)));
+            assert!(s.found.get(&context).is_none());
+            assert!(s.refused.contains(&(context.clone(), Source::Git)));
+            assert_eq!(s.refused_stored.get(&key).map(String::as_str), Some("b"));
         });
     }
 
     #[test]
     fn an_old_request_cant_refuse_the_credential_chosen_since() {
         let key = "example.test/o/switched".to_string();
+        let repo = Some("/repo");
+        let context = context(&key, repo);
         let old = Credential { username: "u".into(), token: "old".into(), source: Source::Stored };
         let new = Credential { username: "u".into(), token: "new".into(), source: Source::Git };
-        session(|s| s.found.insert(key.clone(), new.clone()));
-        refused(&key, &old);
-        session(|s| assert_eq!(s.found.get(&key).map(|f| f.token.as_str()), Some("new")));
+        session(|s| s.found.insert(context.clone(), new.clone()));
+        refused(&key, repo, &old);
+        session(|s| assert_eq!(s.found.get(&context).map(|f| f.token.as_str()), Some("new")));
+    }
+
+    #[test]
+    fn helper_results_are_local_to_the_repository_context() {
+        let first = context("example.test/o/local", Some("/one"));
+        let second = context("example.test/o/local", Some("/two"));
+        session(|s| {
+            s.found.insert(first, Credential { username: "one".into(), token: "a".into(), source: Source::Git });
+            assert!(s.found.get(&second).is_none());
+        });
     }
 }

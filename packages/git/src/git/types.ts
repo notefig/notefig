@@ -258,6 +258,8 @@ export type GitDirection = "push" | "pull";
 
 /** The checked-out branch and where it goes. */
 export interface GitBranchTarget {
+  /** The configured remote's name. */
+  remote: string;
   url: string;
   branch: string;
   /** Its name on the remote (`refs/heads/…`). */
@@ -267,6 +269,8 @@ export interface GitBranchTarget {
 }
 
 export interface GitRemote {
+  /** The configured remote whose refspec/tracking namespace applies. */
+  name?: string;
   url: string;
   credential?: string;
 }

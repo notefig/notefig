@@ -299,15 +299,15 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
 
     it("falls back to origin", async () => {
       const service = await withConfig('[remote "origin"]\n\turl = https://h/o.git\n');
-      await expect(service.remoteTarget("push")).resolves.toEqual({ url: "https://h/o.git", branch: "main", remoteRef: REF, upstreamRenamed: false });
+      await expect(service.remoteTarget("push")).resolves.toEqual({ remote: "origin", url: "https://h/o.git", branch: "main", remoteRef: REF, upstreamRenamed: false });
     });
 
     it("pushes to the push remote and push URL, and pulls from the upstream", async () => {
       const service = await withConfig(
         '[branch "main"]\n\tremote = up\n\tpushRemote = fork\n[remote "up"]\n\turl = https://h/up.git\n[remote "fork"]\n\turl = https://h/f.git\n\tpushurl = https://h/fp.git\n',
       );
-      await expect(service.remoteTarget("push")).resolves.toMatchObject({ url: "https://h/fp.git" });
-      await expect(service.remoteTarget("pull")).resolves.toMatchObject({ url: "https://h/up.git" });
+      await expect(service.remoteTarget("push")).resolves.toMatchObject({ remote: "fork", url: "https://h/fp.git" });
+      await expect(service.remoteTarget("pull")).resolves.toMatchObject({ remote: "up", url: "https://h/up.git" });
     });
 
     it("honours remote.pushDefault", async () => {

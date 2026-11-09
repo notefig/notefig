@@ -38,12 +38,7 @@ const textEncoder = new TextEncoder();
 
 const ZERO_OID = "0".repeat(40);
 
-/**
- * The remote fetch reads its refspec from. isomorphic-git's `fetch` won't
- * run without one in the config, and sync workspaces are clones, so they
- * have `origin`'s; the URL is always the caller's.
- */
-const FETCH_REMOTE = "origin";
+const DEFAULT_REMOTE = "origin";
 
 function joinGitPath(repoPath: string, relativePath: string): string {
   const base = repoPath.endsWith("/") ? repoPath.slice(0, -1) : repoPath;
@@ -888,8 +883,8 @@ export class IsomorphicGitService implements GitService {
       if (!url) return { problem: `This repository has no remote for ${branch}.` };
       const own = `refs/heads/${branch}`;
       const upstream = (await this.config(`branch.${branch}.merge`)) ?? own;
-      if (direction === "pull") return { url, branch, remoteRef: upstream, upstreamRenamed: false };
-      return { url, branch, remoteRef: own, upstreamRenamed: name === tracking && upstream !== own };
+      if (direction === "pull") return { remote: name, url, branch, remoteRef: upstream, upstreamRenamed: false };
+      return { remote: name, url, branch, remoteRef: own, upstreamRenamed: name === tracking && upstream !== own };
     } catch {
       return { problem: "This folder isn't a git repository." };
     }
@@ -910,7 +905,35 @@ export class IsomorphicGitService implements GitService {
     const refs = await this.listRemoteRefs(remote, [ref]);
     const theirs = refs.find((entry) => entry.ref === ref)?.oid ?? null;
     if (theirs === ours) return false;
-    await this.pushRef(remote, { ref, oid: ours, expect: theirs });
+    try {
+      await this.pushRef(remote, { ref, oid: ours, expect: theirs });
+    } catch (error) {
+      const failure = toGitError(error);
+      if (failure.code !== "Network") throw failure;
+      // receive-pack may have applied the update before its reply was lost.
+      for (const delay of [0, 250, 750]) {
+        if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+        try {
+          const after = await this.listRemoteRefs(remote, [ref]);
+          if (after.find((entry) => entry.ref === ref)?.oid === ours) {
+            // The lost push response also prevented isomorphic-git from
+            // updating its tracking ref; complete that local side effect.
+            await git.writeRef({
+              fs: this.fsClient,
+              dir: this.dir,
+              gitdir: this.gitdir,
+              ref: `refs/remotes/${remote.name ?? DEFAULT_REMOTE}/${target.branch}`,
+              value: ours,
+              force: true,
+            });
+            return true;
+          }
+        } catch {
+          // Preserve the original network failure if polling cannot answer.
+        }
+      }
+      throw failure;
+    }
     return true;
   }
 
@@ -1020,7 +1043,7 @@ export class IsomorphicGitService implements GitService {
             gitdir: this.gitdir,
             cache: this.cache,
             ...this.remote(remote),
-            remote: FETCH_REMOTE,
+            remote: remote.name ?? DEFAULT_REMOTE,
             remoteRef: ref,
             singleBranch: true,
             tags: false,
@@ -1040,7 +1063,8 @@ export class IsomorphicGitService implements GitService {
   /**
    * isomorphic-git's `push` sends a local ref; an oid stands in for one
    * (it passes 40 hex digits through), so no temporary local ref is
-   * written. It does write a tracking ref `refs/remotes/origin/<remote ref
+   * written. It writes a tracking ref under the named remote (`origin`
+   * when unnamed), at `<remote ref
    * minus refs/heads>` after each push, even for non-branch refs. It walks
    * `oid` as a commit, so a blob can't be pushed (`InvalidInput`).
    */
@@ -1052,6 +1076,7 @@ export class IsomorphicGitService implements GitService {
         gitdir: this.gitdir,
         cache: this.cache,
         ...this.remote(remote),
+        remote: remote.name ?? DEFAULT_REMOTE,
         ref: input.delete ? ZERO_OID : input.oid,
         remoteRef: input.ref,
         delete: input.delete,

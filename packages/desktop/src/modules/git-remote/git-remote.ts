@@ -7,7 +7,6 @@
  */
 import { defineModule } from "@notefig/core";
 import { GitError, type GitBranchTarget, type GitDirection, type GitRemote, type GitService } from "@notefig/git";
-import { platformModule } from "@/core/services";
 import { gitWorkerModule, type GitWorker } from "@/modules/git-worker";
 import { path as pathutil } from "@/utils/path";
 
@@ -43,7 +42,14 @@ export function createWorkspaceGitRemote(deps: { workspacePath: string; gitWorke
   const root = pathutil.normalize(deps.workspacePath);
   const gitDir = pathutil.join(root, ".git");
   let git: GitService | null = null;
+  let operation: Promise<void> = Promise.resolve();
   const service = () => (git ??= deps.gitWorker.create({ repoPath: root, gitDir }));
+
+  const exclusive = <T>(work: () => Promise<T>): Promise<T> => {
+    const run = operation.then(work, work);
+    operation = run.then(() => undefined, () => undefined);
+    return run;
+  };
 
   const target: WorkspaceGitRemote["target"] = async (direction = "push") => {
     const found = await service().remoteTarget(direction);
@@ -62,7 +68,7 @@ export function createWorkspaceGitRemote(deps: { workspacePath: string; gitWorke
     if ("problem" in found) throw new Error(found.problem);
     try {
       // The repository whose git config applies when finding the credential.
-      return await work({ url: found.url, credential: root }, found);
+      return await work({ name: found.remote, url: found.url, credential: root }, found);
     } catch (error) {
       throw new Error(problemOf(error, found.url));
     }
@@ -70,12 +76,12 @@ export function createWorkspaceGitRemote(deps: { workspacePath: string; gitWorke
 
   return {
     target,
-    push: () =>
+    push: () => exclusive(() =>
       onTarget("push", async (remote, found) => ({
         branch: found.branch,
         pushed: await service().pushBranch(remote, found),
-      })),
-    pull: () => onTarget("pull", (remote, found) => service().pullBranch(remote, found)),
+      }))),
+    pull: () => exclusive(() => onTarget("pull", (remote, found) => service().pullBranch(remote, found))),
     dispose() {
       if (git) deps.gitWorker.dispose(gitDir);
     },
@@ -84,7 +90,7 @@ export function createWorkspaceGitRemote(deps: { workspacePath: string; gitWorke
 
 export const gitRemoteModule = defineModule({
   name: "gitRemote",
-  needs: [platformModule, gitWorkerModule],
+  needs: [gitWorkerModule],
   workspace: {
     create: (ctx) => createWorkspaceGitRemote({ workspacePath: ctx.workspace.path, gitWorker: ctx.use("gitWorker") }),
     dispose: (remote) => remote.dispose(),

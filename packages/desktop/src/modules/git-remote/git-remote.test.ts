@@ -4,8 +4,8 @@ import type { GitWorker } from "@/modules/git-worker";
 import { createWorkspaceGitRemote } from "./git-remote";
 
 const URL_ = "https://github.com/team/notes.git";
-const TARGET = { url: URL_, branch: "main", remoteRef: "refs/heads/main", upstreamRenamed: false };
-const REMOTE = { url: URL_, credential: "/ws" };
+const TARGET = { remote: "origin", url: URL_, branch: "main", remoteRef: "refs/heads/main", upstreamRenamed: false };
+const REMOTE = { name: "origin", url: URL_, credential: "/ws" };
 
 function setup(overrides: Partial<GitService> = {}) {
   const git = {
@@ -68,5 +68,23 @@ describe("git remote", () => {
     await used.remote.target();
     used.remote.dispose();
     expect(used.gitWorker.dispose).toHaveBeenCalledWith("/ws/.git");
+  });
+
+  it("serializes mutations and releases the lane after a failure", async () => {
+    let finishPush!: (value: boolean) => void;
+    const pushBranch = vi.fn(() => new Promise<boolean>((resolve) => { finishPush = resolve; }));
+    const pullBranch = vi.fn(async () => 1);
+    const { remote } = setup({ pushBranch, pullBranch });
+    const push = remote.push();
+    const pull = remote.pull();
+    await vi.waitFor(() => expect(pushBranch).toHaveBeenCalledOnce());
+    expect(pullBranch).not.toHaveBeenCalled();
+    finishPush(true);
+    await expect(push).resolves.toMatchObject({ pushed: true });
+    await expect(pull).resolves.toBe(1);
+
+    pushBranch.mockRejectedValueOnce(new Error("failed"));
+    await expect(remote.push()).rejects.toThrow("failed");
+    await expect(remote.pull()).resolves.toBe(1);
   });
 });
