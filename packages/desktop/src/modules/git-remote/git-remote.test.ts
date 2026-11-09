@@ -34,7 +34,7 @@ describe("git remote", () => {
 
   it("only speaks HTTPS for now, and passes on why there's no target", async () => {
     const ssh = setup({ remoteTarget: vi.fn(async () => ({ ...TARGET, url: "git@github.com:t/n.git" })) });
-    await expect(ssh.remote.target()).resolves.toEqual({ problem: expect.stringMatching(/HTTPS/) });
+    await expect(ssh.remote.urls()).rejects.toThrow(/HTTPS/);
     await expect(ssh.remote.push()).rejects.toThrow(/HTTPS/);
 
     const none = setup({ remoteTarget: vi.fn(async () => ({ problem: "No remote." })) });
@@ -65,9 +65,20 @@ describe("git remote", () => {
     expect(idle.gitWorker.dispose).not.toHaveBeenCalled();
 
     const used = setup();
-    await used.remote.target();
+    await used.remote.urls();
     used.remote.dispose();
     expect(used.gitWorker.dispose).toHaveBeenCalledWith("/ws/.git");
+  });
+
+  it("lists each repository the branch uses once, skipping one it can't", async () => {
+    await expect(setup().remote.urls()).resolves.toEqual([URL_]);
+
+    const upstream = "https://github.com/team/upstream.git";
+    const fork = setup({ remoteTarget: vi.fn(async (direction) => ({ ...TARGET, url: direction === "pull" ? upstream : URL_ })) });
+    await expect(fork.remote.urls()).resolves.toEqual([URL_, upstream]);
+
+    const sshPush = setup({ remoteTarget: vi.fn(async (direction) => ({ ...TARGET, url: direction === "pull" ? upstream : "git@github.com:t/n.git" })) });
+    await expect(sshPush.remote.urls()).resolves.toEqual([upstream]);
   });
 
   it("serializes mutations and releases the lane after a failure", async () => {

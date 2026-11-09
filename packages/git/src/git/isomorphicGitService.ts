@@ -905,35 +905,7 @@ export class IsomorphicGitService implements GitService {
     const refs = await this.listRemoteRefs(remote, [ref]);
     const theirs = refs.find((entry) => entry.ref === ref)?.oid ?? null;
     if (theirs === ours) return false;
-    try {
-      await this.pushRef(remote, { ref, oid: ours, expect: theirs });
-    } catch (error) {
-      const failure = toGitError(error);
-      if (failure.code !== "Network") throw failure;
-      // receive-pack may have applied the update before its reply was lost.
-      for (const delay of [0, 250, 750]) {
-        if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
-        try {
-          const after = await this.listRemoteRefs(remote, [ref]);
-          if (after.find((entry) => entry.ref === ref)?.oid === ours) {
-            // The lost push response also prevented isomorphic-git from
-            // updating its tracking ref; complete that local side effect.
-            await git.writeRef({
-              fs: this.fsClient,
-              dir: this.dir,
-              gitdir: this.gitdir,
-              ref: `refs/remotes/${remote.name ?? DEFAULT_REMOTE}/${target.branch}`,
-              value: ours,
-              force: true,
-            });
-            return true;
-          }
-        } catch {
-          // Preserve the original network failure if polling cannot answer.
-        }
-      }
-      throw failure;
-    }
+    await this.pushRef(remote, { ref, oid: ours, expect: theirs });
     return true;
   }
 
@@ -998,6 +970,10 @@ export class IsomorphicGitService implements GitService {
       const changed = await this.inspectPull(ours, theirs);
       await this.checkoutTree(theirs, true);
       await this.checkoutTree(theirs, false);
+      // Checkout takes a while, and a terminal can commit during it.
+      if ((await this.headOf(ref)) !== ours) {
+        throw new GitError("PullRefused", `${target.branch} got a new commit during the pull. Check it with git status in a terminal.`);
+      }
       await git.writeRef({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, ref, value: theirs, force: true });
       return changed;
     } catch (error) {

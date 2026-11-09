@@ -10,6 +10,8 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import isoGit from "isomorphic-git";
+
 import { withBasicAuth } from "./httpClient";
 import { IsomorphicGitService } from "./isomorphicGitService";
 import {
@@ -468,22 +470,20 @@ describeIfGit("remote operations over git http-backend", () => {
       expect(await git(dir, "rev-parse", "refs/remotes/fork/main")).toBe(await git(dir, "rev-parse", "HEAD"));
     });
 
-    it("recognizes a push applied before its response was lost", async () => {
-      const { dir } = await clone("a");
-      write(dir, "mine.md", "mine\n");
-      await git(dir, "add", "-A");
-      await git(dir, ...SYSTEM_GIT_IDENTITY, "commit", "-qm", "local");
-      const lostReply: GitHttpClient = {
-        async request(request) {
-          const response = await http.request(request);
-          if (request.url.endsWith("/git-receive-pack")) throw new Error("reply lost");
-          return response;
-        },
-      };
-      const service = serviceAt(dir, { http: lostReply });
-      await expect(service.pushBranch(remote, { ...target, url: remote.url })).resolves.toBe(true);
-      expect(await bareRef("refs/heads/main")).toBe(await git(dir, "rev-parse", "HEAD"));
-      expect(await git(dir, "rev-parse", "refs/remotes/origin/main")).toBe(await git(dir, "rev-parse", "HEAD"));
+    it("refuses to move a branch that got a commit during the checkout", async () => {
+      const { dir, service } = await clone("a");
+      await remoteChange(editNote);
+      const realCheckout = isoGit.checkout;
+      let local = "";
+      const checkout = jest.spyOn(isoGit, "checkout").mockImplementation(async (args) => {
+        await realCheckout(args);
+        if (args.dryRun) return;
+        await git(dir, ...SYSTEM_GIT_IDENTITY, "commit", "-q", "--allow-empty", "-m", "from a terminal");
+        local = await git(dir, "rev-parse", "HEAD");
+      });
+      await expect(pull(service)).rejects.toThrow(/new commit during the pull/);
+      checkout.mockRestore();
+      expect(await git(dir, "rev-parse", "HEAD")).toBe(local);
     });
   });
 

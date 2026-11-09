@@ -3,11 +3,11 @@
 //! reaches JS.
 //!
 //! - HTTPS only, no userinfo in the URL; one shared keep-alive client; a
-//!   10 s connect timeout and 120 s whole-request timeout. Ambiguous pushes
-//!   are reconciled by reading the remote ref back.
+//!   10 s connect timeout and 120 s whole-request timeout.
 //! - The remote is read off the URL (`remote_key`), and its credential
 //!   (`credentials.rs`) is added as `Authorization: Basic …` — so a token
-//!   only ever goes to its own repository. A 401 drops it for the session.
+//!   only ever goes to its own repository. What a 401 does to it is
+//!   `credentials::retry_after`.
 //!   Auth and cookie headers from the frontend are dropped.
 //!
 //! Wire: the body travels raw, `{url, method, headers}` in the
@@ -129,31 +129,28 @@ pub async fn git_http_request(request: RawRequest) -> Result<tauri::ipc::Respons
         other => return Err(format!("Unsupported method {other}.")),
     };
 
-    // Stored token, git helper, GitHub CLI, then unauthenticated. Auth-like
-    // failures advance to the next source within this one git request.
-    for attempt in 0..4 {
-        let credential = credentials::for_remote(&key, meta.credential.as_deref()).await;
-        let mut builder = shared_client()?.request(if post { reqwest::Method::POST } else { reqwest::Method::GET }, url.clone());
-        for (name, value) in &meta.headers {
-            if !DROPPED_HEADERS.contains(&name.to_ascii_lowercase().as_str()) {
-                builder = builder.header(name, value);
-            }
+    let mut builder = shared_client()?.request(if post { reqwest::Method::POST } else { reqwest::Method::GET }, url);
+    for (name, value) in &meta.headers {
+        if !DROPPED_HEADERS.contains(&name.to_ascii_lowercase().as_str()) {
+            builder = builder.header(name, value);
         }
-        if let Some(found) = &credential {
-            builder = builder.header(reqwest::header::AUTHORIZATION, basic_auth(&found.username, &found.token));
-        }
-        if post {
-            builder = builder.body(request.body.clone());
-        }
+    }
+    if post {
+        builder = builder.body(request.body);
+    }
 
-        let response = builder.send().await.map_err(|e| e.to_string())?;
+    loop {
+        let repo = meta.credential.as_deref();
+        let credential = credentials::for_remote(&key, repo).await;
+        let mut attempt = builder.try_clone().ok_or("A git request body can't be sent again.")?;
+        if let Some(found) = &credential {
+            attempt = attempt.header(reqwest::header::AUTHORIZATION, basic_auth(&found.username, &found.token));
+        }
+        let response = attempt.send().await.map_err(|e| e.to_string())?;
         let status = response.status().as_u16();
-        if attempt < 3 && matches!(status, 401 | 403 | 404) {
-            if let Some(used) = &credential {
-                credentials::refused(&key, meta.credential.as_deref(), used);
-                let _ = response.bytes().await; // keep the connection reusable
-                continue;
-            }
+        if credentials::retry_after(&key, repo, credential.as_ref(), status) {
+            let _ = response.bytes().await; // keep the connection reusable
+            continue;
         }
         let headers = response
             .headers()
@@ -163,7 +160,6 @@ pub async fn git_http_request(request: RawRequest) -> Result<tauri::ipc::Respons
         let body = response.bytes().await.map_err(|e| e.to_string())?;
         return Ok(tauri::ipc::Response::new(frame_response(status, headers, &body)));
     }
-    Err("Git credential resolution exhausted unexpectedly.".into())
 }
 
 #[cfg(test)]

@@ -10,9 +10,9 @@
 //! 3. the GitHub CLI (`gh auth token`).
 //!
 //! What is found is held in memory for the session, never copied. A 401
-//! drops it, and a refused git or gh credential is skipped for the rest of
-//! the session (never rejected back to the user's helper: it may be fine
-//! for their other repositories). The frontend learns the source and
+//! drops it (see `retry_after`), and a refused git or gh credential is
+//! skipped for the rest of the session (never rejected back to the user's
+//! helper: it may be fine for their other repositories). The frontend learns the source and
 //! username, never the secret.
 
 use std::collections::{HashMap, HashSet};
@@ -73,9 +73,6 @@ struct Session {
     /// instead of running the helpers each time; an explicit status asks again.
     missing: HashSet<Context>,
     refused: HashSet<(Context, Source)>,
-    /// A pasted token is global to the remote. Skip a rejected value until
-    /// the user replaces it rather than re-reading it on every request.
-    refused_stored: HashMap<String, String>,
 }
 
 static SESSION: Mutex<Option<Session>> = Mutex::new(None);
@@ -188,12 +185,11 @@ async fn resolve(key: &str, ask_again: bool, repo: Option<&str>) -> Option<Crede
     if found.is_some() || (missing && !ask_again) {
         return found;
     }
-    let stored = keychain(|entry| entry.get_password(), key)
-        .await
-        .ok()
-        .flatten()
-        .filter(|token| session(|s| s.refused_stored.get(key) != Some(token)))
-        .map(|token| Credential { username: token_username(key).into(), token, source: Source::Stored });
+    let stored = keychain(|entry| entry.get_password(), key).await.ok().flatten().map(|token| Credential {
+        username: token_username(key).into(),
+        token,
+        source: Source::Stored,
+    });
     let refused = |source| session(|s| s.refused.contains(&(context.clone(), source)));
     let found = match stored {
         Some(found) => Some(found),
@@ -222,24 +218,27 @@ pub(crate) async fn for_remote(key: &str, repo: Option<&str>) -> Option<Credenti
     resolve(key, false, repo).await
 }
 
-/// The remote refused this credential: try the next source.
-pub(crate) fn refused(key: &str, repo: Option<&str>, used: &Credential) {
+/// Whether to send a request again after this answer. A 401 drops the
+/// credential: a git or gh one gives way to the next source, while a token
+/// the user pasted stands until they replace it, so the 401 reaches them and
+/// nothing goes out under an account they didn't choose. Any other status
+/// says nothing about the credential: a 403 can be a read-only token on a
+/// push, or a rate limit.
+pub(crate) fn retry_after(key: &str, repo: Option<&str>, used: Option<&Credential>, status: u16) -> bool {
+    let Some(used) = used.filter(|_| status == 401) else {
+        return false;
+    };
     let context = context(key, repo);
     session(|s| {
         // The user may have switched credentials while this request ran.
-        if s.found.get(&context).is_none_or(|found| found.token != used.token) {
-            return;
-        }
-        s.found.remove(&context);
-        if used.source == Source::Stored {
-            s.refused_stored.insert(key.to_string(), used.token.clone());
-            s.found.retain(|ctx, found| {
-                ctx.remote != key || found.source != Source::Stored || found.token != used.token
-            });
-        } else {
-            s.refused.insert((context, used.source));
+        if s.found.get(&context).is_some_and(|found| found.token == used.token) {
+            s.found.remove(&context);
+            if used.source != Source::Stored {
+                s.refused.insert((context, used.source));
+            }
         }
     });
+    used.source != Source::Stored
 }
 
 fn clear_remote_session(key: &str) {
@@ -247,7 +246,6 @@ fn clear_remote_session(key: &str) {
         s.found.retain(|ctx, _| ctx.remote != key);
         s.missing.retain(|ctx| ctx.remote != key);
         s.refused.retain(|(ctx, _)| ctx.remote != key);
-        s.refused_stored.remove(key);
     });
 }
 
@@ -307,35 +305,59 @@ mod tests {
         assert_eq!(token_username("github.com/o/r"), "x-access-token");
     }
 
+    fn credential(source: Source, token: &str) -> Credential {
+        Credential { username: "u".into(), token: token.into(), source }
+    }
+
     #[test]
-    fn refused_credentials_are_skipped_in_the_right_scope() {
-        let key = "example.test/o/r".to_string();
-        let repo = Some("/repo");
-        let context = context(&key, repo);
-        let credential = |source, token: &str| Credential { username: "u".into(), token: token.into(), source };
-        let insert = |found: &Credential| session(|s| s.found.insert(context.clone(), found.clone()));
+    fn a_401_moves_past_a_helper_credential() {
+        let key = "example.test/o/helper";
+        let context = context(key, Some("/repo"));
         let git = credential(Source::Git, "a");
-        insert(&git);
-        refused(&key, repo, &git);
-        let stored = credential(Source::Stored, "b");
-        insert(&stored);
-        refused(&key, repo, &stored);
+        session(|s| s.found.insert(context.clone(), git.clone()));
+        assert!(retry_after(key, Some("/repo"), Some(&git), 401));
         session(|s| {
             assert!(s.found.get(&context).is_none());
             assert!(s.refused.contains(&(context.clone(), Source::Git)));
-            assert_eq!(s.refused_stored.get(&key).map(String::as_str), Some("b"));
+        });
+    }
+
+    #[test]
+    fn a_401_on_a_pasted_token_reaches_the_user() {
+        let key = "example.test/o/pasted";
+        let context = context(key, Some("/repo"));
+        let stored = credential(Source::Stored, "b");
+        session(|s| s.found.insert(context.clone(), stored.clone()));
+        assert!(!retry_after(key, Some("/repo"), Some(&stored), 401));
+        session(|s| {
+            assert!(s.found.get(&context).is_none());
+            assert!(!s.refused.contains(&(context.clone(), Source::Stored)));
+        });
+    }
+
+    #[test]
+    fn only_a_401_says_the_credential_is_bad() {
+        let key = "example.test/o/denied";
+        let context = context(key, Some("/repo"));
+        let git = credential(Source::Git, "a");
+        session(|s| s.found.insert(context.clone(), git.clone()));
+        for status in [200, 403, 404, 429, 500] {
+            assert!(!retry_after(key, Some("/repo"), Some(&git), status));
+        }
+        assert!(!retry_after(key, Some("/repo"), None, 401));
+        session(|s| {
+            assert!(s.found.contains_key(&context));
+            assert!(!s.refused.contains(&(context.clone(), Source::Git)));
         });
     }
 
     #[test]
     fn an_old_request_cant_refuse_the_credential_chosen_since() {
-        let key = "example.test/o/switched".to_string();
-        let repo = Some("/repo");
-        let context = context(&key, repo);
-        let old = Credential { username: "u".into(), token: "old".into(), source: Source::Stored };
-        let new = Credential { username: "u".into(), token: "new".into(), source: Source::Git };
+        let key = "example.test/o/switched";
+        let context = context(key, Some("/repo"));
+        let new = credential(Source::Git, "new");
         session(|s| s.found.insert(context.clone(), new.clone()));
-        refused(&key, repo, &old);
+        retry_after(key, Some("/repo"), Some(&credential(Source::Stored, "old")), 401);
         session(|s| assert_eq!(s.found.get(&context).map(|f| f.token.as_str()), Some("new")));
     }
 

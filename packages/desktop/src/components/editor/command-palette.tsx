@@ -109,10 +109,10 @@ function gitCommands(core: Core, workspacePath: string, t: TFunction): CommandTy
   /** Change the remote's credential, reporting what's in use after. */
   const onCredential = (change: (url: string) => Promise<CredentialStatus | null | undefined>) => async () => {
     try {
-      const found = await remote().target();
-      if ("problem" in found) throw new Error(found.problem);
-      const status = await change(found.url);
-      if (status !== undefined) showCredential(status);
+      for (const url of await remote().urls()) {
+        const status = await change(url);
+        if (status !== undefined) showCredential(status);
+      }
     } catch (error) {
       toast.error(errorText(error));
     }

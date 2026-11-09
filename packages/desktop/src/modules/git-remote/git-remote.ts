@@ -17,8 +17,8 @@ declare module "@notefig/core" {
 }
 
 export interface WorkspaceGitRemote {
-  /** Where a push (the default) or pull goes, or why it can't. */
-  target(direction?: GitDirection): Promise<GitBranchTarget | { problem: string }>;
+  /** The repositories this branch pushes to and pulls from. Rejects with what to fix if there are none. */
+  urls(): Promise<string[]>;
   /** Rejects with what to fix. `pushed` is false if the remote has it. */
   push(): Promise<{ branch: string; pushed: boolean }>;
   /** Fast-forward; how many files changed. Rejects with what to fix. */
@@ -46,12 +46,12 @@ export function createWorkspaceGitRemote(deps: { workspacePath: string; gitWorke
   const service = () => (git ??= deps.gitWorker.create({ repoPath: root, gitDir }));
 
   const exclusive = <T>(work: () => Promise<T>): Promise<T> => {
-    const run = operation.then(work, work);
+    const run = operation.then(work);
     operation = run.then(() => undefined, () => undefined);
     return run;
   };
 
-  const target: WorkspaceGitRemote["target"] = async (direction = "push") => {
+  const target = async (direction: GitDirection): Promise<GitBranchTarget | { problem: string }> => {
     const found = await service().remoteTarget(direction);
     if ("url" in found && !/^https:\/\/[^/@\s]+\/\S+/.test(found.url)) {
       return { problem: "Only HTTPS remotes are supported for now." };
@@ -75,7 +75,12 @@ export function createWorkspaceGitRemote(deps: { workspacePath: string; gitWorke
   };
 
   return {
-    target,
+    async urls() {
+      const found = await Promise.all([target("push"), target("pull")]);
+      const urls = found.flatMap((each) => ("url" in each ? [each.url] : []));
+      if (urls.length === 0 && "problem" in found[0]) throw new Error(found[0].problem);
+      return [...new Set(urls)];
+    },
     push: () => exclusive(() =>
       onTarget("push", async (remote, found) => ({
         branch: found.branch,
