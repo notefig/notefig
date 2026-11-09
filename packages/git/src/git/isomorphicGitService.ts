@@ -7,6 +7,7 @@ import {
   GitError,
   type GitAddInput,
   type GitFileDifference,
+  type GitStatusInput,
   type GitCheckoutPathsInput,
   type GitCommitInput,
   type GitCreateBranchInput,
@@ -346,7 +347,7 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async status(): Promise<RepoStatus> {
+  async status(input?: GitStatusInput): Promise<RepoStatus> {
     try {
       let branch: string | null = null;
 
@@ -383,6 +384,7 @@ export class IsomorphicGitService implements GitService {
         dir: this.dir,
         gitdir: this.gitdir,
         cache: this.cache,
+        ...(input?.filepaths ? { filepaths: input.filepaths } : {}),
       });
 
       const staged: GitFileChange[] = [];

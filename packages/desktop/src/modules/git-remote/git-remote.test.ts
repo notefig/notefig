@@ -20,21 +20,30 @@ function setup(overrides: Partial<GitService> = {}, config: Record<string, strin
     mergeBase: vi.fn(async () => "mine"),
     changedFiles: vi.fn(async () => changed("a.md")),
     merge: vi.fn(async () => ({})),
+    status: vi.fn(async () => ({ staged: [], unstaged: [], untracked: [] })),
     readFile: vi.fn(async ({ ref }: { ref: string }) => encode(ref === "mine" ? "old\n" : "new\n")),
     unstage: vi.fn(async () => {}),
     ...overrides,
   } as unknown as GitService;
   const gitWorker = { create: vi.fn(() => git), dispose: vi.fn() } satisfies GitWorker;
-  const documents = { write: vi.fn(async () => {}), hasUnsavedEdits: vi.fn(() => false) };
+  // What's on disk: the last commit's text until something writes.
+  const disk = new Map<string, Uint8Array>();
+  const documents = {
+    write: vi.fn(async (path: string, text: string) => void disk.set(path, encode(text))),
+    hasUnsavedEdits: vi.fn((_path: string) => false),
+  };
   const ok = { succeeded: [], failed: [] };
   const fs = {
-    readBinaryFiles: vi.fn(async (paths: string[]) => ({ succeeded: paths.map((path) => ({ path, data: encode("old\n") })), failed: [] as unknown[] })),
+    readBinaryFiles: vi.fn(async (paths: string[]) => ({
+      succeeded: paths.map((path) => ({ path, data: disk.get(path) ?? encode("old\n") })),
+      failed: [] as unknown[],
+    })),
     writeBinaryFiles: vi.fn(async () => ok),
     deleteFiles: vi.fn(async () => ok),
   };
   const files = { recordDiskChanges: vi.fn(async () => {}) };
   const remote = createWorkspaceGitRemote({ workspacePath: "/ws", fs: fs as never, gitWorker, documents: documents as never, files });
-  return { remote, git, gitWorker, documents, fs, files };
+  return { remote, git, gitWorker, documents, fs, files, disk };
 }
 
 describe("git remote: target", () => {
@@ -44,8 +53,8 @@ describe("git remote: target", () => {
 
   it("follows the branch's own remote, falling back to origin", async () => {
     const { remote } = setup({}, { "branch.main.remote": "fork", "remote.fork.url": "https://h/fork.git" });
-    await expect(remote.target()).resolves.toEqual({ url: "https://h/fork.git", branch: "main", remoteRef: REF });
-    await expect(setup().remote.target()).resolves.toEqual({ url: URL_, branch: "main", remoteRef: REF });
+    await expect(remote.target()).resolves.toEqual({ url: "https://h/fork.git", branch: "main", remoteRef: REF, upstreamRenamed: false });
+    await expect(setup().remote.target()).resolves.toEqual({ url: URL_, branch: "main", remoteRef: REF, upstreamRenamed: false });
   });
 
   it("pushes to the push remote and push URL, and pulls from the fetch one", async () => {
@@ -69,7 +78,9 @@ describe("git remote: target", () => {
     const config = { "branch.main.remote": "origin", "branch.main.merge": "refs/heads/trunk", "remote.origin.url": URL_ };
     const { remote } = setup({}, config);
     await expect(remote.target("pull")).resolves.toMatchObject({ remoteRef: "refs/heads/trunk" });
-    await expect(remote.target("push")).resolves.toEqual({ problem: expect.stringMatching(/another name/) });
+    // Still a target, so its credential can be set; only the push refuses.
+    await expect(remote.target("push")).resolves.toMatchObject({ remoteRef: REF, upstreamRenamed: true });
+    await expect(remote.push()).rejects.toThrow(/another name/);
   });
 
   it.each([
@@ -194,12 +205,37 @@ describe("git remote: pull", () => {
 
   it("stops if typing lands after the check, and puts back what it wrote", async () => {
     const { remote, git, documents } = setup({ changedFiles: vi.fn(async () => changed("a.md", "b.md")) });
-    // Clean for the two checks up front and a.md's write; b.md's goes dirty.
-    documents.hasUnsavedEdits.mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValue(true);
+    let checks = 0;
+    documents.hasUnsavedEdits.mockImplementation((path) => path === "/ws/b.md" && checks++ > 0);
     await expect(remote.pull()).rejects.toThrow(/Local changes in b.md/);
     expect(documents.write).toHaveBeenNthCalledWith(1, "/ws/a.md", "new\n");
     expect(documents.write).toHaveBeenNthCalledWith(2, "/ws/a.md", "old\n");
     expect(git.merge).not.toHaveBeenCalled();
+  });
+
+  it("leaves a file edited after the pull wrote it, and says so", async () => {
+    const { remote, git, documents, fs, disk } = setup({
+      changedFiles: vi.fn(async () => changed("a.md", "b.png")),
+      readFile: vi.fn(async ({ ref, filepath }: { ref: string; filepath: string }) =>
+        ref === "mine" ? encode("old\n") : filepath === "b.png" ? new Uint8Array([0]) : encode("new\n"),
+      ),
+    } as never);
+    fs.writeBinaryFiles.mockImplementation(async () => {
+      disk.set("/ws/a.md", encode("typed since\n"));
+      return { succeeded: [], failed: [{ message: "disk full" }] } as never;
+    });
+    await expect(remote.pull()).rejects.toThrow(/disk full.*Kept newer edits in a.md/);
+    expect(documents.write).toHaveBeenCalledTimes(1);
+    expect(git.merge).not.toHaveBeenCalled();
+  });
+
+  it("refuses over a staged edit, even if the file matches the commit", async () => {
+    const { remote, git, documents } = setup({
+      status: vi.fn(async () => ({ staged: [{ path: "a.md", type: "modified" }], unstaged: [], untracked: [] })),
+    } as never);
+    await expect(remote.pull()).rejects.toThrow(/Local changes in a.md/);
+    expect(git.merge).not.toHaveBeenCalled();
+    expect(documents.write).not.toHaveBeenCalled();
   });
 
   it("reports a failed write, puts files back and leaves the branch", async () => {

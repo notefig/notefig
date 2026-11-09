@@ -153,6 +153,11 @@ export interface GitStorageHost {
   unlock(name: string): Promise<void>;
 }
 
+export interface GitStatusInput {
+  /** Repo-relative, `/`-separated paths or folders; omitted, the whole tree. */
+  filepaths?: string[];
+}
+
 /** A path two commits differ on. */
 export interface GitFileDifference {
   /** `/`-separated. */
@@ -208,7 +213,8 @@ export type GitReadTextFileInput = {
 
 export interface GitService {
   init(input?: GitInitInput): ReturnType<typeof igInit>;
-  status(): Promise<RepoStatus>;
+  /** `filepaths` limits the walk to these paths (or folders under them). */
+  status(input?: GitStatusInput): Promise<RepoStatus>;
   add(input: GitAddInput): ReturnType<typeof igAdd>;
   remove(input: GitRemoveInput): ReturnType<typeof igRemove>;
   unstage(input: GitUnstageInput): ReturnType<typeof igResetIndex>;

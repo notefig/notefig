@@ -29,6 +29,8 @@ export interface GitRemoteTarget {
   branch: string;
   /** The branch's name on the remote (`refs/heads/…`). */
   remoteRef: string;
+  /** It tracks a differently named branch there, which a push won't touch. */
+  upstreamRenamed: boolean;
 }
 
 type Direction = "push" | "pull";
@@ -121,12 +123,8 @@ export function createWorkspaceGitRemote(deps: GitRemoteDeps): WorkspaceGitRemot
       if (!/^https:\/\/[^/@\s]+\/\S+/.test(url)) return { problem: "Only HTTPS remotes are supported for now." };
       const own = `refs/heads/${branch}`;
       const upstream = (await config(`branch.${branch}.merge`)) ?? own;
-      if (direction === "pull") return { url, branch, remoteRef: upstream };
-      // As git's default does: it won't push to a differently named upstream.
-      if (name === tracking && upstream !== own) {
-        return { problem: `${branch} tracks a branch with another name. Push it from a terminal.` };
-      }
-      return { url, branch, remoteRef: own };
+      if (direction === "pull") return { url, branch, remoteRef: upstream, upstreamRenamed: false };
+      return { url, branch, remoteRef: own, upstreamRenamed: name === tracking && upstream !== own };
     } catch {
       return { problem: "This folder isn't a git repository." };
     }
@@ -162,22 +160,24 @@ export function createWorkspaceGitRemote(deps: GitRemoteDeps): WorkspaceGitRemot
     return changes;
   };
 
-  /** Whether the file is no longer what the last commit has. */
-  const hasLocalEdits = async ({ filepath, before }: PullChange): Promise<boolean> => {
+  /** Whether the file isn't `expected`: on disk, or in an open editor. */
+  const differsFrom = async (filepath: string, expected: Uint8Array | null): Promise<boolean> => {
     const path = absolute(filepath);
     if (deps.documents.hasUnsavedEdits(path)) return true;
     const { succeeded, failed } = await deps.fs.readBinaryFiles([path]);
     if (failed[0] && failed[0].type !== "not_found") return true;
-    return !sameBytes(succeeded[0]?.data ?? null, before);
+    return !sameBytes(succeeded[0]?.data ?? null, expected);
   };
 
   const localEditsError = (paths: string[]) =>
     new Error(`Local changes in ${listed(paths)} would be overwritten. Commit them first.`);
 
   const refuseOverLocalEdits = async (changes: PullChange[]) => {
-    const blocked: string[] = [];
-    for (const change of changes) if (await hasLocalEdits(change)) blocked.push(change.filepath);
-    if (blocked.length > 0) throw localEditsError(blocked);
+    const filepaths = changes.map((change) => change.filepath);
+    const { staged } = await service().status({ filepaths });
+    const blocked = new Set(staged.map((change) => change.path));
+    for (const { filepath, before } of changes) if (await differsFrom(filepath, before)) blocked.add(filepath);
+    if (blocked.size > 0) throw localEditsError([...blocked]);
   };
 
   /** Put one version on disk, through documents so open editors follow. */
@@ -193,20 +193,32 @@ export function createWorkspaceGitRemote(deps: GitRemoteDeps): WorkspaceGitRemot
     if (failed[0]) throw new Error(`Couldn't update ${filepath}: ${failed[0].message}`);
   };
 
+  /** Put back what a failed pull wrote, unless it was edited since; the
+   *  paths left alone. */
+  const undoWrites = async (done: PullChange[]): Promise<string[]> => {
+    const kept: string[] = [];
+    for (const { filepath, before, after } of done) {
+      if (await differsFrom(filepath, after)) kept.push(filepath);
+      else await writeVersion(filepath, before).catch(() => kept.push(filepath));
+    }
+    return kept;
+  };
+
   /** The files, then the branch; a failure puts the files back. */
   const applyChanges = async (changes: PullChange[], ref: string, theirs: string) => {
     const done: PullChange[] = [];
     try {
       for (const change of changes) {
         // Typing may have landed since the check before this began.
-        if (await hasLocalEdits(change)) throw localEditsError([change.filepath]);
+        if (await differsFrom(change.filepath, change.before)) throw localEditsError([change.filepath]);
         await writeVersion(change.filepath, change.after);
         done.push(change);
       }
       await service().merge({ ours: ref, theirs, fastForwardOnly: true });
     } catch (error) {
-      for (const change of done) await writeVersion(change.filepath, change.before).catch(() => {});
-      throw error;
+      const kept = await undoWrites(done);
+      if (kept.length === 0) throw error;
+      throw new Error(`${error instanceof Error ? error.message : String(error)} Kept newer edits in ${listed(kept)}.`);
     }
     for (const { filepath } of changes) await service().unstage({ filepath, ref: theirs });
     const paths = (present: boolean) =>
@@ -217,7 +229,9 @@ export function createWorkspaceGitRemote(deps: GitRemoteDeps): WorkspaceGitRemot
   return {
     target,
     push: () =>
-      onTarget("push", async ({ branch }, remote, ref) => {
+      onTarget("push", async ({ branch, upstreamRenamed }, remote, ref) => {
+        // As git's default does.
+        if (upstreamRenamed) throw new Error(`${branch} tracks a branch with another name. Push it from a terminal.`);
         const ours = await head(ref);
         if (!ours) throw new Error("This branch has no commits yet.");
         const refs = await service().listRemoteRefs(remote, [ref]);

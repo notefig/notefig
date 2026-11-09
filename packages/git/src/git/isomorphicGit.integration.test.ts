@@ -312,6 +312,17 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     await expect(service.mergeBase("refs/heads/main", first!)).resolves.toBe(first);
   });
 
+  it("limits status to the given paths", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    await host.writeFileAtomic(join(repoDir, "a.md"), encode("a\n"));
+    await host.writeFileAtomic(join(repoDir, "c.md"), encode("c\n"));
+
+    expect((await service.status({ filepaths: ["a.md"] })).untracked).toEqual(["a.md"]);
+    expect((await service.status()).untracked).toEqual(["a.md", "c.md"]);
+  });
+
   it("reports a change of file mode alone", async () => {
     const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
     await service.init({ defaultBranch: "main" });
