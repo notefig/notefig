@@ -34,8 +34,15 @@ export type AgentTaskRow = {
   /** Set when this task was spawned by another task (subagent pattern) */
   parentTaskId?: string;
   workspacePath: string;
-  /** Short user-facing label, e.g. first prompt truncated */
+  /** Short user-facing label: the first prompt, cut short, until the
+   *  agent names the session (`session_rename`). */
   title: string;
+  /**
+   * Who named the session. Absent until the agent renames it: the title is
+   * the placeholder or the first prompt. "agent" is final — the agent names
+   * a session once, and a named session can't be renamed again.
+   */
+  titleSource?: "agent";
   status: AgentTaskStatus;
   harnessId: string;
   /**

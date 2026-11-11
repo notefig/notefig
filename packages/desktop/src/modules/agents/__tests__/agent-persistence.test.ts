@@ -143,6 +143,18 @@ describe("pure helpers", () => {
     ).toBeNull();
   });
 
+  it("the agent's name is durable: it survives the boot mapping, and an unknown source reads as unnamed", () => {
+    const named = parsePersistedAgentTask(taskRow({ titleSource: "agent" }));
+    expect(bootAgentTaskRow(named!)).toMatchObject({ title: "Rewrite chapter 3", titleSource: "agent" });
+
+    const legacy = bootAgentTaskRow(parsePersistedAgentTask(taskRow())!);
+    expect(legacy).not.toHaveProperty("titleSource");
+
+    const garbled = parsePersistedAgentTask({ ...taskRow(), titleSource: "user" });
+    expect(garbled?.taskId).toBe("task_a");
+    expect(garbled?.titleSource).toBeUndefined();
+  });
+
   it("session usage is durable: it survives the boot mapping, and a malformed one drops alone", () => {
     const tokens = { input: 1, cacheRead: 2, cacheWrite: 0, output: 3, thought: 0 };
     const total = { tokens, cost: { amount: 0.5, currency: "USD" } };

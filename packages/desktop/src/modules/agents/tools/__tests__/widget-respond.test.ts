@@ -97,3 +97,37 @@ describe("widget_respond and diffs", () => {
     expect(WidgetRespondInputSchema.safeParse({ kind: "answer", markdown: "``` diff\n-a\n+b\n```" }).success).toBe(true);
   });
 });
+
+describe("widget_respond waits for the session's name", () => {
+  const ctxNamed = (titleSource?: "agent") =>
+    ({
+      workspacePath: "/ws",
+      taskId: "task_1",
+      agents: {
+        task: () => ({ get: () => ({ ...(titleSource ? { titleSource } : {}) }) }),
+      },
+      services: {},
+    }) as unknown as Parameters<typeof widgetRespond.execute>[0];
+  const input = { kind: "answer", markdown: "Done." } as const;
+
+  it("refuses until the agent has named the session, saying how", async () => {
+    const result = await widgetRespond.execute(ctxNamed(), input);
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error).toContain("`session_rename`");
+  });
+
+  it("refuses for a task with no row", async () => {
+    const ctx = {
+      ...ctxNamed(),
+      agents: { task: () => ({ get: () => undefined }) },
+    } as unknown as Parameters<typeof widgetRespond.execute>[0];
+    expect((await widgetRespond.execute(ctx, input)).ok).toBe(false);
+  });
+
+  it("delivers once the session is named", async () => {
+    expect(await widgetRespond.execute(ctxNamed("agent"), input)).toEqual({
+      ok: true,
+      value: { recorded: true },
+    });
+  });
+});

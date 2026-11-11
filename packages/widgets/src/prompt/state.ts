@@ -100,13 +100,15 @@ export function deriveWidgetResponse(
   return null;
 }
 
-/** One call's response: a `widget_respond` call whose input parses, else
- *  null. The single reading both the done face (above) and the chat's
- *  transcript card (./transcript.tsx) go through. */
+/** One call's response: a `widget_respond` call whose input parses and
+ *  that the tool didn't refuse (it refuses on an unnamed session, and the
+ *  agent calls again once it's named), else null. The single reading both
+ *  the done face (above) and the chat's transcript card (./transcript.tsx)
+ *  go through. */
 export function readWidgetResponse(
   call: ToolCallUpdate,
 ): WidgetResponse | null {
-  if (call.title !== WIDGET_RESPOND_TOOL_NAME) return null;
+  if (call.title !== WIDGET_RESPOND_TOOL_NAME || call.status === "failed") return null;
   const parsed = WidgetRespondInputSchema.safeParse(call.rawInput);
   return parsed.success ? parsed.data : null;
 }

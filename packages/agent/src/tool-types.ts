@@ -39,6 +39,10 @@ export interface ToolAgentsFacade {
   task(taskId: string): {
     prompt(text: string): unknown;
     cancel(): Promise<unknown>;
+    /** The task's row: only what tools read off it. */
+    get(): { titleSource?: "agent" } | undefined;
+    /** Name the session, once (`session_rename`). */
+    rename(title: string): { ok: true } | { ok: false; error: string };
   };
   workspace(workspacePath: string): {
     createTask(harness: unknown): Promise<unknown>;

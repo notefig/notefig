@@ -70,6 +70,48 @@
           "kind": "update",
           "update": {
             "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_sr",
+            "title": "mcp__notefig__session_rename",
+            "kind": "other",
+            "status": "pending",
+            "rawInput": {
+              "title": "Document summary"
+            }
+          },
+          "at": 380
+        },
+        {
+          "kind": "mcp",
+          "method": "tools/call",
+          "params": {
+            "name": "session_rename",
+            "arguments": {
+              "title": "Document summary"
+            }
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"renamed\":true,\"title\":\"Document summary\"}"
+              }
+            ]
+          },
+          "at": 400
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_sr",
+            "status": "completed"
+          },
+          "at": 420
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
             "toolCallId": "toolu_wr",
             "title": "mcp__notefig__widget_respond",
             "kind": "other",
