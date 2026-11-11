@@ -10,7 +10,6 @@
 import { useCallback } from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import type { Editor } from "@tiptap/core";
-import type { DictationApi } from "@notefig/dictation";
 import {
   collectWidgets,
   PROMPT_NODE_NAME,
@@ -119,42 +118,22 @@ export function navigateToPromptWidget(
  * this editor instance currently has focus, so each open document responds
  * only for its own caret.
  *
- * Because the right-hand Option key is also the dictation hold gesture on
- * macOS, navigation cancels any active dictation before moving, so the two
- * gestures don't overlap.
- *
- * - Alt+ArrowDown  -> next widget
- * - Alt+ArrowUp    -> previous widget
- * - Alt+Shift+ArrowDown -> last widget
- * - Alt+Shift+ArrowUp   -> first widget
+ * - Mod+ArrowDown  -> next widget
+ * - Mod+ArrowUp    -> previous widget
+ * - Mod+Shift+ArrowDown -> last widget
+ * - Mod+Shift+ArrowUp   -> first widget
  */
-export function usePromptWidgetNavigation(
-  editor: Editor,
-  dictation?: DictationApi,
-): void {
+export function usePromptWidgetNavigation(editor: Editor): void {
   const navigate = useCallback(
     (direction: Direction) => () => {
       if (!editor.isFocused) return;
-      dictation?.cancel();
       navigateToPromptWidget(editor, direction);
     },
-    [editor, dictation],
+    [editor],
   );
 
-  useHotkey({ key: "ArrowDown", alt: true }, navigate("next"), {
-    preventDefault: true,
-  });
-  useHotkey({ key: "ArrowUp", alt: true }, navigate("prev"), {
-    preventDefault: true,
-  });
-  useHotkey(
-    { key: "ArrowDown", alt: true, shift: true },
-    navigate("last"),
-    { preventDefault: true },
-  );
-  useHotkey(
-    { key: "ArrowUp", alt: true, shift: true },
-    navigate("first"),
-    { preventDefault: true },
-  );
+  useHotkey({ key: "ArrowDown", mod: true }, navigate("next"));
+  useHotkey({ key: "ArrowUp", mod: true }, navigate("prev"));
+  useHotkey({ key: "ArrowDown", mod: true, shift: true }, navigate("last"));
+  useHotkey({ key: "ArrowUp", mod: true, shift: true }, navigate("first"));
 }

@@ -71,7 +71,7 @@ export function TextEditor({
     turnWrites.attribute,
   );
   useEditorFocusLifecycle(editor, file.path);
-  usePromptWidgetNavigation(editor, dictation);
+  usePromptWidgetNavigation(editor);
   const scrollRef = useEditorViewportMemory(editor, file.path);
   const handleLinkToggle = useLinkPrompt(editor);
 

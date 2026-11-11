@@ -153,25 +153,25 @@ export const HOTKEY_CATALOG: HotkeyEntry[] = [
   // src/components/editor/use-prompt-widget-navigation.ts
   {
     id: "nextPromptWidget",
-    binding: "Alt+ArrowDown",
+    binding: "Mod+ArrowDown",
     labelKey: "nextPromptWidget",
     group: "editing",
   },
   {
     id: "previousPromptWidget",
-    binding: "Alt+ArrowUp",
+    binding: "Mod+ArrowUp",
     labelKey: "previousPromptWidget",
     group: "editing",
   },
   {
     id: "lastPromptWidget",
-    binding: "Alt+Shift+ArrowDown",
+    binding: "Mod+Shift+ArrowDown",
     labelKey: "lastPromptWidget",
     group: "editing",
   },
   {
     id: "firstPromptWidget",
-    binding: "Alt+Shift+ArrowUp",
+    binding: "Mod+Shift+ArrowUp",
     labelKey: "firstPromptWidget",
     group: "editing",
   },
