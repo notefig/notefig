@@ -14,8 +14,9 @@ import {
   collectWidgets,
   PROMPT_NODE_NAME,
   promptDraftRange,
+  selectWidget,
 } from "@notefig/widgets";
-import { NodeSelection, TextSelection } from "@tiptap/pm/state";
+import { TextSelection } from "@tiptap/pm/state";
 
 type Direction = "next" | "prev" | "first" | "last";
 
@@ -90,7 +91,7 @@ function focusAndScrollToWidget(editor: Editor, pos: number): void {
   if (range && draftVisible) {
     tr = tr.setSelection(TextSelection.create(tr.doc, range.to));
   } else {
-    tr = tr.setSelection(NodeSelection.create(tr.doc, pos));
+    tr = selectWidget(tr, pos);
   }
   tr = tr.scrollIntoView();
   editor.view.dispatch(tr);
