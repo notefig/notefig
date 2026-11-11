@@ -39,7 +39,8 @@ export function SessionButton({
       )}
       onClick={(event) => onOpenChat?.(openIntentOf(event))}
     >
-      <SessionMarkIcon colorSlot={session?.colorSlot} shapeSlot={session?.shapeSlot} />
+      {/* 16px: a touch over the card's 12px icons, so the shape reads. */}
+      <SessionMarkIcon colorSlot={session?.colorSlot} shapeSlot={session?.shapeSlot} size={16} />
     </button>
   );
   if (!onOpenChat) return button;

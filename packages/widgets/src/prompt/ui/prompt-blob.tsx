@@ -2122,7 +2122,7 @@ export function DoneState({
       mark={mark}
       actions={
         <>
-          <SessionButton session={session} onOpenChat={onOpenChat} className="size-4" />
+          <SessionButton session={session} onOpenChat={onOpenChat} className="size-[1.125rem]" />
           <button
             type="button"
             title={t("promptBlobDismiss")}
