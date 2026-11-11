@@ -60,7 +60,7 @@ describe("SessionPicker", () => {
     expect(trigger.querySelector('[data-testid="harness-logo-claude"]')).not.toBeNull();
   });
 
-  it("lists live sessions by mark, harness name and title, checking the target", () => {
+  it("lists live sessions by mark, harness name and title, marking the target", () => {
     const onSelectSession = vi.fn();
     const { trigger } = renderPicker("t_price", onSelectSession);
     openMenu(trigger);
@@ -70,8 +70,8 @@ describe("SessionPicker", () => {
       "opencodePricing table1h ago",
     ]);
     expect(options[0].querySelector("[data-session-mark]")?.getAttribute("data-session-mark")).toBe("0:0");
-    expect(options[0].querySelector(".invisible")).not.toBeNull();
-    expect(options[1].querySelector(".invisible")).toBeNull();
+    expect(options[0].getAttribute("aria-current")).toBeNull();
+    expect(options[1].getAttribute("aria-current")).toBe("true");
     act(() => options[0].click());
     expect(onSelectSession).toHaveBeenCalledWith("t_pitch");
   });

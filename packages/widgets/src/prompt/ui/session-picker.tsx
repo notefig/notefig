@@ -4,14 +4,14 @@
  * names its session the same way everywhere: a bound or adopted session's
  * mark, or, before there is one, the logo of the harness a new session
  * would start on. The menu lists the workspace's recent live sessions by
- * their marks, each with its harness's name in small text before its title,
- * then a new conversation on each of the top harnesses (no session yet, so
- * those keep the harness logo); picking one also becomes the remembered
- * default (the sessions panel's split-button rule).
+ * their marks, each with its harness's name in small text before its title
+ * (the target's in medium), then a new conversation on each of the top
+ * harnesses (no session yet, so those keep the harness logo); picking one
+ * also becomes the remembered default (the sessions panel's split-button
+ * rule).
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check } from "lucide-react";
 import { Button } from "@notefig/ui/button";
 import { VoiceWave } from "@notefig/ui/voice-wave";
 import {
@@ -132,6 +132,7 @@ export function SessionPicker({
                 key={session.taskId}
                 className="cursor-pointer gap-2 text-xs"
                 data-session-option={session.taskId}
+                aria-current={session.taskId === target?.taskId || undefined}
                 onSelect={() =>
                   onSelectSession
                     ? onSelectSession(session.taskId)
@@ -143,19 +144,20 @@ export function SessionPicker({
                   <span className="shrink-0 text-[0.625rem] text-muted-foreground">
                     {harnessLabel(session.harnessId)}
                   </span>
-                  <span className="min-w-0 truncate">{session.title}</span>
+                  {/* The session the next prompt goes to reads in medium. */}
+                  <span
+                    className={
+                      session.taskId === target?.taskId
+                        ? "min-w-0 truncate font-medium"
+                        : "min-w-0 truncate"
+                    }
+                  >
+                    {session.title}
+                  </span>
                 </span>
                 <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
                   {session.description}
                 </span>
-                <Check
-                  aria-hidden
-                  className={
-                    session.taskId === target?.taskId
-                      ? "size-3 shrink-0"
-                      : "invisible size-3 shrink-0"
-                  }
-                />
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
