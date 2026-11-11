@@ -663,6 +663,7 @@ i18n
           agentToolWorkspaceReadDocument: "Read Document",
           agentToolDocumentReadRange: "Read Document Range",
           agentToolWorkspaceOpenFiles: "Open Files",
+          agentToolSessionRename: "Name Session",
           agentToolWidgetRespond: "Respond in Widget",
 
           // Telemetry consent + Privacy settings

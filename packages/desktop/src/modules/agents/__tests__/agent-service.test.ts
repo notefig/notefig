@@ -11,6 +11,7 @@ import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { APP_DIR_NAME } from "@/utils/app-dir";
 import type { AgentTask } from "../agent-service";
 import { testAgents } from "@/testing/test-agents";
+import type { AgentsApi } from "../agents";
 import type { Hooks } from "@notefig/core";
 
 // A tiny in-memory disk, consulted only for the devin project config:
@@ -77,6 +78,7 @@ let deps: AgentRuntimeDeps;
 let hooks: Hooks;
 let store: AgentStore;
 let runtime: AgentRuntime;
+let agents: AgentsApi;
 
 const harness = BUILT_IN_HARNESSES[0];
 
@@ -133,7 +135,7 @@ beforeEach(() => {
   deleteFiles.mockClear();
   mcpEndpoints.length = 0;
   const fs = { readFiles, writeFiles, deleteFiles };
-  ({ deps, hooks, store, runtime } = testAgents({
+  ({ deps, hooks, store, runtime, agents } = testAgents({
     fs,
     proc: {
       createMcpEndpoint,
@@ -2605,3 +2607,97 @@ describe("usage limits", () => {
   });
 });
 
+
+describe("session naming (MET-284)", () => {
+  async function startedTask(workspacePath = "/ws") {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async () => ({ stopReason: "end_turn" });
+    // Through the runtime, so the facade finds it.
+    const task = runtime.managerFor(workspacePath).createTask(harness);
+    await task.start(() => client);
+    return task;
+  }
+
+  /** Another session's row in a workspace. */
+  function seedSession(taskId: string, title: string, extra: object = {}) {
+    store.tasks.insert({
+      taskId,
+      workspacePath: "/ws",
+      title,
+      status: "restored",
+      harnessId: harness.id,
+      createdAt: 1,
+      updatedAt: 1,
+      ...extra,
+    });
+  }
+
+  const row = (taskId: string) => store.tasks.get(taskId);
+
+  it("goes by the first prompt until the agent names it, and keeps the name after", async () => {
+    const task = await startedTask();
+    await runPrompt(task, "> the quoted passage\n\nmake this shorter");
+    expect(row(task.taskId)).toMatchObject({ title: "make this shorter" });
+    expect(row(task.taskId)?.titleSource).toBeUndefined();
+
+    expect(task.rename("Investor intro rewrite")).toEqual({ ok: true });
+    expect(row(task.taskId)).toMatchObject({
+      title: "Investor intro rewrite",
+      titleSource: "agent",
+    });
+
+    await runPrompt(task, "now the closing");
+    expect(row(task.taskId)?.title).toBe("Investor intro rewrite");
+  });
+
+  it("refuses a second rename, even straight through the facade", async () => {
+    const task = await startedTask();
+    await runPrompt(task, "make this shorter");
+    expect(task.rename("Investor intro")).toEqual({ ok: true });
+
+    const again = agents.task(task.taskId).rename("Something else");
+    expect(again.ok).toBe(false);
+    expect(!again.ok && again.error).toContain('already named "Investor intro"');
+    expect(row(task.taskId)?.title).toBe("Investor intro");
+  });
+
+  it("refuses another live session's name in the workspace without spending the rename", async () => {
+    seedSession("task_other", "Investor Intro");
+    seedSession("task_gone", "Pitch deck", { status: "unavailable" });
+    const task = await startedTask();
+    await runPrompt(task, "make this shorter");
+
+    const taken = task.rename("investor intro");
+    expect(taken.ok).toBe(false);
+    expect(!taken.ok && taken.error).toContain('"Investor Intro"');
+    expect(row(task.taskId)?.titleSource).toBeUndefined();
+
+    // An unavailable session's name is free, and the rename is still there.
+    expect(task.rename("Pitch deck")).toEqual({ ok: true });
+  });
+
+  it("allows a name another workspace's session has", async () => {
+    seedSession("task_elsewhere", "Investor intro", { workspacePath: "/other" });
+    const task = await startedTask();
+    expect(task.rename("Investor intro")).toEqual({ ok: true });
+  });
+
+  it("keeps the agent's name through a revival and its next prompt", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onLoadSession = async () => ({});
+    agent.onPrompt = async () => ({ stopReason: "end_turn" });
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    seedSession(task.taskId, "Investor intro", {
+      titleSource: "agent",
+      sessionId: "sess_old",
+    });
+    await task.start(() => client, { resumeSessionId: "sess_old" });
+    await runPrompt(task, "make this shorter");
+    expect(row(task.taskId)).toMatchObject({
+      title: "Investor intro",
+      titleSource: "agent",
+    });
+  });
+});

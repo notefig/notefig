@@ -15,7 +15,7 @@ import {
   type RequestPermissionResponse,
   type TurnOutcome,
 } from "@notefig/shared/agent";
-import type { AgentStore, AgentTurn } from "./agent-collections";
+import type { AgentStore, AgentTaskRow, AgentTurn } from "./agent-collections";
 import type { AgentRuntime } from "./agent-service";
 import { encodeWidgetContextUri } from "@notefig/agent";
 import type { KvApi } from "@/modules/kv";
@@ -97,6 +97,14 @@ export interface AgentTaskHandle {
   delete(): Promise<void>;
   /** Show its chat tab. */
   open(): void;
+  /** Its row, or undefined if there is none (deleted, or never started). */
+  get(): AgentTaskRow | undefined;
+  /**
+   * The agent names the session (`session_rename`): a live task only, once,
+   * and to a name no other session in the workspace has. Refusals come back
+   * as values worded for the agent.
+   */
+  rename(title: string): ActionResult;
   respondPermission(
     requestId: string,
     response: RequestPermissionResponse,
@@ -322,6 +330,12 @@ export function createAgents({
       delete: () => runtime.delete(taskId),
       open() {
         openAgentTab(taskId);
+      },
+      get: () => store.tasks.get(taskId),
+      rename(title) {
+        const task = runtime.task(taskId);
+        if (!task) return { ok: false, error: "agent task is not started" };
+        return task.rename(title);
       },
       respondPermission(requestId, response) {
         const task = runtime.task(taskId);

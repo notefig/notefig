@@ -509,6 +509,21 @@ describe("deriveWidgetResponse", () => {
     expect(deriveWidgetResponse(entries)?.markdown).toBe("the real one");
   });
 
+  it("skips a call the tool refused, falling back to an earlier delivered one", () => {
+    const refused = (id: string, markdown: string) =>
+      toolEntry(id, {
+        title: "widget_respond",
+        status: "failed",
+        rawInput: { kind: "answer", markdown },
+      } as Partial<ToolCallUpdate>);
+    expect(deriveWidgetResponse([refused("evt_1", "before naming")])).toBeNull();
+    const entries = [
+      respond("evt_1", { kind: "answer", markdown: "delivered" }),
+      refused("evt_2", "refused"),
+    ];
+    expect(deriveWidgetResponse(entries)?.markdown).toBe("delivered");
+  });
+
   it("ignores other tool calls and returns null when no response exists", () => {
     const entries = [
       toolEntry("evt_1", {

@@ -22,7 +22,7 @@ export function serverInstructions(): string {
     `This server exposes the Notefig writing app's native tools (${names}); ` +
     `you are running as an agent inside that app. Notefig registers it for ` +
     `this session only, so it isn't in any config file and needs no checking. ` +
-    `Three things are PRIMARY; the rest are for when a task calls for them. ` +
+    `Four things are PRIMARY; the rest are for when a task calls for them. ` +
     `(1) The widget-context resource: a prompt sent from an in-document widget ` +
     `carries a \`resource_link\` whose URI starts with ` +
     `\`notefig://widget-context\`. Call \`resources/read\` on it as your ` +
@@ -43,7 +43,12 @@ export function serverInstructions(): string {
     `A prompt from either surface may also carry \`file://\` resource_links, ` +
     `files the user referenced with @: don't \`resources/read\` those, read ` +
     `each one with \`workspace_read_document\` before acting. ` +
-    `(3) \`workspace_read_document\`, for when the widget context doesn't ` +
+    `(3) \`session_rename\`: name this session ONCE, on your first turn, ` +
+    `before \`widget_respond\`, with a 2–4 word name for the session's ` +
+    `goal. The user tells sessions apart by it on every widget, and it ` +
+    `can't be changed later. \`widget_respond\` refuses until you have. ` +
+    `A session you already named keeps its name: never call it again. ` +
+    `(4) \`workspace_read_document\`, for when the widget context doesn't ` +
     `cover the request (another section named in the outline, say). Do NOT ` +
     `read the entire document by default; read part of it with ` +
     `\`line\`/\`limit\`. ` +

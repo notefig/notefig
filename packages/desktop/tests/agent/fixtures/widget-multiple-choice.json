@@ -27,6 +27,48 @@
           "kind": "update",
           "update": {
             "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_sr",
+            "title": "mcp__notefig__session_rename",
+            "kind": "other",
+            "status": "pending",
+            "rawInput": {
+              "title": "Pricing section"
+            }
+          },
+          "at": 40
+        },
+        {
+          "kind": "mcp",
+          "method": "tools/call",
+          "params": {
+            "name": "session_rename",
+            "arguments": {
+              "title": "Pricing section"
+            }
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"renamed\":true,\"title\":\"Pricing section\"}"
+              }
+            ]
+          },
+          "at": 60
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_sr",
+            "status": "completed"
+          },
+          "at": 80
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
             "toolCallId": "toolu_q",
             "title": "mcp__notefig__widget_respond",
             "kind": "other",

@@ -54,6 +54,9 @@ export const PersistedAgentTaskSchema = z
     parentTaskId: z.string().min(1).optional(),
     workspacePath: z.string().min(1),
     title: z.string(),
+    // Loose: an unknown value reads as "not named by the agent", which only
+    // gives the agent its one rename back.
+    titleSource: z.literal("agent").optional().catch(undefined),
     // Default, not required: rows written before full-row persistence
     // (2026-07-15) carry no status — they load as plain restorable rows.
     status: z.string().default("restored"),
@@ -98,6 +101,7 @@ export function bootAgentTaskRow(row: PersistedAgentTask): AgentTaskRow | null {
     ...(row.parentTaskId ? { parentTaskId: row.parentTaskId } : {}),
     workspacePath: row.workspacePath,
     title: row.title,
+    ...(row.titleSource ? { titleSource: row.titleSource } : {}),
     status: "restored",
     harnessId: row.harnessId,
     sessionId: row.sessionId,
