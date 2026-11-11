@@ -503,15 +503,37 @@ describe("deriveSessionActivity (MET-284)", () => {
   it("puts the user first: a waiting permission or a sign-in outranks working", () => {
     const running = [turn({ turnId: "trn_2" }), turn({ turnId: "trn_3", status: "queued" })];
     expect(activity(running, { pendingPermission: true })).toEqual({ kind: "needs-you", turnId: "trn_2" });
-    const held = [turn({ turnId: "trn_3", status: "queued" })];
-    expect(activity(held, { task: { authRequired: true } as AgentTaskRow })).toEqual({
-      kind: "needs-you",
-      turnId: "trn_3",
-    });
     expect(activity([], { task: { authRequired: true } as AgentTaskRow })).toEqual({
       kind: "needs-you",
       turnId: null,
     });
+  });
+
+  it("points a sign-in at the prompt it interrupted, which failed on it", () => {
+    const signIn = { task: { authRequired: true } as AgentTaskRow, ownTurnId: "trn_9" };
+    const turns = [
+      turn({ turnId: "trn_2", status: "error" }),
+      turn({ turnId: "trn_3", status: "error" }),
+      turn({ turnId: "trn_4", status: "queued" }),
+    ];
+    // The newest errored turn is the held one, not the prompt queued behind it.
+    expect(activity(turns, signIn)).toEqual({ kind: "needs-you", turnId: "trn_3" });
+    // With nothing errored, the first queued prompt is what waits.
+    expect(activity([turn({ turnId: "trn_4", status: "queued" })], signIn)).toEqual({
+      kind: "needs-you",
+      turnId: "trn_4",
+    });
+  });
+
+  it("leaves a sign-in to the face of a widget whose own turn hasn't completed", () => {
+    const signIn = { task: { authRequired: true } as AgentTaskRow };
+    expect(activity([turn({ turnId: "trn_1", status: "error" })], signIn)).toEqual({ kind: "idle" });
+    // Queued behind the held prompt: its face asks for the sign-in too.
+    const behind = [turn({ turnId: "trn_0", status: "error" }), turn({ turnId: "trn_1", status: "queued" })];
+    expect(activity(behind, signIn)).toEqual({ kind: "idle" });
+    // Completed long ago: the footer is where the user hears of it.
+    const done = [turn({ turnId: "trn_1", status: "completed" }), turn({ turnId: "trn_2", status: "error" })];
+    expect(activity(done, signIn)).toEqual({ kind: "needs-you", turnId: "trn_2" });
   });
 
   it("leaves a wait on the widget's own turn to its face", () => {

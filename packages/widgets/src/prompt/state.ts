@@ -487,21 +487,44 @@ export function deriveSessionActivity({
   pendingPermission: boolean;
   ownTurnId: string | null;
 }): SessionActivity {
-  if (!task) return { kind: "idle" };
+  if (!task) return IDLE;
+  const own = taskTurns.find((turn) => turn.turnId === ownTurnId);
+  if (task.authRequired) return signInActivity(taskTurns, own);
   const running = taskTurns.find((turn) => turn.status === "running");
-  const queued = taskTurns
-    .filter((turn) => turn.status === "queued")
-    .sort((a, b) => (a.turnId < b.turnId ? -1 : 1));
-  // Blocked on the user: the running turn (a permission), else the prompt
-  // a sign-in holds back (the first queued).
-  const current = running ?? queued[0];
-  if (current?.turnId === ownTurnId) return { kind: "idle" };
-  if (pendingPermission || task.authRequired) {
-    return { kind: "needs-you", turnId: current?.turnId ?? null };
-  }
+  const queued = taskTurns.filter((turn) => turn.status === "queued");
+  // First in line is the widget's own: its face says what it does, and
+  // what queues behind it is the "newer" count.
+  if ((running ?? firstById(queued)) === own && own) return IDLE;
+  if (pendingPermission) return { kind: "needs-you", turnId: running?.turnId ?? null };
   if (running) return { kind: "working", turnId: running.turnId };
-  const waiting = queued.filter((turn) => turn.turnId !== ownTurnId).length;
-  return waiting > 0 ? { kind: "queued", count: waiting } : { kind: "idle" };
+  const waiting = queued.filter((turn) => turn !== own).length;
+  return waiting > 0 ? { kind: "queued", count: waiting } : IDLE;
+}
+
+function firstById(turns: AgentTurn[]): AgentTurn | undefined {
+  return turns.reduce<AgentTurn | undefined>(
+    (first, turn) => (!first || turn.turnId < first.turnId ? turn : first),
+    undefined,
+  );
+}
+
+const IDLE: SessionActivity = { kind: "idle" };
+
+/**
+ * A sign-in holds the session back. The prompt it interrupted failed on it
+ * (its turn is the newest errored one) and runs again once the user signs
+ * in; with none, the first queued prompt is what waits. A widget whose own
+ * turn hasn't completed already asks for the sign-in on its face.
+ */
+function signInActivity(taskTurns: AgentTurn[], own: AgentTurn | undefined): SessionActivity {
+  if (own && own.status !== "completed") return IDLE;
+  const errored = taskTurns.filter((turn) => turn.status === "error");
+  const newestError = errored.reduce<AgentTurn | undefined>(
+    (newest, turn) => (!newest || turn.turnId > newest.turnId ? turn : newest),
+    undefined,
+  );
+  const held = newestError ?? firstById(taskTurns.filter((turn) => turn.status === "queued"));
+  return { kind: "needs-you", turnId: held?.turnId ?? null };
 }
 
 /** How many prompts the session was sent after the widget's own: zero
