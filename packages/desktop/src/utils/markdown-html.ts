@@ -13,6 +13,12 @@ import { drawnDiffFences } from "@notefig/widgets/diff-block/markdown";
 // as the element that draws it.
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true }).use(drawnDiffFences);
 
+// linkify-it with fuzzyLink enabled treats local file references such as
+// "2026-10-23.md" as .md (Moldova) domains and turns them into external
+// http://2026-10-23.md links. Keep linkification for explicit schemes
+// (https://...) but disable schemaless/fuzzy URLs in LLM output.
+md.linkify.set({ fuzzyLink: false });
+
 export function renderMarkdownHtml(text: string): string {
   return md.render(text);
 }
