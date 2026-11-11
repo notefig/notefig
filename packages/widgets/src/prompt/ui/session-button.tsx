@@ -38,8 +38,6 @@ export function SessionTag({
   className?: string;
 }) {
   const { t } = useTranslation();
-  const harness = useHarness(session?.harnessId);
-  const line = useSessionStatusLine(status);
   const kind = status?.activity.kind;
   const newer = status?.newer ?? 0;
   // Anything beside the mark widens the tag into a pill with room for it.
@@ -77,39 +75,50 @@ export function SessionTag({
         <TooltipTrigger asChild>{button}</TooltipTrigger>
       </OpenInNewTabContextMenu>
       <SessionTooltip
-        harness={harness?.label}
+        harnessId={session?.harnessId}
         title={session?.title ?? t("promptBlobOpenChat")}
-        status={line}
+        status={status}
       />
     </Tooltip>
   );
 }
 
-/** A harness by id, from the host's list: its label names it. */
-function useHarness(harnessId: string | undefined) {
-  return usePromptWidgetHost()
-    .useHarnessList()
-    .find((entry) => entry.id === harnessId);
-}
-
 /** A session's tooltip, wherever its mark stands for it: the harness's name
  *  small and muted, then the session's, then its status when it has one. */
 export function SessionTooltip({
-  harness,
+  harnessId,
   title,
   status,
 }: {
-  harness?: string;
+  harnessId?: string;
   title: string;
-  status?: string | null;
+  status?: SessionStatus;
 }) {
   return (
     <TooltipContent side="top" className="flex flex-col gap-0.5 px-2 py-1 text-[0.6875rem]">
       <span className="flex items-baseline gap-1.5">
-        {harness && <span className="text-[0.625rem] text-muted-foreground">{harness}</span>}
+        {harnessId && <HarnessName harnessId={harnessId} />}
         <span>{title}</span>
       </span>
-      {status && <span className="text-muted-foreground">{status}</span>}
+      {status && <StatusLine status={status} />}
     </TooltipContent>
   );
+}
+
+/** The harness's name, small and muted. Its own component so the harness
+ *  list is only read while the tooltip is open. */
+function HarnessName({ harnessId }: { harnessId: string }) {
+  const harness = usePromptWidgetHost()
+    .useHarnessList()
+    .find((entry) => entry.id === harnessId);
+  return (
+    <span className="text-[0.625rem] text-muted-foreground">{harness?.label ?? harnessId}</span>
+  );
+}
+
+/** The status sentence. Its own component so its lookup (where the
+ *  session is working) only runs while the tooltip is open. */
+function StatusLine({ status }: { status: SessionStatus }) {
+  const line = useSessionStatusLine(status);
+  return line ? <span className="text-muted-foreground">{line}</span> : null;
 }

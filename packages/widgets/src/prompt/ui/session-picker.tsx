@@ -125,7 +125,7 @@ export function SessionPicker({
           </TooltipTrigger>
         </DropdownMenuTrigger>
         <SessionTooltip
-          harness={target ? harnessLabel(target.harnessId) : undefined}
+          harnessId={target?.harnessId}
           title={target?.title ?? t("agentChooseHarness")}
         />
       </Tooltip>

@@ -416,4 +416,15 @@ describe("the widget's session (MET-284)", () => {
     expect(container!.querySelector("[data-session-footer]")).toBeNull();
     expect(tag().textContent).toBe("promptBlobSessionNewer");
   });
+
+  it("a failed widget keeps its session's tag before dismiss: the session lives on", () => {
+    render("error", {
+      task: session,
+      display: { errorMessage: "boom", sessionActivity: { kind: "needs-you", turnId: "trn_9" }, newerCount: 1 },
+    });
+    expect(tag().querySelector(".bg-warning")).not.toBeNull();
+    expect(tag().textContent).toBe("promptBlobSessionNewer");
+    const dismiss = container!.querySelector('button[aria-label="promptBlobDismiss"]')!;
+    expect(tag().compareDocumentPosition(dismiss) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

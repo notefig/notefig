@@ -1042,6 +1042,11 @@ function SettledState({
         message={display.errorMessage ?? undefined}
         onRetry={actions.retry}
         onEdit={actions.editPrompt}
+        session={boundTaskId ? task : undefined}
+        sessionStatus={sessionStatusOf(display)}
+        onOpenChat={(intent) =>
+          boundTaskId && actions.openAgentTab(boundTaskId, intent)
+        }
         onDismiss={actions.dismiss}
       />
     );
@@ -2059,11 +2064,19 @@ function ErrorState({
   message,
   onRetry,
   onEdit,
+  session,
+  sessionStatus,
+  onOpenChat,
   onDismiss,
 }: {
   message: string | undefined;
   onRetry: () => void;
   onEdit: () => void;
+  /** The bound session: its tag sits before dismiss, as on the done face.
+   *  The session lives on after a failed turn, and may need the user. */
+  session?: SessionMark;
+  sessionStatus?: SessionStatus;
+  onOpenChat: (intent?: OpenIntent) => void;
   onDismiss: () => void;
 }) {
   const { t } = useTranslation();
@@ -2093,6 +2106,14 @@ function ErrorState({
         >
           <Pencil className="size-3.5" />
         </button>
+        {session && (
+          <SessionTag
+            session={session}
+            status={sessionStatus}
+            onOpenChat={onOpenChat}
+            className="h-[1.375rem] min-w-[1.375rem]"
+          />
+        )}
         <button
           type="button"
           title={t("promptBlobDismiss")}
