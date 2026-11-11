@@ -56,8 +56,8 @@ import {
 } from "../doc-helpers";
 import type { PromptReference } from "../doc-helpers";
 import { basename } from "../basename";
-import { HarnessBadge, SessionButton, type SessionMark } from "./session-button";
-import { SessionFooter } from "./session-footer";
+import { SessionTag, type SessionMark } from "./session-button";
+import type { SessionStatus } from "./session-status";
 import { SessionPicker, useTargetHarnessId } from "./session-picker";
 import type { PromptWidget, PromptWidgetsApi } from "../widgets-service";
 import {
@@ -660,6 +660,7 @@ function SentFace({
         onStop={actions.stop}
         stopLabel={t("agentRemoveFromQueue")}
         session={task}
+        sessionStatus={sessionStatusOf(display)}
         onOpenChat={actions.openBoundChat}
       />
     );
@@ -690,6 +691,7 @@ function SentFace({
           onStop={actions.stop}
           stopLabel={t("agentStop")}
           session={task}
+        sessionStatus={sessionStatusOf(display)}
           onOpenChat={actions.openBoundChat}
         />
         <div className="px-2.5 pb-2">
@@ -736,6 +738,7 @@ function RunningFace({
         onStop={actions.stop}
         stopLabel={t("agentStop")}
         session={task}
+        sessionStatus={sessionStatusOf(display)}
         onOpenChat={actions.openBoundChat}
       />
       {phase === "needs-permission" && boundTaskId && (
@@ -848,13 +851,10 @@ export function PromptBlobFace({
 
             <SettledState
               mark={
-                <HeadingMark
+                <HarnessMark
                   task={task}
                   workspacePath={workspacePath}
                   boundTaskId={boundTaskId}
-                  onOpenChat={(intent) =>
-                    boundTaskId && actions.openAgentTab(boundTaskId, intent)
-                  }
                 />
               }
               phase={phase}
@@ -879,8 +879,6 @@ export function PromptBlobFace({
             onNewSession={actions.newSession}
             focusComposer={draftIO.focus}
           />
-          {/* Last on the card, so it never moves what is above it. */}
-          <SessionFooter task={task} boundTaskId={boundTaskId} display={display} />
         </div>
       </AnimatedHeight>
     </FaceFrame>
@@ -980,6 +978,13 @@ function RemovalRefusedHint({ shown }: { shown: boolean }) {
   );
 }
 
+/** The session's status for its tag, when the face knows it (not the demo). */
+function sessionStatusOf(display: PromptBlobDisplay): SessionStatus | undefined {
+  return display.sessionActivity
+    ? { activity: display.sessionActivity, newer: display.newerCount ?? 0 }
+    : undefined;
+}
+
 /** The face of a round that has ended: Done and Error are the two resting
  *  cards, and a question is the done card waiting on its answer (the draft
  *  row below takes it). Chosen here so the face itself stays phase-agnostic
@@ -1022,7 +1027,11 @@ function SettledState({
         changeCounts={display.changeCounts}
         changes={display.changes}
         onOpenFile={(path, intent) => actions.openFile(path, intent)}
-        harnessId={boundTaskId ? task?.harnessId : undefined}
+        session={task}
+        sessionStatus={sessionStatusOf(display)}
+        onOpenChat={(intent) =>
+          boundTaskId && actions.openAgentTab(boundTaskId, intent)
+        }
         onDismiss={actions.dismiss}
       />
     );
@@ -1649,40 +1658,29 @@ function useDraftPlaceholder(phase: BlobPhase): string {
   return dictationKey ? t(`${key}Dictation`, { key: dictationKey }) : t(key);
 }
 
-/** What leads a response's heading: the mark of the session that answered,
- *  which opens its chat (its tooltip names the harness and the session).
- *  Before the widget has a session (or once its row is gone) it is the logo
- *  of the harness a send would go to. While someone dictates a reply, the
- *  wave stands in for it, as it does for the picker on a fresh prompt; the
- *  cell keeps the mark's size, so the heading doesn't move. */
-function HeadingMark({
+/** What leads a response's heading: the logo of the harness that answered.
+ *  Read off the bound task's own row: the picker's list drops a session
+ *  once it is cancelled or failed, and the answer still came from it.
+ *  While someone dictates a reply, the wave stands in for it, as it does
+ *  for the picker's logo on a fresh prompt; the cell keeps the logo's size,
+ *  so the heading doesn't move. */
+function HarnessMark({
   task,
   workspacePath,
   boundTaskId,
-  onOpenChat,
 }: {
   task: AgentTaskRow | undefined;
   workspacePath: string;
   boundTaskId: string | null;
-  onOpenChat: (intent?: OpenIntent) => void;
 }) {
   const host = usePromptWidgetHost();
   const { HarnessLogo } = host.slots;
   const target = useTargetHarnessId(workspacePath, boundTaskId);
-  const lead =
-    boundTaskId && task ? (
-      <SessionButton
-        session={task}
-        onOpenChat={onOpenChat}
-        className="dictation-idle-only size-[1.125rem]"
-      />
-    ) : (
-      <HarnessLogo harnessId={target} className="dictation-idle-only size-3" />
-    );
-  if (!host.dictation) return lead;
+  const harnessId = task?.harnessId ?? target;
+  if (!host.dictation) return <HarnessLogo harnessId={harnessId} className="size-3" />;
   return (
-    <span className="dictation-swap size-[1.125rem] place-items-center [grid-template:1.125rem/1.125rem]">
-      {lead}
+    <span className="dictation-swap size-3 [grid-template:0.75rem/0.75rem]">
+      <HarnessLogo harnessId={harnessId} className="dictation-idle-only size-3" />
       <VoiceWave level={host.dictation.level} hearing={host.dictation.hearing} size="0.95rem" className="dictation-active-only" />
     </span>
   );
@@ -1707,6 +1705,7 @@ function StatusRow({
   onStop,
   stopLabel,
   session,
+  sessionStatus,
   onOpenChat,
 }: {
   label?: string;
@@ -1718,8 +1717,10 @@ function StatusRow({
   onEdit?: () => void;
   onStop?: () => void;
   stopLabel?: string;
-  /** The bound session: its dot ends the row (MET-284). */
+  /** The bound session: its tag ends the row (MET-284). */
   session?: SessionMark;
+  /** What that session is up to besides this widget, on its tag. */
+  sessionStatus?: SessionStatus;
   /** Jump to the bound session's chat (MET-104) — present in every bound
    *  phase, so a pending prompt is one click from its full transcript. */
   onOpenChat?: (intent?: OpenIntent) => void;
@@ -1779,7 +1780,12 @@ function StatusRow({
         <Square className="size-3.5 fill-current" />
       </button>
       {/* Last, not among the actions: the session the row belongs to. */}
-      <SessionButton session={session} onOpenChat={onOpenChat} className="size-[1.375rem]" />
+      <SessionTag
+        session={session}
+        status={sessionStatus}
+        onOpenChat={onOpenChat}
+        className="h-[1.375rem] min-w-[1.375rem]"
+      />
     </div>
   );
 }
@@ -1980,10 +1986,12 @@ export function DoneState({
   changeCounts = new Map(),
   changes,
   onOpenFile,
-  harnessId,
+  session,
+  sessionStatus,
+  onOpenChat,
   onDismiss,
 }: {
-  /** Leads the heading row (HeadingMark). */
+  /** Leads the heading row (HarnessMark). */
   mark?: React.ReactNode;
   /** The open choice question's controls, under the question. */
   choices?: React.ReactNode;
@@ -1998,8 +2006,11 @@ export function DoneState({
   changeCounts?: ReadonlyMap<string, number>;
   changes?: PromptChangeNavigation;
   onOpenFile: (path: string, intent?: OpenIntent) => void;
-  /** The bound session's harness: its logo sits among the end buttons. */
-  harnessId?: string;
+  /** The bound session: its tag ends the heading row, the way to its chat. */
+  session?: SessionMark;
+  /** What that session is up to besides this widget, on its tag. */
+  sessionStatus?: SessionStatus;
+  onOpenChat: (intent?: OpenIntent) => void;
   onDismiss: () => void;
 }) {
   const { t } = useTranslation();
@@ -2011,7 +2022,12 @@ export function DoneState({
       mark={mark}
       actions={
         <>
-          <HarnessBadge harnessId={harnessId} />
+          <SessionTag
+            session={session}
+            status={sessionStatus}
+            onOpenChat={onOpenChat}
+            className="h-[1.125rem] min-w-[1.125rem]"
+          />
           <button
             type="button"
             title={t("promptBlobDismiss")}

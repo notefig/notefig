@@ -27,7 +27,14 @@ import { ScratchpadIcon } from "@/components/editor/scratchpad-icon";
 import { SidebarSeparator } from "@/components/editor/tool-bar";
 import { TOOL_ICONS } from "@/components/editor/workspace-tools";
 import { useCore } from "@notefig/core/react";
-import { useAgentSessionList } from "@/modules/agents/react";
+import {
+  useAgentSessionList,
+  useAgentTaskRowsById,
+  type AgentTaskRow,
+} from "@/modules/agents/react";
+import { SessionGlyph } from "@/components/agent/session-glyph";
+import { FileTypeIcon } from "@/components/editor/file-type-icon";
+import { IconSwap } from "@notefig/ui/icon-swap";
 import { useAttention } from "@/hooks/use-attention";
 import { mostPressing, type AttentionItem, type AttentionKind } from "@/utils/attention";
 import { describePromptRound, isLiveRound, type PromptRound } from "@/modules/prompt-rounds";
@@ -70,6 +77,12 @@ export function EverythingPanel({
   const { t } = useTranslation();
   const attention = useAttention();
   const rounds = usePromptRounds(ROUNDS_SHOWN);
+  // Each round's session, for its mark: one query for all the rows.
+  const roundSessions = new Map(
+    useAgentTaskRowsById([...new Set(rounds.map((round) => round.taskId))]).map(
+      (task) => [task.taskId, task],
+    ),
+  );
   const sessions = useAgentSessionList(SESSIONS_SHOWN);
   const recentDocuments = useRecentDocuments(RECENT_DOCUMENTS_FETCHED);
   // Documents with a round in flight show it on their row too.
@@ -94,7 +107,12 @@ export function EverythingPanel({
       t("promptRounds"),
       rounds,
       (round, index) => (
-        <PromptRoundRow key={round.turnId} round={round} attention={roundMarks[index]} />
+        <PromptRoundRow
+          key={round.turnId}
+          round={round}
+          session={roundSessions.get(round.taskId)}
+          attention={roundMarks[index]}
+        />
       ),
       roundMarks.reduce(mostPressing, null),
     ),
@@ -404,9 +422,12 @@ function AttentionGroup({ items }: { items: AttentionItem[] }) {
  *  widget in its document. */
 function PromptRoundRow({
   round,
+  session,
   attention,
 }: {
   round: PromptRound;
+  /** The round's session: its mark is the row's icon once it settles. */
+  session: AgentTaskRow | undefined;
   /** Settled since the user last had its document in front. */
   attention: AttentionKind | null;
 }) {
@@ -415,10 +436,11 @@ function PromptRoundRow({
   return (
     <NavRow
       leading={
-        <StatusGlyph
+        <SessionGlyph
           state={
             attention ? attentionGlyphState(attention) : turnGlyphState(round.status)
           }
+          session={session}
         />
       }
       emphasis={attention !== null}
@@ -426,20 +448,6 @@ function PromptRoundRow({
       title={`${label} · ${getFileName(round.documentPath)} · ${deriveProjectName(round.workspacePath)}`}
       trailing={describePromptRound(round) ?? formatTimeAgo(round.startedAt)}
       onOpen={(intent) => jumpToRound(core, round, { intent })}
-    />
-  );
-}
-
-/** The recents marker: a hairline ring, filled in the brand colour for
- *  the document in front of the user. */
-function Marker({ filled }: { filled: boolean }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        "size-1.5 shrink-0 rounded-full",
-        filled ? "bg-brand" : "border border-muted-foreground/70",
-      )}
     />
   );
 }
@@ -458,7 +466,17 @@ function RecentDocumentRow({
   return (
     <NavRow
       leading={
-        live ? <StatusGlyph state="running" /> : <Marker filled={active} />
+        // A file is its file icon, a scratchpad its own; while a round runs
+        // in it, the running glyph, swapped in and out like a session's.
+        <IconSwap swapKey={live ? "running" : "file"}>
+          {live ? (
+            <StatusGlyph state="running" />
+          ) : document.isScratchpad ? (
+            <ScratchpadIcon className="size-3" />
+          ) : (
+            <FileTypeIcon path={document.path} className="size-3.5" />
+          )}
+        </IconSwap>
       }
       label={getFileName(document.path)}
       title={`${document.path} · ${deriveProjectName(document.workspacePath)}`}

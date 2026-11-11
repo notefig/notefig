@@ -1,11 +1,10 @@
 /**
  * MET-284: a prompt widget shows which session it belongs to, quietly. The
  * agent names the session once (`session_rename`); every widget of the
- * session carries the same mark (a shape in the session's color), whose
- * tooltip is that name; and a
- * widget's footer says how many prompts the session was sent after its
- * own — appearing under the card's content without moving it, and still
- * there after a reload.
+ * session carries the same tag (its mark: a shape in the session's color),
+ * whose tooltip is that name; and the tag counts the prompts the session
+ * was sent after the widget's own ("1 newer"), without moving the heading, and
+ * still after a reload.
  */
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { openFileInTree, setupTestDatabase, waitForFileTree } from "../setup/test-helpers";
@@ -29,7 +28,8 @@ async function markTooltip(page: Page, widget: Locator): Promise<Locator> {
   await mark(widget).hover();
   return page.getByRole("tooltip");
 }
-const footer = (widget: Locator) => widget.locator("[data-session-footer]");
+/** The session's tag: its mark, and "N newer" for the prompts sent after this one. */
+const tag = (widget: Locator) => widget.locator("[data-session-tag]");
 
 /** A widget by the answer it settled on. */
 const settled = (page: Page, answer: string) =>
@@ -56,7 +56,7 @@ test.describe("prompt widget session", () => {
     await expect(mark(first)).toHaveAttribute("data-session-mark", "0:0");
     await expect(await markTooltip(page, first)).toContainText("Pitch rewrite");
     await page.mouse.move(0, 0);
-    await expect(footer(first)).toHaveCount(0);
+    await expect(tag(first)).toHaveText("");
     const heading = first.getByText("Shortened the opening");
     const before = await heading.boundingBox();
 
@@ -67,10 +67,11 @@ test.describe("prompt widget session", () => {
     await expect(face(second)).toHaveAttribute("data-blob-phase", "done", { timeout: 30_000 });
     await expect(mark(second)).toHaveAttribute("data-session-mark", "0:0");
 
-    await expect(footer(first)).toHaveText("1 newer");
-    await expect(footer(second)).toHaveCount(0);
-    // The footer came in under the content: the heading didn't move.
-    expect(await heading.boundingBox()).toEqual(before);
+    await expect(tag(first)).toHaveText("1 newer");
+    await expect(tag(second)).toHaveText("");
+    // The count came in on the tag: the heading didn't move.
+    const after = await heading.boundingBox();
+    expect({ x: after?.x, y: after?.y }).toEqual({ x: before?.x, y: before?.y });
 
     // Let the autosave write the widgets' markers, then come back.
     await page.waitForTimeout(2500);
@@ -80,7 +81,7 @@ test.describe("prompt widget session", () => {
     await editor.waitFor();
     const restored = settled(page, "Shortened the opening");
     await expect(face(restored)).toHaveAttribute("data-blob-phase", "done", { timeout: 15_000 });
-    await expect(footer(restored)).toHaveText("1 newer");
+    await expect(tag(restored)).toHaveText("1 newer");
     await expect(mark(restored)).toHaveAttribute("data-session-mark", "0:0");
     await expect(await markTooltip(page, restored)).toContainText("Pitch rewrite");
     await page.mouse.move(0, 0);

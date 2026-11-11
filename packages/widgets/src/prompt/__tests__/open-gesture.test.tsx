@@ -10,7 +10,6 @@ vi.mock("react-i18next", () => ({
 }));
 
 import { DoneState } from "../ui/prompt-blob";
-import { SessionButton } from "../ui/session-button";
 import { DiffCard } from "../../diff-block/card";
 import { parseDiffBlock, patchOf } from "../../diff-block/patch";
 import { fakePromptWidgetHost, withHost } from "../../testing/fake-host";
@@ -68,11 +67,7 @@ function renderDone() {
       touchedFiles: ["/ws/notes.md"],
       documentPath: "/ws/doc.md",
       onOpenFile,
-      // The heading's lead: the session's mark, its way to the chat.
-      mark: createElement(SessionButton, {
-        session: { title: "Pitch rewrite", harnessId: "claude", colorSlot: 0, shapeSlot: 0 },
-        onOpenChat,
-      }),
+      onOpenChat,
       onDismiss: () => {},
     }),
   );
@@ -102,7 +97,7 @@ describe("links in a finished prompt open like the file tree's rows", () => {
     expect(onOpenFile).toHaveBeenCalledWith("/ws/notes.md", "new-tab");
   });
 
-  it("the session mark opens the chat the same way", () => {
+  it("the chat button opens the session the same way", () => {
     const { onOpenChat, chat } = renderDone();
     click(chat);
     expect(onOpenChat).toHaveBeenLastCalledWith("replace");

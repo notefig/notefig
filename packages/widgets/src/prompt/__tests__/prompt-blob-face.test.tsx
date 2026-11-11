@@ -245,28 +245,15 @@ describe("PromptBlobFace", () => {
       `[data-choice-option="${name}"]`,
     ) as HTMLButtonElement;
 
-  it("the heading leads with the bound session's mark, even once it left the picker", () => {
+  it("the heading's logo is the bound session's harness, even once it left the picker", () => {
     // The fake picker lists no sessions (as for a cancelled one), and its
-    // default harness is "claude": the session's own harness, not that one,
-    // is the badge among the end buttons.
+    // default harness is "claude".
     render("needs-answer", {
       display: question("single_choice"),
-      task: { taskId: "task_1", harnessId: "opencode", colorSlot: 3, shapeSlot: 5 },
+      task: { taskId: "task_1", harnessId: "opencode" },
     });
-    const marks = container!.querySelectorAll("[data-session-mark]");
-    expect(marks).toHaveLength(1);
-    expect(marks[0].getAttribute("data-session-mark")).toBe("3:5");
-    const badge = container!.querySelector("[data-harness-badge]");
-    expect(badge?.getAttribute("data-harness-badge")).toBe("opencode");
-    expect(badge?.querySelector('[data-testid="harness-logo-opencode"]')).not.toBeNull();
+    expect(container?.querySelector('[data-testid="harness-logo-opencode"]')).not.toBeNull();
     expect(container?.querySelector('[data-testid="harness-logo-claude"]')).toBeNull();
-  });
-
-  it("an unbound settled widget leads with the harness a send would go to", () => {
-    render("needs-answer", { display: question("single_choice"), boundTaskId: null });
-    expect(container?.querySelector('[data-testid="harness-logo-claude"]')).not.toBeNull();
-    expect(container?.querySelector("[data-session-mark]")).toBeNull();
-    expect(container?.querySelector("[data-harness-badge]")).toBeNull();
   });
 
   it("a single choice offers a button per option; clicking one picks it", () => {
@@ -381,8 +368,14 @@ describe("the widget's session (MET-284)", () => {
     expect(marks()).toHaveLength(1);
   });
 
-  it("the footer says what the session does elsewhere and how many prompts came after", () => {
-    const text = render("done", {
+  const tag = () => container!.querySelector<HTMLElement>("[data-session-tag]")!;
+  const tooltipOf = (button: HTMLElement) => {
+    act(() => button.focus());
+    return document.body.querySelector("[role=tooltip]")?.textContent;
+  };
+
+  it("the tag counts the prompts that came after, and its tooltip says the rest", () => {
+    render("done", {
       task: session,
       display: {
         widgetResponse: answer,
@@ -391,38 +384,36 @@ describe("the widget's session (MET-284)", () => {
       },
       host: { useRoundDocument: () => "/ws/pitch.md" },
     });
-    expect(text).toContain("promptBlobSessionWorkingIn · promptBlobSessionNewer");
-    expect(container!.querySelector("[data-session-footer]")?.textContent).toBe(
-      "promptBlobSessionWorkingIn · promptBlobSessionNewer",
+    expect(tag().textContent).toBe("promptBlobSessionNewer");
+    expect(tag().dataset.sessionTag).toBe("working");
+    expect(tooltipOf(tag())).toBe(
+      "Investor intro rewritepromptBlobSessionWorkingIn · promptBlobSessionNewer",
     );
   });
 
-  it("a session waiting on the user shows a still dot, and a chat turn says so", () => {
+  it("a session waiting on the user puts a still dot on the tag, and a chat turn says so", () => {
     render("done", {
       task: session,
       display: { widgetResponse: answer, sessionActivity: { kind: "needs-you", turnId: "trn_9" } },
     });
-    const footer = container!.querySelector("[data-session-footer]")!;
-    expect(footer.textContent).toBe("promptBlobSessionNeedsYouInChat");
-    expect(footer.querySelector(".bg-warning")).not.toBeNull();
-    expect(footer.innerHTML).not.toMatch(/animate|shimmer/);
+    expect(tag().querySelector(".bg-warning")).not.toBeNull();
+    expect(tag().textContent).toBe("");
+    expect(tooltipOf(tag())).toContain("promptBlobSessionNeedsYouInChat");
   });
 
-  it("has no footer when there is nothing to say", () => {
+  it("an idle session with nothing newer is just its mark", () => {
     render("done", {
       task: session,
       display: { widgetResponse: answer, sessionActivity: { kind: "idle" }, newerCount: 0 },
     });
-    expect(container!.querySelector("[data-session-footer]")).toBeNull();
+    expect(tag().textContent).toBe("");
+    expect(tag().children).toHaveLength(1);
+    expect(tooltipOf(tag())).toBe("Investor intro rewrite");
   });
 
-  it("the footer sits last on the card, under the composer", () => {
-    render("done", {
-      task: session,
-      display: { widgetResponse: answer, sessionActivity: { kind: "queued", count: 1 } },
-    });
-    const footer = container!.querySelector("[data-session-footer]")!;
-    const composer = container!.querySelector('[data-testid="composer"]')!;
-    expect(composer.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  it("no line of its own: a working widget's status rides on its tag too", () => {
+    render("running", { task: session, display: { sessionActivity: { kind: "queued", count: 1 }, newerCount: 1 } });
+    expect(container!.querySelector("[data-session-footer]")).toBeNull();
+    expect(tag().textContent).toBe("promptBlobSessionNewer");
   });
 });

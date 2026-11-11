@@ -14,6 +14,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@notefig/ui/button";
 import { VoiceWave } from "@notefig/ui/voice-wave";
+import { IconSwap } from "@notefig/ui/icon-swap";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,10 +22,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@notefig/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
+import { Tooltip, TooltipTrigger } from "@notefig/ui/tooltip";
 import { usePromptWidgetHost } from "../host-context";
 import type { SessionOption } from "../host";
 import { SessionMarkIcon } from "../session-mark";
+import { SessionTooltip } from "./session-button";
 
 /** The session the widget's prompts go to: its bound session, else the one
  *  a send would join. Undefined when that session isn't live, or there is
@@ -101,25 +103,31 @@ export function SessionPicker({
               {/* While someone dictates into this draft, the wave stands in
                   for the mark (styles.css cross-fades them on the dictation
                   ghost). */}
-              {target ? (
-                <SessionMarkIcon
-                  colorSlot={target.colorSlot}
-                  shapeSlot={target.shapeSlot}
-                  size={16}
-                  className="dictation-idle-only"
-                />
-              ) : (
-                <HarnessLogo harnessId={harnesses[0].id} className="dictation-idle-only" />
-              )}
+              {/* A change of target shrinks one icon and grows the next. */}
+              <IconSwap
+                swapKey={target ? `session:${target.taskId}` : `harness:${harnesses[0].id}`}
+                className="dictation-idle-only"
+              >
+                {target ? (
+                  <SessionMarkIcon
+                    colorSlot={target.colorSlot}
+                    shapeSlot={target.shapeSlot}
+                    size={16}
+                  />
+                ) : (
+                  <HarnessLogo harnessId={harnesses[0].id} />
+                )}
+              </IconSwap>
               {host.dictation && (
                 <VoiceWave level={host.dictation.level} hearing={host.dictation.hearing} size="1.05rem" className="dictation-active-only" />
               )}
             </Button>
           </TooltipTrigger>
         </DropdownMenuTrigger>
-        <TooltipContent side="top" className="px-2 py-1 text-[0.6875rem]">
-          {target?.title ?? t("agentChooseHarness")}
-        </TooltipContent>
+        <SessionTooltip
+          harness={target ? harnessLabel(target.harnessId) : undefined}
+          title={target?.title ?? t("agentChooseHarness")}
+        />
       </Tooltip>
       <DropdownMenuContent
         align="start"
