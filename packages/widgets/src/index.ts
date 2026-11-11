@@ -20,7 +20,7 @@ export {
 } from "./registry";
 
 // ─── the prompt widget ────────────────────────────────────────────────────
-export { promptWidget } from "./prompt";
+export { promptWidget, selectWidget } from "./prompt";
 /** The prompt widget's tool calls as the agent chat shows them. */
 export { renderPromptToolCall } from "./prompt/transcript";
 export { PROMPT_DRAFT_NODE_NAME, PROMPT_NODE_NAME } from "./prompt/node";

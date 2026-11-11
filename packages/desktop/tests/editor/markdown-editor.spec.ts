@@ -422,3 +422,65 @@ test.describe("search", () => {
       });
   });
 });
+
+test.describe("prompt widget navigation", () => {
+  test("hotkeys jump between prompt widgets in document order", async ({
+    page,
+  }) => {
+    await openHarness(page, {
+      content: [
+        "para one",
+        "",
+        '<!-- notefig:prompt id="blob_a" task="task_a" -->',
+        "",
+        "para two",
+        "",
+        '<!-- notefig:prompt id="blob_b" task="task_b" -->',
+        "",
+        "para three",
+        "",
+        '<!-- notefig:prompt id="blob_c" task="task_c" -->',
+        "",
+      ].join("\n"),
+    });
+
+    await expect(page.locator('[data-type="ai-prompt"]')).toHaveCount(3);
+
+    const activeBlob = () =>
+      page.evaluate(() => {
+        const widget = document
+          .getSelection()
+          ?.anchorNode?.parentElement?.closest('[data-type="ai-prompt"]');
+        return widget?.getAttribute("data-blob-id") ?? null;
+      });
+
+    // Focus the editor in the prose before the first widget.
+    await page
+      .locator(".ProseMirror p", { hasText: "para one" })
+      .first()
+      .click();
+    await expect.poll(activeBlob).toBeNull();
+
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await expect.poll(activeBlob).toBe("blob_a");
+
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await expect.poll(activeBlob).toBe("blob_b");
+
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await expect.poll(activeBlob).toBe("blob_c");
+
+    // Wraps to the first widget.
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await expect.poll(activeBlob).toBe("blob_a");
+
+    await page.keyboard.press("ControlOrMeta+ArrowUp");
+    await expect.poll(activeBlob).toBe("blob_c");
+
+    await page.keyboard.press("ControlOrMeta+Shift+ArrowUp");
+    await expect.poll(activeBlob).toBe("blob_a");
+
+    await page.keyboard.press("ControlOrMeta+Shift+ArrowDown");
+    await expect.poll(activeBlob).toBe("blob_c");
+  });
+});

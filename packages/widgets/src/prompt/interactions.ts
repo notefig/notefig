@@ -83,7 +83,7 @@ function selectedWidget(
 }
 
 /** Select the widget at `pos` the way the keyboard does. */
-function selectWidget(tr: Transaction, pos: number): Transaction {
+export function selectWidget(tr: Transaction, pos: number): Transaction {
   const node = tr.doc.nodeAt(pos);
   return tr
     .setSelection(NodeSelection.create(tr.doc, pos))

@@ -9,6 +9,7 @@ import { useEditorFileSync } from "./use-editor-file-sync";
 import { useEditorFocusLifecycle } from "./use-editor-focus-lifecycle";
 import { useEditorViewportMemory } from "./use-editor-viewport-memory";
 import { useLinkPrompt } from "./use-link-prompt";
+import { usePromptWidgetNavigation } from "./use-prompt-widget-navigation";
 import { TiptapToolbar } from "./tiptap-toolbar";
 import { PromptMentionMenu, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
 import { LinkBubbleMenu } from "./tiptap-link-menu";
@@ -70,6 +71,7 @@ export function TextEditor({
     turnWrites.attribute,
   );
   useEditorFocusLifecycle(editor, file.path);
+  usePromptWidgetNavigation(editor);
   const scrollRef = useEditorViewportMemory(editor, file.path);
   const handleLinkToggle = useLinkPrompt(editor);
 
