@@ -41,8 +41,9 @@ export const widgetRespond: AgentTool<WidgetResponse, { recorded: true }> = {
   description:
     `Deliver your response to the in-document widget the prompt came from, ` +
     `once, as the turn's last step. Pick its \`kind\`: ` +
-    `${describeResponseKinds()}. An optional short \`title\` becomes the ` +
-    `widget's heading. The widget renders inline, so keep \`markdown\` to a ` +
+    `${describeResponseKinds()}. Give every answer and issue a \`title\`: a ` +
+    `few words naming this response, the widget's one heading (a choice's ` +
+    `question is its heading, so it needs none). The widget renders inline, so keep \`markdown\` to a ` +
     `few sentences or a short list, and never restate what you wrote into ` +
     `the document. Never put a diff block in it: write the diff into the ` +
     `document, and say here where it is.`,

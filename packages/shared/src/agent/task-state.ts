@@ -43,6 +43,20 @@ export type AgentTaskRow = {
    * a session once, and a named session can't be renamed again.
    */
   titleSource?: "agent";
+  /**
+   * The session's color and letter (`session-color.ts`), 0 through 5: picked
+   * when the row is made and kept, so its widgets and its edits always read
+   * the same. Absent on rows from before session colors: those show in
+   * the neutral color.
+   */
+  colorSlot?: number;
+  /**
+   * How many prompts the session has been sent, from a widget or the chat
+   * (MET-284). Each turn carries its place in that count (`ordinal`), so a
+   * widget can say how many prompts came after its own. Absent until the
+   * first prompt, and on rows from before it was kept.
+   */
+  promptCount?: number;
   status: AgentTaskStatus;
   harnessId: string;
   /**
@@ -123,6 +137,11 @@ export type AgentTurn = {
   /** Failure reason when status is "error" — the "why did it fail?" answer. */
   error?: string;
   startedAt: number;
+  /**
+   * The turn's place among its task's prompts, 1-based: the task's
+   * `promptCount` when this prompt was sent. Absent on replayed turns.
+   */
+  ordinal?: number;
   /**
    * What this turn spent. Absent until the turn settles and on session/load
    * replay (ACP replays carry no usage); null when the harness reported

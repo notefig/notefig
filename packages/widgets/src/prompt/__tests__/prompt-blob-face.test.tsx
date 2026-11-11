@@ -17,7 +17,8 @@ vi.mock("react-i18next", () => ({
 
 import { PromptBlobFace, type ChoiceDisplay } from "../ui/prompt-blob";
 import type { WidgetResponse } from "@notefig/shared/agent";
-import type { BlobPhase } from "../state";
+import type { BlobPhase, SessionActivity } from "../state";
+import type { PromptWidgetHost } from "../host";
 import type { AgentTaskRow } from "@notefig/shared/agent";
 import { fakePromptWidgetHost, withHost } from "../../testing/fake-host";
 
@@ -66,8 +67,11 @@ function render(
       activeToolLine: string | null;
       assistantTeaser: string | null;
       queueAhead: number;
+      sessionActivity: SessionActivity;
+      newerCount: number;
     }>;
     task?: Partial<AgentTaskRow>;
+    host?: Partial<PromptWidgetHost>;
     draft?: string;
     reference?: { text: string; from: number; to: number } | null;
     clearReference?: () => void;
@@ -79,7 +83,7 @@ function render(
   act(() =>
     root!.render(
       withHost(
-        fakePromptWidgetHost(),
+        fakePromptWidgetHost(overrides.host),
         createElement(PromptBlobFace, {
           phase,
           record,
@@ -321,5 +325,75 @@ describe("PromptBlobFace", () => {
 
   it("shows the failure reason on error", () => {
     expect(render("error", { display: { errorMessage: "boom" } })).toContain("boom");
+  });
+});
+
+describe("the widget's session (MET-284)", () => {
+  const session = { title: "Investor intro rewrite", colorSlot: 2 };
+  const dots = () => [...container!.querySelectorAll<HTMLElement>("[data-session-dot]")];
+  const answer: WidgetResponse = { kind: "answer", markdown: "Done.", title: "Tightened the intro" };
+
+  it("a settled widget heads with its title and the session's dot, which opens the chat", () => {
+    const text = render("done", { task: session, display: { widgetResponse: answer } });
+    expect(text).toContain("Tightened the intro");
+    // The session's name is the dot's tooltip, never text on the card.
+    expect(text).not.toContain("Investor intro rewrite");
+    const [dot] = dots();
+    expect(dots()).toHaveLength(1);
+    expect(dot.title).toBe("Investor intro rewrite");
+    expect(dot.getAttribute("aria-label")).toBe("promptBlobOpenChat");
+    expect((dot.firstElementChild as HTMLElement).style.background).toBe("hsl(var(--session-3))");
+  });
+
+  it("a working widget's dot ends its status row, after the actions", () => {
+    render("running", { task: session });
+    const row = dots()[0].parentElement!;
+    expect(row.lastElementChild).toBe(dots()[0]);
+    expect(dots()).toHaveLength(1);
+  });
+
+  it("the footer says what the session does elsewhere and how many prompts came after", () => {
+    const text = render("done", {
+      task: session,
+      display: {
+        widgetResponse: answer,
+        sessionActivity: { kind: "working", turnId: "trn_9" },
+        newerCount: 2,
+      },
+      host: { useRoundDocument: () => "/ws/pitch.md" },
+    });
+    expect(text).toContain("promptBlobSessionWorkingIn · promptBlobSessionNewer");
+    expect(container!.querySelector("[data-session-footer]")?.textContent).toBe(
+      "promptBlobSessionWorkingIn · promptBlobSessionNewer",
+    );
+  });
+
+  it("a session waiting on the user shows a still dot, and a chat turn says so", () => {
+    render("done", {
+      task: session,
+      display: { widgetResponse: answer, sessionActivity: { kind: "needs-you", turnId: "trn_9" } },
+    });
+    const footer = container!.querySelector("[data-session-footer]")!;
+    expect(footer.textContent).toBe("promptBlobSessionNeedsYouInChat");
+    expect(footer.querySelector(".bg-warning")).not.toBeNull();
+    expect(footer.innerHTML).not.toMatch(/animate|shimmer/);
+  });
+
+  it("has no footer when there is nothing to say", () => {
+    render("done", {
+      task: session,
+      display: { widgetResponse: answer, sessionActivity: { kind: "idle" }, newerCount: 0 },
+    });
+    expect(container!.querySelector("[data-session-footer]")).toBeNull();
+  });
+
+  it("the footer sits last on the card, under the composer", () => {
+    render("done", {
+      task: session,
+      display: { widgetResponse: answer, sessionActivity: { kind: "queued", count: 1 } },
+    });
+    const footer = container!.querySelector("[data-session-footer]")!;
+    const composer = container!.querySelector('[data-testid="composer"]')!;
+    expect(composer.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

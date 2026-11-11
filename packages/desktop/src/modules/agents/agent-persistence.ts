@@ -7,7 +7,7 @@
  * turns a stored row back into a live one.
  */
 import { z } from "zod";
-import type { SessionUsage } from "@notefig/shared/agent";
+import { SESSION_COLOR_SLOTS, type SessionUsage } from "@notefig/shared/agent";
 import type { AgentTaskRow } from "./agent-collections";
 
 /** The collection id, and so the SQLite table this data lands in. */
@@ -57,6 +57,15 @@ export const PersistedAgentTaskSchema = z
     // Loose: an unknown value reads as "not named by the agent", which only
     // gives the agent its one rename back.
     titleSource: z.literal("agent").optional().catch(undefined),
+    // Loose too: a slot out of range reads as none (the neutral color).
+    colorSlot: z
+      .number()
+      .int()
+      .min(0)
+      .max(SESSION_COLOR_SLOTS - 1)
+      .optional()
+      .catch(undefined),
+    promptCount: z.number().int().min(0).optional().catch(undefined),
     // Default, not required: rows written before full-row persistence
     // (2026-07-15) carry no status — they load as plain restorable rows.
     status: z.string().default("restored"),
@@ -102,6 +111,8 @@ export function bootAgentTaskRow(row: PersistedAgentTask): AgentTaskRow | null {
     workspacePath: row.workspacePath,
     title: row.title,
     ...(row.titleSource ? { titleSource: row.titleSource } : {}),
+    ...(row.colorSlot !== undefined ? { colorSlot: row.colorSlot } : {}),
+    ...(row.promptCount !== undefined ? { promptCount: row.promptCount } : {}),
     status: "restored",
     harnessId: row.harnessId,
     sessionId: row.sessionId,

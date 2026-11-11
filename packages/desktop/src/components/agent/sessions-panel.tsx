@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type { HarnessDefinition } from "@notefig/shared/agent";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
+import { sessionColor } from "@notefig/widgets";
 import { Button } from "@notefig/ui/button";
 import { ButtonGroup } from "@notefig/ui/button-group";
 import {
@@ -278,6 +279,16 @@ export function SessionRow({
               attention && "font-medium",
             )}
           >
+            {/* The session's color: the same dot its widgets carry, and the
+                color of its edits in the document (MET-284). */}
+            {task.colorSlot !== undefined && (
+              <span
+                aria-hidden
+                className="mr-1.5 inline-block size-2 rounded-full align-middle"
+                style={{ background: sessionColor(task.colorSlot) }}
+                data-session-dot={task.colorSlot}
+              />
+            )}
             {task.title}
           </span>
           <span className="shrink-0 text-[0.6875rem] text-muted-foreground/80">

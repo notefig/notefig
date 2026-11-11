@@ -15,7 +15,6 @@ import {
   Check,
   CornerDownLeft,
   FileText,
-  MessageSquare,
   Pencil,
   RotateCw,
   Square,
@@ -66,6 +65,9 @@ import {
 } from "../doc-helpers";
 import type { PromptReference } from "../doc-helpers";
 import { basename } from "../basename";
+import { sessionColor } from "../session-color";
+import { SessionButton, type SessionMark } from "./session-button";
+import { SessionFooter } from "./session-footer";
 import type { PromptWidget, PromptWidgetsApi } from "../widgets-service";
 import {
   capabilitiesOf,
@@ -84,8 +86,11 @@ import {
   takesTyping,
   composeChoiceAnswer,
   deriveChoiceKey,
+  deriveSessionActivity,
+  newerPromptCount,
   type BlobPhase,
   type RoundOutcome,
+  type SessionActivity,
 } from "../state";
 
 /** What the face reads off a widget's record: the prompt it last sent. */
@@ -250,7 +255,7 @@ function usePromptBlobRound({
   boundTaskId: string | null;
 }) {
   const host = usePromptWidgetHost();
-  const { turn, task, entries, taskTurns } = host.useRound({
+  const { turn, task, entries, taskTurns, pendingPermissions } = host.useRound({
     turnId: boundTurnId,
     taskId: boundTaskId,
   });
@@ -258,7 +263,13 @@ function usePromptBlobRound({
     () => sortEntriesChronologically(entries),
     [entries],
   );
-  return { turn, task, sortedEntries, taskTurns };
+  return {
+    turn,
+    task,
+    sortedEntries,
+    taskTurns,
+    pendingPermission: pendingPermissions.length > 0,
+  };
 }
 
 /**
@@ -276,6 +287,8 @@ function usePromptBlobDisplay({
   widget,
   sortedEntries,
   taskTurns,
+  task,
+  pendingPermission,
 }: {
   review: PromptReview;
   blobId: string;
@@ -284,6 +297,9 @@ function usePromptBlobDisplay({
   widget: PromptWidget;
   sortedEntries: AgentEntry[];
   taskTurns: AgentTurn[];
+  /** The bound session: its change marks are drawn in its color. */
+  task: AgentTaskRow | undefined;
+  pendingPermission: boolean;
 }): PromptBlobDisplay {
   const running = phase === "running";
   const rawActiveToolLine = running ? deriveActiveToolLine(sortedEntries) : null;
@@ -298,7 +314,14 @@ function usePromptBlobDisplay({
     assistantTeaser: running ? deriveLatestAssistantLine(sortedEntries) : null,
     queueAhead: queuePosition(phase, taskTurns, widget.boundTurnId),
     changeCounts: usePromptChangeCounts(review, blobId),
-    changes: usePromptChangeNavigation(review, blobId, editor),
+    changes: usePromptChangeNavigation(review, blobId, editor, task?.colorSlot),
+    sessionActivity: deriveSessionActivity({
+      task,
+      taskTurns,
+      pendingPermission,
+      ownTurnId: widget.boundTurnId,
+    }),
+    newerCount: newerPromptCount(task, widget.ordinal),
   };
 }
 
@@ -570,6 +593,11 @@ interface PromptBlobDisplay extends OutcomeDisplay {
   changeCounts: ReadonlyMap<string, number>;
   /** Review of the round's changes in this document. */
   changes: PromptChangeNavigation;
+  /** What the bound session is doing apart from this round (MET-284).
+   *  Absent for a face with no session behind it (the marketing demo). */
+  sessionActivity?: SessionActivity;
+  /** Prompts the session was sent after this round. */
+  newerCount?: number;
 }
 
 /** Everything the face can do. Grouped so the container hands over one
@@ -637,6 +665,7 @@ function SentFace({
         onEdit={actions.editPrompt}
         onStop={actions.stop}
         stopLabel={t("agentRemoveFromQueue")}
+        session={task}
         onOpenChat={actions.openBoundChat}
       />
     );
@@ -647,6 +676,7 @@ function SentFace({
       <RunningFace
         phase={phase}
         record={record}
+        task={task}
         boundTaskId={boundTaskId}
         display={display}
         actions={actions}
@@ -665,6 +695,7 @@ function SentFace({
           onEdit={actions.editPrompt}
           onStop={actions.stop}
           stopLabel={t("agentStop")}
+          session={task}
           onOpenChat={actions.openBoundChat}
         />
         <div className="px-2.5 pb-2">
@@ -682,12 +713,14 @@ function SentFace({
 function RunningFace({
   phase,
   record,
+  task,
   boundTaskId,
   display,
   actions,
 }: {
   phase: BlobPhase;
   record: PromptBlobRecord;
+  task: AgentTaskRow | undefined;
   boundTaskId: string | null;
   display: PromptBlobDisplay;
   actions: PromptBlobFaceActions;
@@ -708,6 +741,7 @@ function RunningFace({
         onEdit={actions.editPrompt}
         onStop={actions.stop}
         stopLabel={t("agentStop")}
+        session={task}
         onOpenChat={actions.openBoundChat}
       />
       {phase === "needs-permission" && boundTaskId && (
@@ -791,10 +825,11 @@ export function PromptBlobFace({
       <AnimatedHeight>
         <div
           className={cn(
-            "rounded-lg border",
+            "relative rounded-lg border",
             blobCardClass(phase, response === "issue"),
           )}
         >
+          <SessionRail task={task} boundTaskId={boundTaskId} />
           {/* Everything above the draft row is chrome, and chrome inside a
               node view must be contentEditable={false} — the same rule
               BlobNodeView follows. It is not cosmetic: without it the whole
@@ -828,6 +863,7 @@ export function PromptBlobFace({
               }
               phase={phase}
               display={display}
+              task={task}
               boundTaskId={boundTaskId}
               documentPath={documentPath}
               actions={actions}
@@ -846,6 +882,8 @@ export function PromptBlobFace({
             onSelectSession={actions.rebindSession}
             focusComposer={draftIO.focus}
           />
+          {/* Last on the card, so it never moves what is above it. */}
+          <SessionFooter task={task} boundTaskId={boundTaskId} display={display} />
         </div>
       </AnimatedHeight>
     </FaceFrame>
@@ -860,6 +898,25 @@ interface FaceRules {
   removalRefused: boolean;
   /** When the last delete was refused: each one shakes the face. */
   removalRefusedAt: number | null;
+}
+
+/** The bound session's color down the card's left edge (MET-284): every
+ *  widget of one session carries the same one. */
+function SessionRail({
+  task,
+  boundTaskId,
+}: {
+  task: AgentTaskRow | undefined;
+  boundTaskId: string | null;
+}) {
+  if (!boundTaskId || task?.colorSlot === undefined) return null;
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute inset-y-2 left-0 w-[3px] rounded-r-full"
+      style={{ background: sessionColor(task.colorSlot) }}
+    />
+  );
 }
 
 /** The quoted selection a widget was summoned over, when there is one. */
@@ -953,6 +1010,7 @@ function SettledState({
   mark,
   phase,
   display,
+  task,
   boundTaskId,
   documentPath,
   actions,
@@ -960,6 +1018,7 @@ function SettledState({
   mark: React.ReactNode;
   phase: BlobPhase;
   display: PromptBlobDisplay;
+  task: AgentTaskRow | undefined;
   boundTaskId: string | null;
   documentPath: string;
   actions: PromptBlobFaceActions;
@@ -985,6 +1044,7 @@ function SettledState({
         changeCounts={display.changeCounts}
         changes={display.changes}
         onOpenFile={(path, intent) => actions.openFile(path, intent)}
+        session={task}
         onOpenChat={(intent) =>
           boundTaskId && actions.openAgentTab(boundTaskId, intent)
         }
@@ -1085,7 +1145,7 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     draftIO,
   });
 
-  const { turn, task, sortedEntries, taskTurns } = usePromptBlobRound({
+  const { turn, task, sortedEntries, taskTurns, pendingPermission } = usePromptBlobRound({
     boundTurnId,
     boundTaskId,
   });
@@ -1116,6 +1176,8 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
       widget,
       sortedEntries,
       taskTurns,
+      task,
+      pendingPermission,
     }),
     choice: choice.display,
   };
@@ -1774,6 +1836,7 @@ function StatusRow({
   onEdit,
   onStop,
   stopLabel,
+  session,
   onOpenChat,
 }: {
   label?: string;
@@ -1785,6 +1848,8 @@ function StatusRow({
   onEdit?: () => void;
   onStop?: () => void;
   stopLabel?: string;
+  /** The bound session: its dot ends the row (MET-284). */
+  session?: SessionMark;
   /** Jump to the bound session's chat (MET-104) — present in every bound
    *  phase, so a pending prompt is one click from its full transcript. */
   onOpenChat?: (intent?: OpenIntent) => void;
@@ -1813,14 +1878,6 @@ function StatusRow({
           </div>
         )}
       </div>
-      <OpenChatButton
-        onOpenChat={onOpenChat}
-        className={cn(
-          "rounded p-1",
-          !onOpenChat && "invisible",
-        )}
-        iconClassName="size-3.5"
-      />
       <button
         type="button"
         title={t("promptBlobEdit")}
@@ -1851,6 +1908,8 @@ function StatusRow({
       >
         <Square className="size-3.5 fill-current" />
       </button>
+      {/* Last, not among the actions: the session the row belongs to. */}
+      <SessionButton session={session} onOpenChat={onOpenChat} className="size-[1.375rem]" />
     </div>
   );
 }
@@ -2012,43 +2071,6 @@ function TouchedFileChips({
 /** The way into the bound session's transcript: a click opens its chat in
  *  place of the tab in front, Mod+click or the menu in a new tab — as a
  *  session row in the sidebar does. Without a session it is inert. */
-function OpenChatButton({
-  onOpenChat,
-  className,
-  iconClassName,
-}: {
-  onOpenChat?: (intent?: OpenIntent) => void;
-  className?: string;
-  iconClassName: string;
-}) {
-  const { t } = useTranslation();
-  const button = (
-    <button
-      type="button"
-      title={t("promptBlobOpenChat")}
-      aria-label={t("promptBlobOpenChat")}
-      disabled={!onOpenChat}
-      className={cn(
-        "shrink-0 text-muted-foreground transition-colors",
-        onOpenChat && "cursor-pointer hover:bg-accent hover:text-foreground",
-        className,
-      )}
-      onClick={(event) => onOpenChat?.(openIntentOf(event))}
-    >
-      <MessageSquare className={iconClassName} />
-    </button>
-  );
-  if (!onOpenChat) return button;
-  return (
-    <OpenInNewTabContextMenu
-      label={t("openInNewTab")}
-      onOpenInNewTab={() => onOpenChat("new-tab")}
-    >
-      {button}
-    </OpenInNewTabContextMenu>
-  );
-}
-
 const fileChipClass =
   "flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.6875rem] transition-colors";
 const fileChipIdleClass =
@@ -2088,6 +2110,7 @@ export function DoneState({
   changeCounts = new Map(),
   changes,
   onOpenFile,
+  session,
   onOpenChat,
   onDismiss,
 }: {
@@ -2106,6 +2129,8 @@ export function DoneState({
   changeCounts?: ReadonlyMap<string, number>;
   changes?: PromptChangeNavigation;
   onOpenFile: (path: string, intent?: OpenIntent) => void;
+  /** The bound session: its dot is the heading row's way to its chat. */
+  session?: SessionMark;
   onOpenChat: (intent?: OpenIntent) => void;
   onDismiss: () => void;
 }) {
@@ -2118,11 +2143,7 @@ export function DoneState({
       mark={mark}
       actions={
         <>
-          <OpenChatButton
-            onOpenChat={onOpenChat}
-            className="rounded p-0.5"
-            iconClassName="size-3"
-          />
+          <SessionButton session={session} onOpenChat={onOpenChat} className="size-4" />
           <button
             type="button"
             title={t("promptBlobDismiss")}

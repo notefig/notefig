@@ -266,7 +266,7 @@ describe("createMcpRequestHandler", () => {
       method: "tools/call",
       params: {
         name: "widget_respond",
-        arguments: { kind: "answer", markdown: "Two options stand out." },
+        arguments: { kind: "answer", markdown: "Two options stand out.", title: "Two options" },
       },
     });
     const result = ok?.result as {

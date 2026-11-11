@@ -205,6 +205,21 @@ function useRound({
 }
 
 /** Live sessions for the widget's picker, newest first. */
+/** The document a widget sent a turn's prompt from (its prompt round), or
+ *  null for a turn no widget sent. One row, by key. */
+function useRoundDocument(turnId: string | null): string | null {
+  const { promptRounds } = useCore();
+  const turnKey = turnId ?? " none";
+  const { data: rows = [] } = useLiveQuery(
+    (q) =>
+      q
+        .from({ round: promptRounds.collection })
+        .where(({ round }) => eq(round.turnId, turnKey)),
+    [turnKey],
+  );
+  return rows[0]?.documentPath ?? null;
+}
+
 function useSessionList(workspacePath: string): SessionOption[] {
   const metas = useAgentTaskList(workspacePath);
   return useMemo(
@@ -335,6 +350,7 @@ export function usePromptWidgetHost(): PromptWidgetHost {
 
       useRound,
       useSessionList,
+      useRoundDocument,
       useDefaultHarness: useHarnessIdentity,
       useHarnessList,
       useTrust,

@@ -1,0 +1,184 @@
+{
+  "format": "notefig-agent-recording",
+  "version": 1,
+  "recordedAt": "2026-09-19T12:00:00.000Z",
+  "harnessId": "claude-code",
+  "taskId": "task_fixture_session",
+  "workspacePath": "/workspace/recorded",
+  "sessionId": "sess_fixture_claude-code",
+  "outOfTurn": [],
+  "turns": [
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Shorten the opening"
+        },
+        {
+          "type": "resource_link",
+          "uri": "notefig://widget-context?path=%2Fworkspace%2Frecorded%2Fnotes.md&pos=12",
+          "name": "widget-context",
+          "mimeType": "application/json"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_sr",
+            "title": "mcp__notefig__session_rename",
+            "kind": "other",
+            "status": "pending",
+            "rawInput": {
+              "title": "Pitch rewrite"
+            }
+          },
+          "at": 120
+        },
+        {
+          "kind": "mcp",
+          "method": "tools/call",
+          "params": {
+            "name": "session_rename",
+            "arguments": {
+              "title": "Pitch rewrite"
+            }
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"renamed\":true,\"title\":\"Pitch rewrite\"}"
+              }
+            ]
+          },
+          "at": 140
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_sr",
+            "status": "completed"
+          },
+          "at": 160
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_wr1",
+            "title": "mcp__notefig__widget_respond",
+            "kind": "other",
+            "status": "pending",
+            "rawInput": {
+              "kind": "answer",
+              "title": "Shortened the opening",
+              "markdown": "Cut the opening to one sentence."
+            }
+          },
+          "at": 240
+        },
+        {
+          "kind": "mcp",
+          "method": "tools/call",
+          "params": {
+            "name": "widget_respond",
+            "arguments": {
+              "kind": "answer",
+              "title": "Shortened the opening",
+              "markdown": "Cut the opening to one sentence."
+            }
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"recorded\":true}"
+              }
+            ]
+          },
+          "at": 260
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_wr1",
+            "status": "completed"
+          },
+          "at": 280
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 400
+    },
+    {
+      "prompt": [
+        {
+          "type": "text",
+          "text": "Now tighten the close"
+        },
+        {
+          "type": "resource_link",
+          "uri": "notefig://widget-context?path=%2Fworkspace%2Frecorded%2Fnotes.md&pos=12",
+          "name": "widget-context",
+          "mimeType": "application/json"
+        }
+      ],
+      "startedAt": 0,
+      "events": [
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "toolu_wr2",
+            "title": "mcp__notefig__widget_respond",
+            "kind": "other",
+            "status": "pending",
+            "rawInput": {
+              "kind": "answer",
+              "title": "Tightened the close",
+              "markdown": "The close now ends on the ask."
+            }
+          },
+          "at": 120
+        },
+        {
+          "kind": "mcp",
+          "method": "tools/call",
+          "params": {
+            "name": "widget_respond",
+            "arguments": {
+              "kind": "answer",
+              "title": "Tightened the close",
+              "markdown": "The close now ends on the ask."
+            }
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"recorded\":true}"
+              }
+            ]
+          },
+          "at": 140
+        },
+        {
+          "kind": "update",
+          "update": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "toolu_wr2",
+            "status": "completed"
+          },
+          "at": 160
+        }
+      ],
+      "stopReason": "end_turn",
+      "endedAt": 300
+    }
+  ]
+}

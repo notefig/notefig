@@ -11,6 +11,8 @@ import {
   deriveLatestAssistantLine,
   deriveTouchedFiles,
   deriveQueuePosition,
+  deriveSessionActivity,
+  newerPromptCount,
   deriveComposerButton,
   deriveComposerKeyAction,
   deriveWidgetResponse,
@@ -465,6 +467,65 @@ describe("deriveQueuePosition", () => {
     ];
     expect(deriveQueuePosition(turns, "trn_4")).toBe(2);
     expect(deriveQueuePosition(turns, "trn_2")).toBe(0);
+  });
+});
+
+describe("deriveSessionActivity (MET-284)", () => {
+  const task = {} as AgentTaskRow;
+  const activity = (
+    taskTurns: AgentTurn[],
+    extra: Partial<Parameters<typeof deriveSessionActivity>[0]> = {},
+  ) =>
+    deriveSessionActivity({ task, taskTurns, pendingPermission: false, ownTurnId: "trn_1", ...extra });
+
+  it("is idle with nothing in flight, or no session", () => {
+    expect(activity([turn({ status: "completed" })])).toEqual({ kind: "idle" });
+    expect(activity([], { task: undefined })).toEqual({ kind: "idle" });
+  });
+
+  it("names the running turn, unless it is the widget's own", () => {
+    expect(activity([turn({ turnId: "trn_2" })])).toEqual({ kind: "working", turnId: "trn_2" });
+    expect(activity([turn({ turnId: "trn_1" })])).toEqual({ kind: "idle" });
+  });
+
+  it("counts the queued prompts that aren't the widget's own", () => {
+    const turns = [
+      turn({ turnId: "trn_1", status: "queued" }),
+      turn({ turnId: "trn_2", status: "queued" }),
+      turn({ turnId: "trn_3", status: "queued" }),
+    ];
+    // The widget's own prompt is first in line: its face says so.
+    expect(activity(turns)).toEqual({ kind: "idle" });
+    expect(activity(turns, { ownTurnId: "trn_9" })).toEqual({ kind: "queued", count: 3 });
+    expect(activity(turns.slice(1))).toEqual({ kind: "queued", count: 2 });
+  });
+
+  it("puts the user first: a waiting permission or a sign-in outranks working", () => {
+    const running = [turn({ turnId: "trn_2" }), turn({ turnId: "trn_3", status: "queued" })];
+    expect(activity(running, { pendingPermission: true })).toEqual({ kind: "needs-you", turnId: "trn_2" });
+    const held = [turn({ turnId: "trn_3", status: "queued" })];
+    expect(activity(held, { task: { authRequired: true } as AgentTaskRow })).toEqual({
+      kind: "needs-you",
+      turnId: "trn_3",
+    });
+    expect(activity([], { task: { authRequired: true } as AgentTaskRow })).toEqual({
+      kind: "needs-you",
+      turnId: null,
+    });
+  });
+
+  it("leaves a wait on the widget's own turn to its face", () => {
+    expect(activity([turn({ turnId: "trn_1" })], { pendingPermission: true })).toEqual({ kind: "idle" });
+  });
+});
+
+describe("newerPromptCount (MET-284)", () => {
+  it("counts the prompts sent after the widget's, zero when either side is unknown", () => {
+    expect(newerPromptCount({ promptCount: 5 }, 3)).toBe(2);
+    expect(newerPromptCount({ promptCount: 3 }, 3)).toBe(0);
+    expect(newerPromptCount({}, 3)).toBe(0);
+    expect(newerPromptCount({ promptCount: 5 }, null)).toBe(0);
+    expect(newerPromptCount(undefined, 3)).toBe(0);
   });
 });
 

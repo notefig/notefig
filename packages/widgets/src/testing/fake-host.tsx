@@ -50,6 +50,7 @@ export function fakePromptWidgetHost(
 
     useRound: vi.fn(() => EMPTY_ROUND),
     useSessionList: vi.fn(() => []),
+    useRoundDocument: vi.fn(() => null),
     useDefaultHarness: vi.fn(() => ({ id: "claude", label: "Claude Code" })),
     useHarnessList: vi.fn(() => [
       { id: "claude", label: "Claude Code" },

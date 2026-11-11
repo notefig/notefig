@@ -2608,6 +2608,85 @@ describe("usage limits", () => {
 });
 
 
+describe("session color slots (MET-284)", () => {
+  it("gives each new session of a workspace the lowest free slot, and keeps it", async () => {
+    const start = async (workspacePath: string) => {
+      const [client, agentSide] = createLoopbackPair();
+      new FakeAgent(agentSide);
+      const task = runtime.managerFor(workspacePath).createTask(harness);
+      await task.start(() => client);
+      return store.tasks.get(task.taskId)?.colorSlot;
+    };
+    expect(await start("/ws")).toBe(0);
+    expect(await start("/ws")).toBe(1);
+    expect(await start("/other")).toBe(0);
+  });
+
+  it("keeps a revived session's slot", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onLoadSession = async () => ({});
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    store.tasks.insert({
+      taskId: task.taskId,
+      workspacePath: "/ws",
+      title: "Investor intro",
+      status: "restored",
+      harnessId: harness.id,
+      sessionId: "sess_old",
+      colorSlot: 4,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await task.start(() => client, { resumeSessionId: "sess_old" });
+    expect(store.tasks.get(task.taskId)?.colorSlot).toBe(4);
+  });
+});
+
+describe("session prompt count (MET-284)", () => {
+  it("counts every prompt sent to a session and gives each turn its place", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async () => ({ stopReason: "end_turn" });
+    const task = runtime.managerFor("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "first");
+    // A widget's prompt goes through the same queue as a chat prompt.
+    agents.task(task.taskId).promptFromWidget("second", {
+      workspacePath: "/ws",
+      path: "/ws/doc.md",
+      pos: 1,
+      isDocEmpty: false,
+    });
+    await vi.waitFor(() => expect(turnFor(task.taskId)).toHaveLength(2));
+    expect(turnFor(task.taskId).map((turn) => turn.ordinal)).toEqual([1, 2]);
+    expect(store.tasks.get(task.taskId)?.promptCount).toBe(2);
+  });
+
+  it("goes on counting from a revived session's count", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onLoadSession = async () => ({});
+    agent.onPrompt = async () => ({ stopReason: "end_turn" });
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    store.tasks.insert({
+      taskId: task.taskId,
+      workspacePath: "/ws",
+      title: "Investor intro",
+      status: "restored",
+      harnessId: harness.id,
+      sessionId: "sess_old",
+      promptCount: 4,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await task.start(() => client, { resumeSessionId: "sess_old" });
+    await runPrompt(task, "again");
+    expect(turnFor(task.taskId).at(-1)?.ordinal).toBe(5);
+    expect(store.tasks.get(task.taskId)?.promptCount).toBe(5);
+  });
+});
+
 describe("session naming (MET-284)", () => {
   async function startedTask(workspacePath = "/ws") {
     const [client, agentSide] = createLoopbackPair();

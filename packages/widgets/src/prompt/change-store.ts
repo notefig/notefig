@@ -76,6 +76,8 @@ export function createPromptReview(saved: ReviewRangeStore) {
   /** What was last saved per document, so an unchanged save is skipped. */
   const lastSaved = new Map<string, string>();
   let reviewing: string | null = null;
+  /** The color slot of the session the widget under review belongs to. */
+  let reviewingSlot: number | null = null;
 
   const emit = () => {
     for (const listener of [...listeners]) listener();
@@ -129,7 +131,10 @@ export function createPromptReview(saved: ReviewRangeStore) {
     discard(blobId: string): void {
       // Nothing left to review once the changes are gone.
       let changed = reviewing === blobId;
-      if (changed) reviewing = null;
+      if (changed) {
+        reviewing = null;
+        reviewingSlot = null;
+      }
       for (const [documentPath, entry] of byDocument) {
         const kept = entry.changes.filter((change) => change.blobId !== blobId);
         if (kept.length === entry.changes.length) continue;
@@ -152,9 +157,16 @@ export function createPromptReview(saved: ReviewRangeStore) {
      *  filter: only that widget's changes are marked in the documents, and
      *  starting a review on another widget ends this one. */
     reviewing: (): string | null => reviewing,
-    setReviewing(blobId: string | null): void {
-      if (reviewing === blobId) return;
+    /** The color slot of the reviewed widget's session — the marks are
+     *  drawn in it — or null when there is none to draw in. */
+    reviewingSlot: (): number | null => reviewingSlot,
+    /** Start (or end, with null) a widget's review. The widget hands over
+     *  its session's color slot, which it reads off its bound task. */
+    setReviewing(blobId: string | null, colorSlot?: number | null): void {
+      const slot = blobId === null ? null : (colorSlot ?? null);
+      if (reviewing === blobId && reviewingSlot === slot) return;
       reviewing = blobId;
+      reviewingSlot = slot;
       emit();
     },
     subscribe(listener: () => void): () => void {
@@ -180,20 +192,4 @@ export function usePromptChangeCounts(
     () => new Map(JSON.parse(key) as Array<[string, number]>),
     [key],
   );
-}
-
-/**
- * The widget's review colour, one of the theme's chart hues picked by id —
- * the same widget always lands on the same hue, in the document and on its
- * face. A CSS colour expression, usable anywhere a colour is.
- */
-export function promptChangeColor(blobId: string, alpha = 1): string {
-  let hash = 0;
-  for (let i = 0; i < blobId.length; i++) {
-    hash = (hash * 31 + blobId.charCodeAt(i)) | 0;
-  }
-  const hue = (Math.abs(hash) % 5) + 1;
-  return alpha === 1
-    ? `hsl(var(--chart-${hue}))`
-    : `hsl(var(--chart-${hue}) / ${alpha})`;
 }

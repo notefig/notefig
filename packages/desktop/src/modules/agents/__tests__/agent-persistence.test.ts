@@ -155,6 +155,25 @@ describe("pure helpers", () => {
     expect(garbled?.titleSource).toBeUndefined();
   });
 
+  it("the color slot is durable, and one out of range reads as none", () => {
+    const slotted = parsePersistedAgentTask(taskRow({ colorSlot: 3 }));
+    expect(bootAgentTaskRow(slotted!)).toMatchObject({ colorSlot: 3 });
+    expect(bootAgentTaskRow(parsePersistedAgentTask(taskRow())!)).not.toHaveProperty("colorSlot");
+    for (const colorSlot of [6, -1, 1.5, "a"]) {
+      const garbled = parsePersistedAgentTask({ ...taskRow(), colorSlot });
+      expect(garbled?.taskId).toBe("task_a");
+      expect(garbled?.colorSlot).toBeUndefined();
+    }
+  });
+
+  it("the prompt count is durable, and a garbled one reads as none", () => {
+    const counted = parsePersistedAgentTask(taskRow({ promptCount: 7 }));
+    expect(bootAgentTaskRow(counted!)).toMatchObject({ promptCount: 7 });
+    const garbled = parsePersistedAgentTask({ ...taskRow(), promptCount: -1 });
+    expect(garbled?.taskId).toBe("task_a");
+    expect(garbled?.promptCount).toBeUndefined();
+  });
+
   it("session usage is durable: it survives the boot mapping, and a malformed one drops alone", () => {
     const tokens = { input: 1, cacheRead: 2, cacheWrite: 0, output: 3, thought: 0 };
     const total = { tokens, cost: { amount: 0.5, currency: "USD" } };

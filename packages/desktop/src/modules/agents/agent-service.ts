@@ -58,6 +58,7 @@ import {
 } from "@notefig/agent";
 import { toolRegistry, getTool } from "./tools";
 import { serverInstructions } from "./mcp-instructions";
+import { pickColorSlot } from "./session-color";
 import { buildWidgetContextPayload } from "./widget-context-resource";
 import {
   contextFrom,
@@ -317,6 +318,10 @@ function recordQueuedTurn(
   }: { taskId: string; sessionId: string | null; turnId: string; text: string },
 ): void {
   const now = Date.now();
+  const task = store.tasks.get(taskId);
+  // The prompt's place in the session's count (MET-284): what lets a widget
+  // say how many prompts came after its own.
+  const ordinal = task ? (task.promptCount ?? 0) + 1 : undefined;
   store.entries.insert({
     id: newEventId(),
     taskId,
@@ -331,12 +336,14 @@ function recordQueuedTurn(
     sessionId: sessionId ?? "",
     status: "queued",
     startedAt: now,
+    ...(ordinal ? { ordinal } : {}),
   });
   // Enqueue is activity even when it doesn't change status (queueing onto
   // a busy task) — bump so the session list orders by last touch.
-  if (store.tasks.get(taskId)) {
+  if (task) {
     store.tasks.update(taskId, (draft) => {
       draft.updatedAt = now;
+      draft.promptCount = ordinal;
     });
   }
 }
@@ -1867,6 +1874,7 @@ export class AgentTask {
       parentTaskId: this.parentTaskId,
       workspacePath: this.workspacePath,
       title: UNNAMED_TITLE,
+      colorSlot: pickColorSlot(this.store.tasks.values(), this.workspacePath),
       status: this.status,
       harnessId: this.harness.id,
       createdAt: Date.now(),

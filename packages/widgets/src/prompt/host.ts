@@ -128,6 +128,9 @@ export interface PromptWidgetHost {
   useRound(args: { turnId: string | null; taskId: string | null }): PromptRound;
   /** Live sessions in this workspace, newest first, ready to render. */
   useSessionList(workspacePath: string): SessionOption[];
+  /** The document a turn's prompt was sent from by a widget, or null when
+   *  no widget sent it (the chat) — where the session is working now. */
+  useRoundDocument(turnId: string | null): string | null;
   /** The harness a new session would use. The host picks it; the widget only
    *  names it (trust prompt) and draws its logo. */
   useDefaultHarness(): { id: string; label: string };
