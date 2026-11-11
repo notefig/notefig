@@ -461,26 +461,26 @@ test.describe("prompt widget navigation", () => {
       .click();
     await expect.poll(activeBlob).toBeNull();
 
-    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await page.keyboard.press("Alt+ArrowDown");
     await expect.poll(activeBlob).toBe("blob_a");
 
-    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await page.keyboard.press("Alt+ArrowDown");
     await expect.poll(activeBlob).toBe("blob_b");
 
-    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await page.keyboard.press("Alt+ArrowDown");
     await expect.poll(activeBlob).toBe("blob_c");
 
     // Wraps to the first widget.
-    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await page.keyboard.press("Alt+ArrowDown");
     await expect.poll(activeBlob).toBe("blob_a");
 
-    await page.keyboard.press("ControlOrMeta+ArrowUp");
+    await page.keyboard.press("Alt+ArrowUp");
     await expect.poll(activeBlob).toBe("blob_c");
 
-    await page.keyboard.press("ControlOrMeta+Shift+ArrowUp");
+    await page.keyboard.press("Alt+Shift+ArrowUp");
     await expect.poll(activeBlob).toBe("blob_a");
 
-    await page.keyboard.press("ControlOrMeta+Shift+ArrowDown");
+    await page.keyboard.press("Alt+Shift+ArrowDown");
     await expect.poll(activeBlob).toBe("blob_c");
   });
 });

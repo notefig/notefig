@@ -117,10 +117,10 @@ export function navigateToPromptWidget(
  * this editor instance currently has focus, so each open document responds
  * only for its own caret.
  *
- * - Mod+ArrowDown  -> next widget
- * - Mod+ArrowUp    -> previous widget
- * - Mod+Shift+ArrowDown -> last widget
- * - Mod+Shift+ArrowUp   -> first widget
+ * - Alt+ArrowDown  -> next widget
+ * - Alt+ArrowUp    -> previous widget
+ * - Alt+Shift+ArrowDown -> last widget
+ * - Alt+Shift+ArrowUp   -> first widget
  */
 export function usePromptWidgetNavigation(editor: Editor): void {
   const navigate = useCallback(
@@ -131,8 +131,8 @@ export function usePromptWidgetNavigation(editor: Editor): void {
     [editor],
   );
 
-  useHotkey({ key: "ArrowDown", mod: true }, navigate("next"));
-  useHotkey({ key: "ArrowUp", mod: true }, navigate("prev"));
-  useHotkey({ key: "ArrowDown", mod: true, shift: true }, navigate("last"));
-  useHotkey({ key: "ArrowUp", mod: true, shift: true }, navigate("first"));
+  useHotkey({ key: "ArrowDown", alt: true }, navigate("next"));
+  useHotkey({ key: "ArrowUp", alt: true }, navigate("prev"));
+  useHotkey({ key: "ArrowDown", alt: true, shift: true }, navigate("last"));
+  useHotkey({ key: "ArrowUp", alt: true, shift: true }, navigate("first"));
 }
