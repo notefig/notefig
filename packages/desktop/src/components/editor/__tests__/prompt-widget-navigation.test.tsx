@@ -23,7 +23,11 @@ import {
   testPrompts,
   withHost,
 } from "@notefig/widgets/testing";
-import { navigateToPromptWidget } from "../use-prompt-widget-navigation";
+import type { DictationApi } from "@notefig/dictation";
+import {
+  navigateToPromptWidget,
+  usePromptWidgetNavigation,
+} from "../use-prompt-widget-navigation";
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -97,6 +101,63 @@ async function navigate(
     navigateToPromptWidget(editor, direction);
     await tick();
   });
+}
+
+function NavigationHarness({
+  content,
+  onEditor,
+  dictation,
+}: {
+  content: string;
+  onEditor: (editor: Editor) => void;
+  dictation?: DictationApi;
+}) {
+  const editor = useEditor({
+    extensions: [
+      ...editorExtensions.filter((e) => e.name !== "aiPrompt"),
+      ...widgetRendererNodes({
+        filePath: "/ws/doc.md",
+        basePath: "/ws",
+        prompts: testPrompts().prompts,
+      }),
+    ],
+    content,
+  });
+  useEffect(() => {
+    if (editor) onEditor(editor);
+  }, [editor, onEditor]);
+  usePromptWidgetNavigation(editor, dictation);
+  return editor ? createElement(EditorContent, { editor }) : null;
+}
+
+async function mountWithDictation(
+  content: string,
+  dictation?: DictationApi,
+): Promise<Editor> {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  let editor: Editor | null = null;
+  await act(async () => {
+    root!.render(
+      createElement(
+        StrictMode,
+        null,
+        withHost(
+          fakePromptWidgetHost(),
+          createElement(NavigationHarness, {
+            content,
+            onEditor: (instance) => {
+              editor = instance;
+            },
+            dictation,
+          }),
+        ),
+      ),
+    );
+    await tick();
+  });
+  return editor!;
 }
 
 function widgetPositions(editor: Editor): { pos: number; blobId: string }[] {
@@ -275,5 +336,42 @@ describe("navigateToPromptWidget", () => {
 
     await navigate(editor, "last");
     expect(selectedBlobId(editor)).toBe("blob_c");
+  });
+});
+
+describe("usePromptWidgetNavigation", () => {
+  it("cancels active dictation before navigating", async () => {
+    const cancel = vi.fn();
+    const dictation = { cancel } as unknown as DictationApi;
+    const editor = await mountWithDictation(
+      [
+        "<p>before</p>",
+        '<div data-type="ai-prompt" data-blob-id="blob_a"></div>',
+        "<p>after</p>",
+      ].join(""),
+      dictation,
+    );
+
+    await act(async () => {
+      editor.commands.focus("end");
+      await tick();
+    });
+    expect(editor.isFocused).toBe(true);
+
+    await act(async () => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          code: "ArrowDown",
+          altKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await tick();
+    });
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(selectedBlobId(editor)).toBe("blob_a");
   });
 });

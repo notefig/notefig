@@ -10,6 +10,7 @@
 import { useCallback } from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import type { Editor } from "@tiptap/core";
+import type { DictationApi } from "@notefig/dictation";
 import {
   collectWidgets,
   PROMPT_NODE_NAME,
@@ -113,26 +114,47 @@ export function navigateToPromptWidget(
 }
 
 /**
+/**
  * Register the widget navigation hotkeys on the document. They only act when
  * this editor instance currently has focus, so each open document responds
  * only for its own caret.
+ *
+ * Because the right-hand Option key is also the dictation hold gesture on
+ * macOS, navigation cancels any active dictation before moving, so the two
+ * gestures don't overlap.
  *
  * - Alt+ArrowDown  -> next widget
  * - Alt+ArrowUp    -> previous widget
  * - Alt+Shift+ArrowDown -> last widget
  * - Alt+Shift+ArrowUp   -> first widget
  */
-export function usePromptWidgetNavigation(editor: Editor): void {
+export function usePromptWidgetNavigation(
+  editor: Editor,
+  dictation?: DictationApi,
+): void {
   const navigate = useCallback(
     (direction: Direction) => () => {
       if (!editor.isFocused) return;
+      dictation?.cancel();
       navigateToPromptWidget(editor, direction);
     },
-    [editor],
+    [editor, dictation],
   );
 
-  useHotkey({ key: "ArrowDown", alt: true }, navigate("next"));
-  useHotkey({ key: "ArrowUp", alt: true }, navigate("prev"));
-  useHotkey({ key: "ArrowDown", alt: true, shift: true }, navigate("last"));
-  useHotkey({ key: "ArrowUp", alt: true, shift: true }, navigate("first"));
+  useHotkey({ key: "ArrowDown", alt: true }, navigate("next"), {
+    preventDefault: true,
+  });
+  useHotkey({ key: "ArrowUp", alt: true }, navigate("prev"), {
+    preventDefault: true,
+  });
+  useHotkey(
+    { key: "ArrowDown", alt: true, shift: true },
+    navigate("last"),
+    { preventDefault: true },
+  );
+  useHotkey(
+    { key: "ArrowUp", alt: true, shift: true },
+    navigate("first"),
+    { preventDefault: true },
+  );
 }
