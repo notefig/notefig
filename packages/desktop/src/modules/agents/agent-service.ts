@@ -1087,11 +1087,14 @@ export class AgentTask {
         error: `This session is already named "${row.title}"; keep it.`,
       };
     }
+    // By workspace key: a workspace reopened under another spelling
+    // (C:\Work, c:\work) keeps its saved sessions under the old one.
+    const workspace = workspaceKey(this.workspacePath);
     const taken = this.store.tasks.toArray
       .filter(
         (other) =>
           other.taskId !== this.taskId &&
-          other.workspacePath === this.workspacePath &&
+          workspaceKey(other.workspacePath) === workspace &&
           other.status !== "unavailable",
       )
       .map((other) => other.title);
