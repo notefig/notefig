@@ -329,27 +329,40 @@ describe("PromptBlobFace", () => {
 });
 
 describe("the widget's session (MET-284)", () => {
-  const session = { title: "Investor intro rewrite", colorSlot: 2 };
-  const dots = () => [...container!.querySelectorAll<HTMLElement>("[data-session-dot]")];
+  const session = { title: "Investor intro rewrite", colorSlot: 2, shapeSlot: 7 };
+  const marks = () =>
+    [...container!.querySelectorAll<HTMLElement>("[data-session-mark]")].map(
+      (mark) => mark.closest("button")!,
+    );
   const answer: WidgetResponse = { kind: "answer", markdown: "Done.", title: "Tightened the intro" };
 
-  it("a settled widget heads with its title and the session's dot, which opens the chat", () => {
+  it("a settled widget heads with its title and the session's mark, which opens the chat", () => {
     const text = render("done", { task: session, display: { widgetResponse: answer } });
     expect(text).toContain("Tightened the intro");
-    // The session's name is the dot's tooltip, never text on the card.
+    // The session's name is the mark's tooltip, never text on the card.
     expect(text).not.toContain("Investor intro rewrite");
-    const [dot] = dots();
-    expect(dots()).toHaveLength(1);
-    expect(dot.title).toBe("Investor intro rewrite");
-    expect(dot.getAttribute("aria-label")).toBe("promptBlobOpenChat");
-    expect((dot.firstElementChild as HTMLElement).style.background).toBe("hsl(var(--session-3))");
+    const [button] = marks();
+    expect(marks()).toHaveLength(1);
+    expect(button.title).toBe("");
+    expect(button.getAttribute("aria-label")).toBe("promptBlobOpenChat");
+    const mark = button.querySelector("[data-session-mark]")!;
+    expect(mark.getAttribute("data-session-mark")).toBe("2:7");
+    expect(mark.innerHTML).toContain("hsl(var(--session-3))");
   });
 
-  it("a working widget's dot ends its status row, after the actions", () => {
+  it("the mark's tooltip, the app's own, names the session", () => {
+    render("done", { task: session, display: { widgetResponse: answer } });
+    act(() => marks()[0].focus());
+    expect(document.body.querySelector("[role=tooltip]")?.textContent).toBe(
+      "Investor intro rewrite",
+    );
+  });
+
+  it("a working widget's mark ends its status row, after the actions", () => {
     render("running", { task: session });
-    const row = dots()[0].parentElement!;
-    expect(row.lastElementChild).toBe(dots()[0]);
-    expect(dots()).toHaveLength(1);
+    const row = marks()[0].parentElement!;
+    expect(row.lastElementChild).toBe(marks()[0]);
+    expect(marks()).toHaveLength(1);
   });
 
   it("the footer says what the session does elsewhere and how many prompts came after", () => {

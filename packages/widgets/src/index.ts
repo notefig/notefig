@@ -129,8 +129,8 @@ export {
   type ReviewRangeStore,
   type SavedReviewRanges,
 } from "./prompt/change-store";
-/** A session's color (MET-284): its widgets, its edits, the sessions panel. */
-export { sessionColor } from "./prompt/session-color";
+/** A session's mark (MET-284): its widgets and the sessions panel. */
+export { SessionMarkIcon } from "./prompt/session-mark";
 export {
   deriveRoundOutcome,
   isMutatingToolCall,

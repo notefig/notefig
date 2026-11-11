@@ -65,7 +65,6 @@ import {
 } from "../doc-helpers";
 import type { PromptReference } from "../doc-helpers";
 import { basename } from "../basename";
-import { sessionColor } from "../session-color";
 import { SessionButton, type SessionMark } from "./session-button";
 import { SessionFooter } from "./session-footer";
 import type { PromptWidget, PromptWidgetsApi } from "../widgets-service";
@@ -825,11 +824,10 @@ export function PromptBlobFace({
       <AnimatedHeight>
         <div
           className={cn(
-            "relative rounded-lg border",
+            "rounded-lg border",
             blobCardClass(phase, response === "issue"),
           )}
         >
-          <SessionRail task={task} boundTaskId={boundTaskId} />
           {/* Everything above the draft row is chrome, and chrome inside a
               node view must be contentEditable={false} — the same rule
               BlobNodeView follows. It is not cosmetic: without it the whole
@@ -898,25 +896,6 @@ interface FaceRules {
   removalRefused: boolean;
   /** When the last delete was refused: each one shakes the face. */
   removalRefusedAt: number | null;
-}
-
-/** The bound session's color down the card's left edge (MET-284): every
- *  widget of one session carries the same one. */
-function SessionRail({
-  task,
-  boundTaskId,
-}: {
-  task: AgentTaskRow | undefined;
-  boundTaskId: string | null;
-}) {
-  if (!boundTaskId || task?.colorSlot === undefined) return null;
-  return (
-    <span
-      aria-hidden
-      className="pointer-events-none absolute inset-y-2 left-0 w-[3px] rounded-r-full"
-      style={{ background: sessionColor(task.colorSlot) }}
-    />
-  );
 }
 
 /** The quoted selection a widget was summoned over, when there is one. */

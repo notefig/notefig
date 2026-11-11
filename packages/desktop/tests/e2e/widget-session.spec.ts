@@ -1,7 +1,8 @@
 /**
  * MET-284: a prompt widget shows which session it belongs to, quietly. The
  * agent names the session once (`session_rename`); every widget of the
- * session carries the same colored dot, whose tooltip is that name; and a
+ * session carries the same mark (a shape in the session's color), whose
+ * tooltip is that name; and a
  * widget's footer says how many prompts the session was sent after its
  * own — appearing under the card's content without moving it, and still
  * there after a reload.
@@ -21,7 +22,13 @@ const WS = "/workspace/widget-session";
 const DOC = "# Pitch\n\npara one\n\npara two\n";
 
 const face = (widget: Locator) => widget.locator("[data-blob-phase]");
-const dot = (widget: Locator) => widget.locator("[data-session-dot]");
+const mark = (widget: Locator) => widget.locator("[data-session-mark]");
+
+/** The app's tooltip over a widget's session mark. */
+async function markTooltip(page: Page, widget: Locator): Promise<Locator> {
+  await mark(widget).hover();
+  return page.getByRole("tooltip");
+}
 const footer = (widget: Locator) => widget.locator("[data-session-footer]");
 
 /** A widget by the answer it settled on. */
@@ -31,7 +38,7 @@ const settled = (page: Page, answer: string) =>
 test.describe("prompt widget session", () => {
   test.setTimeout(120_000);
 
-  test("widgets of one session share its dot, and the older one counts the newer prompt", async ({
+  test("widgets of one session share its mark, and the older one counts the newer prompt", async ({
     page,
   }) => {
     await setupTestDatabase(page, "widget-session");
@@ -43,11 +50,12 @@ test.describe("prompt widget session", () => {
     const first = settled(page, "Shortened the opening");
     await expect(face(first)).toHaveAttribute("data-blob-phase", "done", { timeout: 30_000 });
     // One heading: the response's title. The session's name, which the
-    // agent gave it, is only the dot's tooltip.
+    // agent gave it, is only the mark's tooltip.
     await expect(first).toContainText("Shortened the opening");
     await expect(first).not.toContainText("Pitch rewrite");
-    await expect(dot(first)).toHaveAttribute("title", "Pitch rewrite");
-    await expect(dot(first)).toHaveAttribute("data-session-dot", "0");
+    await expect(mark(first)).toHaveAttribute("data-session-mark", "0:0");
+    await expect(await markTooltip(page, first)).toHaveText("Pitch rewrite");
+    await page.mouse.move(0, 0);
     await expect(footer(first)).toHaveCount(0);
     const heading = first.getByText("Shortened the opening");
     const before = await heading.boundingBox();
@@ -57,8 +65,7 @@ test.describe("prompt widget session", () => {
     await sendWidgetPrompt(page, await summonWidget(page, editor), promptTextOf(recording, 1));
     const second = settled(page, "Tightened the close");
     await expect(face(second)).toHaveAttribute("data-blob-phase", "done", { timeout: 30_000 });
-    await expect(dot(second)).toHaveAttribute("data-session-dot", "0");
-    await expect(dot(second)).toHaveAttribute("title", "Pitch rewrite");
+    await expect(mark(second)).toHaveAttribute("data-session-mark", "0:0");
 
     await expect(footer(first)).toHaveText("1 newer");
     await expect(footer(second)).toHaveCount(0);
@@ -74,6 +81,7 @@ test.describe("prompt widget session", () => {
     const restored = settled(page, "Shortened the opening");
     await expect(face(restored)).toHaveAttribute("data-blob-phase", "done", { timeout: 15_000 });
     await expect(footer(restored)).toHaveText("1 newer");
-    await expect(dot(restored)).toHaveAttribute("title", "Pitch rewrite");
+    await expect(mark(restored)).toHaveAttribute("data-session-mark", "0:0");
+    await expect(await markTooltip(page, restored)).toHaveText("Pitch rewrite");
   });
 });

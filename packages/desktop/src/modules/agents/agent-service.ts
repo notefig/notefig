@@ -58,7 +58,7 @@ import {
 } from "@notefig/agent";
 import { toolRegistry, getTool } from "./tools";
 import { serverInstructions } from "./mcp-instructions";
-import { pickColorSlot } from "./session-color";
+import { pickSessionMark } from "./session-color";
 import { buildWidgetContextPayload } from "./widget-context-resource";
 import {
   contextFrom,
@@ -1874,7 +1874,7 @@ export class AgentTask {
       parentTaskId: this.parentTaskId,
       workspacePath: this.workspacePath,
       title: UNNAMED_TITLE,
-      colorSlot: pickColorSlot(this.store.tasks.values(), this.workspacePath),
+      ...pickSessionMark(this.store.tasks.values(), this.workspacePath),
       status: this.status,
       harnessId: this.harness.id,
       createdAt: Date.now(),

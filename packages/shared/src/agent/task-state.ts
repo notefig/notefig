@@ -44,12 +44,18 @@ export type AgentTaskRow = {
    */
   titleSource?: "agent";
   /**
-   * The session's color and letter (`session-color.ts`), 0 through 5: picked
-   * when the row is made and kept, so its widgets and its edits always read
-   * the same. Absent on rows from before session colors: those show in
-   * the neutral color.
+   * The session's color (`session-color.ts`), 0 through 11: picked when the
+   * row is made and kept, so its widgets and its edits always read the
+   * same. Absent on rows from before session colors: those show in the
+   * neutral color.
    */
   colorSlot?: number;
+  /**
+   * The session's shape, 0 through 23, picked and kept like its color: the
+   * two together are the session's mark. Absent on rows from before
+   * session shapes: those show a plain tile.
+   */
+  shapeSlot?: number;
   /**
    * How many prompts the session has been sent, from a widget or the chat
    * (MET-284). Each turn carries its place in that count (`ordinal`), so a

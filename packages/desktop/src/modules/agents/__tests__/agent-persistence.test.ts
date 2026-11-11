@@ -155,14 +155,17 @@ describe("pure helpers", () => {
     expect(garbled?.titleSource).toBeUndefined();
   });
 
-  it("the color slot is durable, and one out of range reads as none", () => {
-    const slotted = parsePersistedAgentTask(taskRow({ colorSlot: 3 }));
-    expect(bootAgentTaskRow(slotted!)).toMatchObject({ colorSlot: 3 });
-    expect(bootAgentTaskRow(parsePersistedAgentTask(taskRow())!)).not.toHaveProperty("colorSlot");
-    for (const colorSlot of [6, -1, 1.5, "a"]) {
-      const garbled = parsePersistedAgentTask({ ...taskRow(), colorSlot });
+  it("the mark's slots are durable, and one out of range reads as none", () => {
+    const slotted = parsePersistedAgentTask(taskRow({ colorSlot: 11, shapeSlot: 23 }));
+    expect(bootAgentTaskRow(slotted!)).toMatchObject({ colorSlot: 11, shapeSlot: 23 });
+    const bare = bootAgentTaskRow(parsePersistedAgentTask(taskRow())!);
+    expect(bare).not.toHaveProperty("colorSlot");
+    expect(bare).not.toHaveProperty("shapeSlot");
+    for (const [colorSlot, shapeSlot] of [[12, 24], [-1, -1], [1.5, 2.5], ["a", "b"]]) {
+      const garbled = parsePersistedAgentTask({ ...taskRow(), colorSlot, shapeSlot });
       expect(garbled?.taskId).toBe("task_a");
       expect(garbled?.colorSlot).toBeUndefined();
+      expect(garbled?.shapeSlot).toBeUndefined();
     }
   });
 

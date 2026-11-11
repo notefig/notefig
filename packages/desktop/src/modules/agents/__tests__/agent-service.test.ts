@@ -2608,21 +2608,22 @@ describe("usage limits", () => {
 });
 
 
-describe("session color slots (MET-284)", () => {
-  it("gives each new session of a workspace the lowest free slot, and keeps it", async () => {
+describe("session marks (MET-284)", () => {
+  it("gives each new session of a workspace the lowest free color and shape, and keeps them", async () => {
     const start = async (workspacePath: string) => {
       const [client, agentSide] = createLoopbackPair();
       new FakeAgent(agentSide);
       const task = runtime.managerFor(workspacePath).createTask(harness);
       await task.start(() => client);
-      return store.tasks.get(task.taskId)?.colorSlot;
+      const row = store.tasks.get(task.taskId);
+      return [row?.colorSlot, row?.shapeSlot];
     };
-    expect(await start("/ws")).toBe(0);
-    expect(await start("/ws")).toBe(1);
-    expect(await start("/other")).toBe(0);
+    expect(await start("/ws")).toEqual([0, 0]);
+    expect(await start("/ws")).toEqual([1, 1]);
+    expect(await start("/other")).toEqual([0, 0]);
   });
 
-  it("keeps a revived session's slot", async () => {
+  it("keeps a revived session's mark", async () => {
     const [client, agentSide] = createLoopbackPair();
     const agent = new FakeAgent(agentSide);
     agent.onLoadSession = async () => ({});
@@ -2635,11 +2636,12 @@ describe("session color slots (MET-284)", () => {
       harnessId: harness.id,
       sessionId: "sess_old",
       colorSlot: 4,
+      shapeSlot: 17,
       createdAt: 1,
       updatedAt: 1,
     });
     await task.start(() => client, { resumeSessionId: "sess_old" });
-    expect(store.tasks.get(task.taskId)?.colorSlot).toBe(4);
+    expect(store.tasks.get(task.taskId)).toMatchObject({ colorSlot: 4, shapeSlot: 17 });
   });
 });
 
