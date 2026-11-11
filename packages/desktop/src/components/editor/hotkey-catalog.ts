@@ -150,6 +150,31 @@ export const HOTKEY_CATALOG: HotkeyEntry[] = [
     labelKey: "searchInFile",
     group: "editing",
   },
+  // src/components/editor/use-prompt-widget-navigation.ts
+  {
+    id: "nextPromptWidget",
+    binding: "Mod+ArrowDown",
+    labelKey: "nextPromptWidget",
+    group: "editing",
+  },
+  {
+    id: "previousPromptWidget",
+    binding: "Mod+ArrowUp",
+    labelKey: "previousPromptWidget",
+    group: "editing",
+  },
+  {
+    id: "lastPromptWidget",
+    binding: "Mod+Shift+ArrowDown",
+    labelKey: "lastPromptWidget",
+    group: "editing",
+  },
+  {
+    id: "firstPromptWidget",
+    binding: "Mod+Shift+ArrowUp",
+    labelKey: "firstPromptWidget",
+    group: "editing",
+  },
   {
     id: "searchInAllFiles",
     binding: "Mod+Shift+F",
