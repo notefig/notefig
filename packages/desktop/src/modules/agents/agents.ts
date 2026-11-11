@@ -332,11 +332,7 @@ export function createAgents({
         openAgentTab(taskId);
       },
       get: () => store.tasks.get(taskId),
-      rename(title) {
-        const task = runtime.task(taskId);
-        if (!task) return { ok: false, error: "agent task is not started" };
-        return task.rename(title);
-      },
+      rename: (title) => runtime.rename(taskId, title),
       respondPermission(requestId, response) {
         const task = runtime.task(taskId);
         if (!task) {

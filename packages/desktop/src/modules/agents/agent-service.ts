@@ -2210,6 +2210,8 @@ export interface AgentRuntime {
     optionId: string,
     value: string,
   ): Promise<ActionResult>;
+  /** The agent names a live task's session, once (`session_rename`). */
+  rename(taskId: string, title: string): ActionResult;
   /**
    * Resolves once boot reconciliation has settled — i.e. the hydrated rows
    * have loaded and the ones that can never be revived have been deleted.
@@ -2497,6 +2499,11 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       const task = live.get(taskId);
       if (!task) return { ok: false, error: "agent task is not started" };
       return task.setConfigOption(optionId, value);
+    },
+    rename(taskId, title) {
+      const task = live.get(taskId);
+      if (!task) return { ok: false, error: "agent task is not started" };
+      return task.rename(title);
     },
     whenReconciled() {
       reconciled ??= store
