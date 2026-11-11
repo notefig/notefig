@@ -61,8 +61,11 @@ export interface SessionOption {
   title: string;
   /** Pre-resolved one-line summary (relative time, turn count, …). */
   description: string;
-  /** Which harness runs it — picks the logo. */
+  /** Which harness runs it — named beside its title. */
   harnessId: string;
+  /** The session's mark (MET-284), absent on a session from before marks. */
+  colorSlot?: number;
+  shapeSlot?: number;
 }
 
 /**

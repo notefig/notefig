@@ -237,6 +237,8 @@ function useSessionList(workspacePath: string): SessionOption[] {
           description:
             describeTaskMeta(meta) ?? formatTimeAgo(meta.task.updatedAt),
           harnessId: meta.task.harnessId,
+          colorSlot: meta.task.colorSlot,
+          shapeSlot: meta.task.shapeSlot,
         })),
     [metas],
   );

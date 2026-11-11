@@ -12,7 +12,6 @@ import {
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { useTranslation } from "react-i18next";
 import {
-  Check,
   CornerDownLeft,
   FileText,
   Pencil,
@@ -24,17 +23,9 @@ import {
 import { toast } from "sonner";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
-import { Button } from "@notefig/ui/button";
 import { Checkbox } from "@notefig/ui/checkbox";
 import { OrbLoader } from "@notefig/ui/orb-loader";
 import { VoiceWave } from "@notefig/ui/voice-wave";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@notefig/ui/dropdown-menu";
 import { cn } from "@notefig/ui/utils";
 import { OpenInNewTabContextMenu } from "@notefig/ui/open-in-new-tab-item";
 import { openIntentOf, type OpenIntent } from "@notefig/ui/open-intent";
@@ -67,6 +58,7 @@ import type { PromptReference } from "../doc-helpers";
 import { basename } from "../basename";
 import { SessionButton, type SessionMark } from "./session-button";
 import { SessionFooter } from "./session-footer";
+import { SessionPicker, useTargetHarnessId } from "./session-picker";
 import type { PromptWidget, PromptWidgetsApi } from "../widgets-service";
 import {
   capabilitiesOf,
@@ -1585,7 +1577,7 @@ function DraftRow({
       >
         {composing ? (
           <div contentEditable={false}>
-            <SessionControl
+            <SessionPicker
               workspacePath={workspacePath}
               boundTaskId={boundTaskId}
               onSelectSession={onSelectSession}
@@ -1638,31 +1630,6 @@ function useDraftPlaceholder(phase: BlobPhase): string {
   return dictationKey ? t(`${key}Dictation`, { key: dictationKey }) : t(key);
 }
 
-/**
- * The session picker, logo-only trigger in the composer row: shows where
- * the next prompt actually goes (the adopted session's harness logo, or the
- * default harness if nothing is adopted). The menu offers the workspace's
- * recent live sessions to re-target, or a new conversation on one of the top
- * harnesses — each its own entry with its logo; picking one also becomes the
- * remembered default (the sessions panel's split-button rule).
- */
-/** The harness the widget's prompts go to: its bound session's, else the
- *  session a send would join, else the default. The session it points at is
- *  in the list whenever it is live, so no second lookup is needed. */
-function useTargetHarnessId(
-  workspacePath: string,
-  boundTaskId: string | null | undefined,
-): string {
-  const host = usePromptWidgetHost();
-  const harnesses = host.useHarnessList();
-  const sessions = host.useSessionList(workspacePath);
-  const taskId = boundTaskId ?? host.peekSession(workspacePath);
-  return (
-    sessions.find((session) => session.taskId === taskId)?.harnessId ??
-    harnesses[0].id
-  );
-}
-
 /** What leads a response's heading: the logo of the harness that answered.
  *  Read off the bound task's own row: the picker's list drops a session
  *  once it is cancelled or failed, and the answer still came from it.
@@ -1688,112 +1655,6 @@ function HarnessMark({
       <HarnessLogo harnessId={harnessId} className="dictation-idle-only size-3" />
       <VoiceWave level={host.dictation.level} hearing={host.dictation.hearing} size="0.95rem" className="dictation-active-only" />
     </span>
-  );
-}
-
-function SessionControl({
-  workspacePath,
-  boundTaskId,
-  onSelectSession,
-  onClose,
-}: {
-  workspacePath: string;
-  /** The session this widget is already bound to (a restored widget, MET-163)
-   *  — the icon must name where the prompt will actually go, which is this
-   *  task rather than the workspace's shared session. */
-  boundTaskId?: string | null;
-  /** Re-target a bound widget. Absent for an unbound one, whose selection
-   *  just moves the shared session as it always did. */
-  onSelectSession?: (taskId: string) => void;
-  /** The menu is a detour from typing: when it closes, the caret goes back
-   *  to the composer (as the chat tab's pickers do). */
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const host = usePromptWidgetHost();
-  const { HarnessLogo } = host.slots;
-  // Default first, never empty — the top three become the explicit
-  // new-conversation entries below.
-  const harnesses = host.useHarnessList();
-  // Already filtered to live sessions and ordered newest-first by the host.
-  const sessions = host.useSessionList(workspacePath);
-  const [open, setOpen] = useState(false);
-
-  const peekedTaskId = boundTaskId ?? host.peekSession(workspacePath);
-  const triggerHarnessId = useTargetHarnessId(workspacePath, boundTaskId);
-
-  const recentSessions = sessions.slice(0, 5);
-
-  return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="dictation-swap size-7 shrink-0 cursor-pointer rounded-lg text-muted-foreground"
-          title={t("agentChooseHarness")}
-          aria-label={t("agentChooseHarness")}
-        >
-          {/* While someone dictates into this draft, the wave stands in for
-              the logo (styles.css cross-fades them on the dictation ghost). */}
-          <HarnessLogo harnessId={triggerHarnessId} className="dictation-idle-only" />
-          {host.dictation && (
-            <VoiceWave level={host.dictation.level} hearing={host.dictation.hearing} size="1.05rem" className="dictation-active-only" />
-          )}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="start"
-        onCloseAutoFocus={(event) => {
-          // Radix would hand focus back to the trigger.
-          event.preventDefault();
-          onClose();
-        }}
-      >
-        {recentSessions.length > 0 && (
-          <>
-            {recentSessions.map((session) => (
-              <DropdownMenuItem
-                key={session.taskId}
-                className="cursor-pointer gap-2 text-xs"
-                onSelect={() =>
-                  onSelectSession
-                    ? onSelectSession(session.taskId)
-                    : host.adoptSession(workspacePath, session.taskId)
-                }
-              >
-                {session.taskId === peekedTaskId ? (
-                  <Check className="size-3 shrink-0" />
-                ) : (
-                  <HarnessLogo
-                    harnessId={session.harnessId}
-                    className="size-3"
-                  />
-                )}
-                <span className="min-w-0 flex-1 truncate">{session.title}</span>
-                <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
-                  {session.description}
-                </span>
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-          </>
-        )}
-        {harnesses.slice(0, 3).map((harness) => (
-          <DropdownMenuItem
-            key={harness.id}
-            className="cursor-pointer gap-2 text-xs"
-            onSelect={() => host.dropSession(workspacePath, harness.id)}
-          >
-            <HarnessLogo
-              harnessId={harness.id}
-              className="size-3 text-muted-foreground"
-            />
-            {t("promptBlobNewSessionWith", { harness: harness.label })}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 
