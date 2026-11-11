@@ -56,7 +56,7 @@ import {
 } from "../doc-helpers";
 import type { PromptReference } from "../doc-helpers";
 import { basename } from "../basename";
-import { SessionButton, type SessionMark } from "./session-button";
+import { HarnessBadge, SessionButton, type SessionMark } from "./session-button";
 import { SessionFooter } from "./session-footer";
 import { SessionPicker, useTargetHarnessId } from "./session-picker";
 import type { PromptWidget, PromptWidgetsApi } from "../widgets-service";
@@ -609,6 +609,9 @@ interface PromptBlobFaceActions {
   escapeToEditor: () => void;
   /** Point this widget at a different session (the composer's picker). */
   rebindSession: (taskId: string) => void;
+  /** Point this widget at a new session on `harnessId`, started on send
+   *  (the composer's picker). */
+  newSession: (harnessId: string) => void;
   openBoundChat?: (intent?: OpenIntent) => void;
   /** Open a touched document in a tab. */
   openFile: (path: string, intent?: OpenIntent) => void;
@@ -845,10 +848,13 @@ export function PromptBlobFace({
 
             <SettledState
               mark={
-                <HarnessMark
+                <HeadingMark
                   task={task}
                   workspacePath={workspacePath}
                   boundTaskId={boundTaskId}
+                  onOpenChat={(intent) =>
+                    boundTaskId && actions.openAgentTab(boundTaskId, intent)
+                  }
                 />
               }
               phase={phase}
@@ -870,6 +876,7 @@ export function PromptBlobFace({
             workspacePath={workspacePath}
             boundTaskId={boundTaskId}
             onSelectSession={actions.rebindSession}
+            onNewSession={actions.newSession}
             focusComposer={draftIO.focus}
           />
           {/* Last on the card, so it never moves what is above it. */}
@@ -1015,10 +1022,7 @@ function SettledState({
         changeCounts={display.changeCounts}
         changes={display.changes}
         onOpenFile={(path, intent) => actions.openFile(path, intent)}
-        session={task}
-        onOpenChat={(intent) =>
-          boundTaskId && actions.openAgentTab(boundTaskId, intent)
-        }
+        harnessId={boundTaskId ? task?.harnessId : undefined}
         onDismiss={actions.dismiss}
       />
     );
@@ -1451,6 +1455,17 @@ function usePromptBlobActions({
     [prompts, host, blobId, workspacePath],
   );
 
+  // A new conversation drops the workspace's shared session and this
+  // widget's own: a widget the picker bound to a session would otherwise
+  // keep sending there (and keep showing its mark).
+  const newSession = useCallback(
+    (harnessId: string) => {
+      host.dropSession(workspacePath, harnessId);
+      prompts.unbind(blobId);
+    },
+    [prompts, host, blobId, workspacePath],
+  );
+
   return {
     send,
     sendFollowUp,
@@ -1461,6 +1476,7 @@ function usePromptBlobActions({
     revertToSlash,
     backspaceDismiss,
     rebindSession,
+    newSession,
   };
 }
 
@@ -1546,6 +1562,7 @@ function DraftRow({
   workspacePath,
   boundTaskId,
   onSelectSession,
+  onNewSession,
   focusComposer,
 }: {
   phase: BlobPhase;
@@ -1558,6 +1575,7 @@ function DraftRow({
   workspacePath: string;
   boundTaskId?: string | null;
   onSelectSession?: (taskId: string) => void;
+  onNewSession?: (harnessId: string) => void;
   /** Put the caret back in this widget's composer. */
   focusComposer: () => void;
 }) {
@@ -1581,6 +1599,7 @@ function DraftRow({
               workspacePath={workspacePath}
               boundTaskId={boundTaskId}
               onSelectSession={onSelectSession}
+              onNewSession={onNewSession}
               onClose={focusComposer}
             />
           </div>
@@ -1630,29 +1649,40 @@ function useDraftPlaceholder(phase: BlobPhase): string {
   return dictationKey ? t(`${key}Dictation`, { key: dictationKey }) : t(key);
 }
 
-/** What leads a response's heading: the logo of the harness that answered.
- *  Read off the bound task's own row: the picker's list drops a session
- *  once it is cancelled or failed, and the answer still came from it.
- *  While someone dictates a reply, the wave stands in for it, as it does
- *  for the picker's logo on a fresh prompt; the cell keeps the logo's size,
- *  so the heading doesn't move. */
-function HarnessMark({
+/** What leads a response's heading: the mark of the session that answered,
+ *  which opens its chat (its tooltip names the harness and the session).
+ *  Before the widget has a session (or once its row is gone) it is the logo
+ *  of the harness a send would go to. While someone dictates a reply, the
+ *  wave stands in for it, as it does for the picker on a fresh prompt; the
+ *  cell keeps the mark's size, so the heading doesn't move. */
+function HeadingMark({
   task,
   workspacePath,
   boundTaskId,
+  onOpenChat,
 }: {
   task: AgentTaskRow | undefined;
   workspacePath: string;
   boundTaskId: string | null;
+  onOpenChat: (intent?: OpenIntent) => void;
 }) {
   const host = usePromptWidgetHost();
   const { HarnessLogo } = host.slots;
   const target = useTargetHarnessId(workspacePath, boundTaskId);
-  const harnessId = task?.harnessId ?? target;
-  if (!host.dictation) return <HarnessLogo harnessId={harnessId} className="size-3" />;
+  const lead =
+    boundTaskId && task ? (
+      <SessionButton
+        session={task}
+        onOpenChat={onOpenChat}
+        className="dictation-idle-only size-[1.125rem]"
+      />
+    ) : (
+      <HarnessLogo harnessId={target} className="dictation-idle-only size-3" />
+    );
+  if (!host.dictation) return lead;
   return (
-    <span className="dictation-swap size-3 [grid-template:0.75rem/0.75rem]">
-      <HarnessLogo harnessId={harnessId} className="dictation-idle-only size-3" />
+    <span className="dictation-swap size-[1.125rem] place-items-center [grid-template:1.125rem/1.125rem]">
+      {lead}
       <VoiceWave level={host.dictation.level} hearing={host.dictation.hearing} size="0.95rem" className="dictation-active-only" />
     </span>
   );
@@ -1950,11 +1980,10 @@ export function DoneState({
   changeCounts = new Map(),
   changes,
   onOpenFile,
-  session,
-  onOpenChat,
+  harnessId,
   onDismiss,
 }: {
-  /** Leads the heading row (HarnessMark). */
+  /** Leads the heading row (HeadingMark). */
   mark?: React.ReactNode;
   /** The open choice question's controls, under the question. */
   choices?: React.ReactNode;
@@ -1969,9 +1998,8 @@ export function DoneState({
   changeCounts?: ReadonlyMap<string, number>;
   changes?: PromptChangeNavigation;
   onOpenFile: (path: string, intent?: OpenIntent) => void;
-  /** The bound session: its dot is the heading row's way to its chat. */
-  session?: SessionMark;
-  onOpenChat: (intent?: OpenIntent) => void;
+  /** The bound session's harness: its logo sits among the end buttons. */
+  harnessId?: string;
   onDismiss: () => void;
 }) {
   const { t } = useTranslation();
@@ -1983,7 +2011,7 @@ export function DoneState({
       mark={mark}
       actions={
         <>
-          <SessionButton session={session} onOpenChat={onOpenChat} className="size-[1.125rem]" />
+          <HarnessBadge harnessId={harnessId} />
           <button
             type="button"
             title={t("promptBlobDismiss")}

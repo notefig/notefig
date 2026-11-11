@@ -54,7 +54,7 @@ test.describe("prompt widget session", () => {
     await expect(first).toContainText("Shortened the opening");
     await expect(first).not.toContainText("Pitch rewrite");
     await expect(mark(first)).toHaveAttribute("data-session-mark", "0:0");
-    await expect(await markTooltip(page, first)).toHaveText("Pitch rewrite");
+    await expect(await markTooltip(page, first)).toContainText("Pitch rewrite");
     await page.mouse.move(0, 0);
     await expect(footer(first)).toHaveCount(0);
     const heading = first.getByText("Shortened the opening");
@@ -82,6 +82,24 @@ test.describe("prompt widget session", () => {
     await expect(face(restored)).toHaveAttribute("data-blob-phase", "done", { timeout: 15_000 });
     await expect(footer(restored)).toHaveText("1 newer");
     await expect(mark(restored)).toHaveAttribute("data-session-mark", "0:0");
-    await expect(await markTooltip(page, restored)).toHaveText("Pitch rewrite");
+    await expect(await markTooltip(page, restored)).toContainText("Pitch rewrite");
+    await page.mouse.move(0, 0);
+
+    // A fresh widget's picker shows the harness logo while no session waits
+    // (none does after a reload), the mark of a session picked for it, and
+    // the logo again once a new conversation lets go of that session.
+    const fresh = page.locator('[data-type="ai-prompt"]').filter({ has: page.locator("[data-session-picker]") });
+    await summonWidget(page, editor);
+    const picker = fresh.locator("[data-session-picker]");
+    await expect(picker).toHaveAttribute("data-session-picker", "");
+    await picker.click();
+    await page.locator("[data-session-option]").first().click();
+    await expect(picker.locator("[data-session-mark]")).toHaveAttribute("data-session-mark", "0:0");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await picker.click();
+    await expect(page.getByRole("menu")).toBeVisible();
+    await page.getByRole("menuitem", { name: /New .* conversation/ }).first().click();
+    await expect(picker).toHaveAttribute("data-session-picker", "");
+    await expect(picker.locator("[data-session-mark]")).toHaveCount(0);
   });
 });

@@ -50,6 +50,7 @@ const actions = {
   backspaceDismiss: noop,
   escapeToEditor: noop,
   rebindSession: noop,
+  newSession: noop,
   openBoundChat: noop,
   openFile: noop,
   openAgentTab: noop,
@@ -71,6 +72,8 @@ function render(
       newerCount: number;
     }>;
     task?: Partial<AgentTaskRow>;
+    /** The widget's session; "task_1" unless given (null: unbound). */
+    boundTaskId?: string | null;
     host?: Partial<PromptWidgetHost>;
     draft?: string;
     reference?: { text: string; from: number; to: number } | null;
@@ -88,7 +91,7 @@ function render(
           phase,
           record,
           task: overrides.task as AgentTaskRow | undefined,
-          boundTaskId: "task_1",
+          boundTaskId: overrides.boundTaskId === undefined ? "task_1" : overrides.boundTaskId,
           workspacePath: "/ws",
           trustName: "Claude Code",
           confirmTrust: false,
@@ -242,15 +245,28 @@ describe("PromptBlobFace", () => {
       `[data-choice-option="${name}"]`,
     ) as HTMLButtonElement;
 
-  it("the heading's logo is the bound session's harness, even once it left the picker", () => {
+  it("the heading leads with the bound session's mark, even once it left the picker", () => {
     // The fake picker lists no sessions (as for a cancelled one), and its
-    // default harness is "claude".
+    // default harness is "claude": the session's own harness, not that one,
+    // is the badge among the end buttons.
     render("needs-answer", {
       display: question("single_choice"),
-      task: { taskId: "task_1", harnessId: "opencode" },
+      task: { taskId: "task_1", harnessId: "opencode", colorSlot: 3, shapeSlot: 5 },
     });
-    expect(container?.querySelector('[data-testid="harness-logo-opencode"]')).not.toBeNull();
+    const marks = container!.querySelectorAll("[data-session-mark]");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].getAttribute("data-session-mark")).toBe("3:5");
+    const badge = container!.querySelector("[data-harness-badge]");
+    expect(badge?.getAttribute("data-harness-badge")).toBe("opencode");
+    expect(badge?.querySelector('[data-testid="harness-logo-opencode"]')).not.toBeNull();
     expect(container?.querySelector('[data-testid="harness-logo-claude"]')).toBeNull();
+  });
+
+  it("an unbound settled widget leads with the harness a send would go to", () => {
+    render("needs-answer", { display: question("single_choice"), boundTaskId: null });
+    expect(container?.querySelector('[data-testid="harness-logo-claude"]')).not.toBeNull();
+    expect(container?.querySelector("[data-session-mark]")).toBeNull();
+    expect(container?.querySelector("[data-harness-badge]")).toBeNull();
   });
 
   it("a single choice offers a button per option; clicking one picks it", () => {

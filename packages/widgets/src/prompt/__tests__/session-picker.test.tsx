@@ -22,7 +22,7 @@ const sessions: SessionOption[] = [
   { taskId: "t_price", title: "Pricing table", description: "1h ago", harnessId: "opencode", colorSlot: 1, shapeSlot: 1 },
 ];
 
-function renderPicker(peeked: string | null, onSelectSession = vi.fn()) {
+function renderPicker(peeked: string | null, onSelectSession = vi.fn(), onNewSession = vi.fn()) {
   const host = fakePromptWidgetHost({
     useSessionList: vi.fn(() => sessions),
     peekSession: vi.fn(() => peeked),
@@ -34,7 +34,12 @@ function renderPicker(peeked: string | null, onSelectSession = vi.fn()) {
     root!.render(
       withHost(
         host,
-        <SessionPicker workspacePath="/ws" onSelectSession={onSelectSession} onClose={vi.fn()} />,
+        <SessionPicker
+          workspacePath="/ws"
+          onSelectSession={onSelectSession}
+          onNewSession={onNewSession}
+          onClose={vi.fn()}
+        />,
       ),
     ),
   );
@@ -74,5 +79,17 @@ describe("SessionPicker", () => {
     expect(options[1].getAttribute("aria-current")).toBe("true");
     act(() => options[0].click());
     expect(onSelectSession).toHaveBeenCalledWith("t_pitch");
+  });
+
+  it("a new conversation goes through the widget, which lets go of its session", () => {
+    const onNewSession = vi.fn();
+    const { host, trigger } = renderPicker("t_price", vi.fn(), onNewSession);
+    openMenu(trigger);
+    const item = [...document.body.querySelectorAll<HTMLElement>("[role=menuitem]")].find(
+      (entry) => entry.textContent === "promptBlobNewSessionWith",
+    );
+    act(() => item!.click());
+    expect(onNewSession).toHaveBeenCalledWith("claude");
+    expect(host.dropSession).not.toHaveBeenCalled();
   });
 });

@@ -53,6 +53,7 @@ export function SessionPicker({
   workspacePath,
   boundTaskId,
   onSelectSession,
+  onNewSession,
   onClose,
 }: {
   workspacePath: string;
@@ -63,6 +64,9 @@ export function SessionPicker({
   /** Re-target a bound widget. Absent for an unbound one, whose selection
    *  just moves the shared session as it always did. */
   onSelectSession?: (taskId: string) => void;
+  /** Start this widget on a new session. Absent: the selection just drops
+   *  the workspace's shared session. */
+  onNewSession?: (harnessId: string) => void;
   /** The menu is a detour from typing: when it closes, the caret goes back
    *  to the composer (as the chat tab's pickers do). */
   onClose: () => void;
@@ -167,7 +171,11 @@ export function SessionPicker({
           <DropdownMenuItem
             key={harness.id}
             className="cursor-pointer gap-2 text-xs"
-            onSelect={() => host.dropSession(workspacePath, harness.id)}
+            onSelect={() =>
+              onNewSession
+                ? onNewSession(harness.id)
+                : host.dropSession(workspacePath, harness.id)
+            }
           >
             <HarnessLogo
               harnessId={harness.id}
