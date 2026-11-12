@@ -1,3 +1,4 @@
+import { SESSION_COLOR_SLOTS, SESSION_SHAPES } from "@notefig/shared/agent";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createLoopbackPair, type McpEndpoint } from "@notefig/agent";
 import { FakeAgent } from "../mock-harness";
@@ -2609,18 +2610,26 @@ describe("usage limits", () => {
 
 
 describe("session marks (MET-284)", () => {
-  it("gives each new session of a workspace the lowest free color and shape, and keeps them", async () => {
+  it("gives each new session of a workspace a free color and shape, and keeps them", async () => {
     const start = async (workspacePath: string) => {
       const [client, agentSide] = createLoopbackPair();
       new FakeAgent(agentSide);
       const task = runtime.managerFor(workspacePath).createTask(harness);
       await task.start(() => client);
       const row = store.tasks.get(task.taskId);
-      return [row?.colorSlot, row?.shapeSlot];
+      return { color: row?.colorSlot, shape: row?.shapeSlot };
     };
-    expect(await start("/ws")).toEqual([0, 0]);
-    expect(await start("/ws")).toEqual([1, 1]);
-    expect(await start("/other")).toEqual([0, 0]);
+    const first = await start("/ws");
+    const second = await start("/ws");
+    for (const mark of [first, second]) {
+      expect(mark.color).toBeGreaterThanOrEqual(0);
+      expect(mark.color).toBeLessThan(SESSION_COLOR_SLOTS);
+      expect(mark.shape).toBeGreaterThanOrEqual(0);
+      expect(mark.shape).toBeLessThan(SESSION_SHAPES);
+    }
+    // One workspace's sessions never share a color or a shape.
+    expect(second.color).not.toBe(first.color);
+    expect(second.shape).not.toBe(first.shape);
   });
 
   it("keeps a revived session's mark", async () => {

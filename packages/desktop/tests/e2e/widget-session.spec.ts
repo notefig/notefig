@@ -53,7 +53,9 @@ test.describe("prompt widget session", () => {
     // agent gave it, is only the mark's tooltip.
     await expect(first).toContainText("Shortened the opening");
     await expect(first).not.toContainText("Pitch rewrite");
-    await expect(mark(first)).toHaveAttribute("data-session-mark", "0:0");
+    // The session's mark is picked at random: a color and a shape, both set.
+    await expect(mark(first)).toHaveAttribute("data-session-mark", /^\d+:\d+$/);
+    const sessionMark = (await mark(first).getAttribute("data-session-mark"))!;
     await expect(await markTooltip(page, first)).toContainText("Pitch rewrite");
     await page.mouse.move(0, 0);
     await expect(tag(first)).toHaveText("");
@@ -65,7 +67,7 @@ test.describe("prompt widget session", () => {
     await sendWidgetPrompt(page, await summonWidget(page, editor), promptTextOf(recording, 1));
     const second = settled(page, "Tightened the close");
     await expect(face(second)).toHaveAttribute("data-blob-phase", "done", { timeout: 30_000 });
-    await expect(mark(second)).toHaveAttribute("data-session-mark", "0:0");
+    await expect(mark(second)).toHaveAttribute("data-session-mark", sessionMark);
 
     await expect(tag(first)).toHaveText("1 newer");
     await expect(tag(second)).toHaveText("");
@@ -82,7 +84,7 @@ test.describe("prompt widget session", () => {
     const restored = settled(page, "Shortened the opening");
     await expect(face(restored)).toHaveAttribute("data-blob-phase", "done", { timeout: 15_000 });
     await expect(tag(restored)).toHaveText("1 newer");
-    await expect(mark(restored)).toHaveAttribute("data-session-mark", "0:0");
+    await expect(mark(restored)).toHaveAttribute("data-session-mark", sessionMark);
     await expect(await markTooltip(page, restored)).toContainText("Pitch rewrite");
     await page.mouse.move(0, 0);
 
@@ -95,7 +97,7 @@ test.describe("prompt widget session", () => {
     await expect(picker).toHaveAttribute("data-session-picker", "");
     await picker.click();
     await page.locator("[data-session-option]").first().click();
-    await expect(picker.locator("[data-session-mark]")).toHaveAttribute("data-session-mark", "0:0");
+    await expect(picker.locator("[data-session-mark]")).toHaveAttribute("data-session-mark", sessionMark);
     await expect(page.getByRole("menu")).toHaveCount(0);
     await picker.click();
     await expect(page.getByRole("menu")).toBeVisible();

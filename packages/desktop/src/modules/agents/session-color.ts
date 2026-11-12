@@ -19,32 +19,37 @@ type Held = Pick<
 type SlotKey = "colorSlot" | "shapeSlot";
 
 /**
- * A color and a shape no other live session of the workspace holds: twelve
- * sessions never share a color, and twenty-four never share a shape, so no
- * two share a mark until there are more than twenty-four. An unavailable
- * session (its harness session is gone) holds none. When every slot of one
- * kind is held, the one of the session left untouched longest is reused.
+ * A color and a shape no other live session of the workspace holds, at
+ * random among those free: twelve sessions never share a color, and
+ * twenty-four never share a shape, so no two share a mark until there are
+ * more than twenty-four, and a new workspace's first session isn't always
+ * the same mark. An unavailable session (its harness session is gone)
+ * holds none. When every slot of one kind is held, the one of the session
+ * left untouched longest is reused. `random` is Math.random's shape (tests
+ * pass their own).
  */
 export function pickSessionMark(
   rows: Iterable<Held>,
   workspacePath: string,
   taskId?: string,
+  random: () => number = Math.random,
 ): { colorSlot: number; shapeSlot: number } {
   const workspace = workspaceKey(workspacePath);
   const live = [...rows].filter((row) => holds(row, workspace, taskId));
   return {
-    colorSlot: pickSlot(live, "colorSlot", SESSION_COLOR_SLOTS),
-    shapeSlot: pickSlot(live, "shapeSlot", SESSION_SHAPES),
+    colorSlot: pickSlot(live, "colorSlot", SESSION_COLOR_SLOTS, random),
+    shapeSlot: pickSlot(live, "shapeSlot", SESSION_SHAPES, random),
   };
 }
 
-/** The lowest free slot of one kind, else the stalest held one. */
-function pickSlot(live: Held[], key: SlotKey, count: number): number {
+/** A free slot of one kind, at random, else the stalest held one. */
+function pickSlot(live: Held[], key: SlotKey, count: number, random: () => number): number {
   const holders = heldSlots(live, key);
-  for (let slot = 0; slot < count; slot++) {
-    if (!holders.has(slot)) return slot;
-  }
-  return stalestSlot(holders);
+  const free = Array.from({ length: count }, (_, slot) => slot).filter(
+    (slot) => !holders.has(slot),
+  );
+  if (free.length === 0) return stalestSlot(holders);
+  return free[Math.min(free.length - 1, Math.floor(random() * free.length))];
 }
 
 /** Each slot of one kind the live sessions hold, with the latest activity
