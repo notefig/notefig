@@ -10,7 +10,7 @@
  * also becomes the remembered default (the sessions panel's split-button
  * rule).
  */
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@notefig/ui/button";
 import { VoiceWave } from "@notefig/ui/voice-wave";
@@ -51,7 +51,10 @@ export function useTargetHarnessId(
   return useTargetSession(workspacePath, boundTaskId)?.harnessId ?? harnesses[0].id;
 }
 
-export function SessionPicker({
+/** Memoized: nothing it shows depends on the draft, and the widget re-renders
+ *  on every keystroke in it; its props (ids, and callbacks the widget keeps
+ *  stable) only change when the target does. */
+export const SessionPicker = memo(function SessionPicker({
   workspacePath,
   boundTaskId,
   onSelectSession,
@@ -195,4 +198,4 @@ export function SessionPicker({
       </DropdownMenuContent>
     </DropdownMenu>
   );
-}
+});
