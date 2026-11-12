@@ -3,7 +3,17 @@ import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 
 import { cn } from "./utils";
 
-const TooltipProvider = TooltipPrimitive.Provider;
+/** How long the pointer rests before a tooltip opens, app-wide. Radix's own
+ *  700ms reads as sluggish next to the app's quick hovers; once one tooltip
+ *  is open, its neighbours open at once (Radix's skip delay). */
+const TOOLTIP_DELAY_MS = 200;
+
+function TooltipProvider({
+  delayDuration = TOOLTIP_DELAY_MS,
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
+  return <TooltipPrimitive.Provider delayDuration={delayDuration} {...props} />;
+}
 
 const Tooltip = TooltipPrimitive.Root;
 

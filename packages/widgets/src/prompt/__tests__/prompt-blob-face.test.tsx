@@ -17,7 +17,8 @@ vi.mock("react-i18next", () => ({
 
 import { PromptBlobFace, type ChoiceDisplay } from "../ui/prompt-blob";
 import type { WidgetResponse } from "@notefig/shared/agent";
-import type { BlobPhase } from "../state";
+import type { BlobPhase, SessionActivity } from "../state";
+import type { PromptWidgetHost } from "../host";
 import type { AgentTaskRow } from "@notefig/shared/agent";
 import { fakePromptWidgetHost, withHost } from "../../testing/fake-host";
 
@@ -49,6 +50,7 @@ const actions = {
   backspaceDismiss: noop,
   escapeToEditor: noop,
   rebindSession: noop,
+  newSession: noop,
   openBoundChat: noop,
   openFile: noop,
   openAgentTab: noop,
@@ -66,8 +68,13 @@ function render(
       activeToolLine: string | null;
       assistantTeaser: string | null;
       queueAhead: number;
+      sessionActivity: SessionActivity;
+      newerCount: number;
     }>;
     task?: Partial<AgentTaskRow>;
+    /** The widget's session; "task_1" unless given (null: unbound). */
+    boundTaskId?: string | null;
+    host?: Partial<PromptWidgetHost>;
     draft?: string;
     reference?: { text: string; from: number; to: number } | null;
     clearReference?: () => void;
@@ -79,12 +86,12 @@ function render(
   act(() =>
     root!.render(
       withHost(
-        fakePromptWidgetHost(),
+        fakePromptWidgetHost(overrides.host),
         createElement(PromptBlobFace, {
           phase,
           record,
           task: overrides.task as AgentTaskRow | undefined,
-          boundTaskId: "task_1",
+          boundTaskId: overrides.boundTaskId === undefined ? "task_1" : overrides.boundTaskId,
           workspacePath: "/ws",
           trustName: "Claude Code",
           confirmTrust: false,
@@ -321,5 +328,103 @@ describe("PromptBlobFace", () => {
 
   it("shows the failure reason on error", () => {
     expect(render("error", { display: { errorMessage: "boom" } })).toContain("boom");
+  });
+});
+
+describe("the widget's session (MET-284)", () => {
+  const session = { title: "Investor intro rewrite", colorSlot: 2, shapeSlot: 7 };
+  const marks = () =>
+    [...container!.querySelectorAll<HTMLElement>("[data-session-mark]")].map(
+      (mark) => mark.closest("button")!,
+    );
+  const answer: WidgetResponse = { kind: "answer", markdown: "Done.", title: "Tightened the intro" };
+
+  it("a settled widget heads with its title and the session's mark, which opens the chat", () => {
+    const text = render("done", { task: session, display: { widgetResponse: answer } });
+    expect(text).toContain("Tightened the intro");
+    // The session's name is the mark's tooltip, never text on the card.
+    expect(text).not.toContain("Investor intro rewrite");
+    const [button] = marks();
+    expect(marks()).toHaveLength(1);
+    expect(button.title).toBe("");
+    expect(button.getAttribute("aria-label")).toBe("promptBlobOpenChat");
+    const mark = button.querySelector("[data-session-mark]")!;
+    expect(mark.getAttribute("data-session-mark")).toBe("2:7");
+    expect(mark.innerHTML).toContain("hsl(var(--session-3))");
+  });
+
+  it("the mark's tooltip, the app's own, names the session", () => {
+    render("done", { task: session, display: { widgetResponse: answer } });
+    act(() => marks()[0].focus());
+    expect(document.body.querySelector("[role=tooltip]")?.textContent).toBe(
+      "Investor intro rewrite",
+    );
+  });
+
+  it("a working widget's mark ends its status row, after the actions", () => {
+    render("running", { task: session });
+    const row = marks()[0].parentElement!;
+    expect(row.lastElementChild).toBe(marks()[0]);
+    expect(marks()).toHaveLength(1);
+  });
+
+  const tag = () => container!.querySelector<HTMLElement>("[data-session-tag]")!;
+  const tooltipOf = (button: HTMLElement) => {
+    act(() => button.focus());
+    return document.body.querySelector("[role=tooltip]")?.textContent;
+  };
+
+  it("the tag counts the prompts that came after, and its tooltip says the rest", () => {
+    render("done", {
+      task: session,
+      display: {
+        widgetResponse: answer,
+        sessionActivity: { kind: "working", turnId: "trn_9" },
+        newerCount: 2,
+      },
+      host: { useRoundDocument: () => "/ws/pitch.md" },
+    });
+    expect(tag().textContent).toBe("promptBlobSessionNewer");
+    expect(tag().dataset.sessionTag).toBe("working");
+    expect(tooltipOf(tag())).toBe(
+      "Investor intro rewritepromptBlobSessionWorkingIn · promptBlobSessionNewer",
+    );
+  });
+
+  it("a session waiting on the user puts a still dot on the tag, and a chat turn says so", () => {
+    render("done", {
+      task: session,
+      display: { widgetResponse: answer, sessionActivity: { kind: "needs-you", turnId: "trn_9" } },
+    });
+    expect(tag().querySelector(".bg-warning")).not.toBeNull();
+    expect(tag().textContent).toBe("");
+    expect(tooltipOf(tag())).toContain("promptBlobSessionNeedsYouInChat");
+  });
+
+  it("an idle session with nothing newer is just its mark", () => {
+    render("done", {
+      task: session,
+      display: { widgetResponse: answer, sessionActivity: { kind: "idle" }, newerCount: 0 },
+    });
+    expect(tag().textContent).toBe("");
+    expect(tag().children).toHaveLength(1);
+    expect(tooltipOf(tag())).toBe("Investor intro rewrite");
+  });
+
+  it("no line of its own: a working widget's status rides on its tag too", () => {
+    render("running", { task: session, display: { sessionActivity: { kind: "queued", count: 1 }, newerCount: 1 } });
+    expect(container!.querySelector("[data-session-footer]")).toBeNull();
+    expect(tag().textContent).toBe("promptBlobSessionNewer");
+  });
+
+  it("a failed widget keeps its session's tag before dismiss: the session lives on", () => {
+    render("error", {
+      task: session,
+      display: { errorMessage: "boom", sessionActivity: { kind: "needs-you", turnId: "trn_9" }, newerCount: 1 },
+    });
+    expect(tag().querySelector(".bg-warning")).not.toBeNull();
+    expect(tag().textContent).toBe("promptBlobSessionNewer");
+    const dismiss = container!.querySelector('button[aria-label="promptBlobDismiss"]')!;
+    expect(tag().compareDocumentPosition(dismiss) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

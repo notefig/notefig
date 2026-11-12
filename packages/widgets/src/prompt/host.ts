@@ -61,8 +61,11 @@ export interface SessionOption {
   title: string;
   /** Pre-resolved one-line summary (relative time, turn count, …). */
   description: string;
-  /** Which harness runs it — picks the logo. */
+  /** Which harness runs it — named beside its title. */
   harnessId: string;
+  /** The session's mark (MET-284), absent on a session from before marks. */
+  colorSlot?: number;
+  shapeSlot?: number;
 }
 
 /**
@@ -128,6 +131,9 @@ export interface PromptWidgetHost {
   useRound(args: { turnId: string | null; taskId: string | null }): PromptRound;
   /** Live sessions in this workspace, newest first, ready to render. */
   useSessionList(workspacePath: string): SessionOption[];
+  /** The document a turn's prompt was sent from by a widget, or null when
+   *  no widget sent it (the chat) — where the session is working now. */
+  useRoundDocument(turnId: string | null): string | null;
   /** The harness a new session would use. The host picks it; the widget only
    *  names it (trust prompt) and draws its logo. */
   useDefaultHarness(): { id: string; label: string };

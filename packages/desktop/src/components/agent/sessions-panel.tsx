@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type { HarnessDefinition } from "@notefig/shared/agent";
 import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
+import { SessionGlyph } from "@/components/agent/session-glyph";
 import { Button } from "@notefig/ui/button";
 import { ButtonGroup } from "@notefig/ui/button-group";
 import {
@@ -63,7 +64,6 @@ import {
 } from "@/hooks/use-harness-selection";
 import { HarnessLogo } from "@/components/agent/harness-logo";
 import {
-  StatusGlyph,
   attentionGlyphState,
   taskGlyphState,
 } from "@/components/agent/status-glyph";
@@ -261,7 +261,7 @@ export function SessionRow({
           )}
         >
           <span className="flex size-3 shrink-0 items-center justify-center">
-            <StatusGlyph
+            <SessionGlyph
               // What needs attention outranks the status: an ask or a
               // failure is what the run is blocked on. (A finished-turn mark
               // never coexists with a running session — utils/attention.)
@@ -270,6 +270,7 @@ export function SessionRow({
                   ? attentionGlyphState(attention)
                   : taskGlyphState(task)
               }
+              session={task}
             />
           </span>
           <span

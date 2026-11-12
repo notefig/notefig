@@ -183,7 +183,8 @@
             "status": "pending",
             "rawInput": {
               "kind": "issue",
-              "markdown": "I can't tell which paragraph you mean — the document changed since the summary."
+              "markdown": "I can't tell which paragraph you mean — the document changed since the summary.",
+              "title": "Paragraph unclear"
             }
           },
           "at": 120
@@ -195,7 +196,8 @@
             "name": "widget_respond",
             "arguments": {
               "kind": "issue",
-              "markdown": "I can't tell which paragraph you mean — the document changed since the summary."
+              "markdown": "I can't tell which paragraph you mean — the document changed since the summary.",
+              "title": "Paragraph unclear"
             }
           },
           "result": {

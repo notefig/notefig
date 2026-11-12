@@ -273,6 +273,7 @@ const PROMPT_ACTIONS = {
   dismiss: noop,
   escapeToEditor: noop,
   rebindSession: noop,
+  newSession: noop,
   openBoundChat: noop,
   openFile: noop,
   openAgentTab: noop,

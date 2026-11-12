@@ -17,7 +17,8 @@
  */
 import { useCallback, useState, useSyncExternalStore } from "react";
 import type { Editor } from "@tiptap/core";
-import { promptChangeColor, type PromptReview } from "./change-store";
+import type { PromptReview } from "./change-store";
+import { sessionColor } from "./session-color";
 import {
   promptChangeMarks,
   revealPromptChange,
@@ -29,7 +30,7 @@ export type PromptChangeNavigation = {
   count: number;
   /** Whether this widget is the one under review. */
   reviewing: boolean;
-  /** The widget's review colour — its gutter bars'. */
+  /** The widget's session color — its gutter bars'. */
   color: string;
   toggleReview(): void;
   /** Turn this widget's review on (idempotent). */
@@ -50,6 +51,8 @@ export function usePromptChangeNavigation(
   review: PromptReview,
   blobId: string,
   editor: Editor,
+  /** The color slot of the widget's session, off its bound task. */
+  colorSlot: number | undefined,
 ): PromptChangeNavigation {
   const count = useSyncExternalStore(
     review.subscribe,
@@ -67,12 +70,12 @@ export function usePromptChangeNavigation(
 
   const toggleReview = useCallback(() => {
     setPosition(null);
-    review.setReviewing(review.reviewing() === blobId ? null : blobId);
-  }, [review, blobId]);
+    review.setReviewing(review.reviewing() === blobId ? null : blobId, colorSlot);
+  }, [review, blobId, colorSlot]);
 
   const showChanges = useCallback(
-    () => review.setReviewing(blobId),
-    [review, blobId],
+    () => review.setReviewing(blobId, colorSlot),
+    [review, blobId, colorSlot],
   );
 
   const step = useCallback(
@@ -86,16 +89,16 @@ export function usePromptChangeNavigation(
             : marks.length - 1
           : (index + direction + marks.length) % marks.length;
       setPosition(next);
-      review.setReviewing(blobId);
+      review.setReviewing(blobId, colorSlot);
       revealPromptChange(editor.view, marks[next]);
     },
-    [review, editor, blobId, index],
+    [review, editor, blobId, index, colorSlot],
   );
 
   return {
     count,
     reviewing,
-    color: promptChangeColor(blobId),
+    color: sessionColor(colorSlot),
     toggleReview,
     showChanges,
     index,

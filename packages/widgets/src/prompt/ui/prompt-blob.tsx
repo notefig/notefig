@@ -12,10 +12,8 @@ import {
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { useTranslation } from "react-i18next";
 import {
-  Check,
   CornerDownLeft,
   FileText,
-  MessageSquare,
   Pencil,
   RotateCw,
   Square,
@@ -25,17 +23,9 @@ import {
 import { toast } from "sonner";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
-import { Button } from "@notefig/ui/button";
 import { Checkbox } from "@notefig/ui/checkbox";
 import { OrbLoader } from "@notefig/ui/orb-loader";
 import { VoiceWave } from "@notefig/ui/voice-wave";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@notefig/ui/dropdown-menu";
 import { cn } from "@notefig/ui/utils";
 import { OpenInNewTabContextMenu } from "@notefig/ui/open-in-new-tab-item";
 import { openIntentOf, type OpenIntent } from "@notefig/ui/open-intent";
@@ -66,6 +56,9 @@ import {
 } from "../doc-helpers";
 import type { PromptReference } from "../doc-helpers";
 import { basename } from "../basename";
+import { SessionTag, type SessionMark } from "./session-button";
+import type { SessionStatus } from "./session-status";
+import { SessionPicker, useTargetHarnessId } from "./session-picker";
 import type { PromptWidget, PromptWidgetsApi } from "../widgets-service";
 import {
   capabilitiesOf,
@@ -84,8 +77,11 @@ import {
   takesTyping,
   composeChoiceAnswer,
   deriveChoiceKey,
+  deriveSessionActivity,
+  newerPromptCount,
   type BlobPhase,
   type RoundOutcome,
+  type SessionActivity,
 } from "../state";
 
 /** What the face reads off a widget's record: the prompt it last sent. */
@@ -250,7 +246,7 @@ function usePromptBlobRound({
   boundTaskId: string | null;
 }) {
   const host = usePromptWidgetHost();
-  const { turn, task, entries, taskTurns } = host.useRound({
+  const { turn, task, entries, taskTurns, pendingPermissions } = host.useRound({
     turnId: boundTurnId,
     taskId: boundTaskId,
   });
@@ -258,7 +254,13 @@ function usePromptBlobRound({
     () => sortEntriesChronologically(entries),
     [entries],
   );
-  return { turn, task, sortedEntries, taskTurns };
+  return {
+    turn,
+    task,
+    sortedEntries,
+    taskTurns,
+    pendingPermission: pendingPermissions.length > 0,
+  };
 }
 
 /**
@@ -276,6 +278,8 @@ function usePromptBlobDisplay({
   widget,
   sortedEntries,
   taskTurns,
+  task,
+  pendingPermission,
 }: {
   review: PromptReview;
   blobId: string;
@@ -284,6 +288,9 @@ function usePromptBlobDisplay({
   widget: PromptWidget;
   sortedEntries: AgentEntry[];
   taskTurns: AgentTurn[];
+  /** The bound session: its change marks are drawn in its color. */
+  task: AgentTaskRow | undefined;
+  pendingPermission: boolean;
 }): PromptBlobDisplay {
   const running = phase === "running";
   const rawActiveToolLine = running ? deriveActiveToolLine(sortedEntries) : null;
@@ -298,7 +305,14 @@ function usePromptBlobDisplay({
     assistantTeaser: running ? deriveLatestAssistantLine(sortedEntries) : null,
     queueAhead: queuePosition(phase, taskTurns, widget.boundTurnId),
     changeCounts: usePromptChangeCounts(review, blobId),
-    changes: usePromptChangeNavigation(review, blobId, editor),
+    changes: usePromptChangeNavigation(review, blobId, editor, task?.colorSlot),
+    sessionActivity: deriveSessionActivity({
+      task,
+      taskTurns,
+      pendingPermission,
+      ownTurnId: widget.boundTurnId,
+    }),
+    newerCount: newerPromptCount(task, widget.ordinal),
   };
 }
 
@@ -570,6 +584,11 @@ interface PromptBlobDisplay extends OutcomeDisplay {
   changeCounts: ReadonlyMap<string, number>;
   /** Review of the round's changes in this document. */
   changes: PromptChangeNavigation;
+  /** What the bound session is doing apart from this round (MET-284).
+   *  Absent for a face with no session behind it (the marketing demo). */
+  sessionActivity?: SessionActivity;
+  /** Prompts the session was sent after this round. */
+  newerCount?: number;
 }
 
 /** Everything the face can do. Grouped so the container hands over one
@@ -590,6 +609,9 @@ interface PromptBlobFaceActions {
   escapeToEditor: () => void;
   /** Point this widget at a different session (the composer's picker). */
   rebindSession: (taskId: string) => void;
+  /** Point this widget at a new session on `harnessId`, started on send
+   *  (the composer's picker). */
+  newSession: (harnessId: string) => void;
   openBoundChat?: (intent?: OpenIntent) => void;
   /** Open a touched document in a tab. */
   openFile: (path: string, intent?: OpenIntent) => void;
@@ -637,6 +659,8 @@ function SentFace({
         onEdit={actions.editPrompt}
         onStop={actions.stop}
         stopLabel={t("agentRemoveFromQueue")}
+        session={task}
+        sessionStatus={sessionStatusOf(display)}
         onOpenChat={actions.openBoundChat}
       />
     );
@@ -647,6 +671,7 @@ function SentFace({
       <RunningFace
         phase={phase}
         record={record}
+        task={task}
         boundTaskId={boundTaskId}
         display={display}
         actions={actions}
@@ -665,6 +690,8 @@ function SentFace({
           onEdit={actions.editPrompt}
           onStop={actions.stop}
           stopLabel={t("agentStop")}
+          session={task}
+        sessionStatus={sessionStatusOf(display)}
           onOpenChat={actions.openBoundChat}
         />
         <div className="px-2.5 pb-2">
@@ -682,12 +709,14 @@ function SentFace({
 function RunningFace({
   phase,
   record,
+  task,
   boundTaskId,
   display,
   actions,
 }: {
   phase: BlobPhase;
   record: PromptBlobRecord;
+  task: AgentTaskRow | undefined;
   boundTaskId: string | null;
   display: PromptBlobDisplay;
   actions: PromptBlobFaceActions;
@@ -708,6 +737,8 @@ function RunningFace({
         onEdit={actions.editPrompt}
         onStop={actions.stop}
         stopLabel={t("agentStop")}
+        session={task}
+        sessionStatus={sessionStatusOf(display)}
         onOpenChat={actions.openBoundChat}
       />
       {phase === "needs-permission" && boundTaskId && (
@@ -828,6 +859,7 @@ export function PromptBlobFace({
               }
               phase={phase}
               display={display}
+              task={task}
               boundTaskId={boundTaskId}
               documentPath={documentPath}
               actions={actions}
@@ -844,6 +876,7 @@ export function PromptBlobFace({
             workspacePath={workspacePath}
             boundTaskId={boundTaskId}
             onSelectSession={actions.rebindSession}
+            onNewSession={actions.newSession}
             focusComposer={draftIO.focus}
           />
         </div>
@@ -945,6 +978,13 @@ function RemovalRefusedHint({ shown }: { shown: boolean }) {
   );
 }
 
+/** The session's status for its tag, when the face knows it (not the demo). */
+function sessionStatusOf(display: PromptBlobDisplay): SessionStatus | undefined {
+  return display.sessionActivity
+    ? { activity: display.sessionActivity, newer: display.newerCount ?? 0 }
+    : undefined;
+}
+
 /** The face of a round that has ended: Done and Error are the two resting
  *  cards, and a question is the done card waiting on its answer (the draft
  *  row below takes it). Chosen here so the face itself stays phase-agnostic
@@ -953,6 +993,7 @@ function SettledState({
   mark,
   phase,
   display,
+  task,
   boundTaskId,
   documentPath,
   actions,
@@ -960,6 +1001,7 @@ function SettledState({
   mark: React.ReactNode;
   phase: BlobPhase;
   display: PromptBlobDisplay;
+  task: AgentTaskRow | undefined;
   boundTaskId: string | null;
   documentPath: string;
   actions: PromptBlobFaceActions;
@@ -985,6 +1027,8 @@ function SettledState({
         changeCounts={display.changeCounts}
         changes={display.changes}
         onOpenFile={(path, intent) => actions.openFile(path, intent)}
+        session={task}
+        sessionStatus={sessionStatusOf(display)}
         onOpenChat={(intent) =>
           boundTaskId && actions.openAgentTab(boundTaskId, intent)
         }
@@ -998,6 +1042,11 @@ function SettledState({
         message={display.errorMessage ?? undefined}
         onRetry={actions.retry}
         onEdit={actions.editPrompt}
+        session={boundTaskId ? task : undefined}
+        sessionStatus={sessionStatusOf(display)}
+        onOpenChat={(intent) =>
+          boundTaskId && actions.openAgentTab(boundTaskId, intent)
+        }
         onDismiss={actions.dismiss}
       />
     );
@@ -1085,7 +1134,7 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
     draftIO,
   });
 
-  const { turn, task, sortedEntries, taskTurns } = usePromptBlobRound({
+  const { turn, task, sortedEntries, taskTurns, pendingPermission } = usePromptBlobRound({
     boundTurnId,
     boundTaskId,
   });
@@ -1116,6 +1165,8 @@ function usePromptBlobModel(placement: PromptBlobPlacement) {
       widget,
       sortedEntries,
       taskTurns,
+      task,
+      pendingPermission,
     }),
     choice: choice.display,
   };
@@ -1418,6 +1469,17 @@ function usePromptBlobActions({
     [prompts, host, blobId, workspacePath],
   );
 
+  // A new conversation drops the workspace's shared session and this
+  // widget's own: a widget the picker bound to a session would otherwise
+  // keep sending there (and keep showing its mark).
+  const newSession = useCallback(
+    (harnessId: string) => {
+      host.dropSession(workspacePath, harnessId);
+      prompts.unbind(blobId);
+    },
+    [prompts, host, blobId, workspacePath],
+  );
+
   return {
     send,
     sendFollowUp,
@@ -1428,6 +1490,7 @@ function usePromptBlobActions({
     revertToSlash,
     backspaceDismiss,
     rebindSession,
+    newSession,
   };
 }
 
@@ -1513,6 +1576,7 @@ function DraftRow({
   workspacePath,
   boundTaskId,
   onSelectSession,
+  onNewSession,
   focusComposer,
 }: {
   phase: BlobPhase;
@@ -1525,6 +1589,7 @@ function DraftRow({
   workspacePath: string;
   boundTaskId?: string | null;
   onSelectSession?: (taskId: string) => void;
+  onNewSession?: (harnessId: string) => void;
   /** Put the caret back in this widget's composer. */
   focusComposer: () => void;
 }) {
@@ -1544,10 +1609,11 @@ function DraftRow({
       >
         {composing ? (
           <div contentEditable={false}>
-            <SessionControl
+            <SessionPicker
               workspacePath={workspacePath}
               boundTaskId={boundTaskId}
               onSelectSession={onSelectSession}
+              onNewSession={onNewSession}
               onClose={focusComposer}
             />
           </div>
@@ -1597,31 +1663,6 @@ function useDraftPlaceholder(phase: BlobPhase): string {
   return dictationKey ? t(`${key}Dictation`, { key: dictationKey }) : t(key);
 }
 
-/**
- * The session picker, logo-only trigger in the composer row: shows where
- * the next prompt actually goes (the adopted session's harness logo, or the
- * default harness if nothing is adopted). The menu offers the workspace's
- * recent live sessions to re-target, or a new conversation on one of the top
- * harnesses — each its own entry with its logo; picking one also becomes the
- * remembered default (the sessions panel's split-button rule).
- */
-/** The harness the widget's prompts go to: its bound session's, else the
- *  session a send would join, else the default. The session it points at is
- *  in the list whenever it is live, so no second lookup is needed. */
-function useTargetHarnessId(
-  workspacePath: string,
-  boundTaskId: string | null | undefined,
-): string {
-  const host = usePromptWidgetHost();
-  const harnesses = host.useHarnessList();
-  const sessions = host.useSessionList(workspacePath);
-  const taskId = boundTaskId ?? host.peekSession(workspacePath);
-  return (
-    sessions.find((session) => session.taskId === taskId)?.harnessId ??
-    harnesses[0].id
-  );
-}
-
 /** What leads a response's heading: the logo of the harness that answered.
  *  Read off the bound task's own row: the picker's list drops a session
  *  once it is cancelled or failed, and the answer still came from it.
@@ -1650,112 +1691,6 @@ function HarnessMark({
   );
 }
 
-function SessionControl({
-  workspacePath,
-  boundTaskId,
-  onSelectSession,
-  onClose,
-}: {
-  workspacePath: string;
-  /** The session this widget is already bound to (a restored widget, MET-163)
-   *  — the icon must name where the prompt will actually go, which is this
-   *  task rather than the workspace's shared session. */
-  boundTaskId?: string | null;
-  /** Re-target a bound widget. Absent for an unbound one, whose selection
-   *  just moves the shared session as it always did. */
-  onSelectSession?: (taskId: string) => void;
-  /** The menu is a detour from typing: when it closes, the caret goes back
-   *  to the composer (as the chat tab's pickers do). */
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const host = usePromptWidgetHost();
-  const { HarnessLogo } = host.slots;
-  // Default first, never empty — the top three become the explicit
-  // new-conversation entries below.
-  const harnesses = host.useHarnessList();
-  // Already filtered to live sessions and ordered newest-first by the host.
-  const sessions = host.useSessionList(workspacePath);
-  const [open, setOpen] = useState(false);
-
-  const peekedTaskId = boundTaskId ?? host.peekSession(workspacePath);
-  const triggerHarnessId = useTargetHarnessId(workspacePath, boundTaskId);
-
-  const recentSessions = sessions.slice(0, 5);
-
-  return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="dictation-swap size-7 shrink-0 cursor-pointer rounded-lg text-muted-foreground"
-          title={t("agentChooseHarness")}
-          aria-label={t("agentChooseHarness")}
-        >
-          {/* While someone dictates into this draft, the wave stands in for
-              the logo (styles.css cross-fades them on the dictation ghost). */}
-          <HarnessLogo harnessId={triggerHarnessId} className="dictation-idle-only" />
-          {host.dictation && (
-            <VoiceWave level={host.dictation.level} hearing={host.dictation.hearing} size="1.05rem" className="dictation-active-only" />
-          )}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="start"
-        onCloseAutoFocus={(event) => {
-          // Radix would hand focus back to the trigger.
-          event.preventDefault();
-          onClose();
-        }}
-      >
-        {recentSessions.length > 0 && (
-          <>
-            {recentSessions.map((session) => (
-              <DropdownMenuItem
-                key={session.taskId}
-                className="cursor-pointer gap-2 text-xs"
-                onSelect={() =>
-                  onSelectSession
-                    ? onSelectSession(session.taskId)
-                    : host.adoptSession(workspacePath, session.taskId)
-                }
-              >
-                {session.taskId === peekedTaskId ? (
-                  <Check className="size-3 shrink-0" />
-                ) : (
-                  <HarnessLogo
-                    harnessId={session.harnessId}
-                    className="size-3"
-                  />
-                )}
-                <span className="min-w-0 flex-1 truncate">{session.title}</span>
-                <span className="shrink-0 text-[0.6875rem] text-muted-foreground">
-                  {session.description}
-                </span>
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-          </>
-        )}
-        {harnesses.slice(0, 3).map((harness) => (
-          <DropdownMenuItem
-            key={harness.id}
-            className="cursor-pointer gap-2 text-xs"
-            onSelect={() => host.dropSession(workspacePath, harness.id)}
-          >
-            <HarnessLogo
-              harnessId={harness.id}
-              className="size-3 text-muted-foreground"
-            />
-            {t("promptBlobNewSessionWith", { harness: harness.label })}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 /**
  * The in-flight face: the sent prompt for context, and — only while a tool
  * call is actually in flight — a shimmering tool-activity line above it. No
@@ -1774,6 +1709,8 @@ function StatusRow({
   onEdit,
   onStop,
   stopLabel,
+  session,
+  sessionStatus,
   onOpenChat,
 }: {
   label?: string;
@@ -1785,6 +1722,10 @@ function StatusRow({
   onEdit?: () => void;
   onStop?: () => void;
   stopLabel?: string;
+  /** The bound session: its tag ends the row (MET-284). */
+  session?: SessionMark;
+  /** What that session is up to besides this widget, on its tag. */
+  sessionStatus?: SessionStatus;
   /** Jump to the bound session's chat (MET-104) — present in every bound
    *  phase, so a pending prompt is one click from its full transcript. */
   onOpenChat?: (intent?: OpenIntent) => void;
@@ -1813,14 +1754,6 @@ function StatusRow({
           </div>
         )}
       </div>
-      <OpenChatButton
-        onOpenChat={onOpenChat}
-        className={cn(
-          "rounded p-1",
-          !onOpenChat && "invisible",
-        )}
-        iconClassName="size-3.5"
-      />
       <button
         type="button"
         title={t("promptBlobEdit")}
@@ -1851,6 +1784,13 @@ function StatusRow({
       >
         <Square className="size-3.5 fill-current" />
       </button>
+      {/* Last, not among the actions: the session the row belongs to. */}
+      <SessionTag
+        session={session}
+        status={sessionStatus}
+        onOpenChat={onOpenChat}
+        className="h-[1.375rem] min-w-[1.375rem]"
+      />
     </div>
   );
 }
@@ -2012,43 +1952,6 @@ function TouchedFileChips({
 /** The way into the bound session's transcript: a click opens its chat in
  *  place of the tab in front, Mod+click or the menu in a new tab — as a
  *  session row in the sidebar does. Without a session it is inert. */
-function OpenChatButton({
-  onOpenChat,
-  className,
-  iconClassName,
-}: {
-  onOpenChat?: (intent?: OpenIntent) => void;
-  className?: string;
-  iconClassName: string;
-}) {
-  const { t } = useTranslation();
-  const button = (
-    <button
-      type="button"
-      title={t("promptBlobOpenChat")}
-      aria-label={t("promptBlobOpenChat")}
-      disabled={!onOpenChat}
-      className={cn(
-        "shrink-0 text-muted-foreground transition-colors",
-        onOpenChat && "cursor-pointer hover:bg-accent hover:text-foreground",
-        className,
-      )}
-      onClick={(event) => onOpenChat?.(openIntentOf(event))}
-    >
-      <MessageSquare className={iconClassName} />
-    </button>
-  );
-  if (!onOpenChat) return button;
-  return (
-    <OpenInNewTabContextMenu
-      label={t("openInNewTab")}
-      onOpenInNewTab={() => onOpenChat("new-tab")}
-    >
-      {button}
-    </OpenInNewTabContextMenu>
-  );
-}
-
 const fileChipClass =
   "flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.6875rem] transition-colors";
 const fileChipIdleClass =
@@ -2088,6 +1991,8 @@ export function DoneState({
   changeCounts = new Map(),
   changes,
   onOpenFile,
+  session,
+  sessionStatus,
   onOpenChat,
   onDismiss,
 }: {
@@ -2106,6 +2011,10 @@ export function DoneState({
   changeCounts?: ReadonlyMap<string, number>;
   changes?: PromptChangeNavigation;
   onOpenFile: (path: string, intent?: OpenIntent) => void;
+  /** The bound session: its tag ends the heading row, the way to its chat. */
+  session?: SessionMark;
+  /** What that session is up to besides this widget, on its tag. */
+  sessionStatus?: SessionStatus;
   onOpenChat: (intent?: OpenIntent) => void;
   onDismiss: () => void;
 }) {
@@ -2118,10 +2027,11 @@ export function DoneState({
       mark={mark}
       actions={
         <>
-          <OpenChatButton
+          <SessionTag
+            session={session}
+            status={sessionStatus}
             onOpenChat={onOpenChat}
-            className="rounded p-0.5"
-            iconClassName="size-3"
+            className="h-[1.125rem] min-w-[1.125rem]"
           />
           <button
             type="button"
@@ -2154,11 +2064,19 @@ function ErrorState({
   message,
   onRetry,
   onEdit,
+  session,
+  sessionStatus,
+  onOpenChat,
   onDismiss,
 }: {
   message: string | undefined;
   onRetry: () => void;
   onEdit: () => void;
+  /** The bound session: its tag sits before dismiss, as on the done face.
+   *  The session lives on after a failed turn, and may need the user. */
+  session?: SessionMark;
+  sessionStatus?: SessionStatus;
+  onOpenChat: (intent?: OpenIntent) => void;
   onDismiss: () => void;
 }) {
   const { t } = useTranslation();
@@ -2188,6 +2106,14 @@ function ErrorState({
         >
           <Pencil className="size-3.5" />
         </button>
+        {session && (
+          <SessionTag
+            session={session}
+            status={sessionStatus}
+            onOpenChat={onOpenChat}
+            className="h-[1.375rem] min-w-[1.375rem]"
+          />
+        )}
         <button
           type="button"
           title={t("promptBlobDismiss")}

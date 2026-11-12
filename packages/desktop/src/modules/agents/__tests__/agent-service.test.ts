@@ -1,3 +1,4 @@
+import { SESSION_COLOR_SLOTS, SESSION_SHAPES } from "@notefig/shared/agent";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createLoopbackPair, type McpEndpoint } from "@notefig/agent";
 import { FakeAgent } from "../mock-harness";
@@ -2607,6 +2608,95 @@ describe("usage limits", () => {
   });
 });
 
+
+describe("session marks (MET-284)", () => {
+  it("gives each new session of a workspace a free color and shape, and keeps them", async () => {
+    const start = async (workspacePath: string) => {
+      const [client, agentSide] = createLoopbackPair();
+      new FakeAgent(agentSide);
+      const task = runtime.managerFor(workspacePath).createTask(harness);
+      await task.start(() => client);
+      const row = store.tasks.get(task.taskId);
+      return { color: row?.colorSlot, shape: row?.shapeSlot };
+    };
+    const first = await start("/ws");
+    const second = await start("/ws");
+    for (const mark of [first, second]) {
+      expect(mark.color).toBeGreaterThanOrEqual(0);
+      expect(mark.color).toBeLessThan(SESSION_COLOR_SLOTS);
+      expect(mark.shape).toBeGreaterThanOrEqual(0);
+      expect(mark.shape).toBeLessThan(SESSION_SHAPES);
+    }
+    // One workspace's sessions never share a color or a shape.
+    expect(second.color).not.toBe(first.color);
+    expect(second.shape).not.toBe(first.shape);
+  });
+
+  it("keeps a revived session's mark", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onLoadSession = async () => ({});
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    store.tasks.insert({
+      taskId: task.taskId,
+      workspacePath: "/ws",
+      title: "Investor intro",
+      status: "restored",
+      harnessId: harness.id,
+      sessionId: "sess_old",
+      colorSlot: 4,
+      shapeSlot: 17,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await task.start(() => client, { resumeSessionId: "sess_old" });
+    expect(store.tasks.get(task.taskId)).toMatchObject({ colorSlot: 4, shapeSlot: 17 });
+  });
+});
+
+describe("session prompt count (MET-284)", () => {
+  it("counts every prompt sent to a session and gives each turn its place", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onPrompt = async () => ({ stopReason: "end_turn" });
+    const task = runtime.managerFor("/ws").createTask(harness);
+    await task.start(() => client);
+    await runPrompt(task, "first");
+    // A widget's prompt goes through the same queue as a chat prompt.
+    agents.task(task.taskId).promptFromWidget("second", {
+      workspacePath: "/ws",
+      path: "/ws/doc.md",
+      pos: 1,
+      isDocEmpty: false,
+    });
+    await vi.waitFor(() => expect(turnFor(task.taskId)).toHaveLength(2));
+    expect(turnFor(task.taskId).map((turn) => turn.ordinal)).toEqual([1, 2]);
+    expect(store.tasks.get(task.taskId)?.promptCount).toBe(2);
+  });
+
+  it("goes on counting from a revived session's count", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onLoadSession = async () => ({});
+    agent.onPrompt = async () => ({ stopReason: "end_turn" });
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+    store.tasks.insert({
+      taskId: task.taskId,
+      workspacePath: "/ws",
+      title: "Investor intro",
+      status: "restored",
+      harnessId: harness.id,
+      sessionId: "sess_old",
+      promptCount: 4,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await task.start(() => client, { resumeSessionId: "sess_old" });
+    await runPrompt(task, "again");
+    expect(turnFor(task.taskId).at(-1)?.ordinal).toBe(5);
+    expect(store.tasks.get(task.taskId)?.promptCount).toBe(5);
+  });
+});
 
 describe("session naming (MET-284)", () => {
   async function startedTask(workspacePath = "/ws") {

@@ -115,6 +115,9 @@ export type StoredRound = {
   prompt: string;
   /** Written when the round settles. */
   outcome: RoundOutcome | null;
+  /** The round's place among its session's prompts; absent on records
+   *  from before it was kept. */
+  ordinal?: number;
 };
 
 export type StoredRoundObservation = {
@@ -151,6 +154,10 @@ export type PromptWidget = {
   /** The bound round once the user has seen how it ended (scrolled to it,
    *  or it was already over when the widget took it up from a restore). */
   seenTurnId: string | null;
+  /** The bound round's place among its session's prompts (MET-284), off
+   *  its turn row while there is one, else its record: what "N newer"
+   *  counts from. Null when neither knows. */
+  ordinal: number | null;
 };
 
 /** A widget bound to a session, located in its document. */
@@ -237,6 +244,7 @@ const EMPTY: PromptWidget = {
   removalRefusedAt: null,
   outcome: null,
   seenTurnId: null,
+  ordinal: null,
 };
 
 type Watch = {
@@ -352,7 +360,8 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
    *  widget on a revived session. */
   const fold = (blobId: string, watch: Watch): boolean => {
     const widget = get(blobId);
-    const live = factsOf(watch.observation.get());
+    const snapshot = watch.observation.get();
+    const live = factsOf(snapshot);
     if (live.turn !== undefined) watch.seenTurn = true;
     const record = recordOf(blobId);
     const turn = roundStatus(record?.status, live.turn, watch.seenTurn);
@@ -370,6 +379,7 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
         },
       }),
       outcome,
+      ordinal: snapshot.turn?.ordinal ?? record?.ordinal ?? null,
     });
     return get(blobId) !== widget;
   };
@@ -473,6 +483,7 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
       boundTaskId: null,
       boundTurnId: null,
       outcome: null,
+      ordinal: null,
     });
   };
 
@@ -537,6 +548,7 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
         boundTaskId: taskId,
         boundTurnId: null,
         outcome: null,
+        ordinal: null,
       });
     },
     unbind,
@@ -562,6 +574,7 @@ export function createPromptWidgets(deps: PromptWidgetsDeps): PromptWidgetsApi {
           boundTurnId: turnId,
           lastSentPrompt: prompt,
           outcome: null,
+          ordinal: null,
         });
         // The turn row may not be written yet (a session still reviving
         // records the prompt first); until it is, the turn is queued.

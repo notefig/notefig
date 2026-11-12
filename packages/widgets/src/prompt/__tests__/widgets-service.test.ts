@@ -201,6 +201,23 @@ describe("stored rounds (MET-251)", () => {
     outcome: OUTCOME,
   });
 
+  it("knows its round's place among the session's prompts, from the turn row or its record", async () => {
+    const t = testPrompts();
+    await t.send("blob", "summarize", ROUND);
+    expect(t.prompts.get("blob").ordinal).toBeNull();
+    t.setTurn("trn_1", "task_1", "running", { ordinal: 3 });
+    expect(t.prompts.get("blob").ordinal).toBe(3);
+
+    // After a relaunch the turn row is gone: the record still knows.
+    const restored = testPrompts();
+    restored.storeRound("blob", { ...settled(), ordinal: 4 });
+    restored.prompts.restore("blob", "task_1");
+    expect(restored.prompts.get("blob").ordinal).toBe(4);
+    // Moving off the round forgets it.
+    restored.prompts.unbind("blob");
+    expect(restored.prompts.get("blob").ordinal).toBeNull();
+  });
+
   it("a restored widget comes back as it was left", () => {
     const t = testPrompts();
     t.storeRound("blob", settled());

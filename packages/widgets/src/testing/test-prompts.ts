@@ -108,7 +108,7 @@ export function testPrompts({
       turnId: string,
       taskId: string,
       status: AgentTurn["status"],
-      { unrecorded = false }: { unrecorded?: boolean } = {},
+      { unrecorded = false, ordinal }: { unrecorded?: boolean; ordinal?: number } = {},
     ): void {
       turns.set(turnId, {
         turnId,
@@ -116,6 +116,7 @@ export function testPrompts({
         sessionId: "",
         status,
         startedAt: 0,
+        ...(ordinal ? { ordinal } : {}),
       });
       notify();
       if (unrecorded || status === "queued" || status === "running") return;

@@ -48,6 +48,7 @@ const demoHost: PromptWidgetHost = {
 
   useRound: () => EMPTY_ROUND,
   useSessionList: () => [],
+  useRoundDocument: () => null,
   useDefaultHarness: () => HARNESSES[0],
   useHarnessList: () => HARNESSES,
   useTrust: () => ({ isTrusted: true, grant: noop }),
