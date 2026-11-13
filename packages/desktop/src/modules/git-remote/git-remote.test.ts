@@ -75,6 +75,19 @@ describe("git remote", () => {
     await expect(remote.push()).rejects.toThrow(message);
   });
 
+  it.each([
+    ["git@[::1]:notes.git", "ssh -T git@::1 in a terminal"],
+    ["[::1]:notes.git", "ssh -T ::1 in a terminal"],
+    ["gh:team/notes.git", "ssh -T gh in a terminal"],
+    ["ssh://git@host:2222/notes.git", "ssh -T ssh://git@host:2222 in a terminal"],
+  ])("names a destination ssh can reach for %s", async (url, message) => {
+    const { remote } = setup({
+      remoteTarget: vi.fn(async () => ({ ...TARGET, url })),
+      pushBranch: vi.fn(async () => { throw new GitError("HostUnverified", "raw"); }),
+    });
+    await expect(remote.push()).rejects.toThrow(message);
+  });
+
   it("passes a refused pull's own message through", async () => {
     const { remote } = setup({ pullBranch: vi.fn(async () => { throw new GitError("PullRefused", "Local changes in a.md."); }) });
     await expect(remote.pull()).rejects.toThrow("Local changes in a.md.");
