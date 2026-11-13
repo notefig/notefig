@@ -189,6 +189,7 @@ export class InitCommand extends ConfigAwareCommand {
       this.templatePath,
       (path) =>
         !path.includes('.contentlayer') &&
+        !path.includes('.content-collections') &&
         !path.includes('.git') &&
         !path.includes('.next'),
     );
