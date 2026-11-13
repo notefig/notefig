@@ -111,6 +111,21 @@ interface Move {
 /** Raised to end a cycle whose stop was already dispatched. */
 class CycleStop extends Error {}
 
+/** `git`, refusing every call once `closed()`: a cycle left running past
+ *  close's deadline ends at its next git call, whatever step it's on. */
+function closable(git: GitService, closed: () => boolean): GitService {
+  return new Proxy(git, {
+    get(target, key) {
+      const value = Reflect.get(target, key) as unknown;
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        if (closed()) throw new CycleStop();
+        return (value as (...args: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  });
+}
+
 /** A remote refused the push because it moved. */
 const PUSH_REFUSALS = new Set(["NotFastForward", "RefConflict", "PushRejected"]);
 
@@ -155,7 +170,9 @@ async function inBatches<T>(items: string[], run: (batch: string[]) => Promise<T
 }
 
 export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): void } {
-  const { root, git, remote, branch, author } = deps;
+  const { root, remote, branch, author } = deps;
+  /** Ends a cycle at its next git call once closed (`alive`). */
+  const git = closable(deps.git, () => stopped);
   const branchRef = `refs/heads/${branch}`;
   const setTimer =
     deps.setTimer ??
@@ -195,9 +212,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   };
   const absolute = (path: string) => pathutil.join(root, pathutil.fromTreePath(path));
   /** After close's deadline a cycle may still be awaiting a request: it
-   *  ends before its next step that writes (a fetch into `.git`, a commit,
-   *  the branch moving, a file, a push) instead of touching a closed
-   *  workspace. Only the request it was waiting on can still finish. */
+   *  ends at its next git call (`closable`) or file write instead of
+   *  touching a closed workspace. Only what it was waiting on can finish. */
   const alive = () => {
     if (stopped) throw new CycleStop();
   };
@@ -278,7 +294,6 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       if (paths) await stageByHash(paths);
       const all = await stageChanges(git, paths);
       if (all.length === 0) return;
-      alive();
       await git.commit({ message: commitMessage(author.name, all), author });
     } catch (error) {
       // Keep what wasn't committed for the next try.
@@ -312,11 +327,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     const bytes = await git.readFile({ ref: to, filepath });
     const path = absolute(filepath);
     if (bytes === null) {
+      alive();
       const { failed } = await deps.fs.deleteFiles([path]);
       const refused = failed.find((failure) => failure.type !== "not_found");
       if (refused) throw new Error(`Couldn't delete ${filepath}: ${refused.message}`);
       return "deleted";
     }
+    alive();
     const text = bytes.includes(0) ? null : decodeText(bytes);
     if (text !== null) return (await deps.documents.write(path, text, { source: "sync" })) === "held" ? "held" : "written";
     const { failed } = await deps.fs.writeBinaryFiles([{ path, data: bytes }]);
@@ -374,7 +391,6 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const pullStep = async () => {
     deps.dispatch({ type: "step", activity: "pulling" });
     // Also moves refs/remotes/origin/<branch>, keeping a diverged tip reachable.
-    alive();
     const [fetched] = await git.fetchRefs(remote, [branchRef]);
     const theirs = fetched?.oid;
     if (!theirs) throw new GitError("RepoNotFound", "The remote branch is gone.");
@@ -395,7 +411,6 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       stop({ type: "diverged", detail: `Changed here and on the remote: ${edited.join(", ")}. Sync stopped so neither side is lost.` });
     }
     if (base === ours) {
-      alive();
       await git.merge({ ours: branchRef, theirs, fastForwardOnly: true });
       unfinished = { from: ours, to: theirs, done: new Set(), held: [] };
       await moveWorktree(unfinished);
@@ -409,11 +424,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     if (both.length > 0 && !keepLocalOnce) {
       stop({ type: "diverged", detail: `Changed here and on the remote: ${both.join(", ")}. Sync stopped so neither side is lost.` });
     }
-    alive();
     for (const filepath of remoteFiles) {
       if (!local.has(filepath)) await git.unstage({ filepath, ref: theirs });
     }
-    alive();
     const replayed = await git.commit({ message: commitMessage(author.name, localFiles), author, parent: [theirs] });
     unfinished = { from: ours, to: replayed, done: new Set(), held: [] };
     await moveWorktree(unfinished);
@@ -434,7 +447,6 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const checkReturn = async (theirs: string, ours: string | null) => {
     if (!mayAsk(theirs, ours)) return;
     const away = awayMs();
-    alive();
     const [fetched] = await git.fetchRefs(remote, [branchRef]);
     const summary = fetched?.oid ? await returnSummary(git, ours, fetched.oid, lastSynced) : null;
     if (!summary) return;
@@ -452,7 +464,6 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     deps.dispatch({ type: "step", activity: "pushing" });
     try {
       // The branch only moves forward: never forced, only over the polled tip.
-      alive();
       await git.pushRef(remote, { ref: branchRef, oid: ours, expect: theirs });
       integrated = ours;
       return false;
