@@ -5,11 +5,19 @@
  * question it stops on, turning it off. Sync belongs to the workspace, so
  * it lives here rather than in the app's settings.
  *
+ * Every state lays the popover out the same way, after the prompt widget's
+ * card: a header row (the state's icon and name over the remote and
+ * branch); a body saying what the state means or what went wrong, ending
+ * in the way on (one chip, primary when sync waits on it); and a ruled
+ * footer with the credential and, while on, the ways out. Every control
+ * is the same chip.
+ *
  * One snapshot drives it (`useSyncState`), and the credential is one
  * query each change replaces in place, so switching never flashes.
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -20,7 +28,6 @@ import {
   PauseCircle,
   type LucideIcon,
 } from "lucide-react";
-import { Button } from "@notefig/ui/button";
 import { Input } from "@notefig/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@notefig/ui/popover";
 import { cn } from "@notefig/ui/utils";
@@ -56,6 +63,10 @@ function lookOf(state: SyncState): Look {
   return { icon: Loader2, label: `sync-${state.activity}`, spin: true };
 }
 
+function statusOf(state: SyncState): string {
+  return state.setup === "on" ? (state.fault ?? state.activity) : state.setup;
+}
+
 export function SyncStatusCell({ workspacePath }: { workspacePath: string | null }) {
   const { t } = useTranslation();
   const state = useSyncState(workspacePath);
@@ -81,132 +92,237 @@ export function SyncStatusCell({ workspacePath }: { workspacePath: string | null
         <button
           type="button"
           data-testid="sync-status"
-          data-sync-status={state.setup === "on" ? (state.fault ?? state.activity) : state.setup}
+          data-sync-status={statusOf(state)}
           className={cn("flex items-center gap-1.5 hover:text-foreground", state.setup === "off" && "opacity-60")}
         >
           <Icon className={cn("h-3.5 w-3.5", look.tone, look.spin && "animate-spin")} />
           <span>{t(look.label)}</span>
         </button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="start" className="w-80 space-y-3 p-3 text-xs">
+      <PopoverContent side="top" align="start" className="w-80 p-0 text-xs">
         <SyncPanel sync={sync} state={state} />
       </PopoverContent>
     </Popover>
   );
 }
 
-/** One action at a time, with its error. */
+/** One action at a time, with its error; `busy` names the one running. */
 function useAction() {
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const run = async (work: () => Promise<unknown>) => {
-    setBusy(true);
+  const run = async (name: string, work: () => unknown) => {
+    setBusy(name);
     setError(null);
     try {
       await work();
     } catch (thrown) {
       setError(thrown instanceof Error ? thrown.message : String(thrown));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
   return { busy, error, run };
 }
 
-export function SyncPanel({ sync, state }: { sync: WorkspaceSync; state: SyncState }) {
-  const { t } = useTranslation();
-  const action = useAction();
-  const { remote } = state;
-  if (state.setup === "unavailable") return <p className="text-muted-foreground">{state.reason}</p>;
-  if (!remote) return <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />;
-  const where = `${remote.url.replace(/^https:\/\//, "").replace(/\.git$/, "")} · ${remote.branch}`;
+type Runner = ReturnType<typeof useAction>;
 
-  const turnOn = (
-    <Button size="sm" disabled={action.busy} onClick={() => void action.run(() => sync.turnOn())}>
-      {action.busy && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-      {t(state.setup === "ask" ? "syncTurnOnHere" : "syncTurnOn")}
-    </Button>
-  );
+const actionTones = {
+  primary: "border-transparent bg-primary text-primary-foreground hover:bg-primary/90",
+  default: "border-border text-foreground/80 hover:bg-accent hover:text-foreground",
+  danger: "border-destructive/40 text-destructive hover:bg-destructive/10",
+};
 
+/** The popover's one kind of control: a chip, as the prompt widget's
+ *  choices are. One primary chip, at most, for the way on. */
+function Action({
+  tone = "default",
+  busy = false,
+  className,
+  children,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: keyof typeof actionTones; busy?: boolean }) {
   return (
-    <>
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-medium">{t("syncTitle")}</span>
-        <span className="truncate text-muted-foreground">{where}</span>
-      </div>
-      {state.setup === "off" && <p>{t("syncOffDescription")}</p>}
-      {state.setup === "ask" && <p>{t("syncAskDescription")}</p>}
-      {state.setup === "declined" && <p>{t("syncDeclinedDescription")}</p>}
-      {state.setup === "on" && <SyncProblem sync={sync} state={state} />}
-      <CredentialRow sync={sync} state={state} />
-      {action.error && <p className="text-destructive">{action.error}</p>}
-      <div className="flex flex-wrap items-center gap-2">
-        {state.setup !== "on" && turnOn}
-        {state.setup === "ask" && (
-          <Button size="sm" variant="ghost" onClick={() => void action.run(() => sync.decline())}>
-            {t("syncNotNow")}
-          </Button>
-        )}
-        {state.setup === "on" && <SyncOnActions sync={sync} />}
-      </div>
-    </>
+    <button
+      type="button"
+      className={cn(
+        "flex cursor-pointer items-center gap-1 rounded-md border px-2 py-0.5 text-xs transition-colors disabled:pointer-events-none disabled:opacity-50",
+        actionTones[tone],
+        className,
+      )}
+      {...props}
+    >
+      {busy && <Loader2 className="size-3 animate-spin" />}
+      {children}
+    </button>
   );
 }
 
-/** Why sync stopped, and the way on. */
-function SyncProblem({ sync, state }: { sync: WorkspaceSync; state: SyncState }) {
+/** A band of the card, ruled off from the one above. */
+function Section({ className, children }: { className?: string; children: ReactNode }) {
+  return <div className={cn("border-t border-border/60 px-2.5 py-1.5", className)}>{children}</div>;
+}
+
+export function SyncPanel({ sync, state }: { sync: WorkspaceSync; state: SyncState }) {
   const { t } = useTranslation();
-  if (state.fault === "paused" && state.summary) {
-    const { localFiles, remoteFiles, people, since } = state.summary;
-    return (
-      <div className="space-y-2">
-        <p>
-          {t("syncPausedSummary", {
-            local: localFiles.length,
-            remote: remoteFiles.length,
-            when: since ? new Date(since).toLocaleString() : t("syncNever"),
-            people: people.join(", ") || t("syncSomeone"),
-          })}
-        </p>
-        <Button size="sm" onClick={() => sync.resume()}>
-          {t("syncNow")}
-        </Button>
-      </div>
-    );
-  }
-  if (!state.fault) return null;
+  const action = useAction();
+  const look = lookOf(state);
+  const Icon = look.icon;
+  const { remote } = state;
+  const usable = state.setup !== "unavailable" && remote !== null;
   return (
-    <div className="space-y-2">
-      {state.detail && <p className={cn(state.fault === "diverged" && "text-destructive")}>{state.detail}</p>}
-      {state.fault === "diverged" && (
-        <Button size="sm" variant="outline" onClick={() => sync.resume()}>
-          {t("syncKeepMine")}
-        </Button>
+    <div data-sync-panel={statusOf(state)}>
+      <div className="flex items-center gap-2 px-2.5 py-1.5">
+        <Icon className={cn("size-3.5 shrink-0", look.tone ?? "text-muted-foreground", look.spin && "animate-spin")} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-medium">{t(look.label)}</div>
+          {(remote || state.setup !== "unavailable") && (
+            <div className="truncate text-[0.6875rem] text-muted-foreground">
+              {remote ? (
+                `${remote.url.replace(/^https:\/\//, "").replace(/\.git$/, "")} · ${remote.branch}`
+              ) : (
+                <Loader2 className="my-0.5 size-3 animate-spin" />
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      <SyncBody state={state} error={action.error}>
+        {usable &&
+          (state.setup === "on" ? (
+            <WayOnAction sync={sync} state={state} action={action} />
+          ) : (
+            <SetupActions sync={sync} state={state} action={action} />
+          ))}
+      </SyncBody>
+      {usable && (
+        <Section className="space-y-1.5">
+          <Credential sync={sync} state={state} />
+          {state.setup === "on" && <LeaveActions sync={sync} action={action} />}
+        </Section>
       )}
     </div>
   );
 }
 
-function SyncOnActions({ sync }: { sync: WorkspaceSync }) {
+/** What the state means, or why sync stopped; what an action hit; and the
+ *  row of actions, in that order. */
+function SyncBody({ state, error, children }: { state: SyncState; error: string | null; children: ReactNode }) {
   const { t } = useTranslation();
-  const [confirming, setConfirming] = useState(false);
-  const link = "text-muted-foreground underline-offset-2 hover:text-foreground hover:underline";
+  const text = bodyText(state, t);
+  if (!text && !error && !children) return null;
+  const problem = state.setup === "on" && (state.fault === "diverged" || state.fault === "auth-error");
+  return (
+    <div className="space-y-1.5 px-2.5 pb-2">
+      {text && <p className={problem ? "text-destructive" : "text-foreground/80"}>{text}</p>}
+      {error && <p className="text-destructive">{error}</p>}
+      {children && (
+        <div data-sync-actions="" className="flex flex-wrap items-center gap-1.5">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function bodyText(state: SyncState, t: TFunction): string | null {
+  switch (state.setup) {
+    case "unavailable":
+      return state.reason;
+    case "off":
+      return t("syncOffDescription");
+    case "ask":
+      return t("syncAskDescription");
+    case "declined":
+      return t("syncDeclinedDescription");
+  }
+  if (state.fault === "paused" && state.summary) {
+    const { localFiles, remoteFiles, people, since } = state.summary;
+    return t("syncPausedSummary", {
+      local: localFiles.length,
+      remote: remoteFiles.length,
+      when: since ? new Date(since).toLocaleString() : t("syncNever"),
+      people: people.join(", ") || t("syncSomeone"),
+    });
+  }
+  return state.fault ? state.detail : null;
+}
+
+/** Not syncing here yet: turn it on, or (asked) not now. */
+function SetupActions({ sync, state, action }: { sync: WorkspaceSync; state: SyncState; action: Runner }) {
+  const { t } = useTranslation();
   return (
     <>
-      <button type="button" className={link} onClick={() => void sync.syncNow()}>
-        {t("syncNow")}
-      </button>
-      <button type="button" className={link} onClick={() => void sync.decline()}>
+      <Action
+        tone="primary"
+        busy={action.busy === "turnOn"}
+        disabled={action.busy !== null}
+        onClick={() => void action.run("turnOn", () => sync.turnOn())}
+      >
+        {t(state.setup === "ask" ? "syncTurnOnHere" : "syncTurnOn")}
+      </Action>
+      {state.setup === "ask" && (
+        <Action disabled={action.busy !== null} onClick={() => void action.run("decline", () => sync.decline())}>
+          {t("syncNotNow")}
+        </Action>
+      )}
+    </>
+  );
+}
+
+/** The way on from where sync is. A stop waits on the user, and `syncNow`
+ *  does nothing until `resume`, so each stop's way on resumes. */
+function wayOn(sync: WorkspaceSync, state: SyncState): { label: string; stop: boolean; run: () => unknown } {
+  switch (state.fault) {
+    case "diverged":
+      return { label: "syncKeepMine", stop: true, run: () => sync.resume() };
+    case "auth-error":
+      return { label: "syncRetry", stop: true, run: () => sync.resume() };
+    case "paused":
+      return { label: "syncNow", stop: true, run: () => sync.resume() };
+    default:
+      return { label: "syncNow", stop: false, run: () => sync.syncNow() };
+  }
+}
+
+/** While on, the way on: sync now, or what carries on from a stop (the
+ *  primary chip then, since nothing runs until it's pressed). */
+function WayOnAction({ sync, state, action }: { sync: WorkspaceSync; state: SyncState; action: Runner }) {
+  const { t } = useTranslation();
+  const on = wayOn(sync, state);
+  return (
+    <Action
+      tone={on.stop ? "primary" : "default"}
+      busy={action.busy === "on"}
+      disabled={action.busy !== null}
+      onClick={() => void action.run("on", on.run)}
+    >
+      {t(on.label)}
+    </Action>
+  );
+}
+
+/** While on, the ways out: stopping here, and turning off for everyone
+ *  (on a second, confirming click). */
+function LeaveActions({ sync, action }: { sync: WorkspaceSync; action: Runner }) {
+  const { t } = useTranslation();
+  const [confirming, setConfirming] = useState(false);
+  const disabled = action.busy !== null;
+  return (
+    <div data-sync-leave="" className="flex flex-wrap items-center gap-1.5">
+      <Action busy={action.busy === "decline"} disabled={disabled} onClick={() => void action.run("decline", () => sync.decline())}>
         {t("syncStopHere")}
-      </button>
-      <button
-        type="button"
-        className={cn(link, confirming && "text-destructive")}
-        onClick={() => (confirming ? void sync.turnOffForEveryone() : setConfirming(true))}
+      </Action>
+      <Action
+        tone={confirming ? "danger" : "default"}
+        busy={action.busy === "turnOff"}
+        disabled={disabled}
+        onClick={() =>
+          confirming ? void action.run("turnOff", () => sync.turnOffForEveryone()) : setConfirming(true)
+        }
       >
         {t(confirming ? "syncTurnOffConfirm" : "syncTurnOff")}
-      </button>
-    </>
+      </Action>
+    </div>
   );
 }
 
@@ -225,20 +341,30 @@ function tokenHelp(url: string): string | null {
 
 /** The credential sync pushes with, and switching it. SSH remotes sign in
  *  with the user's ssh-agent, so there's nothing to switch. */
-function CredentialRow({ sync, state }: { sync: WorkspaceSync; state: SyncState }) {
+function Credential({ sync, state }: { sync: WorkspaceSync; state: SyncState }) {
   const { t } = useTranslation();
-  if (isSshRemote(state.remote!.url)) return <p className="text-muted-foreground">{t("syncCredential-ssh")}</p>;
-  return <TokenCredentialRow sync={sync} state={state} />;
+  if (isSshRemote(state.remote!.url)) return <CredentialLine>{t("syncCredential-ssh")}</CredentialLine>;
+  return <TokenCredential sync={sync} state={state} />;
 }
 
-function TokenCredentialRow({ sync, state }: { sync: WorkspaceSync; state: SyncState }) {
+function CredentialLine({ children, action }: { children: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="flex items-center gap-2">
+      <KeyRound className="size-3 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1 text-[0.6875rem] text-muted-foreground">{children}</span>
+      {action}
+    </div>
+  );
+}
+
+function TokenCredential({ sync, state }: { sync: WorkspaceSync; state: SyncState }) {
   const { t } = useTranslation();
   const { platform } = useCore();
   const queryClient = useQueryClient();
   const url = state.remote!.url;
   // The repository whose git config applies when finding the credential.
   const repo = sync.workspacePath;
-  const queryKey = ["sync-credential", url];
+  const queryKey = ["sync-credential", repo, url];
   const credential = useQuery({
     queryKey,
     queryFn: () => platform.credentials.status(url, repo),
@@ -248,32 +374,41 @@ function TokenCredentialRow({ sync, state }: { sync: WorkspaceSync; state: SyncS
   const action = useAction();
 
   /** Replace the status in place, and carry on if sync stopped for it. */
-  const change = (work: () => Promise<CredentialStatus | null>) =>
-    action.run(async () => {
+  const change = (name: string, work: () => Promise<CredentialStatus | null>) =>
+    action.run(name, async () => {
       queryClient.setQueryData(queryKey, await work());
       setPasting(false);
       if (state.fault === "auth-error") sync.resume();
     });
 
-  if (credential.isPending) return <p className="text-muted-foreground">{t("syncLookingForCredentials")}</p>;
+  if (credential.isPending) return <CredentialLine>{t("syncLookingForCredentials")}</CredentialLine>;
   const status = credential.data ?? null;
   const switchSource = () =>
-    status?.source === "stored" ? void change(() => platform.credentials.delete(url, repo)) : setPasting(!pasting);
+    status?.source === "stored"
+      ? void change("switch", () => platform.credentials.delete(url, repo))
+      : setPasting(!pasting);
   return (
-    <div className="space-y-1.5">
-      <p className="text-muted-foreground">
-        {status ? t(`syncCredential-${status.source}`, { username: status.username }) : t("syncNoCredentials")}{" "}
-        {status && (
-          <Switch onClick={switchSource}>
-            {t(status.source === "stored" ? "syncUseGitCredentials" : "syncUseToken")}
-          </Switch>
-        )}
-      </p>
+    <>
+      <CredentialLine
+        action={
+          status && (
+            <Action className="shrink-0" busy={action.busy === "switch"} disabled={action.busy !== null} onClick={switchSource}>
+              {t(status.source === "stored" ? "syncUseGitCredentials" : "syncUseToken")}
+            </Action>
+          )
+        }
+      >
+        {status ? t(`syncCredential-${status.source}`, { username: status.username }) : t("syncNoCredentials")}
+      </CredentialLine>
       {(pasting || !status) && (
-        <TokenForm url={url} busy={action.busy} onSave={(token) => change(() => platform.credentials.set(url, repo, token))} />
+        <TokenForm
+          url={url}
+          busy={action.busy === "save"}
+          onSave={(token) => change("save", () => platform.credentials.set(url, repo, token))}
+        />
       )}
       {action.error && <p className="text-destructive">{action.error}</p>}
-    </div>
+    </>
   );
 }
 
@@ -285,7 +420,7 @@ function TokenForm({ url, busy, onSave }: { url: string; busy: boolean; onSave: 
   return (
     <>
       <form
-        className="flex gap-1.5"
+        className="flex items-center gap-1.5"
         onSubmit={(event) => {
           event.preventDefault();
           void onSave(token).then(() => setToken(""));
@@ -294,24 +429,20 @@ function TokenForm({ url, busy, onSave }: { url: string; busy: boolean; onSave: 
         <Input
           type="password"
           autoComplete="off"
-          className="h-7 text-xs"
+          className="h-6 px-2 text-xs"
           placeholder={t("syncTokenPlaceholder")}
           value={token}
           onChange={(event) => setToken(event.target.value)}
         />
-        <Button size="sm" type="submit" disabled={!token.trim() || busy}>
+        <Action type="submit" tone="primary" className="shrink-0" busy={busy} disabled={!token.trim() || busy}>
           {t("syncSaveToken")}
-        </Button>
+        </Action>
       </form>
-      {help && <Switch onClick={() => void platform.ui.openExternal(help)}>{t("syncCreateToken")}</Switch>}
+      {help && (
+        <div className="flex">
+          <Action onClick={() => void platform.ui.openExternal(help)}>{t("syncCreateToken")}</Action>
+        </div>
+      )}
     </>
-  );
-}
-
-function Switch({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-  return (
-    <button type="button" className="underline-offset-2 hover:text-foreground hover:underline" onClick={onClick}>
-      {children}
-    </button>
   );
 }

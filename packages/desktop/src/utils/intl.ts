@@ -738,6 +738,7 @@ i18n
           syncTurnOff: "Turn off for everyone",
           syncTurnOffConfirm: "Everyone stops syncing. Turn off?",
           syncKeepMine: "Keep my versions and go on",
+          syncRetry: "Try again",
           syncPausedSummary:
             "You have {{local}} local changes since {{when}}; the remote has {{remote}} from {{people}}. Sync when you're ready.",
           syncNever: "you started",

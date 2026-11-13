@@ -64,6 +64,10 @@ async function render(state: Partial<SyncState>, credential: CredentialStatus | 
 
 const button = (label: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === label)!;
 const click = (label: string) => act(async () => button(label).click());
+/** The chips in a row of the popover: the way on, or (while on) the ways out. */
+const chips = (row: "actions" | "leave") =>
+  [...document.querySelectorAll(`[data-sync-${row}] button`)].map((b) => b.textContent?.trim());
+const leave = ["Stop on this device", "Turn off for everyone"];
 
 describe("the sync popover", () => {
   it("offers to turn on a project, naming the remote and the credential, and shows what to fix", async () => {
@@ -133,6 +137,56 @@ describe("the sync popover", () => {
     expect(paused.text()).toContain("You have 1 local changes since you started; the remote has 2 from Bo.");
     await click("Sync now");
     expect(paused.sync.resume).toHaveBeenCalled();
+  });
+
+  it.each([
+    ["off", { setup: "off" }, ["Turn on sync"], []],
+    ["ask", { setup: "ask" }, ["Sync on this device", "Not now"], []],
+    ["declined", { setup: "declined" }, ["Turn on sync"], []],
+    ["idle", { setup: "on" }, ["Sync now"], leave],
+    ["pushing", { setup: "on", activity: "pushing" }, ["Sync now"], leave],
+    ["offline", { setup: "on", fault: "offline", detail: "Can't reach it." }, ["Sync now"], leave],
+    ["throttled", { setup: "on", fault: "throttled", detail: "Slow down." }, ["Sync now"], leave],
+    ["auth-error", { setup: "on", fault: "auth-error", detail: "Rejected." }, ["Try again"], leave],
+    ["diverged", { setup: "on", fault: "diverged", detail: "a.md" }, ["Keep my versions and go on"], leave],
+    [
+      "paused",
+      { setup: "on", fault: "paused", summary: { since: null, localFiles: [], remoteFiles: [], people: [] } },
+      ["Sync now"],
+      leave,
+    ],
+  ] as const)("lays out %s with the same rows of chips", async (status, state, actions, ways) => {
+    await render(state as Partial<SyncState>);
+    expect(document.querySelector("[data-sync-panel]")?.getAttribute("data-sync-panel")).toBe(status);
+    expect(document.querySelector("[data-sync-panel]")?.textContent).toContain("github.com/team/notes · main");
+    expect(chips("actions")).toEqual(actions);
+    expect(chips("leave")).toEqual(ways);
+  });
+
+  it("offers nothing to press where sync can't run, only why", async () => {
+    const { text } = await render({ setup: "unavailable", remote: null, reason: "No remote to sync with." });
+    expect(text()).toContain("No remote to sync with.");
+    expect(document.querySelectorAll("button")).toHaveLength(0);
+  });
+
+  it("tries again after a sign-in failure, over SSH too, by resuming", async () => {
+    const { sync, text } = await render({
+      setup: "on",
+      fault: "auth-error",
+      detail: "Host key verification failed.",
+      remote: { url: "git@github.com:team/notes.git", branch: "main" },
+    });
+    expect(text()).toContain("Host key verification failed.");
+    await click("Try again");
+    expect(sync.resume).toHaveBeenCalled();
+    expect(sync.syncNow).not.toHaveBeenCalled();
+  });
+
+  it("syncs now while running", async () => {
+    const { sync } = await render({ setup: "on" });
+    await click("Sync now");
+    expect(sync.syncNow).toHaveBeenCalled();
+    expect(sync.resume).not.toHaveBeenCalled();
   });
 
   it("turns off for everyone only on a second, confirming click", async () => {
