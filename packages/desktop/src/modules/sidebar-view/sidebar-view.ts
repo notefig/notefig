@@ -5,7 +5,7 @@
  */
 import { defineModule } from "@notefig/core";
 import { urlModule } from "@/core/services";
-export const WORKSPACE_TOOLS = ["files", "search", "sessions"] as const;
+export const WORKSPACE_TOOLS = ["files", "search", "sessions", "remote"] as const;
 export type WorkspaceTool = (typeof WORKSPACE_TOOLS)[number];
 export type SidebarView = "everything" | WorkspaceTool;
 

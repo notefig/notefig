@@ -154,6 +154,10 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
     direction,
     setDirection,
   } = useWorkspaceChrome(workspacePath, searchPanelRef, focusActiveTab);
+  const showRemote = useCallback(
+    () => showSidebarView("remote"),
+    [showSidebarView],
+  );
 
   const {
     handleRenameOpenFile,
@@ -285,7 +289,11 @@ function WorkspaceShell({ workspacePath }: { workspacePath: string }) {
           </div>
         </div>
 
-        <StatusBar activeTabId={activeTabId} direction={direction} />
+        <StatusBar
+          activeTabId={activeTabId}
+          direction={direction}
+          onOpenRemote={showRemote}
+        />
 
         <StaleTabPruning
           tabs={openTabGroups}

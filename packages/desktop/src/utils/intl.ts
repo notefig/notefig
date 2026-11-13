@@ -725,7 +725,7 @@ i18n
           syncStopped: "Sync stopped",
           syncPaused: "Sync paused",
           syncOffDescription:
-            "Keep this project in step with its remote: your edits are committed and pushed when you pause or leave, and changes others push appear in your open documents. Everyone who opens the project is asked to sync it too.",
+            "Your edits are pushed when you pause, and others' arrive as they push. Everyone who opens the project is asked to sync too.",
           syncAskDescription:
             "This project syncs with its remote. Sync it on this device? If not, your changes stay here as a local copy.",
           syncDeclinedDescription:
@@ -736,7 +736,17 @@ i18n
           syncNow: "Sync now",
           syncStopHere: "Stop on this device",
           syncTurnOff: "Turn off for everyone",
-          syncTurnOffConfirm: "Everyone stops syncing. Turn off?",
+          syncTurnOffTitle: "Turn off sync for everyone?",
+          syncTurnOffDescription:
+            "This is committed to the project: every device stops syncing when it pulls the change. Files stay as they are.",
+          syncMore: "More",
+          syncRepository: "Repository",
+          syncBranch: "Branch",
+          syncSignIn: "Sign-in",
+          syncGoOn: "Go on",
+          syncNotARepository: "This folder isn't a git repository, so there's no remote to sync with.",
+          syncUnsupported: "Sync needs the desktop app.",
+          remote: "Remote",
           syncKeepMine: "Keep my versions and go on",
           syncRetry: "Try again",
           syncPausedSummary:

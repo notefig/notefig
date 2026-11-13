@@ -5,17 +5,19 @@
  * component module: react-refresh downgrades any edit to a module that
  * exports non-components to a full reload.)
  */
-import { FileText, Search, Sparkles } from "lucide-react";
+import { Cloud, FileText, Search, Sparkles } from "lucide-react";
 import type { WorkspaceTool } from "@/hooks/use-workspace-panels";
 
 export const TOOL_ICONS: Record<WorkspaceTool, typeof FileText> = {
   files: FileText,
   search: Search,
   sessions: Sparkles,
+  remote: Cloud,
 };
 
 export const TOOL_LABEL_KEYS: Record<WorkspaceTool, string> = {
   files: "files",
   search: "search",
   sessions: "agentSessions",
+  remote: "remote",
 };

@@ -7,7 +7,7 @@ import "@/utils/intl";
 import { createTestCore } from "@/testing/test-core";
 import type { CredentialStatus, CredentialsSurface } from "@/adapters/platform-adapter.interface";
 import { INITIAL_SYNC_STATE, type SyncState, type WorkspaceSync } from "@/modules/sync";
-import { SyncPanel } from "../sync-status";
+import { SyncPanel } from "../remote-panel";
 
 let root: Root | null = null;
 
@@ -62,17 +62,23 @@ async function render(state: Partial<SyncState>, credential: CredentialStatus | 
   return { sync, credentials, text: () => host.textContent ?? "" };
 }
 
-const button = (label: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === label)!;
+const button = (label: string) =>
+  [...document.querySelectorAll<HTMLElement>('button, [role="menuitem"]')].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label)!;
 const click = (label: string) => act(async () => button(label).click());
-/** The chips in a row of the popover: the way on, or (while on) the ways out. */
-const chips = (row: "actions" | "leave") =>
-  [...document.querySelectorAll(`[data-sync-${row}] button`)].map((b) => b.textContent?.trim());
-const leave = ["Stop on this device", "Turn off for everyone"];
+/** The buttons under the message: the way on from where sync is. */
+const actions = () => [...document.querySelectorAll("[data-sync-actions] button")].map((b) => b.textContent?.trim());
+/** The tool bar's controls, by label. */
+const bar = () => ["Sync now", "More"].filter((label) => button(label));
+/** Open the tool bar's menu (Radix opens it on pointerdown). */
+const openMenu = () =>
+  act(async () => {
+    button("More").dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+  });
 
-describe("the sync popover", () => {
+describe("the Remote tool", () => {
   it("offers to turn on a project, naming the remote and the credential, and shows what to fix", async () => {
     const { sync, text } = await render({ setup: "off" });
-    expect(text()).toContain("github.com/team/notes · main");
+    expect(document.querySelector("[data-sync-remote]")?.textContent).toContain("github.com/team/notesmain");
     expect(text()).toContain("Everyone who opens the project is asked");
     expect(text()).toContain("Using your git credentials (ada).");
 
@@ -135,7 +141,7 @@ describe("the sync popover", () => {
       summary: { since: null, localFiles: ["a.md"], remoteFiles: ["b.md", "c.md"], people: ["Bo"] },
     });
     expect(paused.text()).toContain("You have 1 local changes since you started; the remote has 2 from Bo.");
-    await click("Sync now");
+    await click("Go on");
     expect(paused.sync.resume).toHaveBeenCalled();
   });
 
@@ -143,24 +149,24 @@ describe("the sync popover", () => {
     ["off", { setup: "off" }, ["Turn on sync"], []],
     ["ask", { setup: "ask" }, ["Sync on this device", "Not now"], []],
     ["declined", { setup: "declined" }, ["Turn on sync"], []],
-    ["idle", { setup: "on" }, ["Sync now"], leave],
-    ["pushing", { setup: "on", activity: "pushing" }, ["Sync now"], leave],
-    ["offline", { setup: "on", fault: "offline", detail: "Can't reach it." }, ["Sync now"], leave],
-    ["throttled", { setup: "on", fault: "throttled", detail: "Slow down." }, ["Sync now"], leave],
-    ["auth-error", { setup: "on", fault: "auth-error", detail: "Rejected." }, ["Try again"], leave],
-    ["diverged", { setup: "on", fault: "diverged", detail: "a.md" }, ["Keep my versions and go on"], leave],
+    ["idle", { setup: "on" }, [], ["Sync now", "More"]],
+    ["pushing", { setup: "on", activity: "pushing" }, [], ["Sync now", "More"]],
+    ["offline", { setup: "on", fault: "offline", detail: "Can't reach it." }, [], ["Sync now", "More"]],
+    ["throttled", { setup: "on", fault: "throttled", detail: "Slow down." }, [], ["Sync now", "More"]],
+    ["auth-error", { setup: "on", fault: "auth-error", detail: "Rejected." }, ["Try again"], ["More"]],
+    ["diverged", { setup: "on", fault: "diverged", detail: "a.md" }, ["Keep my versions and go on"], ["More"]],
     [
       "paused",
       { setup: "on", fault: "paused", summary: { since: null, localFiles: [], remoteFiles: [], people: [] } },
-      ["Sync now"],
-      leave,
+      ["Go on"],
+      ["More"],
     ],
-  ] as const)("lays out %s with the same rows of chips", async (status, state, actions, ways) => {
+  ] as const)("lays out %s the same way: the remote's rows, a message, its way on", async (status, state, ways, controls) => {
     await render(state as Partial<SyncState>);
     expect(document.querySelector("[data-sync-panel]")?.getAttribute("data-sync-panel")).toBe(status);
-    expect(document.querySelector("[data-sync-panel]")?.textContent).toContain("github.com/team/notes · main");
-    expect(chips("actions")).toEqual(actions);
-    expect(chips("leave")).toEqual(ways);
+    expect(document.querySelector("[data-sync-remote]")?.textContent).toContain("github.com/team/notes");
+    expect(actions()).toEqual(ways);
+    expect(bar()).toEqual(controls);
   });
 
   it("offers nothing to press where sync can't run, only why", async () => {
@@ -182,18 +188,24 @@ describe("the sync popover", () => {
     expect(sync.syncNow).not.toHaveBeenCalled();
   });
 
-  it("syncs now while running", async () => {
+  it("syncs now from the tool bar while running", async () => {
     const { sync } = await render({ setup: "on" });
     await click("Sync now");
     expect(sync.syncNow).toHaveBeenCalled();
     expect(sync.resume).not.toHaveBeenCalled();
   });
 
-  it("turns off for everyone only on a second, confirming click", async () => {
+  it("stops on this device, or turns off for everyone after a confirming dialog, from the menu", async () => {
     const { sync } = await render({ setup: "on" });
-    await click("Turn off for everyone");
+    await openMenu();
+    await click("Stop on this device");
+    expect(sync.decline).toHaveBeenCalled();
+
+    await openMenu();
+    await click("Turn off for everyone…");
     expect(sync.turnOffForEveryone).not.toHaveBeenCalled();
-    await click("Everyone stops syncing. Turn off?");
+    expect(document.body.textContent).toContain("Turn off sync for everyone?");
+    await click("Turn off for everyone");
     expect(sync.turnOffForEveryone).toHaveBeenCalled();
   });
 });
