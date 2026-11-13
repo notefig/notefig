@@ -85,7 +85,7 @@ const KINDS = Object.keys(WIDGET_RESPONSE_KINDS) as [
  * harness-side argument mangling (the OpenCode stringified-payload quirk
  * mcp-server.ts repairs) can't corrupt what the widget reads.
  */
-export const WidgetRespondInputSchema = z
+export const WidgetResponseSchema = z
   .object({
     kind: z.enum(KINDS),
     markdown: z
@@ -96,8 +96,12 @@ export const WidgetRespondInputSchema = z
           "a diff block doesn't fit in a widget: write it into the document where " +
           "the change belongs, then call again saying where it is",
       }),
+    // The widget's one heading: required of every kind but the choices,
+    // whose question is the heading (see the refinement below). Optional
+    // in the type, since answers saved before it was required have none.
     title: z
       .string()
+      .trim()
       .max(WIDGET_RESPONSE_LIMITS.title, shorten("a title", WIDGET_RESPONSE_LIMITS.title))
       .optional(),
     options: z
@@ -137,11 +141,29 @@ export const WidgetRespondInputSchema = z
     }
   });
 
+/**
+ * What the agent must send: a response with its title, the widget's one
+ * heading, on every kind but the choices (their question is the heading).
+ * Readers take `WidgetResponseSchema` instead, so a response recorded
+ * before the title was required still reads.
+ */
+export const WidgetRespondInputSchema = WidgetResponseSchema.superRefine((response, ctx) => {
+  if (!isChoiceKind(response.kind) && !response.title) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["title"],
+      message:
+        "a title is required: a few words naming this response, which the " +
+        "widget shows as its heading",
+    });
+  }
+});
+
 function shorten(what: string, limit: number): string {
   return `${what} is at most ${limit} characters — shorten it and call again`;
 }
 
-export type WidgetResponse = z.infer<typeof WidgetRespondInputSchema>;
+export type WidgetResponse = z.infer<typeof WidgetResponseSchema>;
 
 /** The round this response ends waits on the user's reply. */
 export function awaitsReply(response: WidgetResponse | null): boolean {

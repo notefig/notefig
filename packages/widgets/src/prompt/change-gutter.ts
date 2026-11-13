@@ -24,7 +24,8 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { EditorState, PluginView } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import { promptChangesOf } from "./change-tracking";
-import { promptChangeColor, type PromptReview } from "./change-store";
+import type { PromptReview } from "./change-store";
+import { sessionColor } from "./session-color";
 
 const gutterKey = new PluginKey("promptChangeGutter");
 
@@ -83,6 +84,7 @@ class PromptChangeGutter implements PluginView {
   private readonly layer: HTMLDivElement;
   private readonly resize: ResizeObserver | null;
   private lastMarks: PromptChangeMark[] = [];
+  private lastSlot: number | null = null;
   private observed = new Set<Element>();
   private pulsed: PromptChangeMark | null = null;
   private pulseTimer: ReturnType<typeof setTimeout> | undefined;
@@ -166,8 +168,10 @@ class PromptChangeGutter implements PluginView {
     const marks = promptChangeMarks(this.view.state).filter(
       (mark) => mark.blobId === reviewing,
     );
-    if (!force && sameMarks(marks, this.lastMarks)) return;
+    const slot = this.review.reviewingSlot();
+    if (!force && slot === this.lastSlot && sameMarks(marks, this.lastMarks)) return;
     this.lastMarks = marks;
+    this.lastSlot = slot;
     this.layer.replaceChildren();
     this.observeLayout(marks.length > 0);
     if (marks.length === 0) return;
@@ -181,7 +185,7 @@ class PromptChangeGutter implements PluginView {
       const box = dom.getBoundingClientRect();
       const index = barsOnBlock.get(mark.pos) ?? 0;
       barsOnBlock.set(mark.pos, index + 1);
-      const bar = markBar(mark, {
+      const bar = markBar(mark, slot, {
         left: gutterX - index * BAR_SPACING,
         top: box.top - origin.top,
         height: box.height,
@@ -195,16 +199,15 @@ class PromptChangeGutter implements PluginView {
 /** One mark: a bar spanning its block. */
 function markBar(
   mark: PromptChangeMark,
+  slot: number | null,
   at: { left: number; top: number; height: number },
 ): HTMLDivElement {
   const el = document.createElement("div");
   el.dataset.promptChangeMark = mark.blobId;
   el.className = BAR_CLASS;
-  el.style.setProperty("--prompt-change", promptChangeColor(mark.blobId));
-  el.style.setProperty(
-    "--prompt-change-glow",
-    promptChangeColor(mark.blobId, 0.25),
-  );
+  // In the session's color: every edit a session made reads as its own.
+  el.style.setProperty("--prompt-change", sessionColor(slot));
+  el.style.setProperty("--prompt-change-glow", sessionColor(slot, 0.25));
   el.style.left = `${at.left}px`;
   el.style.top = `${at.top}px`;
   el.style.height = `${at.height}px`;

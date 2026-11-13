@@ -4,6 +4,7 @@ import { workspaceReadDocument } from "./workspace-read-document";
 import { documentReadRange } from "./document-read-range";
 import { workspaceOpenFiles } from "./workspace-open-files";
 import { widgetRespond } from "./widget-respond";
+import { sessionRename } from "./session-rename";
 
 /**
  * The tool registry: one direct-imported array, no dynamic registration
@@ -18,6 +19,7 @@ export const toolRegistry: readonly AgentTool<unknown, unknown>[] = [
   workspaceReadDocument,
   documentReadRange,
   workspaceOpenFiles,
+  sessionRename,
   widgetRespond,
 ] as unknown as readonly AgentTool<unknown, unknown>[];
 

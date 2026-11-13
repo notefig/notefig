@@ -35,7 +35,13 @@ const ctx: ToolContext = {
   workspacePath: "/ws",
   taskId: "task_mcp_1",
   agents: {
-    task: () => ({ prompt: vi.fn(), cancel: vi.fn() }),
+    // Already named by the agent: widget_respond's naming gate is open.
+    task: () => ({
+      prompt: vi.fn(),
+      cancel: vi.fn(),
+      get: () => ({ titleSource: "agent" as const }),
+      rename: vi.fn(() => ({ ok: true as const })),
+    }),
     workspace: () => ({ createTask: vi.fn() }),
   },
   services: {
@@ -163,6 +169,8 @@ describe("createMcpRequestHandler", () => {
       "you MUST deliver your final response by calling `widget_respond`",
     );
     expect(instructions).toContain("do NOT call `widget_respond`");
+    // MET-284: the agent names the session once, before widget_respond.
+    expect(instructions).toContain("`session_rename`: name this session ONCE");
     // Changes are shown as diff blocks, which every markdown surface draws.
     expect(instructions).toContain(DIFF_BLOCK_GUIDE);
     // Every response kind is named; the tool's description says when.
@@ -240,6 +248,7 @@ describe("createMcpRequestHandler", () => {
         "workspace_open_files",
         "document_read_range",
         "widget_respond",
+        "session_rename",
       ]),
     );
     // Every tool has a human-readable title distinct from its snake_case name.
@@ -257,7 +266,7 @@ describe("createMcpRequestHandler", () => {
       method: "tools/call",
       params: {
         name: "widget_respond",
-        arguments: { kind: "answer", markdown: "Two options stand out." },
+        arguments: { kind: "answer", markdown: "Two options stand out.", title: "Two options" },
       },
     });
     const result = ok?.result as {

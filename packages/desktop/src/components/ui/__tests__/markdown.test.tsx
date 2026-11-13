@@ -71,6 +71,11 @@ describe("Markdown", () => {
     expect(anchor?.getAttribute("href")).toBe("https://example.com");
   });
 
+  it("does not linkify local file references with .md extension", async () => {
+    await renderResolved("open 2026-10-23.md for notes");
+    expect(container!.querySelector("a")).toBeNull();
+  });
+
   it("renders a re-mount of already-rendered text synchronously (cache)", async () => {
     await renderResolved("cached **hit**");
     act(() => root?.unmount());

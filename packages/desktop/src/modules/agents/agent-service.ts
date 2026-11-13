@@ -58,6 +58,7 @@ import {
 } from "@notefig/agent";
 import { toolRegistry, getTool } from "./tools";
 import { serverInstructions } from "./mcp-instructions";
+import { pickSessionMark } from "./session-color";
 import { buildWidgetContextPayload } from "./widget-context-resource";
 import {
   contextFrom,
@@ -317,6 +318,10 @@ function recordQueuedTurn(
   }: { taskId: string; sessionId: string | null; turnId: string; text: string },
 ): void {
   const now = Date.now();
+  const task = store.tasks.get(taskId);
+  // The prompt's place in the session's count (MET-284): what lets a widget
+  // say how many prompts came after its own.
+  const ordinal = task ? (task.promptCount ?? 0) + 1 : undefined;
   store.entries.insert({
     id: newEventId(),
     taskId,
@@ -331,12 +336,14 @@ function recordQueuedTurn(
     sessionId: sessionId ?? "",
     status: "queued",
     startedAt: now,
+    ...(ordinal ? { ordinal } : {}),
   });
   // Enqueue is activity even when it doesn't change status (queueing onto
   // a busy task) — bump so the session list orders by last touch.
-  if (store.tasks.get(taskId)) {
+  if (task) {
     store.tasks.update(taskId, (draft) => {
       draft.updatedAt = now;
+      draft.promptCount = ordinal;
     });
   }
 }
@@ -354,6 +361,9 @@ function recordQueuedTurn(
  * free functions below (startAgentTask/promptAgentTask/…) and reads all state
  * through the agent collections.
  */
+/** A session's title before its first prompt names it. */
+const UNNAMED_TITLE = "New task";
+
 export class AgentTask {
   readonly permissionBroker: PermissionBroker;
 
@@ -377,7 +387,6 @@ export class AgentTask {
    * terminal state — demote/purge decide what the row says).
    */
   private status: AgentTaskStatus = "starting";
-  private title = "New task";
 
   private currentTurn: TurnState | null = null;
   /**
@@ -936,12 +945,14 @@ export class AgentTask {
     const sessionId = this.sessionId;
 
     // First prompt names the task — minus a leading reference blockquote,
-    // which is the quoted document passage, not what the user asked.
-    if (this.title === "New task") {
+    // which is the quoted document passage, not what the user asked — until
+    // the agent names it (`rename`). The row is the only copy of the name,
+    // so a revived session keeps whatever it was called.
+    const row = this.store.tasks.get(this.taskId);
+    if (row && !row.titleSource && row.title === UNNAMED_TITLE) {
       const named = splitLeadingQuote(text).rest.trim() || text;
-      this.title = named.length > 60 ? `${named.slice(0, 57)}…` : named;
       this.store.tasks.update(this.taskId, (draft) => {
-        draft.title = this.title;
+        draft.title = named.length > 60 ? `${named.slice(0, 57)}…` : named;
       });
     }
 
@@ -1064,6 +1075,49 @@ export class AgentTask {
     captureEvent("agent_session_config_changed", {
       harness: this.harness.id,
       category,
+    });
+    return { ok: true };
+  }
+
+  /**
+   * The agent names the session (`session_rename`): once, and never to a
+   * name another of the workspace's sessions goes by, so sessions stay
+   * told apart. A refused duplicate leaves the rename unspent. Errors as
+   * values, worded for the agent that called.
+   */
+  rename(title: string): { ok: true } | { ok: false; error: string } {
+    const row = this.store.tasks.get(this.taskId);
+    if (!row) return { ok: false, error: "agent task is not started" };
+    if (row.titleSource === "agent") {
+      return {
+        ok: false,
+        error: `This session is already named "${row.title}"; keep it.`,
+      };
+    }
+    // By workspace key: a workspace reopened under another spelling
+    // (C:\Work, c:\work) keeps its saved sessions under the old one.
+    const workspace = workspaceKey(this.workspacePath);
+    const taken = this.store.tasks.toArray
+      .filter(
+        (other) =>
+          other.taskId !== this.taskId &&
+          workspaceKey(other.workspacePath) === workspace &&
+          other.status !== "unavailable",
+      )
+      .map((other) => other.title);
+    if (taken.some((name) => name.toLowerCase() === title.toLowerCase())) {
+      return {
+        ok: false,
+        error:
+          `Another session in this workspace is already named "${title}". ` +
+          `Pick a name that tells this session apart from: ` +
+          `${taken.map((name) => `"${name}"`).join(", ")}.`,
+      };
+    }
+    this.store.tasks.update(this.taskId, (draft) => {
+      draft.title = title;
+      draft.titleSource = "agent";
+      draft.updatedAt = Date.now();
     });
     return { ok: true };
   }
@@ -1806,10 +1860,9 @@ export class AgentTask {
   private upsertTaskRow(): void {
     const existing = this.store.tasks.get(this.taskId);
     if (existing) {
-      // Revival: adopt the restored row — its title is the original first
-      // prompt (so runTurn's first-prompt naming won't rename it) and its
-      // createdAt stands; only the lifecycle fields flip.
-      this.title = existing.title;
+      // Revival: adopt the restored row — its title (the first prompt, or
+      // the agent's name) and createdAt stand; only the lifecycle fields
+      // flip.
       this.store.tasks.update(this.taskId, (draft) => {
         draft.status = this.status;
         draft.updatedAt = Date.now();
@@ -1820,7 +1873,8 @@ export class AgentTask {
       taskId: this.taskId,
       parentTaskId: this.parentTaskId,
       workspacePath: this.workspacePath,
-      title: this.title,
+      title: UNNAMED_TITLE,
+      ...pickSessionMark(this.store.tasks.values(), this.workspacePath),
       status: this.status,
       harnessId: this.harness.id,
       createdAt: Date.now(),
@@ -2167,6 +2221,8 @@ export interface AgentRuntime {
     optionId: string,
     value: string,
   ): Promise<ActionResult>;
+  /** The agent names a live task's session, once (`session_rename`). */
+  rename(taskId: string, title: string): ActionResult;
   /**
    * Resolves once boot reconciliation has settled — i.e. the hydrated rows
    * have loaded and the ones that can never be revived have been deleted.
@@ -2454,6 +2510,11 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       const task = live.get(taskId);
       if (!task) return { ok: false, error: "agent task is not started" };
       return task.setConfigOption(optionId, value);
+    },
+    rename(taskId, title) {
+      const task = live.get(taskId);
+      if (!task) return { ok: false, error: "agent task is not started" };
+      return task.rename(title);
     },
     whenReconciled() {
       reconciled ??= store

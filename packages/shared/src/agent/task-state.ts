@@ -34,8 +34,35 @@ export type AgentTaskRow = {
   /** Set when this task was spawned by another task (subagent pattern) */
   parentTaskId?: string;
   workspacePath: string;
-  /** Short user-facing label, e.g. first prompt truncated */
+  /** Short user-facing label: the first prompt, cut short, until the
+   *  agent names the session (`session_rename`). */
   title: string;
+  /**
+   * Who named the session. Absent until the agent renames it: the title is
+   * the placeholder or the first prompt. "agent" is final — the agent names
+   * a session once, and a named session can't be renamed again.
+   */
+  titleSource?: "agent";
+  /**
+   * The session's color (`session-color.ts`), 0 through 11: picked when the
+   * row is made and kept, so its widgets and its edits always read the
+   * same. Absent on rows from before session colors: those show in the
+   * neutral color.
+   */
+  colorSlot?: number;
+  /**
+   * The session's shape, 0 through 23, picked and kept like its color: the
+   * two together are the session's mark. Absent on rows from before
+   * session shapes: those show a plain tile.
+   */
+  shapeSlot?: number;
+  /**
+   * How many prompts the session has been sent, from a widget or the chat
+   * (MET-284). Each turn carries its place in that count (`ordinal`), so a
+   * widget can say how many prompts came after its own. Absent until the
+   * first prompt, and on rows from before it was kept.
+   */
+  promptCount?: number;
   status: AgentTaskStatus;
   harnessId: string;
   /**
@@ -116,6 +143,11 @@ export type AgentTurn = {
   /** Failure reason when status is "error" — the "why did it fail?" answer. */
   error?: string;
   startedAt: number;
+  /**
+   * The turn's place among its task's prompts, 1-based: the task's
+   * `promptCount` when this prompt was sent. Absent on replayed turns.
+   */
+  ordinal?: number;
   /**
    * What this turn spent. Absent until the turn settles and on session/load
    * replay (ACP replays carry no usage); null when the harness reported

@@ -80,6 +80,9 @@ export interface PromptRoundRow {
   typedPrompt?: string;
   /** What the round left behind, written once when it settles. */
   outcome?: RoundOutcome;
+  /** The turn's place among its session's prompts (`AgentTurn.ordinal`),
+   *  kept here because turn rows don't outlive the run. */
+  ordinal?: number;
   /** The ranges this round changed, per document, with the fingerprint of
    *  the document they were mapped onto (see documentFingerprint). */
   changes?: RoundChanges[];
@@ -282,6 +285,7 @@ export function createPromptRounds({
     async recordStarted(detail, now = Date.now()) {
       await rounds.preload();
       if (rounds.get(detail.turnId)) return;
+      const ordinal = turns.get(detail.turnId)?.ordinal;
       await rounds.insert({
         turnId: detail.turnId,
         taskId: detail.taskId,
@@ -293,6 +297,7 @@ export function createPromptRounds({
         blobId: detail.blobId,
         workspacePath: detail.workspacePath,
         typedPrompt: detail.typedPrompt,
+        ...(ordinal ? { ordinal } : {}),
       }).isPersisted.promise;
       // A turn can end before its start is announced — a dead session
       // settles it inside the send — and that settle found no round to
@@ -385,6 +390,7 @@ function storedRound(row: PromptRoundRow): StoredRound {
     status: row.status,
     prompt: row.typedPrompt ?? row.prompt,
     outcome: row.outcome ?? null,
+    ...(row.ordinal ? { ordinal: row.ordinal } : {}),
   };
 }
 

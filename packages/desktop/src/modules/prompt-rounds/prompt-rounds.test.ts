@@ -70,6 +70,19 @@ describe("prompt rounds", () => {
     expect(rounds.collection.size).toBe(1);
   });
 
+  it("keeps the turn's place among its session's prompts, for after the turn row is gone", async () => {
+    endedTurns.set("t1", { status: "running", ordinal: 3 } as never);
+    await rounds.recordStarted({ ...started("t1"), blobId: "blob_1" }, 10);
+    expect(rounds.collection.get("t1")?.ordinal).toBe(3);
+    endedTurns.delete("t1");
+    const watched = rounds.observeNewest("blob_1", () => {});
+    expect(watched.get()?.ordinal).toBe(3);
+    watched.destroy();
+    // A turn with no place (a replay) records none.
+    await rounds.recordStarted({ ...started("t2"), blobId: "blob_2" }, 11);
+    expect(rounds.collection.get("t2")).not.toHaveProperty("ordinal");
+  });
+
   it("ends a round whose turn ended before its start was announced", async () => {
     // A dead session settles the turn inside the send: the settle comes
     // first and finds no round.

@@ -327,6 +327,10 @@ i18n
             newScratchpad: "New scratchpad",
             searchInFile: "Find in file",
             searchInAllFiles: "Find in all files",
+            nextPromptWidget: "Next prompt widget",
+            previousPromptWidget: "Previous prompt widget",
+            firstPromptWidget: "First prompt widget",
+            lastPromptWidget: "Last prompt widget",
             undo: "Undo",
             redo: "Redo",
             dictate: "Dictate",
@@ -602,6 +606,14 @@ i18n
           promptBlobSessionGone:
             "That session is no longer available — your reply was kept. Sending again starts a new session.",
           promptBlobNewSessionWith: "New {{harness}} conversation",
+          // The widget's footer about its session (MET-284): lowercase, a
+          // quiet aside, joined with " · ".
+          promptBlobSessionWorkingIn: "working in {{file}}",
+          promptBlobSessionWorkingInChat: "working in chat",
+          promptBlobSessionNeedsYouIn: "needs you in {{file}}",
+          promptBlobSessionNeedsYouInChat: "needs you in chat",
+          promptBlobSessionQueued: "{{count}} queued",
+          promptBlobSessionNewer: "{{count}} newer",
           promptBlobTrustWarning:
             "Spawns {{name}} with access to this folder. Press Enter again to continue.",
 
@@ -663,6 +675,7 @@ i18n
           agentToolWorkspaceReadDocument: "Read Document",
           agentToolDocumentReadRange: "Read Document Range",
           agentToolWorkspaceOpenFiles: "Open Files",
+          agentToolSessionRename: "Name Session",
           agentToolWidgetRespond: "Respond in Widget",
 
           // Telemetry consent + Privacy settings

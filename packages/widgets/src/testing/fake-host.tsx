@@ -16,6 +16,7 @@
  * defaults are the boring answers (no sessions, no files, nothing reachable
  * that the test didn't say was reachable).
  */
+import { TooltipProvider } from "@notefig/ui/tooltip";
 import { vi } from "vitest";
 import type { ReactNode } from "react";
 import type { PromptRound, PromptWidgetHost } from "../prompt/host";
@@ -50,6 +51,7 @@ export function fakePromptWidgetHost(
 
     useRound: vi.fn(() => EMPTY_ROUND),
     useSessionList: vi.fn(() => []),
+    useRoundDocument: vi.fn(() => null),
     useDefaultHarness: vi.fn(() => ({ id: "claude", label: "Claude Code" })),
     useHarnessList: vi.fn(() => [
       { id: "claude", label: "Claude Code" },
@@ -97,9 +99,12 @@ export function fakePromptWidgetHost(
   };
 }
 
-/** Render helper: the widget under a host, which is all it ever needs. */
+/** Render helper: the widget under a host and the tooltip provider every
+ *  app root has, which is all it ever needs. */
 export function withHost(host: PromptWidgetHost, children: ReactNode) {
   return (
-    <PromptWidgetHostProvider host={host}>{children}</PromptWidgetHostProvider>
+    <TooltipProvider>
+      <PromptWidgetHostProvider host={host}>{children}</PromptWidgetHostProvider>
+    </TooltipProvider>
   );
 }

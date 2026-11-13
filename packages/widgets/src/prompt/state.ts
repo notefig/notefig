@@ -8,8 +8,9 @@ import {
   isChoiceKind,
   sortEntriesChronologically,
   WIDGET_RESPOND_TOOL_NAME,
-  WidgetRespondInputSchema,
+  WidgetResponseSchema,
   type AgentEntry,
+  type AgentTaskRow,
   type AgentTurn,
   type ToolCallUpdate,
   type WidgetResponse,
@@ -100,14 +101,16 @@ export function deriveWidgetResponse(
   return null;
 }
 
-/** One call's response: a `widget_respond` call whose input parses, else
- *  null. The single reading both the done face (above) and the chat's
- *  transcript card (./transcript.tsx) go through. */
+/** One call's response: a `widget_respond` call whose input parses and
+ *  that the tool didn't refuse (it refuses on an unnamed session, and the
+ *  agent calls again once it's named), else null. The single reading both
+ *  the done face (above) and the chat's transcript card (./transcript.tsx)
+ *  go through. */
 export function readWidgetResponse(
   call: ToolCallUpdate,
 ): WidgetResponse | null {
-  if (call.title !== WIDGET_RESPOND_TOOL_NAME) return null;
-  const parsed = WidgetRespondInputSchema.safeParse(call.rawInput);
+  if (call.title !== WIDGET_RESPOND_TOOL_NAME || call.status === "failed") return null;
+  const parsed = WidgetResponseSchema.safeParse(call.rawInput);
   return parsed.success ? parsed.data : null;
 }
 
@@ -456,6 +459,82 @@ export function deriveQueuePosition(
   return taskTurns.filter(
     (turn) => turn.status === "queued" && turn.turnId < myTurnId,
   ).length;
+}
+
+/**
+ * What a widget's session is doing apart from the widget's own round
+ * (MET-284), for the widget's quiet footer. Most pressing first: it needs
+ * the user (a permission waits, or a sign-in), then it is working, then
+ * prompts wait in its queue. The turn named is the one it is on, so the
+ * footer can say where it came from. The widget's own turn is left out:
+ * its face already says what that is doing.
+ */
+export type SessionActivity =
+  | { kind: "idle" }
+  | { kind: "queued"; count: number }
+  | { kind: "working"; turnId: string }
+  | { kind: "needs-you"; turnId: string | null };
+
+export function deriveSessionActivity({
+  task,
+  taskTurns,
+  pendingPermission,
+  ownTurnId,
+}: {
+  task: Pick<AgentTaskRow, "authRequired"> | undefined;
+  taskTurns: AgentTurn[];
+  /** A permission request on the session waits for an answer. */
+  pendingPermission: boolean;
+  ownTurnId: string | null;
+}): SessionActivity {
+  if (!task) return IDLE;
+  const own = taskTurns.find((turn) => turn.turnId === ownTurnId);
+  if (task.authRequired) return signInActivity(taskTurns, own);
+  const running = taskTurns.find((turn) => turn.status === "running");
+  const queued = taskTurns.filter((turn) => turn.status === "queued");
+  // First in line is the widget's own: its face says what it does, and
+  // what queues behind it is the "newer" count.
+  if ((running ?? firstById(queued)) === own && own) return IDLE;
+  if (pendingPermission) return { kind: "needs-you", turnId: running?.turnId ?? null };
+  if (running) return { kind: "working", turnId: running.turnId };
+  const waiting = queued.filter((turn) => turn !== own).length;
+  return waiting > 0 ? { kind: "queued", count: waiting } : IDLE;
+}
+
+function firstById(turns: AgentTurn[]): AgentTurn | undefined {
+  return turns.reduce<AgentTurn | undefined>(
+    (first, turn) => (!first || turn.turnId < first.turnId ? turn : first),
+    undefined,
+  );
+}
+
+const IDLE: SessionActivity = { kind: "idle" };
+
+/**
+ * A sign-in holds the session back. The prompt it interrupted failed on it
+ * (its turn is the newest errored one) and runs again once the user signs
+ * in; with none, the first queued prompt is what waits. A widget whose own
+ * turn hasn't completed already asks for the sign-in on its face.
+ */
+function signInActivity(taskTurns: AgentTurn[], own: AgentTurn | undefined): SessionActivity {
+  if (own && own.status !== "completed") return IDLE;
+  const errored = taskTurns.filter((turn) => turn.status === "error");
+  const newestError = errored.reduce<AgentTurn | undefined>(
+    (newest, turn) => (!newest || turn.turnId > newest.turnId ? turn : newest),
+    undefined,
+  );
+  const held = newestError ?? firstById(taskTurns.filter((turn) => turn.status === "queued"));
+  return { kind: "needs-you", turnId: held?.turnId ?? null };
+}
+
+/** How many prompts the session was sent after the widget's own: zero
+ *  when either side of the count is unknown (rows from before it). */
+export function newerPromptCount(
+  task: Pick<AgentTaskRow, "promptCount"> | undefined,
+  ordinal: number | null,
+): number {
+  if (!task?.promptCount || !ordinal) return 0;
+  return Math.max(0, task.promptCount - ordinal);
 }
 
 /**

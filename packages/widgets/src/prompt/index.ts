@@ -22,6 +22,7 @@ import {
 } from "./node-view";
 import { promptMinimapSource } from "./minimap";
 import { focusPromptDraft } from "./doc-helpers";
+export { selectWidget } from "./interactions";
 
 export const promptWidget = defineEditorWidget<AiPromptNodeOptions>({
   name: PROMPT_NODE_NAME,

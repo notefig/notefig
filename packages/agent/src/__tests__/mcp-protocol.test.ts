@@ -17,6 +17,8 @@ function stubDeps(): McpHandlerDeps {
         task: () => ({
           prompt: () => undefined,
           cancel: async () => undefined,
+          get: () => undefined,
+          rename: () => ({ ok: true as const }),
         }),
         workspace: () => ({ createTask: async () => undefined }),
       },

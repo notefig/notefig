@@ -20,7 +20,7 @@ export {
 } from "./registry";
 
 // ─── the prompt widget ────────────────────────────────────────────────────
-export { promptWidget } from "./prompt";
+export { promptWidget, selectWidget } from "./prompt";
 /** The prompt widget's tool calls as the agent chat shows them. */
 export { renderPromptToolCall } from "./prompt/transcript";
 export { PROMPT_DRAFT_NODE_NAME, PROMPT_NODE_NAME } from "./prompt/node";
@@ -129,6 +129,8 @@ export {
   type ReviewRangeStore,
   type SavedReviewRanges,
 } from "./prompt/change-store";
+/** A session's mark (MET-284): its widgets and the sessions panel. */
+export { SessionMarkIcon } from "./prompt/session-mark";
 export {
   deriveRoundOutcome,
   isMutatingToolCall,
