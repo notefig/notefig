@@ -26,7 +26,7 @@ import {
   FsError,
   type FileSystemSurface,
 } from "@/adapters/platform-adapter.interface";
-import type { WorkspaceFiles } from "@/modules/files";
+import type { ChangeSource, WorkspaceFiles } from "@/modules/files";
 import type { EditorsApi } from "@/modules/editors";
 import { calculateContentHash } from "@/utils/hash";
 import { getDocumentSync } from "@/utils/markdown-conversion";
@@ -51,14 +51,15 @@ export interface DocumentsApi {
    *  that overlaps a move of its path (`beginMove`) lands where the file
    *  settled.
    *
-   *  `source: "sync"` (remote content) never overwrites unsaved edits: when
+   *  `source` is whose change it is, announced with it on `files:written`.
+   *  A `"sync"` write (remote content) never overwrites unsaved edits: when
    *  the open editor has edits not yet saved, nothing is written and the
    *  write answers `"held"` (the editor's save lands as usual). Any other
    *  write keeps last-writer-wins and answers `"written"`. */
   write(
     path: string,
     content: string,
-    options?: { source?: DocumentWriteSource },
+    options: { source: ChangeSource },
   ): Promise<DocumentWriteResult>;
   /** Resolves once every write in flight for `path` has landed (or failed). */
   whenWritesSettled(path: string): Promise<void>;
@@ -73,8 +74,6 @@ export interface DocumentsApi {
   beginMove(path: string): { settle(finalPath: string): void };
 }
 
-/** Who is writing: an agent (ACP), or sync applying remote content. */
-export type DocumentWriteSource = "agent" | "sync";
 export type DocumentWriteResult = "written" | "held";
 
 /** What documents are built from. */
@@ -204,7 +203,7 @@ export function createDocuments({
 
     async write(path, content, options) {
       assertAbsolute(path);
-      const source = options?.source ?? "agent";
+      const { source } = options;
       // The file may be moving right now — wait it out and write to
       // wherever it settled, so an overlapping agent write can't resurrect
       // the old path.

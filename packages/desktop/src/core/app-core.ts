@@ -76,7 +76,7 @@ export function runtimeModules(): AnyModule[] {
     // `.notefig/` stays out of the user's own git.
     appDirExcludeModule,
     gitRemoteModule,
-    // A project whose metrists.json says so syncs with its git remote.
+    // A project whose config says so syncs with its git remote.
     syncModule,
     agentStoreModule,
     // `@model:` and `@skill:` in the composers (`core.directives`).

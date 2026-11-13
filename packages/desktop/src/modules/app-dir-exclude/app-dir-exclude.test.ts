@@ -51,7 +51,7 @@ const turnIn = (workspacePath: string) => ({
 });
 
 describe("appDirExcludeModule", () => {
-  it("hides .notefig/ from the user's repo after a turn, once the workspace has one", async () => {
+  it("hides .notefig/ but its config from the user's repo after a turn, once the workspace has one", async () => {
     const disk = memoryFs();
     const core = await bootWith(disk);
 
@@ -63,7 +63,19 @@ describe("appDirExcludeModule", () => {
     disk.dirs.add(`${WS}/.git`);
     core.hooks.emit("agent:turn-completed", turnIn(`${WS}/`));
 
-    await vi.waitFor(() => expect(disk.files.get(EXCLUDE)).toBe(".notefig/\n"));
+    await vi.waitFor(() => expect(disk.files.get(EXCLUDE)).toBe("# >>> notefig\n.notefig/*\n!.notefig/config.json\n# <<< notefig\n"));
+    await core.dispose();
+  });
+
+  it("drops an older build's .notefig/ line, which would hide the config, and keeps the user's own", async () => {
+    const disk = memoryFs();
+    disk.dirs.add(`${WS}/.git`);
+    disk.files.set(EXCLUDE, "# mine\n.notefig/\n*.log\n");
+    const core = await bootWith(disk);
+
+    core.hooks.emit("agent:turn-completed", turnIn(WS));
+
+    await vi.waitFor(() => expect(disk.files.get(EXCLUDE)).toBe(`# mine\n*.log\n${"# >>> notefig\n.notefig/*\n!.notefig/config.json\n# <<< notefig\n"}`));
     await core.dispose();
   });
 

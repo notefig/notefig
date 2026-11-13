@@ -27,7 +27,7 @@ const editorFs: EditorFs = {
   exists: vi.fn(async () => []),
   writeBinaryFiles: vi.fn(async () => ({ succeeded: [], failed: [] })),
 };
-const SYNCED = { "metrists.json": '{\n  "sync": {\n    "enabled": true\n  }\n}\n' };
+const SYNCED = { ".notefig/config.json": '{\n  "sync": {\n    "enabled": true\n  }\n}\n' };
 const SEED = { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph.\n" };
 
 let remote: TestRemote | null = null;
@@ -41,15 +41,14 @@ afterEach(async () => {
 });
 
 async function writeDevice(ws: string, device: { on: boolean; lastSyncedAt?: number }) {
-  await fsp.mkdir(join(ws, ".notefig"), { recursive: true });
-  await fsp.writeFile(join(ws, ".notefig", "sync.json"), JSON.stringify({ deviceId: "dev", ...device }));
+  await fsp.writeFile(join(ws, ".git", "notefig-sync.json"), JSON.stringify({ deviceId: "dev", ...device }));
 }
 
 /** A clone open in a core. `synced`: the project syncs and this device
  *  said yes (the default); `asked`: the project syncs, no answer yet;
  *  `plain`: the project doesn't sync. */
-async function setup(mode: "synced" | "asked" | "plain" = "synced") {
-  remote = await createTestRemote(mode === "plain" ? SEED : { ...SEED, ...SYNCED });
+async function setup(mode: "synced" | "asked" | "plain" = "synced", extra: Record<string, string> = {}) {
+  remote = await createTestRemote(mode === "plain" ? { ...SEED, ...extra } : { ...SEED, ...SYNCED, ...extra });
   const ws = await remote.clone("device-a");
   if (mode === "synced") await writeDevice(ws, { on: true });
   const fs = nodeFs();
@@ -101,7 +100,7 @@ async function setup(mode: "synced" | "asked" | "plain" = "synced") {
 
 const read = (path: string) => fsp.readFile(path, "utf8");
 const tree = async (bare: string) => (await runGit(bare, ["ls-tree", "-r", "--name-only", "main"])).split("\n").sort();
-const written = (core: Core, ...paths: string[]) => core.hooks.emit("files:written", { paths, source: "app" });
+const written = (core: Core, ...paths: string[]) => core.hooks.emit("files:written", { paths, source: "user" });
 
 describe("sync: a project's setting, each device's answer", () => {
   it("costs nothing in a project that doesn't sync until asked", async () => {
@@ -122,9 +121,9 @@ describe("sync: a project's setting, each device's answer", () => {
 
     expect(sync.state()).toMatchObject({ setup: "on", fault: null, activity: "idle" });
     expect(remote.requests[0]).toBe("GET git-receive-pack");
-    expect(JSON.parse(await runGit(remote.bare, ["show", "main:metrists.json"]))).toEqual({ sync: { enabled: true } });
+    expect(JSON.parse(await runGit(remote.bare, ["show", "main:.notefig/config.json"]))).toEqual({ sync: { enabled: true } });
     expect(await runGit(remote.bare, ["show", "main:local.md"])).toBe("Before sync was on.");
-    expect(JSON.parse(await read(join(ws, ".notefig", "sync.json")))).toMatchObject({ on: true });
+    expect(JSON.parse(await read(join(ws, ".git", "notefig-sync.json")))).toMatchObject({ on: true });
     expect(await read(join(ws, ".git", "info", "exclude"))).toContain(".claude/");
   });
 
@@ -160,16 +159,81 @@ describe("sync: a project's setting, each device's answer", () => {
 
     await a.turnOffForEveryone();
     expect(a.state().setup).toBe("off");
-    expect(JSON.parse(await runGit(remote.bare, ["show", "main:metrists.json"]))).toEqual({ sync: { enabled: false } });
+    expect(JSON.parse(await runGit(remote.bare, ["show", "main:.notefig/config.json"]))).toEqual({ sync: { enabled: false } });
 
     await b.syncNow();
     await vi.waitFor(() => expect(b.state().setup).toBe("off"));
-    await expect(fsp.access(join(wsB, ".notefig", "sync.json"))).rejects.toThrow();
+    await expect(fsp.access(join(wsB, ".git", "notefig-sync.json"))).rejects.toThrow();
     void core;
   });
 });
 
 describe("sync: solo", () => {
+  it("asks a clone whose repository carries a device answer: consent stays out of what a clone gets", async () => {
+    // The project syncs, and the repo "answers" yes where older builds
+    // and this one keep a device's answer; this clone still asks.
+    const yes = '{"deviceId":"x","on":true}';
+    const { sync } = await setup("asked", { ".notefig/sync.json": yes, "notefig-sync.json": yes });
+    expect(sync.state().setup).toBe("ask");
+  });
+
+  it("follows the checked-out branch: a terminal checkout restarts sync on the new one", async () => {
+    const { sync, remote, ws, core } = await setup();
+    const before = await remote.tip();
+    await runGit(ws, ["checkout", "-q", "-b", "draft"]);
+    await sync.syncNow();
+    await vi.waitFor(() => expect(sync.state().remote?.branch).toBe("draft"));
+    await sync.whenReady();
+
+    await fsp.writeFile(join(ws, "draft.md"), "On the draft.\n");
+    written(core, join(ws, "draft.md"));
+    await sync.syncNow();
+
+    expect(await remote.tip("draft")).toBe(await runGit(ws, ["rev-parse", "HEAD"]));
+    expect(await remote.tip()).toBe(before);
+  });
+
+  it("leaves a branch that pulls from one remote branch and pushes to another to git", async () => {
+    const { sync, ws } = await setup("plain");
+    await runGit(ws, ["config", "branch.main.merge", "refs/heads/trunk"]);
+    await sync.inspect();
+    expect(sync.state()).toMatchObject({ setup: "unavailable", reason: expect.stringContaining("Sync needs them to be the same branch") });
+  });
+
+  it("finishes a pull whose write failed before committing anything, so the old file isn't pushed back", async () => {
+    const { sync, remote, ws, fs } = await setup();
+    const pushed = await remote.pushFromPlainGit(await remote.clone("plain"), { "image.bin": "PNG\u0000data" }, "binary");
+    const image = join(ws, "image.bin");
+    const realWrite = fs.writeBinaryFiles.bind(fs);
+    const failing = vi.spyOn(fs, "writeBinaryFiles").mockImplementation(async (entries) =>
+      entries.some((entry) => entry.path === image)
+        ? { succeeded: [], failed: [{ path: image, type: "permission_denied", message: "read-only" }] }
+        : realWrite(entries),
+    );
+    await sync.syncNow();
+    expect(sync.state()).toMatchObject({ fault: "offline", detail: expect.stringContaining("image.bin") });
+
+    failing.mockRestore();
+    await sync.syncNow();
+    expect(sync.state().fault).toBe(null);
+    expect(await read(join(ws, "image.bin"))).toBe("PNG\u0000data");
+    expect(await remote.tip()).toBe(pushed);
+    expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
+  });
+
+  it("stops before taking in a change the file API can't write: an executable bit", async () => {
+    const { sync, remote, ws } = await setup();
+    const before = await runGit(ws, ["rev-parse", "HEAD"]);
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["update-index", "--chmod=+x", "note.md"]);
+    await runGit(plain, ["commit", "-q", "-m", "chmod"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+    await sync.syncNow();
+
+    expect(sync.state()).toMatchObject({ fault: "diverged", detail: expect.stringContaining("File permissions changed for note.md") });
+    expect(await runGit(ws, ["rev-parse", "HEAD"])).toBe(before);
+  });
+
   it("commits once per sitting and pushes, with the repo's identity", async () => {
     const { sync, files, remote, ws } = await setup();
     const before = await remote.tip();
@@ -231,7 +295,12 @@ describe("sync: solo", () => {
     await write(".claude/settings.local.json", "{}");
     await write("notes.md", "Mine.\n");
     await sync.syncNow();
-    expect(await tree(remote.bare)).toEqual([".claude/settings.json", ".gitignore", "metrists.json", "note.md", "notes.md"]);
+    expect(await tree(remote.bare)).toEqual([".claude/settings.json", ".gitignore", ".notefig/config.json", "note.md", "notes.md"]);
+    expect(await runGit(remote.bare, ["show", "main:.claude/settings.json"])).toBe("{}");
+    // Deleting it here leaves it there too.
+    await fsp.rm(join(ws, ".claude", "settings.json"));
+    written(core, join(ws, ".claude", "settings.json"));
+    await sync.syncNow();
     expect(await runGit(remote.bare, ["show", "main:.claude/settings.json"])).toBe("{}");
 
     await core.projectSettings.update(ws, { sync: { exclude: ["drafts/"] } });
@@ -332,7 +401,7 @@ describe("sync: solo", () => {
     await sync.syncNow();
 
     expect(sync.state().fault).toBe(null);
-    expect(await tree(remote.bare)).toEqual(["metrists.json", "mine.md", "note.md", "theirs.md"]);
+    expect(await tree(remote.bare)).toEqual([".notefig/config.json", "mine.md", "note.md", "theirs.md"]);
     expect(await read(join(ws, "theirs.md"))).toBe("From the CLI.\n");
   });
 

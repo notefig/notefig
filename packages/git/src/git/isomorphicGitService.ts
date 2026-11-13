@@ -1049,7 +1049,9 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async changedFiles(from: string, to: string): Promise<string[]> {
+  async changedFiles(from: string, to: string, options?: { toApply?: boolean }): Promise<string[]> {
+    const swapped: string[] = [];
+    const modes: string[] = [];
     try {
       const changed = await git.walk({
         fs: this.fsClient,
@@ -1059,15 +1061,25 @@ export class IsomorphicGitService implements GitService {
         trees: [git.TREE({ ref: from }), git.TREE({ ref: to })],
         map: async (filepath, [a, b]) => {
           if (filepath === ".") return undefined;
-          const [oidA, oidB] = await Promise.all([a?.oid(), b?.oid()]);
+          const [oidA, oidB, typeA, typeB, modeA, modeB] = await Promise.all([a?.oid(), b?.oid(), a?.type(), b?.type(), a?.mode(), b?.mode()]);
           // Equal subtrees are skipped whole (null stops the descent).
-          if (oidA === oidB) return null;
-          const [typeA, typeB] = await Promise.all([a?.type(), b?.type()]);
-          if (typeA !== "tree" && typeB !== "tree") return filepath;
-          // A file replaced by a folder (or back) is a change too.
-          return typeA === "blob" || typeB === "blob" ? filepath : undefined;
+          if (oidA === oidB && modeA === modeB) return null;
+          if (typeA === "tree" || typeB === "tree") {
+            // A file replaced by a folder (or back) is a change too.
+            if (typeA !== "blob" && typeB !== "blob") return undefined;
+            swapped.push(filepath);
+            return filepath;
+          }
+          if (b && modeA !== modeB && (a || modeB !== PLAIN_FILE_MODE)) modes.push(filepath);
+          return filepath;
         },
       });
+      if (options?.toApply && swapped.length > 0) {
+        throw new GitError("PullRefused", `${listPaths(swapped)} changed between a file and a folder. Pull it in a terminal.`);
+      }
+      if (options?.toApply && modes.length > 0) {
+        throw new GitError("PullRefused", `File permissions changed for ${listPaths(modes)}. Pull it in a terminal.`);
+      }
       return (changed as string[]).sort();
     } catch (error) {
       throw this.fail(error);

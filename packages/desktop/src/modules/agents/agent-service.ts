@@ -638,7 +638,7 @@ export class AgentTask {
           writeTextFile: async (path, content) => {
             await this.deps
               .services(this.workspacePath)
-              .documents.write(path, content);
+              .documents.write(path, content, { source: "agent" });
           },
         },
         { workspacePath: this.workspacePath, path: pathutil },

@@ -342,6 +342,35 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     await expect(service.mergeBase("refs/heads/main", first!)).resolves.toBe(first);
   });
 
+  it("refuses what a file API can't write when asked: a new mode, a file swapped with a folder", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    const author = { name: "T", email: "t@x" };
+    await host.writeFileAtomic(join(repoDir, "run.sh"), encode("echo\n"));
+    await host.writeFileAtomic(join(repoDir, "doc"), encode("a file\n"));
+    const first = await service.addAllAndCommit({ message: "one", author });
+    await host.writeFileAtomic(join(repoDir, "run.sh"), encode("echo hi\n"));
+    await host.chmod(join(repoDir, "run.sh"), 0o755);
+    const second = await service.addAllAndCommit({ message: "two", author });
+
+    await expect(service.changedFiles(first!, second!)).resolves.toEqual(["run.sh"]);
+    await expect(service.changedFiles(first!, second!, { toApply: true })).rejects.toMatchObject({
+      code: "PullRefused",
+      message: expect.stringContaining("File permissions changed for run.sh"),
+    });
+
+    await host.deleteFile(join(repoDir, "doc"));
+    await host.createDir(join(repoDir, "doc"));
+    await host.writeFileAtomic(join(repoDir, "doc", "inside.md"), encode("now a folder\n"));
+    const third = await service.addAllAndCommit({ message: "three", author });
+    await expect(service.changedFiles(second!, third!)).resolves.toEqual(["doc", "doc/inside.md"]);
+    await expect(service.changedFiles(second!, third!, { toApply: true })).rejects.toMatchObject({
+      code: "PullRefused",
+      message: expect.stringContaining("between a file and a folder"),
+    });
+  });
+
   it("reads the repo's config and checked-out branch", async () => {
     const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
     await service.init({ defaultBranch: "main" });

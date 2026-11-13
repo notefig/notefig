@@ -7,7 +7,7 @@ import {
 } from "@/modules/project-settings";
 
 describe("projectSettingsModule", () => {
-  it("drops a workspace's cached settings when the watcher reports its metrists.json", () => {
+  it("drops a workspace's cached settings when the watcher reports its config", () => {
     const queryClient = new QueryClient();
     const core = createCore({
       // The module reads nothing from the platform at boot; it only has to exist.
@@ -26,7 +26,7 @@ describe("projectSettingsModule", () => {
 
     core.hooks.emit("files:changed", {
       workspacePath: "/ws",
-      paths: ["/ws/metrists.json"],
+      paths: ["/ws/.notefig/config.json"],
     });
     expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
     void core.dispose();

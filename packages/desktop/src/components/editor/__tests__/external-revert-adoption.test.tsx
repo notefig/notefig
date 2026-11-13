@@ -320,7 +320,7 @@ describe("external writes restoring app-written content (git revert)", () => {
           // No registered editor: the write reaches this one through the
           // watcher-driven adoption path, as an unregistered editor did.
           editors: createEditors(),
-        }).write(FILE, "agent wrote this");
+        }).write(FILE, "agent wrote this", { source: "agent" });
         watcherSim.appWrites.push({
           path: FILE,
           hash: calculateContentHash("agent wrote this"),

@@ -82,7 +82,7 @@ export interface TreeModelEntry {
  * "standard" is the monochrome tier (markdown/image/json/code/… plus a
  * "default" file glyph); icons inherit currentColor. Project-specific
  * overrides layer on top of the built-ins here, e.g.
- * `byFileName: { "metrists.json": { name: "my-symbol" } }`.
+ * `byFileName: { "config.json": { name: "my-symbol" } }`.
  */
 export const FILE_ICON_CONFIG: FileTreeIconConfig = {
   set: "standard",

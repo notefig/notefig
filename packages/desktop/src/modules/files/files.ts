@@ -90,17 +90,26 @@ declare module "@notefig/core" {
     "files:changed": { workspacePath: string; paths: string[] };
     /**
      * The app wrote, created, deleted or moved these files (absolute
-     * paths) — once per save, never per keystroke. The watcher suppresses
-     * the app's own echoes, so this is how a listener (sync) learns of
-     * them. `source` says whose write: the app's own (autosave, the tree),
-     * an agent's (`core.documents`), or sync applying remote content.
+     * paths) — once per save, never per keystroke, and with whose change
+     * it was (`ChangeSource`). The watcher suppresses the app's own
+     * echoes, so this is how a listener (sync) learns of them.
      */
-    "files:written": { paths: string[]; source: FileWriteSource };
+    "files:written": { paths: string[]; source: ChangeSource };
   }
 }
 
-/** Who wrote a file through the app. */
-export type FileWriteSource = "app" | "agent" | "sync";
+/**
+ * Whose change a file's new bytes are. Every change the app makes is
+ * announced once, on `files:written`, with its source, so a listener can
+ * tell its own changes from the others' (sync never commits back what it
+ * just brought in). Changes from outside the app (another editor, a
+ * terminal) have no source: the watcher reports them on `files:changed`.
+ *
+ * - `user`: the person, through the app (autosave, the tree, settings).
+ * - `agent`: an agent's tool call (`core.documents.write`).
+ * - `sync`: sync bringing in a remote's content.
+ */
+export type ChangeSource = "user" | "agent" | "sync";
 
 /** The query keys a workspace's collections live under — also what the
  *  fetching hooks watch. */
@@ -458,7 +467,7 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
   };
 
   const written = (paths: string[]) =>
-    hooks.emit("files:written", { paths, source: "app" });
+    hooks.emit("files:written", { paths, source: "user" });
 
   const changed = (paths: string[]) => {
     hooks.emit("files:changed", { workspacePath, paths });

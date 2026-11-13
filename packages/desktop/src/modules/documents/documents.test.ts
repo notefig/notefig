@@ -65,7 +65,7 @@ describe("documents.write", () => {
     });
     writeMock.mockResolvedValue({ succeeded: ["/ws-row/a.md"], failed: [] });
 
-    await documents.write("/ws-row/a.md", "hello\n");
+    await documents.write("/ws-row/a.md", "hello\n", { source: "agent" });
 
     expect(content.get("/ws-row/a.md")?.content).toBe("hello\n");
   });
@@ -78,7 +78,7 @@ describe("documents.write", () => {
       ] as never[],
     });
 
-    await expect(documents.write("/ws/a.md", "hello\n")).rejects.toBeInstanceOf(
+    await expect(documents.write("/ws/a.md", "hello\n", { source: "agent" })).rejects.toBeInstanceOf(
       FsError,
     );
   });
@@ -122,7 +122,7 @@ describe("documents.write adoption (open editor)", () => {
 
     // The write is self-write-tagged, so the watcher-driven adoption path
     // never fires for it — the write must adopt directly.
-    await documents.write(path, "# Doc\n\nNew body.\n");
+    await documents.write(path, "# Doc\n\nNew body.\n", { source: "agent" });
 
     expect(liveMarkdown()).toContain("New body.");
     expect(liveMarkdown()).not.toContain("Old body.");
@@ -134,7 +134,7 @@ describe("documents.write adoption (open editor)", () => {
 
     const fence =
       "```notefig:question\nid: q_1234\nstatus: pending\nprompt: OK?\n```\n";
-    await documents.write(path, `# Doc\n\n${fence}`);
+    await documents.write(path, `# Doc\n\n${fence}`, { source: "agent" });
 
     expect(liveMarkdown()).toContain("id: q_1234");
   });
@@ -143,7 +143,7 @@ describe("documents.write adoption (open editor)", () => {
     writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
     openEditor("# Current\n\nEdited before the rewrite.\n");
 
-    await documents.write(path, "# Rewritten\n\nNew content.\n");
+    await documents.write(path, "# Rewritten\n\nNew content.\n", { source: "agent" });
 
     expect(liveMarkdown()).toContain("New content.");
     expect(liveMarkdown()).not.toContain("Edited before the rewrite.");
@@ -160,7 +160,7 @@ describe("documents.write adoption (open editor)", () => {
     sync.writer = () => new Promise<void>(() => {});
     sync.pushUpdate(() => editor.getJSON());
 
-    await documents.write(path, "# Doc\n\nAgent overwrite.\n");
+    await documents.write(path, "# Doc\n\nAgent overwrite.\n", { source: "agent" });
 
     expect(writeMock).toHaveBeenCalledWith([
       { path, content: "# Doc\n\nAgent overwrite.\n" },
@@ -247,8 +247,8 @@ describe("in-flight write tracking", () => {
         return { succeeded: ["/ws/a.md"], failed: [] };
       });
 
-    const first = documents.write("/ws/a.md", "one");
-    const second = documents.write("/ws/a.md", "two");
+    const first = documents.write("/ws/a.md", "one", { source: "agent" });
+    const second = documents.write("/ws/a.md", "two", { source: "agent" });
     const settled = documents.whenWritesSettled("/ws/a.md").then(() =>
       order.push("settled"),
     );
@@ -263,7 +263,7 @@ describe("in-flight write tracking", () => {
   it("redirects a write that overlaps a move to where the file settled", async () => {
     writeMock.mockResolvedValue({ succeeded: ["/ws/b.md"], failed: [] });
     const move = documents.beginMove("/ws/a.md");
-    const write = documents.write("/ws/a.md", "moved content");
+    const write = documents.write("/ws/a.md", "moved content", { source: "agent" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(writeMock).not.toHaveBeenCalled();
 
@@ -278,7 +278,7 @@ describe("in-flight write tracking", () => {
     writeMock.mockResolvedValue({ succeeded: ["/ws/a.md"], failed: [] });
     const move = documents.beginMove("/ws/a.md");
     expect(() => documents.beginMove("/ws/a.md")).toThrow(/already in progress/);
-    const write = documents.write("/ws/a.md", "kept");
+    const write = documents.write("/ws/a.md", "kept", { source: "agent" });
     move.settle("/ws/a.md");
     await write;
     expect(writeMock).toHaveBeenCalledWith([{ path: "/ws/a.md", content: "kept" }]);

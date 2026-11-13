@@ -2,11 +2,14 @@
  * Sync — `core.workspace(ws).sync`: a workspace kept in step with its
  * checked-out branch on the branch's remote (MET-266).
  *
- * Sync is a property of the project: `metrists.json`'s `sync.enabled`,
- * committed, so everyone who clones a synced project is asked to sync it
- * too. Each device answers for itself in `.notefig/sync.json` (never
- * committed): `on`, or not (a local copy). Turning it off for everyone
- * commits `enabled: false`; every device stops when that reaches it.
+ * Sync is a property of the project: `.notefig/config.json`'s
+ * `sync.enabled`, committed, so everyone who clones a synced project is
+ * asked to sync it too. Each clone answers for itself in
+ * `.git/notefig-sync.json`: `on`, or not (a local copy). It's inside the
+ * gitdir because nothing there travels with a clone or a push, so a
+ * repository can't answer for the person who opens it. Turning it off for
+ * everyone commits `enabled: false`; every device stops when that reaches
+ * it.
  *
  * A workspace whose project doesn't sync costs two small file reads at
  * open: no git, no worker, no engine. The engine (`sync-engine.ts`) loads
@@ -21,7 +24,7 @@ import { filesModule, type WorkspaceFiles } from "@/modules/files";
 import { sshProblemOf } from "@/modules/git-remote";
 import { gitWorkerModule, type GitWorker } from "@/modules/git-worker";
 import { projectSettingsModule, type ProjectSettingsApi } from "@/modules/project-settings";
-import { APP_DIR_NAME } from "@/utils/app-dir";
+import { USER_REPO_EXCLUDE_LINES } from "@/utils/app-dir";
 import { setExcludeBlock } from "@/utils/git-exclude";
 import { path as pathutil } from "@/utils/path";
 import {
@@ -87,7 +90,7 @@ export interface WorkspaceSyncDeps {
   engine?: { setTimer?: (run: () => void, ms: number) => () => void; onBlur?: (l: () => void) => () => void };
 }
 
-/** `.notefig/sync.json`: this device's answer. */
+/** `.git/notefig-sync.json`: this clone's answer. */
 interface SyncDevice {
   deviceId: string;
   on: boolean;
@@ -127,7 +130,7 @@ function accessMessage(error: unknown, remote: SyncRemote): string {
 export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
   const root = pathutil.normalize(deps.workspacePath);
   const gitDir = pathutil.join(root, ".git");
-  const devicePath = pathutil.join(root, APP_DIR_NAME, "sync.json");
+  const devicePath = pathutil.join(gitDir, "notefig-sync.json");
   const listeners = new Set<() => void>();
   let state = INITIAL_SYNC_STATE;
   let device: SyncDevice | null = null;
@@ -163,17 +166,21 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     else await deps.fs.writeFiles([{ path: devicePath, content: `${JSON.stringify(next, null, 2)}\n` }]);
   };
 
-  /** The checked-out branch and its HTTPS remote, or why there is none. */
+  /** The checked-out branch and the remote branch it pulls from and
+   *  pushes to (git's own upstream rules), or why there is none. Sync
+   *  pulls and pushes one branch, so a branch whose pulls and pushes go to
+   *  different places is left to git. */
   const readRemote = async (): Promise<SyncRemote | string> => {
     try {
       const git = service();
-      const branch = await git.currentBranch();
-      if (!branch) return "Check out a branch: sync follows the checked-out branch.";
-      const name = (await git.getConfig(`branch.${branch}.remote`)) ?? "origin";
-      const url = await git.getConfig(`remote.${name}.url`);
-      if (!url) return `This repository has no remote to sync ${branch} with.`;
-      if (!/^https:\/\/[^/@\s]+\/\S+/.test(url) && !isSshRemote(url)) return "Sync works with HTTPS and SSH remotes.";
-      return { url, branch };
+      const [pull, push] = await Promise.all([git.remoteTarget("pull"), git.remoteTarget("push")]);
+      if ("problem" in pull) return pull.problem;
+      if ("problem" in push) return push.problem;
+      if (pull.url !== push.url || pull.remoteRef !== push.remoteRef) {
+        return `${push.branch} pulls from one branch and pushes to another. Sync needs them to be the same branch.`;
+      }
+      if (!/^https:\/\/[^/@\s]+\/\S+/.test(push.url) && !isSshRemote(push.url)) return "Sync works with HTTPS and SSH remotes.";
+      return { url: push.url, branch: push.branch };
     } catch {
       return "Couldn't read this repository.";
     }
@@ -206,6 +213,9 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       recordSynced: async (at) => {
         if (device?.on) await writeDevice({ ...device, lastSyncedAt: at });
       },
+      // The engine syncs the branch it started on; the new one is read
+      // again, with its own remote.
+      branchChanged: () => void evaluate(),
       ...deps.engine,
     });
     engine = started;
@@ -236,8 +246,9 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     if (next.setup !== "on" || !sameRemote(next.remote, state.remote)) await stopEngine();
     dispatch(next);
     if (next.setup !== "on" || !next.remote) return;
-    // `.notefig/` and the project's excludes stay out of every commit.
-    await setExcludeBlock(deps.fs, gitDir, "notefig sync", [`${APP_DIR_NAME}/`, ...BUILT_IN_EXCLUDES, ...excludes]);
+    // The app dir (bar the config) and the project's excludes stay out of
+    // every commit.
+    await setExcludeBlock(deps.fs, gitDir, "notefig sync", [...USER_REPO_EXCLUDE_LINES, ...BUILT_IN_EXCLUDES, ...excludes]);
     await startEngine(next.remote);
   };
 

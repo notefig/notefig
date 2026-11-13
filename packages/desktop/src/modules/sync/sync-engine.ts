@@ -61,8 +61,11 @@ export interface SyncEngineDeps {
   fs: Pick<FileSystemSurface, "readDirectory" | "getMetadata" | "writeBinaryFiles" | "deleteFiles">;
   state(): SyncState;
   dispatch(event: SyncEvent): void;
-  /** Keep the last successful sync (sync.json). */
+  /** Keep the last successful sync (this device's file). */
   recordSynced(at: number): Promise<void>;
+  /** Another branch was checked out (a terminal, another app): this
+   *  engine syncs `branch` only, so it hands back to be restarted. */
+  branchChanged(): void;
   setTimer?: (run: () => void, ms: number) => () => void;
   onBlur?: (listener: () => void) => () => void;
   now?: () => number;
@@ -93,8 +96,8 @@ const SCAN_SLACK_MS = 2_000;
 const COMMIT_SCAN_SLACK_MS = 120_000;
 const METADATA_BATCH = 500;
 const SUMMARY_DEPTH = 200;
-/** The app's folder and git's never sync. */
-const NEVER = /^(\.notefig|\.git)(\/|$)/;
+/** git's folder and the app's never sync, but for the project's config. */
+const NEVER = /^(\.git(\/|$)|\.notefig(\/(?!config\.json$)|$))/;
 
 /** Raised to end a cycle whose stop was already dispatched. */
 class CycleStop extends Error {}
@@ -115,6 +118,9 @@ export function faultOf(error: unknown, url: string): SyncEvent {
     return { type: "failed", fault: "auth-error", detail: "The repository was not found, or the credential can't see it." };
   }
   if (code === "Throttled") return { type: "failed", fault: "throttled", detail };
+  // A change only a terminal can take in (a mode, a file swapped with a
+  // folder): the user's to sort out.
+  if (code === "PullRefused") return { type: "diverged", detail };
   return { type: "failed", fault: "offline", detail };
 }
 
@@ -158,6 +164,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   let commitDue = true;
   /** The remote tip already taken in (pulled or pushed). */
   let integrated: string | null = null;
+  /** A pull that moved the branch but not every file yet: finished before
+   *  anything else, so the stale files are never committed back. */
+  let unfinished: { from: string; to: string } | null = null;
   let lastSynced = deps.lastSyncedAt;
   let lastRecorded = lastSynced ?? 0;
   let keepLocalOnce = false;
@@ -222,7 +231,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   /** Stage `paths` by hashing them: status trusts the index's stat cache,
    *  which misses a same-size save within the same second. One `add` for
    *  all of them, since each call rewrites the whole index. */
-  const stageByHash = async (paths: string[]) => {
+  const stageByHash = async (written: string[]) => {
+    // A path the excludes name (`.claude/` committed before sync) stays as
+    // it is on the remote, written or deleted here.
+    const paths: string[] = [];
+    for (const filepath of written) if (!(await git.isIgnored(filepath))) paths.push(filepath);
     const gone = new Set(
       await inBatches(paths, async (batch) =>
         (await deps.fs.getMetadata(batch.map(absolute))).failed
@@ -268,32 +281,41 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     return paths.filter((path) => edited.has(path));
   };
 
-  /** Bring index and worktree from `from` to `to` for the files that
-   *  differ; the bytes are written through the documents write path, which
-   *  holds back a file with unsaved edits. */
-  const moveWorktree = async (from: string, to: string) => {
-    const held: string[] = [];
-    const created: string[] = [];
-    const deleted: string[] = [];
-    for (const filepath of await git.changedFiles(from, to)) {
-      if (NEVER.test(filepath)) continue;
-      const bytes = await git.readFile({ ref: to, filepath });
-      await git.unstage({ filepath, ref: to });
-      const path = absolute(filepath);
-      if (bytes === null) {
-        await deps.fs.deleteFiles([path]);
-        deleted.push(path);
-        continue;
-      }
-      const text = bytes.includes(0) ? null : decodeText(bytes);
-      if (text === null) {
-        await deps.fs.writeBinaryFiles([{ path, data: bytes }]);
-      } else if ((await deps.documents.write(path, text, { source: "sync" })) === "held") {
-        held.push(pathutil.basename(path));
-        continue;
-      }
-      created.push(path);
+  /** Write one file as it is at `to`; `held` when its editor keeps unsaved
+   *  edits. Throws on a write the fs refused. */
+  const applyFile = async (filepath: string, to: string): Promise<"written" | "deleted" | "held"> => {
+    const bytes = await git.readFile({ ref: to, filepath });
+    const path = absolute(filepath);
+    if (bytes === null) {
+      const { failed } = await deps.fs.deleteFiles([path]);
+      const refused = failed.find((failure) => failure.type !== "not_found");
+      if (refused) throw new Error(`Couldn't delete ${filepath}: ${refused.message}`);
+      return "deleted";
     }
+    const text = bytes.includes(0) ? null : decodeText(bytes);
+    if (text !== null) return (await deps.documents.write(path, text, { source: "sync" })) === "held" ? "held" : "written";
+    const { failed } = await deps.fs.writeBinaryFiles([{ path, data: bytes }]);
+    if (failed[0]) throw new Error(`Couldn't write ${filepath}: ${failed[0].message}`);
+    return "written";
+  };
+
+  /** Bring index and worktree from `from` to `to` for the files that
+   *  differ; text is written through the documents write path, which holds
+   *  back a file with unsaved edits. */
+  const moveWorktree = async (from: string, to: string) => {
+    const changes = { created: [] as string[], deleted: [] as string[], held: [] as string[] };
+    for (const filepath of await git.changedFiles(from, to, { toApply: true })) {
+      if (NEVER.test(filepath)) continue;
+      const outcome = await applyFile(filepath, to);
+      changes[outcome === "written" ? "created" : outcome].push(absolute(filepath));
+      // Only once the file is on disk: a failed write leaves the index at
+      // the old version, and the cycle finishes the move (`unfinished`)
+      // before it commits anything. A held file's index takes the remote's
+      // version: the unsaved edits then read as a change on top of it.
+      await git.unstage({ filepath, ref: to });
+    }
+    unfinished = null;
+    const { created, deleted, held } = changes;
     if (created.length > 0 || deleted.length > 0) {
       await deps.files.recordDiskChanges({ created, deleted });
       deps.hooks.emit("sync:remote-applied", { workspacePath: root, commit: to, paths: [...created, ...deleted] });
@@ -303,7 +325,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       // editor. Without a merge (solo), that is a stop.
       stop({
         type: "diverged",
-        detail: `Unsaved edits kept in ${held.join(", ")} while the remote changed them. Sync stopped so neither side is lost.`,
+        detail: `Unsaved edits kept in ${held.map((path) => pathutil.basename(path)).join(", ")} while the remote changed them. Sync stopped so neither side is lost.`,
       });
     }
   };
@@ -324,15 +346,18 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       integrated = theirs;
       return;
     }
-    const remoteFiles = await git.changedFiles(base!, theirs);
+    // Before the branch moves: what the file API can't write stops here.
+    const remoteFiles = await git.changedFiles(base!, theirs, { toApply: true });
     const edited = await dirtyAmong(remoteFiles);
     if (edited.length > 0) {
       stop({ type: "diverged", detail: `Changed here and on the remote: ${edited.join(", ")}. Sync stopped so neither side is lost.` });
     }
     if (base === ours) {
       await git.merge({ ours: branchRef, theirs, fastForwardOnly: true });
+      unfinished = { from: ours, to: theirs };
+      await moveWorktree(ours, theirs);
       integrated = theirs;
-      return moveWorktree(ours, theirs);
+      return;
     }
     // Replay: the local commits since `base` as one commit on `theirs`.
     const localFiles = await git.changedFiles(base!, ours);
@@ -345,8 +370,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       if (!local.has(filepath)) await git.unstage({ filepath, ref: theirs });
     }
     const replayed = await git.commit({ message: commitMessage(author.name, localFiles), author, parent: [theirs] });
-    integrated = theirs;
+    unfinished = { from: ours, to: replayed };
     await moveWorktree(ours, replayed);
+    integrated = theirs;
   };
 
   // --- Offline return -------------------------------------------------------
@@ -417,6 +443,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const cycle = async () => {
     if (!isRunning(deps.state())) return;
     try {
+      if ((await git.currentBranch()) !== branch) {
+        stopped = true;
+        deps.branchChanged();
+        return;
+      }
+      if (unfinished) await moveWorktree(unfinished.from, unfinished.to);
       if (commitDue) await commitStep();
       let refused = await reconcile();
       for (let retry = 0; refused && retry < MAX_PUSH_RETRIES && !stopped; retry++) {
@@ -515,14 +547,18 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     },
     async stop() {
       cancelIdle?.();
-      if (pending() && isRunning(deps.state())) {
-        await Promise.race([syncNow(), new Promise<void>((done) => setTimer(done, CLOSE_SYNC_MS))]);
-      }
+      // One deadline for the last push and the cycle in flight: closing
+      // never waits on a slow request (an HTTPS one can take 120 s). The
+      // cycle left running ends on its own, and starts nothing after.
+      let cancelDeadline = () => {};
+      const deadline = new Promise<void>((done) => (cancelDeadline = setTimer(done, CLOSE_SYNC_MS)));
+      const last = pending() && isRunning(deps.state()) ? syncNow() : running;
+      await Promise.race([last?.catch(() => {}), deadline]);
+      cancelDeadline();
       stopped = true;
       cancelIdle?.();
       cancelPoll?.();
       for (const cleanup of cleanups.splice(0)) cleanup();
-      await running?.catch(() => {});
     },
   };
 }

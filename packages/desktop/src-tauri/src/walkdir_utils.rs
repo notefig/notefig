@@ -25,22 +25,24 @@ impl Default for WalkOptions {
 }
 
 /// The app's own directory is deliberately NOT hidden (MET-135): it holds
-/// user-visible scratchpads and appears in the tree. Everything else it
+/// user-visible scratchpads and the project's config, and appears in the
+/// tree. Everything else it
 /// contains — the history gitdir, agent state, whatever comes next — is
 /// hidden by position rather than by name, so app-internal files never need
 /// a dot prefix to stay out of the tree, the walkers and the watcher.
-/// Mirrors the TS constants in entities/scratchpads.ts.
+/// Mirrors the TS constants in utils/app-dir.ts.
 pub const APP_DIR_NAME: &str = ".notefig";
 
-/// The one child of the app dir that is visible; see `APP_DIR_NAME`.
-pub const APP_VISIBLE_CHILD_NAME: &str = "scratchpads";
+/// The children of the app dir that are visible: the scratchpads folder and
+/// the project's config; see `APP_DIR_NAME`.
+pub const APP_VISIBLE_CHILD_NAMES: [&str; 2] = ["scratchpads", "config.json"];
 
 /// Whether the component `name`, sitting directly inside the component
 /// `parent`, counts as hidden: dot-named (longer than "."), or any child of
-/// the app dir other than the scratchpads folder.
+/// the app dir other than its visible ones.
 pub fn is_hidden_child(parent: Option<&str>, name: &str) -> bool {
     if parent == Some(APP_DIR_NAME) {
-        return name != APP_VISIBLE_CHILD_NAME;
+        return !APP_VISIBLE_CHILD_NAMES.contains(&name);
     }
     name.starts_with('.') && name.len() > 1 && name != APP_DIR_NAME
 }
@@ -219,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn test_app_dir_exposes_only_scratchpads() {
+    fn test_app_dir_exposes_only_scratchpads_and_the_config() {
         let app = format!("/workspace/{}", APP_DIR_NAME);
         assert!(!is_hidden_path(Path::new(&app)));
         assert!(!is_hidden_path(Path::new(&format!("{}/scratchpads", app))));
@@ -227,6 +229,7 @@ mod tests {
             "{}/scratchpads/sub/untitled.md",
             app
         ))));
+        assert!(!is_hidden_path(Path::new(&format!("{}/config.json", app))));
         // Every other child is hidden, dot-named or not.
         assert!(is_hidden_path(Path::new(&format!("{}/.git/HEAD", app))));
         assert!(is_hidden_path(Path::new(&format!("{}/tasks.json", app))));

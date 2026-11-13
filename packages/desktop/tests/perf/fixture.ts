@@ -198,16 +198,16 @@ export async function soloSyncWorkspace(): Promise<string> {
   await fs.rm(root, { recursive: true, force: true });
   await fs.cp(source, root, { recursive: true });
   await resetLargeDocument(root);
-  await fs.writeFile(path.join(root, "metrists.json"), JSON.stringify({ sync: { enabled: true } }));
+  await fs.mkdir(path.join(root, ".notefig"), { recursive: true });
+  await fs.writeFile(path.join(root, ".notefig", "config.json"), JSON.stringify({ sync: { enabled: true } }));
   await git(root, "init", "-q", "-b", "main");
   await git(root, "remote", "add", "origin", "https://127.0.0.1:9/perf-solo-sync.git");
   await fs.mkdir(path.join(root, ".git", "info"), { recursive: true });
-  await fs.writeFile(path.join(root, ".git", "info", "exclude"), ".notefig/\n");
+  await fs.writeFile(path.join(root, ".git", "info", "exclude"), ".notefig/*\n!.notefig/config.json\n");
   await git(root, "add", "-A");
   await git(root, "commit", "-q", "-m", "perf fixture");
-  await fs.mkdir(path.join(root, ".notefig"), { recursive: true });
   await fs.writeFile(
-    path.join(root, ".notefig", "sync.json"),
+    path.join(root, ".git", "notefig-sync.json"),
     JSON.stringify({ deviceId: "perf", on: true, lastSyncedAt: Date.now() }),
   );
   return root;

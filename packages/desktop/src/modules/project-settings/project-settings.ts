@@ -1,5 +1,7 @@
 /**
- * Per-project settings stored in a `metrists.json` file at the workspace root.
+ * Per-project settings stored in `.notefig/config.json`: the one file in
+ * the app dir that belongs to the project, so it is committed with it
+ * (`USER_REPO_EXCLUDE_LINES`) and shown in the tree.
  *
  * The file is the source of truth (tier 1 of the data-layer architecture):
  * it is read through the platform's fs (`core.projectSettings`), cached in a
@@ -13,9 +15,8 @@ import type { Hooks } from "@notefig/core";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { defineModule } from "@notefig/core";
 import { path as pathutil } from "@/utils/path";
+import { PROJECT_CONFIG_REL_PATH } from "@/utils/app-dir";
 import { platformModule, queryClientModule } from "@/core/services";
-
-export const PROJECT_SETTINGS_FILENAME = "metrists.json";
 
 /** The typed, fully-resolved settings consumers work with. */
 export interface ProjectSettingsValues {
@@ -27,7 +28,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettingsValues = {
 };
 
 /**
- * Raw on-disk shape of metrists.json. Sections are partial because the file
+ * Raw on-disk shape of the config. Sections are partial because the file
  * may be absent, hand-edited, or written by other tools; unknown keys are
  * preserved on write but not typed here.
  */
@@ -58,10 +59,17 @@ export function projectSettingsQueryKey(workspacePath: string) {
 }
 
 export function projectSettingsPath(workspacePath: string): string {
-  return pathutil.join(workspacePath, PROJECT_SETTINGS_FILENAME);
+  return pathutil.join(workspacePath, PROJECT_CONFIG_REL_PATH);
 }
 
-/** `core.projectSettings`: each workspace's metrists.json. */
+/** The workspace whose config `path` is, if it is one. */
+function workspaceOfConfig(path: string): string | null {
+  const suffix = `/${PROJECT_CONFIG_REL_PATH}`;
+  const normalized = pathutil.normalize(path);
+  return normalized.endsWith(suffix) ? normalized.slice(0, -suffix.length) || "/" : null;
+}
+
+/** `core.projectSettings`: each workspace's config. */
 export interface ProjectSettingsApi {
   /** Read and parse the file. A missing file or invalid JSON yields `{}` —
    *  never throws. */
@@ -130,7 +138,7 @@ export function createProjectSettings({
 
       hooks?.emit("files:written", {
         paths: [projectSettingsPath(workspacePath)],
-        source: "app",
+        source: "user",
       });
       await queryClient.invalidateQueries({
         queryKey: projectSettingsQueryKey(workspacePath),
@@ -144,14 +152,14 @@ declare module "@notefig/core" {
     projectSettings: ProjectSettingsApi;
   }
   interface CoreHookMap {
-    /** A workspace's metrists.json changed: edited outside, written by the
+    /** A workspace's config changed: edited outside, written by the
      *  app, or brought in by sync. */
     "project-settings:changed": { workspacePath: string };
   }
 }
 
 /** Reads and writes go through the platform's fs; any change to a
- *  workspace's metrists.json (the watcher's, or a write through the app)
+ *  workspace's config (the watcher's, or a write through the app)
  *  drops the cached settings and is announced. */
 export const projectSettingsModule = defineModule({
   name: "projectSettings",
@@ -175,8 +183,8 @@ export const projectSettingsModule = defineModule({
     });
     const offWritten = ctx.hooks.on("files:written", ({ paths }) => {
       for (const path of paths) {
-        if (pathutil.basename(path) !== PROJECT_SETTINGS_FILENAME) continue;
-        changed(pathutil.dirname(path));
+        const workspacePath = workspaceOfConfig(path);
+        if (workspacePath) changed(workspacePath);
       }
     });
     return () => {

@@ -16,7 +16,7 @@ import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import type { GitWorker } from "@/modules/git-worker";
 import { path as pathutil, workspaceKey } from "@/utils/path";
 import { ensureExcludeLines, type ExcludeFs } from "@/utils/git-exclude";
-import { APP_DIR_NAME, SCRATCHPADS_REL_PATH } from "@/utils/app-dir";
+import { APP_DIR_NAME, PROJECT_CONFIG_REL_PATH, SCRATCHPADS_REL_PATH } from "@/utils/app-dir";
 import { gitWorkerModule } from "@/modules/git-worker";
 import { excludeAppDir } from "@/modules/app-dir-exclude";
 import { platformModule } from "@/core/services";
@@ -38,6 +38,7 @@ export function historyGitDir(workspacePath: string): string {
 const HISTORY_EXCLUDE_LINES = [
   `${APP_DIR_NAME}/*`,
   `!${SCRATCHPADS_REL_PATH}`,
+  `!${PROJECT_CONFIG_REL_PATH}`,
   ".git/",
 ];
 

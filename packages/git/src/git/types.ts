@@ -240,8 +240,11 @@ export interface GitService {
   /** A file's bytes as of a ref/commit; null when it isn't there. */
   readFile(input: GitReadTextFileInput): Promise<Uint8Array | null>;
   /** The file paths whose content differs between two commits (oids or
-   *  refs): added, modified or deleted, `/`-separated, sorted. */
-  changedFiles(from: string, to: string): Promise<string[]>;
+   *  refs): added, modified, deleted or with a new mode, `/`-separated,
+   *  sorted. `toApply` is for writing the change through a file API: a
+   *  file swapped with a folder, or a mode it can't set (executable,
+   *  symlink), is refused (`PullRefused`) as `pullBranch` refuses it. */
+  changedFiles(from: string, to: string, options?: { toApply?: boolean }): Promise<string[]>;
   /** The best common ancestor of two commits (oids or refs); null when
    *  they share no history. */
   mergeBase(a: string, b: string): Promise<string | null>;
