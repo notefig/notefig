@@ -485,6 +485,17 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
   const restat = async (path: string) =>
     (await fs.getMetadata([path])).succeeded[0];
 
+  /** Take a file's time and size from disk once a write has landed. */
+  const refreshMetadata = async (filePath: string, contentHash?: string) => {
+    const metadata = await restat(filePath);
+    if (!metadata || !collections.metadata.get(filePath)) return;
+    collections.metadata.update(filePath, (draft) => {
+      draft.modified = metadata.modifiedAt;
+      draft.size = metadata.size;
+      if (contentHash !== undefined) draft.contentHash = contentHash;
+    });
+  };
+
   const write = async (
     filePath: string,
     content: string,
@@ -505,14 +516,7 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
     // date-sorted views flap between old and new positions.
     await tx.isPersisted.promise;
 
-    const metadata = await restat(filePath);
-    if (metadata && collections.metadata.get(filePath)) {
-      collections.metadata.update(filePath, (draft) => {
-        draft.modified = metadata.modifiedAt;
-        draft.size = metadata.size;
-        draft.contentHash = contentHash;
-      });
-    }
+    await refreshMetadata(filePath, contentHash);
 
     // App self-writes are suppressed by the fs watcher, so derived state
     // (search) must be invalidated here, and listeners told.
@@ -544,13 +548,7 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
     else written([filePath]);
 
     // Refresh metadata to get accurate timestamps
-    const metadata = await restat(filePath);
-    if (metadata && collections.metadata.get(filePath)) {
-      collections.metadata.update(filePath, (draft) => {
-        draft.modified = metadata.modifiedAt;
-        draft.size = metadata.size;
-      });
-    }
+    await refreshMetadata(filePath);
   };
 
   const createDirectory = async (dirPath: string) => {
