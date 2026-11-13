@@ -1,7 +1,8 @@
 import git from "isomorphic-git";
 import type { FsClient, MergeResult } from "isomorphic-git";
 
-import { isSshRemote, sshBridgeUrl, toIsomorphicHttp } from "./httpClient";
+import { sshBridgeUrl, toIsomorphicHttp } from "./httpClient";
+import { isSshRemote } from "./remoteUrl";
 import { createIsomorphicGitFs } from "./isomorphicGitFs";
 import {
   GitError,

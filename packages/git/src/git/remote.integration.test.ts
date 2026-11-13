@@ -12,7 +12,8 @@ import { dirname, join } from "node:path";
 
 import isoGit from "isomorphic-git";
 
-import { isSshRemote, sshBridgeUrl, withBasicAuth } from "./httpClient";
+import { sshBridgeUrl, withBasicAuth } from "./httpClient";
+import { isSshRemote } from "./remoteUrl";
 import { IsomorphicGitService } from "./isomorphicGitService";
 import {
   GIT_AUTHOR,

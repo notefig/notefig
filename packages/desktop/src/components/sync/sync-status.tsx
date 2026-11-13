@@ -32,7 +32,7 @@ import { Input } from "@notefig/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@notefig/ui/popover";
 import { cn } from "@notefig/ui/utils";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
-import { isSshRemote } from "@notefig/git";
+import { isSshRemote, remoteLabel } from "@notefig/git";
 import type { CredentialStatus } from "@/adapters/platform-adapter.interface";
 import type { SyncState, WorkspaceSync } from "@/modules/sync";
 import { useSyncState } from "@/modules/sync/react";
@@ -178,7 +178,7 @@ export function SyncPanel({ sync, state }: { sync: WorkspaceSync; state: SyncSta
           {(remote || state.setup !== "unavailable") && (
             <div className="truncate text-[0.6875rem] text-muted-foreground">
               {remote ? (
-                `${remote.url.replace(/^https:\/\//, "").replace(/\.git$/, "")} · ${remote.branch}`
+                `${remoteLabel(remote.url)} · ${remote.branch}`
               ) : (
                 <Loader2 className="my-0.5 size-3 animate-spin" />
               )}

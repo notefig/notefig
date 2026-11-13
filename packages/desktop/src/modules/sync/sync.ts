@@ -16,7 +16,7 @@
  * when sync starts, and its git work runs in `core.gitWorker`.
  */
 import { defineModule, type Hooks } from "@notefig/core";
-import { GitError, isSshRemote, type GitService } from "@notefig/git";
+import { GitError, isHttpsRemote, isSshRemote, remoteHost, remoteLabel, type GitService } from "@notefig/git";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { platformModule } from "@/core/services";
 import { documentsModule, type DocumentsApi } from "@/modules/documents";
@@ -116,14 +116,14 @@ const FALLBACK_AUTHOR = { name: "Notefig", email: "notefig@users.noreply.notefig
 
 /** A sentence for an access check that failed. */
 function accessMessage(error: unknown, remote: SyncRemote): string {
-  const where = remote.url.replace(/^https:\/\//, "").replace(/\.git$/, "");
+  const where = remoteLabel(remote.url);
   const code = error instanceof GitError ? error.code : null;
   const sshProblem = code && isSshRemote(remote.url) ? sshProblemOf(code, remote.url) : undefined;
   if (sshProblem) return sshProblem;
   if (code === "AuthRequired") return `No credentials can push to ${where}. Paste a token with write access.`;
   if (code === "AuthFailed") return `These credentials can't push to ${where}. Use a token with write access to its contents.`;
   if (code === "RepoNotFound") return `${where} wasn't found, or these credentials can't see it.`;
-  if (code === "Network") return `Couldn't reach ${new URL(remote.url).host}. Check the connection and try again.`;
+  if (code === "Network") return `Couldn't reach ${remoteHost(remote.url)}. Check the connection and try again.`;
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -179,7 +179,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       if (pull.url !== push.url || pull.remoteRef !== push.remoteRef) {
         return `${push.branch} pulls from one branch and pushes to another. Sync needs them to be the same branch.`;
       }
-      if (!/^https:\/\/[^/@\s]+\/\S+/.test(push.url) && !isSshRemote(push.url)) return "Sync works with HTTPS and SSH remotes.";
+      if (!isHttpsRemote(push.url) && !isSshRemote(push.url)) return "Sync works with HTTPS and SSH remotes.";
       return { url: push.url, branch: push.branch };
     } catch {
       return "Couldn't read this repository.";

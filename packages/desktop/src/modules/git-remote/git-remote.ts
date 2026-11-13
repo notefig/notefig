@@ -6,7 +6,7 @@
  * does: through the file watcher.
  */
 import { defineModule } from "@notefig/core";
-import { GitError, isSshRemote, type GitBranchTarget, type GitDirection, type GitRemote, type GitService } from "@notefig/git";
+import { GitError, isHttpsRemote, isSshRemote, remoteHost, remoteLabel, sshDestination, type GitBranchTarget, type GitDirection, type GitRemote, type GitService } from "@notefig/git";
 import { gitWorkerModule, type GitWorker } from "@/modules/git-worker";
 import { path as pathutil } from "@/utils/path";
 
@@ -26,19 +26,10 @@ export interface WorkspaceGitRemote {
   dispose(): void;
 }
 
-/** What `ssh` is given to reach the remote: `ssh://[user@]host[:port]`, or `[user@]host` with an IPv6 host's brackets dropped. */
-function sshDestinationOf(url: string): string {
-  if (url.startsWith("ssh://")) return /^ssh:\/\/[^/]+/.exec(url)?.[0] ?? url;
-  const scp = /^(?:([^@/:\s]+)@)?(?:\[([^\]\s]+)\]|([^:]+)):/.exec(url);
-  if (!scp) return url;
-  const host = scp[2] ?? scp[3];
-  return scp[1] ? `${scp[1]}@${host}` : host;
-}
-
 /** What to do about a failed SSH session. Nothing here is about tokens. */
 export function sshProblemOf(code: string, url: string): string | undefined {
-  const where = url.replace(/^ssh:\/\//, "").replace(/\.git$/, "");
-  const destination = sshDestinationOf(url);
+  const where = remoteLabel(url);
+  const destination = sshDestination(url) ?? url;
   const problems: Record<string, string> = {
     AuthRequired: `SSH couldn't sign in to ${destination}. Add your key with ssh-add, then try again.`,
     AuthFailed: `Your SSH key can't write to ${where}.`,
@@ -53,12 +44,12 @@ export function sshProblemOf(code: string, url: string): string | undefined {
 function problemOf(error: unknown, url: string): string {
   const sshProblem = error instanceof GitError && isSshRemote(url) ? sshProblemOf(error.code, url) : undefined;
   if (sshProblem) return sshProblem;
-  const where = url.replace(/^https:\/\//, "").replace(/\.git$/, "");
+  const where = remoteLabel(url);
   const code = error instanceof GitError ? error.code : "";
   if (code === "AuthRequired") return `No credentials work for ${where}. Run "Git: Use a Token for This Remote".`;
   if (code === "AuthFailed") return `These credentials can't access ${where}. It needs write access to its contents.`;
   if (code === "RepoNotFound") return `${where} wasn't found, or these credentials can't see it.`;
-  if (code === "Network") return `Couldn't reach ${new URL(url).host}. Check the connection and try again.`;
+  if (code === "Network") return `Couldn't reach ${remoteHost(url)}. Check the connection and try again.`;
   if (code === "Throttled") return "The host is rate limiting requests. Try again in a minute.";
   if (code === "NotFastForward" || code === "RefConflict") return "The remote has commits this branch doesn't. Pull them first, then push.";
   return error instanceof Error ? error.message : String(error);
@@ -79,7 +70,7 @@ export function createWorkspaceGitRemote(deps: { workspacePath: string; gitWorke
 
   const target = async (direction: GitDirection): Promise<GitBranchTarget | { problem: string }> => {
     const found = await service().remoteTarget(direction);
-    if ("url" in found && !/^https:\/\/[^/@\s]+\/\S+/.test(found.url) && !isSshRemote(found.url)) {
+    if ("url" in found && !isHttpsRemote(found.url) && !isSshRemote(found.url)) {
       return { problem: "Only HTTPS and SSH remotes are supported." };
     }
     return found;
