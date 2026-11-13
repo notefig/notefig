@@ -17,7 +17,9 @@ async function collect(
  * desktop port recognises this host and serves the request over ssh.
  */
 export function sshBridgeUrl(url: string): string {
-  return `https://ssh.notefig.invalid/${encodeURIComponent(url)}`;
+  // git's older spellings of `ssh://`, which the desktop transport reads as one.
+  const canonical = url.replace(/^(?:git\+ssh|ssh\+git):\/\//i, "ssh://");
+  return `https://ssh.notefig.invalid/${encodeURIComponent(canonical)}`;
 }
 
 /**

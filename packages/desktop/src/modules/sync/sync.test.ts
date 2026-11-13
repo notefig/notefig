@@ -115,6 +115,8 @@ describe("sync: a project's setting, each device's answer", () => {
   it("turns on for everyone: checks push access, commits the setting with local work", async () => {
     const { sync, remote, ws } = await setup("plain");
     await fsp.writeFile(join(ws, "local.md"), "Before sync was on.\n");
+    // What older builds wrote: it would keep the new config out of the commit.
+    await fsp.appendFile(join(ws, ".git", "info", "exclude"), ".notefig/\n");
 
     await sync.turnOn();
     await sync.syncNow();
@@ -125,6 +127,7 @@ describe("sync: a project's setting, each device's answer", () => {
     expect(await runGit(remote.bare, ["show", "main:local.md"])).toBe("Before sync was on.");
     expect(JSON.parse(await read(join(ws, ".git", "notefig-sync.json")))).toMatchObject({ on: true });
     expect(await read(join(ws, ".git", "info", "exclude"))).toContain(".claude/");
+    expect((await read(join(ws, ".git", "info", "exclude"))).split("\n")).not.toContain(".notefig/");
   });
 
   it("refuses to turn on without push access, saying what to fix", async () => {
@@ -219,6 +222,32 @@ describe("sync: solo", () => {
     expect(await read(join(ws, "image.bin"))).toBe("PNG\u0000data");
     expect(await remote.tip()).toBe(pushed);
     expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
+  });
+
+  it("retries a half-done pull without overwriting what was saved since", async () => {
+    const { sync, remote, ws, fs, core } = await setup();
+    await remote.pushFromPlainGit(await remote.clone("plain"), { "a.md": "Remote a.\n", "m.bin": "PNG\u0000", "z.md": "Remote z.\n" }, "three");
+    const blocked = join(ws, "m.bin");
+    const realWrite = fs.writeBinaryFiles.bind(fs);
+    const failing = vi.spyOn(fs, "writeBinaryFiles").mockImplementation(async (entries) =>
+      entries.some((entry) => entry.path === blocked)
+        ? { succeeded: [], failed: [{ path: blocked, type: "permission_denied", message: "read-only" }] }
+        : realWrite(entries),
+    );
+    await sync.syncNow();
+    expect(await read(join(ws, "a.md"))).toBe("Remote a.\n");
+    expect(sync.state().fault).toBe("offline");
+
+    // Saved while the pull waits: one it wrote already, one it hadn't.
+    await fsp.writeFile(join(ws, "a.md"), "Mine since.\n");
+    await fsp.writeFile(join(ws, "z.md"), "Mine too.\n");
+    written(core, join(ws, "a.md"), join(ws, "z.md"));
+    failing.mockRestore();
+    await sync.syncNow();
+
+    expect(await read(join(ws, "a.md"))).toBe("Mine since.\n");
+    expect(await read(join(ws, "z.md"))).toBe("Mine too.\n");
+    expect(sync.state()).toMatchObject({ fault: "diverged", detail: expect.stringContaining("z.md") });
   });
 
   it("stops before taking in a change the file API can't write: an executable bit", async () => {

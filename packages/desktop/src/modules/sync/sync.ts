@@ -24,7 +24,7 @@ import { filesModule, type WorkspaceFiles } from "@/modules/files";
 import { sshProblemOf } from "@/modules/git-remote";
 import { gitWorkerModule, type GitWorker } from "@/modules/git-worker";
 import { projectSettingsModule, type ProjectSettingsApi } from "@/modules/project-settings";
-import { USER_REPO_EXCLUDE_LINES } from "@/utils/app-dir";
+import { APP_DIR_NAME, USER_REPO_EXCLUDE_LINES } from "@/utils/app-dir";
 import { setExcludeBlock } from "@/utils/git-exclude";
 import { path as pathutil } from "@/utils/path";
 import {
@@ -248,7 +248,10 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     if (next.setup !== "on" || !next.remote) return;
     // The app dir (bar the config) and the project's excludes stay out of
     // every commit.
-    await setExcludeBlock(deps.fs, gitDir, "notefig sync", [...USER_REPO_EXCLUDE_LINES, ...BUILT_IN_EXCLUDES, ...excludes]);
+    // `.notefig/`, as older builds wrote it, would keep the config out.
+    await setExcludeBlock(deps.fs, gitDir, "notefig sync", [...USER_REPO_EXCLUDE_LINES, ...BUILT_IN_EXCLUDES, ...excludes], [
+      `${APP_DIR_NAME}/`,
+    ]);
     await startEngine(next.remote);
   };
 

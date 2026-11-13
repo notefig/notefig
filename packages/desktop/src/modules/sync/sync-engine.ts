@@ -166,7 +166,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   let integrated: string | null = null;
   /** A pull that moved the branch but not every file yet: finished before
    *  anything else, so the stale files are never committed back. */
-  let unfinished: { from: string; to: string } | null = null;
+  let unfinished: { from: string; to: string; done: Set<string> } | null = null;
   let lastSynced = deps.lastSyncedAt;
   let lastRecorded = lastSynced ?? 0;
   let keepLocalOnce = false;
@@ -185,6 +185,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     return NEVER.test(path) ? null : path;
   };
   const absolute = (path: string) => pathutil.join(root, pathutil.fromTreePath(path));
+  /** After close's deadline a cycle may still be awaiting a request: it
+   *  ends at its next step instead of writing to a closed workspace. */
+  const alive = () => {
+    if (stopped) throw new CycleStop();
+  };
   const stop = (event: SyncEvent): never => {
     deps.dispatch(event);
     throw new CycleStop();
@@ -262,6 +267,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       if (paths) await stageByHash(paths);
       const all = await stageChanges(git, paths);
       if (all.length === 0) return;
+      alive();
       await git.commit({ message: commitMessage(author.name, all), author });
     } catch (error) {
       // Keep what wasn't committed for the next try.
@@ -272,6 +278,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   };
 
   // --- Pull ---------------------------------------------------------------
+
+  /** Files among `paths` whose worktree moved off the index: saved here
+   *  since the index last took them. */
+  const editedSince = async (paths: string[]) => {
+    if (paths.length === 0) return [];
+    const status = await git.status({ filepaths: paths });
+    return [...status.unstaged.map((change) => change.path), ...status.untracked];
+  };
 
   /** Files among `paths` with uncommitted edits. */
   const dirtyAmong = async (paths: string[]) => {
@@ -302,10 +316,15 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   /** Bring index and worktree from `from` to `to` for the files that
    *  differ; text is written through the documents write path, which holds
    *  back a file with unsaved edits. */
-  const moveWorktree = async (from: string, to: string) => {
+  const moveWorktree = async (move: { from: string; to: string; done: Set<string> }) => {
+    const { from, to, done } = move;
     const changes = { created: [] as string[], deleted: [] as string[], held: [] as string[] };
-    for (const filepath of await git.changedFiles(from, to, { toApply: true })) {
-      if (NEVER.test(filepath)) continue;
+    const remaining = (await git.changedFiles(from, to, { toApply: true })).filter((path) => !NEVER.test(path) && !done.has(path));
+    // A retry: a file not written yet may have been saved here since.
+    const edited = done.size > 0 ? await editedSince(remaining) : [];
+    for (const filepath of remaining) {
+      alive();
+      if (edited.includes(filepath)) continue;
       const outcome = await applyFile(filepath, to);
       changes[outcome === "written" ? "created" : outcome].push(absolute(filepath));
       // Only once the file is on disk: a failed write leaves the index at
@@ -313,6 +332,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       // before it commits anything. A held file's index takes the remote's
       // version: the unsaved edits then read as a change on top of it.
       await git.unstage({ filepath, ref: to });
+      done.add(filepath);
+    }
+    if (edited.length > 0) {
+      stop({ type: "diverged", detail: `Changed here and on the remote: ${edited.join(", ")}. Sync stopped so neither side is lost.` });
     }
     unfinished = null;
     const { created, deleted, held } = changes;
@@ -353,9 +376,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       stop({ type: "diverged", detail: `Changed here and on the remote: ${edited.join(", ")}. Sync stopped so neither side is lost.` });
     }
     if (base === ours) {
+      alive();
       await git.merge({ ours: branchRef, theirs, fastForwardOnly: true });
-      unfinished = { from: ours, to: theirs };
-      await moveWorktree(ours, theirs);
+      unfinished = { from: ours, to: theirs, done: new Set() };
+      await moveWorktree(unfinished);
       integrated = theirs;
       return;
     }
@@ -366,12 +390,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     if (both.length > 0 && !keepLocalOnce) {
       stop({ type: "diverged", detail: `Changed here and on the remote: ${both.join(", ")}. Sync stopped so neither side is lost.` });
     }
+    alive();
     for (const filepath of remoteFiles) {
       if (!local.has(filepath)) await git.unstage({ filepath, ref: theirs });
     }
     const replayed = await git.commit({ message: commitMessage(author.name, localFiles), author, parent: [theirs] });
-    unfinished = { from: ours, to: replayed };
-    await moveWorktree(ours, replayed);
+    unfinished = { from: ours, to: replayed, done: new Set() };
+    await moveWorktree(unfinished);
     integrated = theirs;
   };
 
@@ -406,6 +431,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     deps.dispatch({ type: "step", activity: "pushing" });
     try {
       // The branch only moves forward: never forced, only over the polled tip.
+      alive();
       await git.pushRef(remote, { ref: branchRef, oid: ours, expect: theirs });
       integrated = ours;
       return false;
@@ -454,7 +480,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
         deps.branchChanged();
         return;
       }
-      if (unfinished) await moveWorktree(unfinished.from, unfinished.to);
+      if (unfinished) await moveWorktree(unfinished);
       if (commitDue) await commitStep();
       let refused = await reconcile();
       for (let retry = 0; refused && retry < MAX_PUSH_RETRIES && !stopped; retry++) {

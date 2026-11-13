@@ -87,12 +87,13 @@ export async function setExcludeBlock(
     : existing;
   const open = `# >>> ${name}`;
   const close = `# <<< ${name}`;
-  const block = [open, ...lines, close].join("\n");
-  const start = current.indexOf(open);
-  const end = current.indexOf(close, start);
+  // Whole lines only: `# >>> notefig` must not find `# >>> notefig sync`.
+  const rows = current.split("\n");
+  const start = rows.indexOf(open);
+  const end = start >= 0 ? rows.indexOf(close, start) : -1;
   const next =
     start >= 0 && end >= 0
-      ? `${current.slice(0, start)}${block}${current.slice(end + close.length)}`
-      : `${current}${current === "" || current.endsWith("\n") ? "" : "\n"}${block}\n`;
+      ? [...rows.slice(0, start), open, ...lines, close, ...rows.slice(end + 1)].join("\n")
+      : `${current}${current === "" || current.endsWith("\n") ? "" : "\n"}${[open, ...lines, close].join("\n")}\n`;
   if (next !== existing) await writeExclude(fs, excludePath, next);
 }

@@ -59,3 +59,12 @@ describe("remote URLs, read as git reads them", () => {
     ["https://github.com/team/notes.git", null],
   ])("hands ssh a destination for %s", (url, destination) => expect(sshDestination(url)).toBe(destination));
 });
+
+describe("the SSH bridge URL", () => {
+  it("hands the transport git's older ssh spellings as ssh://", async () => {
+    const { sshBridgeUrl } = await import("./httpClient");
+    expect(sshBridgeUrl("git+ssh://h/p")).toBe(sshBridgeUrl("ssh://h/p"));
+    expect(sshBridgeUrl("ssh+git://git@h:22/p")).toBe(sshBridgeUrl("ssh://git@h:22/p"));
+    expect(sshBridgeUrl("git@h:p")).toBe(`https://ssh.notefig.invalid/${encodeURIComponent("git@h:p")}`);
+  });
+});
