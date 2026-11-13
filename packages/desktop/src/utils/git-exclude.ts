@@ -82,8 +82,20 @@ export async function setExcludeBlock(
 ): Promise<void> {
   const excludePath = `${gitDir}/info/exclude`;
   const existing = await readExclude(fs, excludePath);
+  // Retired lines go only outside every managed block: another block may
+  // hold the same line on purpose (`notefig` writes `.notefig/`).
+  let inBlock = false;
   const current = retired.length
-    ? existing.split("\n").filter((line) => !retired.includes(line.trim())).join("\n")
+    ? existing
+        .split("\n")
+        .filter((line) => {
+          const bareLine = line.trim();
+          if (bareLine.startsWith("# >>> ")) inBlock = true;
+          else if (bareLine.startsWith("# <<< ")) inBlock = false;
+          else if (!inBlock && retired.includes(bareLine)) return false;
+          return true;
+        })
+        .join("\n")
     : existing;
   const open = `# >>> ${name}`;
   const close = `# <<< ${name}`;

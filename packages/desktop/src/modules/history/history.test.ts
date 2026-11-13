@@ -102,7 +102,7 @@ describe("a workspace's history repo", () => {
     disk.dirs.add(`${WS}/.git`);
     await repo.ready();
 
-    expect(disk.files.get(`${WS}/.git/info/exclude`)).toBe("# >>> notefig\n.notefig/*\n!.notefig/config.json\n# <<< notefig\n");
+    expect(disk.files.get(`${WS}/.git/info/exclude`)).toBe("# >>> notefig\n.notefig/\n# <<< notefig\n");
   });
 
   it("never blocks init on an exclude it cannot write", async () => {
