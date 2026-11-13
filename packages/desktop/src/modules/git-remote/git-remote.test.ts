@@ -4,6 +4,7 @@ import type { GitWorker } from "@/modules/git-worker";
 import { createWorkspaceGitRemote } from "./git-remote";
 
 const URL_ = "https://github.com/team/notes.git";
+const SSH_URL = "git@github.com:team/notes.git";
 const TARGET = { remote: "origin", url: URL_, branch: "main", remoteRef: "refs/heads/main", upstreamRenamed: false };
 const REMOTE = { name: "origin", url: URL_, credential: "/ws" };
 
@@ -32,10 +33,14 @@ describe("git remote", () => {
     expect(git.remoteTarget).toHaveBeenLastCalledWith("pull");
   });
 
-  it("only speaks HTTPS for now, and passes on why there's no target", async () => {
-    const ssh = setup({ remoteTarget: vi.fn(async () => ({ ...TARGET, url: "git@github.com:t/n.git" })) });
-    await expect(ssh.remote.urls()).rejects.toThrow(/HTTPS/);
-    await expect(ssh.remote.push()).rejects.toThrow(/HTTPS/);
+  it("takes HTTPS and SSH remotes, and passes on why there's no target", async () => {
+    const local = setup({ remoteTarget: vi.fn(async () => ({ ...TARGET, url: "/srv/notes.git" })) });
+    await expect(local.remote.urls()).rejects.toThrow(/HTTPS and SSH/);
+    await expect(local.remote.push()).rejects.toThrow(/HTTPS and SSH/);
+
+    const ssh = setup({ remoteTarget: vi.fn(async () => ({ ...TARGET, url: SSH_URL })) });
+    await expect(ssh.remote.push()).resolves.toMatchObject({ pushed: true });
+    await expect(ssh.remote.urls()).rejects.toThrow(/SSH keys/);
 
     const none = setup({ remoteTarget: vi.fn(async () => ({ problem: "No remote." })) });
     await expect(none.remote.pull()).rejects.toThrow("No remote.");
@@ -51,6 +56,35 @@ describe("git remote", () => {
     ["RefConflict", /Pull them first/],
   ] as const)("explains %s", async (code, message) => {
     const { remote } = setup({ pushBranch: vi.fn(async () => { throw new GitError(code, "raw"); }) });
+    await expect(remote.push()).rejects.toThrow(message);
+  });
+
+  it.each([
+    ["AuthRequired", /ssh-add/],
+    ["AuthFailed", /SSH key can't write to git@github.com:team\/notes/],
+    ["RepoNotFound", /SSH key can't see it/],
+    ["HostUnverified", /ssh -T git@github.com in a terminal/],
+    ["Network", /over SSH/],
+    ["UnsupportedOperation", /ssh command/],
+    ["NotFastForward", /Pull them first/],
+  ] as const)("explains %s over SSH", async (code, message) => {
+    const { remote } = setup({
+      remoteTarget: vi.fn(async () => ({ ...TARGET, url: SSH_URL })),
+      pushBranch: vi.fn(async () => { throw new GitError(code, "raw"); }),
+    });
+    await expect(remote.push()).rejects.toThrow(message);
+  });
+
+  it.each([
+    ["git@[::1]:notes.git", "ssh -T git@::1 in a terminal"],
+    ["[::1]:notes.git", "ssh -T ::1 in a terminal"],
+    ["gh:team/notes.git", "ssh -T gh in a terminal"],
+    ["ssh://git@host:2222/notes.git", "ssh -T ssh://git@host:2222 in a terminal"],
+  ])("names a destination ssh can reach for %s", async (url, message) => {
+    const { remote } = setup({
+      remoteTarget: vi.fn(async () => ({ ...TARGET, url })),
+      pushBranch: vi.fn(async () => { throw new GitError("HostUnverified", "raw"); }),
+    });
     await expect(remote.push()).rejects.toThrow(message);
   });
 
@@ -77,7 +111,7 @@ describe("git remote", () => {
     const fork = setup({ remoteTarget: vi.fn(async (direction) => ({ ...TARGET, url: direction === "pull" ? upstream : URL_ })) });
     await expect(fork.remote.urls()).resolves.toEqual([URL_, upstream]);
 
-    const sshPush = setup({ remoteTarget: vi.fn(async (direction) => ({ ...TARGET, url: direction === "pull" ? upstream : "git@github.com:t/n.git" })) });
+    const sshPush = setup({ remoteTarget: vi.fn(async (direction) => ({ ...TARGET, url: direction === "pull" ? upstream : SSH_URL })) });
     await expect(sshPush.remote.urls()).resolves.toEqual([upstream]);
   });
 

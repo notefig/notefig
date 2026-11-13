@@ -12,6 +12,25 @@ async function collect(
 }
 
 /**
+ * `ssh://…` or git's `[user@]host:path`, but not a Windows drive (`C:\\…`), a
+ * `scheme://` URL or a `helper::address`.
+ */
+export function isSshRemote(url: string): boolean {
+  if (url.startsWith("ssh://")) return true;
+  if (/^[A-Za-z]:[\\/]/.test(url)) return false;
+  return /^(?:[^/@:\s]+@)?(?:\[[^\]\s]+\]|[^/@:\s]+):(?!\/\/|:).+/.test(url);
+}
+
+/**
+ * What isomorphic-git is told an SSH remote's URL is: it refuses any scheme
+ * but http(s), and every request it makes goes through our port anyway. The
+ * desktop port recognises this host and serves the request over ssh.
+ */
+export function sshBridgeUrl(url: string): string {
+  return `https://ssh.notefig.invalid/${encodeURIComponent(url)}`;
+}
+
+/**
  * isomorphic-git's `HttpClient` over our port, for one remote. Each
  * request carries the remote's credential reference for the port to
  * authenticate with, so isomorphic-git never holds a secret and `onAuth`

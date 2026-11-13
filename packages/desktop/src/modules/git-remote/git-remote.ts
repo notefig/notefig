@@ -6,7 +6,7 @@
  * does: through the file watcher.
  */
 import { defineModule } from "@notefig/core";
-import { GitError, type GitBranchTarget, type GitDirection, type GitRemote, type GitService } from "@notefig/git";
+import { GitError, isSshRemote, type GitBranchTarget, type GitDirection, type GitRemote, type GitService } from "@notefig/git";
 import { gitWorkerModule, type GitWorker } from "@/modules/git-worker";
 import { path as pathutil } from "@/utils/path";
 
@@ -17,7 +17,7 @@ declare module "@notefig/core" {
 }
 
 export interface WorkspaceGitRemote {
-  /** The repositories this branch pushes to and pulls from. Rejects with what to fix if there are none. */
+  /** The repositories this branch pushes to and pulls from that take a token. Rejects with why if there are none. */
   urls(): Promise<string[]>;
   /** Rejects with what to fix. `pushed` is false if the remote has it. */
   push(): Promise<{ branch: string; pushed: boolean }>;
@@ -26,7 +26,33 @@ export interface WorkspaceGitRemote {
   dispose(): void;
 }
 
+/** What `ssh` is given to reach the remote: `ssh://[user@]host[:port]`, or `[user@]host` with an IPv6 host's brackets dropped. */
+function sshDestinationOf(url: string): string {
+  if (url.startsWith("ssh://")) return /^ssh:\/\/[^/]+/.exec(url)?.[0] ?? url;
+  const scp = /^(?:([^@/:\s]+)@)?(?:\[([^\]\s]+)\]|([^:]+)):/.exec(url);
+  if (!scp) return url;
+  const host = scp[2] ?? scp[3];
+  return scp[1] ? `${scp[1]}@${host}` : host;
+}
+
+/** What to do about a failed SSH session. Nothing here is about tokens. */
+function sshProblemOf(code: string, url: string): string | undefined {
+  const where = url.replace(/^ssh:\/\//, "").replace(/\.git$/, "");
+  const destination = sshDestinationOf(url);
+  const problems: Record<string, string> = {
+    AuthRequired: `SSH couldn't sign in to ${destination}. Add your key with ssh-add, then try again.`,
+    AuthFailed: `Your SSH key can't write to ${where}.`,
+    RepoNotFound: `${where} wasn't found, or your SSH key can't see it.`,
+    HostUnverified: `This computer doesn't trust ${destination} yet. Run ssh -T ${destination} in a terminal and confirm its key.`,
+    Network: `Couldn't reach ${where} over SSH. Check the connection and try again.`,
+    UnsupportedOperation: "Notefig couldn't find the ssh command on this computer.",
+  };
+  return problems[code];
+}
+
 function problemOf(error: unknown, url: string): string {
+  const sshProblem = error instanceof GitError && isSshRemote(url) ? sshProblemOf(error.code, url) : undefined;
+  if (sshProblem) return sshProblem;
   const where = url.replace(/^https:\/\//, "").replace(/\.git$/, "");
   const code = error instanceof GitError ? error.code : "";
   if (code === "AuthRequired") return `No credentials work for ${where}. Run "Git: Use a Token for This Remote".`;
@@ -53,8 +79,8 @@ export function createWorkspaceGitRemote(deps: { workspacePath: string; gitWorke
 
   const target = async (direction: GitDirection): Promise<GitBranchTarget | { problem: string }> => {
     const found = await service().remoteTarget(direction);
-    if ("url" in found && !/^https:\/\/[^/@\s]+\/\S+/.test(found.url)) {
-      return { problem: "Only HTTPS remotes are supported for now." };
+    if ("url" in found && !/^https:\/\/[^/@\s]+\/\S+/.test(found.url) && !isSshRemote(found.url)) {
+      return { problem: "Only HTTPS and SSH remotes are supported." };
     }
     return found;
   };
@@ -79,7 +105,9 @@ export function createWorkspaceGitRemote(deps: { workspacePath: string; gitWorke
       const found = await Promise.all([target("push"), target("pull")]);
       const urls = found.flatMap((each) => ("url" in each ? [each.url] : []));
       if (urls.length === 0 && "problem" in found[0]) throw new Error(found[0].problem);
-      return [...new Set(urls)];
+      const withTokens = urls.filter((url) => !isSshRemote(url));
+      if (withTokens.length === 0) throw new Error("This remote signs in with your SSH keys, so it doesn't use a token.");
+      return [...new Set(withTokens)];
     },
     push: () => exclusive(() =>
       onTarget("push", async (remote, found) => ({

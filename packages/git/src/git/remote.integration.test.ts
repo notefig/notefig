@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 
 import isoGit from "isomorphic-git";
 
-import { withBasicAuth } from "./httpClient";
+import { isSshRemote, sshBridgeUrl, withBasicAuth } from "./httpClient";
 import { IsomorphicGitService } from "./isomorphicGitService";
 import {
   GIT_AUTHOR,
@@ -94,6 +94,44 @@ function httpBackend(root: string) {
     return [status, headers, reply.subarray(split + 4)];
   });
 }
+
+describe("SSH remotes", () => {
+  it.each([
+    "git@github.com:team/notes.git",
+    "gh:team/notes.git",
+    "g:team/notes.git",
+    "host:notes[2026].git",
+    "git@host:/abs/notes.git",
+    "git@[::1]:notes.git",
+    "ssh://git@host:2222/team/notes.git",
+  ])("recognises %s", (url) => expect(isSshRemote(url)).toBe(true));
+
+  it.each([
+    "https://github.com/team/notes.git",
+    "http://host/notes.git",
+    "file:///srv/notes.git",
+    "/srv/notes.git",
+    "./notes.git",
+    "C:\\repos\\notes.git",
+    "C:/repos/notes.git",
+    "ext::sh -c evil",
+  ])("doesn't take %s for one", (url) => expect(isSshRemote(url)).toBe(false));
+
+  it("reaches the port through the bridge URL isomorphic-git accepts", async () => {
+    const urls: string[] = [];
+    const port: GitHttpClient = {
+      async request({ url }) {
+        urls.push(url);
+        return { status: 401, headers: {}, body: new Uint8Array() };
+      },
+    };
+    const service = new IsomorphicGitService(new NodeGitStorageHost("/r"), { repoPath: "/r", gitDir: "/r/.git" }, { http: port });
+    const url = "git@github.com:team/notes.git";
+    await expect(service.listRemoteRefs({ url })).rejects.toMatchObject({ code: "AuthRequired" });
+    expect(urls).toEqual([`${sshBridgeUrl(url)}/info/refs?service=git-upload-pack`]);
+    expect(urls[0]).toContain("ssh.notefig.invalid/git%40github.com%3Ateam%2Fnotes.git/");
+  });
+});
 
 describeIfGit("remote operations over git http-backend", () => {
   let root: string;
