@@ -37,6 +37,16 @@ This is a simple note file.
         type: "directory" as const,
       },
       {
+        path: `${WORKSPACE_PATH}/.notefig`,
+        content: "",
+        type: "directory" as const,
+      },
+      {
+        path: `${WORKSPACE_PATH}/.notefig/config.json`,
+        content: `{\n  "sync": {\n    "enabled": false\n  }\n}\n`,
+        type: "file" as const,
+      },
+      {
         path: `${WORKSPACE_PATH}/subfolder/nested.md`,
         content: `# Nested File
 

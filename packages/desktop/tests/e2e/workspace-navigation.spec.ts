@@ -31,6 +31,11 @@ test.describe("Workspace Navigation", () => {
 
     const subfolderButton = page.getByRole("treeitem", { name: "subfolder" });
     await expect(subfolderButton).toBeVisible();
+
+    // The project's config sits in the app dir, next to the scratchpads,
+    // but isn't a note: the tree leaves it out.
+    await expect(page.getByRole("treeitem", { name: /scratchpads/ })).toBeVisible();
+    await expect(page.getByRole("treeitem", { name: "config.json" })).toHaveCount(0);
   });
 
   test("should handle empty workspace @smoke", async ({ page }) => {

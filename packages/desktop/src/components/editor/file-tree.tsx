@@ -37,6 +37,7 @@ import {
   type FileTreeNode,
 } from "@/utils/fs";
 import type { WorkspaceFiles } from "@/modules/files";
+import { PROJECT_CONFIG_REL_PATH } from "@/utils/app-dir";
 import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { OpenTabOptions } from "@/modules/tabs";
@@ -168,10 +169,12 @@ function FileTreeInner({
 
   // Trees marks directories with a trailing slash in the input path list.
   // Collapse duplicate slashes defensively: a malformed segment would make
-  // trees materialize an empty-named phantom directory.
+  // trees materialize an empty-named phantom directory. The project's config
+  // stays visible to the walkers and the watcher (settings reload from its
+  // changes) but isn't a note, so it's left out of the tree.
   const treePaths = useMemo(() => {
     return fileMetadataList
-      .filter((entry) => entry.relativePath)
+      .filter((entry) => entry.relativePath && entry.relativePath !== PROJECT_CONFIG_REL_PATH)
       .map((entry) => {
         const rel = entry.relativePath!.replace(/\/{2,}/g, "/");
         return entry.type === "directory" ? `${rel}/` : rel;
