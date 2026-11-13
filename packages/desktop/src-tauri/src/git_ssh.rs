@@ -8,6 +8,9 @@
 //! listing reads the advertisement and hangs up; the request after it opens
 //! a new session, skips the advertisement and sends what the HTTP POST would.
 //! The server checks a push's expected old values against its refs then.
+//! On macOS and Linux the sessions to one remote share a connection that
+//! stays up for a minute after the last one (see `control_dir`), so only the
+//! first pays the handshake.
 //!
 //! `BatchMode` means ssh fails instead of prompting. A failure becomes the
 //! status the git package maps to an error the user can act on.
@@ -115,13 +118,44 @@ fn shell_quote(text: &str) -> String {
     out
 }
 
-fn ssh_args(remote: &SshRemote, service: &str) -> Vec<String> {
+fn ssh_args(remote: &SshRemote, service: &str, control: Option<&Path>) -> Vec<String> {
     let mut args: Vec<String> = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"].map(String::from).to_vec();
     if let Some(port) = remote.port {
         args.extend(["-p".to_string(), port.to_string()]);
     }
+    if let Some(dir) = control {
+        // `%C` hashes host, port and user, so each remote gets its own socket.
+        let path = format!("ControlPath={}/%C", dir.display());
+        args.extend(["-o", "ControlMaster=auto", "-o", &path, "-o", "ControlPersist=60s"].map(String::from));
+    }
     args.extend(["--".to_string(), remote.destination.clone(), format!("{service} {}", shell_quote(&remote.path))]);
     args
+}
+
+/// Where ssh keeps one shared connection per remote, so a poll every second
+/// or two doesn't pay a handshake each time. It's under `/tmp` because a
+/// socket path must stay short (104 bytes on macOS), and it's used only when
+/// it's ours alone: a directory someone else made or can enter is refused,
+/// and each session then connects on its own. Windows' OpenSSH can't share
+/// connections.
+#[cfg(unix)]
+fn control_dir() -> Option<&'static Path> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    static DIR: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let uid = unsafe { libc::getuid() };
+        let dir = std::path::PathBuf::from(format!("/tmp/notefig-ssh-{uid}"));
+        let _ = std::fs::DirBuilder::new().mode(0o700).create(&dir);
+        let meta = std::fs::symlink_metadata(&dir).ok()?;
+        let private = meta.is_dir() && meta.uid() == uid && meta.permissions().mode() & 0o077 == 0;
+        private.then_some(dir)
+    })
+    .as_deref()
+}
+
+#[cfg(not(unix))]
+fn control_dir() -> Option<&'static Path> {
+    None
 }
 
 /// The status for what ssh or the server said on stderr, if it's a known
@@ -235,7 +269,7 @@ fn service_header(service: &str) -> Vec<u8> {
     format!("{:04x}{line}0000", line.len() + 4).into_bytes()
 }
 
-async fn answer_with(program: &Path, path: Option<&str>, url: &Url, post: bool, body: Vec<u8>) -> Result<Answer, String> {
+async fn answer_with(program: &Path, path: Option<&str>, control: Option<&Path>, url: &Url, post: bool, body: Vec<u8>) -> Result<Answer, String> {
     let segments: Vec<&str> = url.path_segments().map(Iterator::collect).unwrap_or_default();
     let service_query = || url.query_pairs().find(|(name, _)| name == "service").map(|(_, value)| value.into_owned());
     let (encoded, service) = match segments.as_slice() {
@@ -247,7 +281,7 @@ async fn answer_with(program: &Path, path: Option<&str>, url: &Url, post: bool, 
         .filter(|name| name == "git-upload-pack" || name == "git-receive-pack")
         .ok_or("Not a git request.")?;
     let remote = parse_remote(&percent_decode(encoded).ok_or("That isn't a valid SSH remote.")?)?;
-    let args = ssh_args(&remote, &service);
+    let args = ssh_args(&remote, &service, control);
     let input = post.then_some(body);
     let run = exchange(program, &args, path, input);
     let outcome = tokio::time::timeout(TIMEOUT, run).await.map_err(|_| "ssh timed out.".to_string())??;
@@ -271,7 +305,7 @@ pub async fn request(url: &Url, post: bool, body: Vec<u8>) -> Result<Answer, Str
     let Some(program) = find_tool("ssh", path.as_deref()) else {
         return Ok((NO_SSH, BTreeMap::new(), Vec::new()));
     };
-    answer_with(&program, path.as_deref(), url, post, body).await
+    answer_with(&program, path.as_deref(), control_dir(), url, post, body).await
 }
 
 #[cfg(test)]
@@ -309,9 +343,30 @@ mod tests {
     fn quotes_the_path_for_the_remote_shell() {
         assert_eq!(shell_quote("a b.git"), "'a b.git'");
         assert_eq!(shell_quote("it's!.git"), "'it'\\''s'\\!'.git'");
-        let args = ssh_args(&remote("git@host", Some(22), "$(touch x).git"), "git-upload-pack");
+        let args = ssh_args(&remote("git@host", Some(22), "$(touch x).git"), "git-upload-pack", None);
         assert_eq!(args[args.len() - 3..], ["--", "git@host", "git-upload-pack '$(touch x).git'"]);
         assert_eq!(args[..6], ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-p", "22"]);
+    }
+
+    #[test]
+    fn shares_one_connection_per_remote_when_it_has_a_private_directory() {
+        let shared = ssh_args(&remote("git@host", None, "x.git"), "git-upload-pack", Some(Path::new("/tmp/d")));
+        let options = ["-o", "ControlMaster=auto", "-o", "ControlPath=/tmp/d/%C", "-o", "ControlPersist=60s"];
+        assert_eq!(shared[4..10], options);
+        assert_eq!(shared[10..], ["--", "git@host", "git-upload-pack 'x.git'"]);
+        let alone = ssh_args(&remote("git@host", None, "x.git"), "git-upload-pack", None);
+        assert!(!alone.iter().any(|arg| arg.starts_with("Control")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keeps_the_shared_connections_where_only_this_user_can_reach_them() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let dir = control_dir().expect("a private directory under /tmp");
+        let meta = std::fs::symlink_metadata(dir).unwrap();
+        assert_eq!(meta.uid(), unsafe { libc::getuid() });
+        assert_eq!(meta.permissions().mode() & 0o077, 0);
+        assert!(dir.as_os_str().len() + 41 < 104, "a socket path must stay short");
     }
 
     #[test]
@@ -378,7 +433,7 @@ mod tests {
             let (_dir, ssh, remote, oid) = fixture(RUN_LOCALLY);
             for service in ["git-upload-pack", "git-receive-pack"] {
                 let target = url(&remote, &format!("info/refs?service={service}"));
-                let (status, headers, body) = answer_with(&ssh, inherited().as_deref(), &target, false, vec![]).await.unwrap();
+                let (status, headers, body) = answer_with(&ssh, inherited().as_deref(), None, &target, false, vec![]).await.unwrap();
                 let text = String::from_utf8_lossy(&body);
                 assert_eq!(status, 200);
                 assert_eq!(headers["content-type"], format!("application/x-{service}-advertisement"));
@@ -392,7 +447,7 @@ mod tests {
         async fn fetches_a_pack_in_a_new_session() {
             let (_dir, ssh, remote, oid) = fixture(RUN_LOCALLY);
             let body = format!("{}0000{}", pkt(&format!("want {oid}\n")), pkt("done\n")).into_bytes();
-            let (status, headers, answer) = answer_with(&ssh, inherited().as_deref(), &url(&remote, "git-upload-pack"), true, body).await.unwrap();
+            let (status, headers, answer) = answer_with(&ssh, inherited().as_deref(), None, &url(&remote, "git-upload-pack"), true, body).await.unwrap();
             assert_eq!(status, 200);
             assert_eq!(headers["content-type"], "application/x-git-upload-pack-result");
             assert!(answer.windows(4).any(|w| w == b"PACK"));
@@ -407,11 +462,11 @@ mod tests {
 
             let bare = dir.path().join("my notes.git");
             let stale = git(&bare, &["-c", "user.name=T", "-c", "user.email=t@t", "commit-tree", "HEAD^{tree}", "-m", "elsewhere"]);
-            let (_, _, answer) = answer_with(&ssh, inherited().as_deref(), &target, true, command(&stale)).await.unwrap();
+            let (_, _, answer) = answer_with(&ssh, inherited().as_deref(), None, &target, true, command(&stale)).await.unwrap();
             assert!(String::from_utf8_lossy(&answer).contains("ng refs/heads/gone"));
             assert_eq!(git(&bare, &["rev-parse", "refs/heads/gone"]), oid);
 
-            let (status, _, answer) = answer_with(&ssh, inherited().as_deref(), &target, true, command(&oid)).await.unwrap();
+            let (status, _, answer) = answer_with(&ssh, inherited().as_deref(), None, &target, true, command(&oid)).await.unwrap();
             assert_eq!(status, 200);
             assert!(String::from_utf8_lossy(&answer).contains("ok refs/heads/gone"));
             assert_eq!(git(&bare, &["for-each-ref", "refs/heads/gone"]), "");
@@ -421,7 +476,7 @@ mod tests {
         async fn a_failed_session_becomes_its_status() {
             let (_dir, ssh, remote, _) = fixture("echo 'git@h: Permission denied (publickey).' >&2\nexit 255");
             let target = url(&remote, "info/refs?service=git-upload-pack");
-            let (status, ..) = answer_with(&ssh, None, &target, false, vec![]).await.unwrap();
+            let (status, ..) = answer_with(&ssh, None, None, &target, false, vec![]).await.unwrap();
             assert_eq!(status, 401);
         }
 
@@ -429,14 +484,14 @@ mod tests {
         async fn an_unknown_failure_is_no_response() {
             let (_dir, ssh, remote, _) = fixture("echo 'ssh: connect to host h port 22: Connection refused' >&2\nexit 255");
             let target = url(&remote, "info/refs?service=git-upload-pack");
-            let error = answer_with(&ssh, None, &target, false, vec![]).await.unwrap_err();
+            let error = answer_with(&ssh, None, None, &target, false, vec![]).await.unwrap_err();
             assert!(error.contains("Connection refused"));
         }
 
         async fn flooded(script: &str, suffix: &str, post: bool) -> Result<Answer, String> {
             let (_dir, ssh, remote, _) = fixture(script);
             let target = url(&remote, suffix);
-            let run = answer_with(&ssh, None, &target, post, vec![]);
+            let run = answer_with(&ssh, None, None, &target, post, vec![]);
             tokio::time::timeout(Duration::from_secs(20), run).await.expect("a flood must end the session")
         }
 
@@ -465,7 +520,8 @@ mod tests {
         async fn only_serves_git_services() {
             let (_dir, ssh, remote, _) = fixture(RUN_LOCALLY);
             let target = url(&remote, "info/refs?service=rm");
-            assert!(answer_with(&ssh, None, &target, false, vec![]).await.is_err());
+            assert!(answer_with(&ssh, None, None, &target, false, vec![]).await.is_err());
         }
     }
 }
+
