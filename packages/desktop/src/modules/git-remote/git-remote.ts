@@ -26,10 +26,19 @@ export interface WorkspaceGitRemote {
   dispose(): void;
 }
 
+/** What `ssh` is given to reach the remote: `ssh://[user@]host[:port]`, or `[user@]host` with an IPv6 host's brackets dropped. */
+function sshDestinationOf(url: string): string {
+  if (url.startsWith("ssh://")) return /^ssh:\/\/[^/]+/.exec(url)?.[0] ?? url;
+  const scp = /^(?:([^@/:\s]+)@)?(?:\[([^\]\s]+)\]|([^:]+)):/.exec(url);
+  if (!scp) return url;
+  const host = scp[2] ?? scp[3];
+  return scp[1] ? `${scp[1]}@${host}` : host;
+}
+
 /** What to do about a failed SSH session. Nothing here is about tokens. */
 function sshProblemOf(code: string, url: string): string | undefined {
   const where = url.replace(/^ssh:\/\//, "").replace(/\.git$/, "");
-  const destination = /^(ssh:\/\/[^/]+|[^:]+)/.exec(url)?.[0] ?? url;
+  const destination = sshDestinationOf(url);
   const problems: Record<string, string> = {
     AuthRequired: `SSH couldn't sign in to ${destination}. Add your key with ssh-add, then try again.`,
     AuthFailed: `Your SSH key can't write to ${where}.`,

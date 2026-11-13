@@ -85,7 +85,8 @@ fn parse_remote(raw: &str) -> Result<SshRemote, String> {
         let path = percent_decode(url.path()).ok_or("That isn't a valid SSH remote.")?;
         // `ssh://host/~/repo` is relative to the home directory, as in git.
         let path = path.strip_prefix('/').filter(|rest| rest.starts_with('~')).unwrap_or(&path);
-        let user = Some(url.username()).filter(|name| !name.is_empty());
+        let user = percent_decode(url.username()).ok_or("That isn't a valid SSH remote.")?;
+        let user = Some(user.as_str()).filter(|name| !name.is_empty());
         return build_remote(user, url.host_str().unwrap_or_default(), url.port(), path);
     }
     // `[…]` brackets an IPv6 host only where the host starts; elsewhere a
@@ -118,14 +119,24 @@ fn shell_quote(text: &str) -> String {
     out
 }
 
+/// A short, stable name for the destination and port as written.
+fn alias_key(remote: &SshRemote) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (&remote.destination, remote.port).hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
 fn ssh_args(remote: &SshRemote, service: &str, control: Option<&Path>) -> Vec<String> {
     let mut args: Vec<String> = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"].map(String::from).to_vec();
     if let Some(port) = remote.port {
         args.extend(["-p".to_string(), port.to_string()]);
     }
     if let Some(dir) = control {
-        // `%C` hashes host, port and user, so each remote gets its own socket.
-        let path = format!("ControlPath={}/%C", dir.display());
+        // `%C` hashes the host, port and user ssh resolves, which two
+        // `~/.ssh/config` aliases with different keys can share. The name as
+        // written goes in too, so each alias signs in with its own key.
+        let path = format!("ControlPath={}/{}-%C", dir.display(), alias_key(remote));
         args.extend(["-o", "ControlMaster=auto", "-o", &path, "-o", "ControlPersist=60s"].map(String::from));
     }
     args.extend(["--".to_string(), remote.destination.clone(), format!("{service} {}", shell_quote(&remote.path))]);
@@ -328,6 +339,7 @@ mod tests {
         assert_eq!(parse_remote("ssh://git@host:2222/team/notes.git"), Ok(remote("git@host", Some(2222), "/team/notes.git")));
         assert_eq!(parse_remote("ssh://host/~/notes.git"), Ok(remote("host", None, "~/notes.git")));
         assert_eq!(parse_remote("ssh://git@host/my%20notes.git"), Ok(remote("git@host", None, "/my notes.git")));
+        assert_eq!(parse_remote("ssh://alice%40example.com@host/x.git"), Ok(remote("alice@example.com@host", None, "/x.git")));
     }
 
     #[test]
@@ -351,11 +363,21 @@ mod tests {
     #[test]
     fn shares_one_connection_per_remote_when_it_has_a_private_directory() {
         let shared = ssh_args(&remote("git@host", None, "x.git"), "git-upload-pack", Some(Path::new("/tmp/d")));
-        let options = ["-o", "ControlMaster=auto", "-o", "ControlPath=/tmp/d/%C", "-o", "ControlPersist=60s"];
+        let path = format!("ControlPath=/tmp/d/{}-%C", alias_key(&remote("git@host", None, "x.git")));
+        let options = ["-o", "ControlMaster=auto", "-o", &path, "-o", "ControlPersist=60s"];
         assert_eq!(shared[4..10], options);
         assert_eq!(shared[10..], ["--", "git@host", "git-upload-pack 'x.git'"]);
         let alone = ssh_args(&remote("git@host", None, "x.git"), "git-upload-pack", None);
         assert!(!alone.iter().any(|arg| arg.starts_with("Control")));
+    }
+
+    #[test]
+    fn gives_each_alias_its_own_connection() {
+        let key = |destination: &str, port| alias_key(&remote(destination, port, "x.git"));
+        assert_ne!(key("git@gh-work", None), key("git@gh-home", None));
+        assert_ne!(key("git@host", None), key("git@host", Some(2222)));
+        assert_eq!(key("git@host", None), key("git@host", None));
+        assert_eq!(key("git@host", None).len(), 16);
     }
 
     #[cfg(unix)]
@@ -366,7 +388,7 @@ mod tests {
         let meta = std::fs::symlink_metadata(dir).unwrap();
         assert_eq!(meta.uid(), unsafe { libc::getuid() });
         assert_eq!(meta.permissions().mode() & 0o077, 0);
-        assert!(dir.as_os_str().len() + 41 < 104, "a socket path must stay short");
+        assert!(dir.as_os_str().len() + 1 + 16 + 1 + 40 < 104, "a socket path must stay short");
     }
 
     #[test]
