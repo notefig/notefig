@@ -195,7 +195,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   };
   const absolute = (path: string) => pathutil.join(root, pathutil.fromTreePath(path));
   /** After close's deadline a cycle may still be awaiting a request: it
-   *  ends at its next step instead of writing to a closed workspace. */
+   *  ends before its next step that writes (a fetch into `.git`, a commit,
+   *  the branch moving, a file, a push) instead of touching a closed
+   *  workspace. Only the request it was waiting on can still finish. */
   const alive = () => {
     if (stopped) throw new CycleStop();
   };
@@ -372,6 +374,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const pullStep = async () => {
     deps.dispatch({ type: "step", activity: "pulling" });
     // Also moves refs/remotes/origin/<branch>, keeping a diverged tip reachable.
+    alive();
     const [fetched] = await git.fetchRefs(remote, [branchRef]);
     const theirs = fetched?.oid;
     if (!theirs) throw new GitError("RepoNotFound", "The remote branch is gone.");
@@ -410,6 +413,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     for (const filepath of remoteFiles) {
       if (!local.has(filepath)) await git.unstage({ filepath, ref: theirs });
     }
+    alive();
     const replayed = await git.commit({ message: commitMessage(author.name, localFiles), author, parent: [theirs] });
     unfinished = { from: ours, to: replayed, done: new Set(), held: [] };
     await moveWorktree(unfinished);
@@ -430,6 +434,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const checkReturn = async (theirs: string, ours: string | null) => {
     if (!mayAsk(theirs, ours)) return;
     const away = awayMs();
+    alive();
     const [fetched] = await git.fetchRefs(remote, [branchRef]);
     const summary = fetched?.oid ? await returnSummary(git, ours, fetched.oid, lastSynced) : null;
     if (!summary) return;

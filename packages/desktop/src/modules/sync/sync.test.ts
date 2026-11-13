@@ -258,6 +258,34 @@ describe("sync: solo", () => {
     expect(await runGit(remote.bare, ["show", "main:m.bin"])).toBe("PNG\u0000");
   });
 
+  it("closes within its deadline while a request hangs, and writes nothing after", async () => {
+    const { sync, remote, ws, core } = await setup();
+    const before = await runGit(ws, ["rev-parse", "HEAD"]);
+    await remote.pushFromPlainGit(await remote.clone("plain"), { "note.md": "Changed elsewhere.\n" }, "elsewhere");
+    const request = remote.http.request.bind(remote.http);
+    let release!: () => void;
+    const hung = new Promise<void>((done) => (release = done));
+    remote.http.request = async (input) => {
+      await hung;
+      return request(input);
+    };
+    void sync.syncNow();
+    await fsp.writeFile(join(ws, "mine.md"), "Unsaved to the remote.\n");
+    written(core, join(ws, "mine.md"));
+
+    const start = Date.now();
+    await core.workspace(ws).close();
+    expect(Date.now() - start).toBeLessThan(7_000);
+
+    release();
+    await new Promise((done) => setTimeout(done, 1_000));
+    expect(await read(join(ws, "note.md"))).not.toBe("Changed elsewhere.\n");
+    // Closing committed what was saved (that's local); the remote's change
+    // never came in.
+    expect(await runGit(ws, ["show", "HEAD:note.md"])).not.toBe("Changed elsewhere.");
+    expect(await runGit(ws, ["log", "--format=%s", `${before}..HEAD`])).toBe("notefig: User device-a edited mine.md");
+  }, 20_000);
+
   it("stops before taking in a change the file API can't write: an executable bit", async () => {
     const { sync, remote, ws } = await setup();
     const before = await runGit(ws, ["rev-parse", "HEAD"]);
