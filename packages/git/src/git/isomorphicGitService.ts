@@ -230,6 +230,47 @@ function localChangesError(paths: string[]): GitError {
   return new GitError("PullRefused", `Local changes in ${listPaths(paths)} would be overwritten. Commit them first.`);
 }
 
+/** `path`, or a folder it's in, is among `asked`. */
+function askedFor(asked: Set<string>, path: string): boolean {
+  for (let at = path; at; at = at.includes("/") ? at.slice(0, at.lastIndexOf("/")) : "") {
+    if (asked.has(at)) return true;
+  }
+  return false;
+}
+
+/** What a status walks for `filepaths`: them, or past `WALK_ROOTS_FROM`
+ *  their folders, comparing only the paths asked for (the filter runs
+ *  before any hashing; a folder passes through). */
+function statusScope(filepaths: string[] | undefined): { filepaths?: string[]; filter?: (path: string) => boolean } {
+  if (!filepaths) return {};
+  if (filepaths.length <= WALK_ROOTS_FROM) return { filepaths };
+  const asked = new Set(filepaths);
+  return { filepaths: walkRoots(filepaths), filter: (path) => askedFor(asked, path) };
+}
+
+/** Past this many paths, a status walks their folders instead. */
+const WALK_ROOTS_FROM = 64;
+
+/**
+ * Where a status walk for `filepaths` starts. isomorphic-git checks each
+ * walked path against every one asked for, so 4,000 paths in a 20,000-file
+ * tree cost 80 million checks (6 s). Past `WALK_ROOTS_FROM` paths, the walk
+ * covers the folders they're in instead (a handful, usually), and a set
+ * keeps it to the paths.
+ */
+function walkRoots(filepaths: string[]): string[] {
+  const folders = new Set(filepaths.map((path) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ".")));
+  if (folders.has(".")) return ["."];
+  // A folder inside another one listed is walked with it.
+  const sorted = [...folders].sort();
+  const roots: string[] = [];
+  for (const folder of sorted) {
+    const last = roots[roots.length - 1];
+    if (last === undefined || !folder.startsWith(`${last}/`)) roots.push(folder);
+  }
+  return roots;
+}
+
 export class IsomorphicGitService implements GitService {
   private readonly fsClient;
   private readonly dir: string;
@@ -395,7 +436,7 @@ export class IsomorphicGitService implements GitService {
         dir: this.dir,
         gitdir: this.gitdir,
         cache: this.cache,
-        ...(input?.filepaths ? { filepaths: input.filepaths } : {}),
+        ...statusScope(input?.filepaths),
       });
 
       const staged: GitFileChange[] = [];

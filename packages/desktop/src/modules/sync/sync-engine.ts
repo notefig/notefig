@@ -420,14 +420,20 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     }
   };
 
+  /** The remote's tip is already in this branch (it was pushed from here,
+   *  or pulled): nothing to fetch, only to push. Answered locally; false
+   *  when the commit isn't here yet. */
+  const behindOurs = async (theirs: string, ours: string | null) =>
+    ours !== null && (await git.mergeBase(ours, theirs).catch(() => null)) === theirs;
+
   /** Poll, pull if the remote moved, push if ahead. */
   const reconcile = async (): Promise<boolean> => {
     const refs = await git.listRemoteRefs(remote, [branchRef]);
     const theirs = refs.find((ref) => ref.ref === branchRef)?.oid ?? null;
     const ours = await head();
     if (theirs) await checkReturn(theirs, ours);
-    if (theirs && theirs !== integrated && theirs !== ours) await pullStep();
-    else if (theirs && theirs === ours) integrated = theirs;
+    if (theirs && (theirs === ours || (theirs !== integrated && (await behindOurs(theirs, ours))))) integrated = theirs;
+    else if (theirs && theirs !== integrated) await pullStep();
     return pushStep(theirs);
   };
 

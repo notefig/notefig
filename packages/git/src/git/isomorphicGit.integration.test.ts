@@ -288,6 +288,25 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     expect(before.untracked).toEqual(["note.md"]);
   });
 
+  it("limits status to a long list of paths and folders, walking only their folders", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    await host.createDir(join(repoDir, "many"));
+    await host.createDir(join(repoDir, "other"));
+    await host.createDir(join(repoDir, "kept"));
+    for (let i = 0; i < 100; i++) await host.writeFileAtomic(join(repoDir, "many", `${i}.md`), encode(`${i}\n`));
+    await host.writeFileAtomic(join(repoDir, "other", "x.md"), encode("x\n"));
+    await host.writeFileAtomic(join(repoDir, "kept", "k.md"), encode("k\n"));
+    const asked = [...Array.from({ length: 80 }, (_, i) => `many/${i}.md`), "kept"];
+
+    const { untracked } = await service.status({ filepaths: asked });
+    expect(untracked).toHaveLength(81);
+    expect(untracked).toContain("kept/k.md");
+    expect(untracked).not.toContain("many/90.md");
+    expect(untracked).not.toContain("other/x.md");
+  });
+
   it("limits status to the given paths", async () => {
     const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
     await service.init({ defaultBranch: "main" });
