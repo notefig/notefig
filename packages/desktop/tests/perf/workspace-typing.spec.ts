@@ -21,6 +21,7 @@ import {
   placeCaret,
   typeAndDelete,
 } from "./large-document";
+import { soloSyncWorkspace } from "./fixture";
 import { saveSamples } from "./results";
 import { withShim } from "./shim";
 
@@ -28,16 +29,18 @@ import { withShim } from "./shim";
 type WorkspaceKind = "regular" | "solo-sync";
 
 /**
- * Opens the large document in a `kind` of workspace. MET-270: this is the
- * one place "solo-sync" will differ from "regular". Until sync exists it is
- * the same workspace. Then write its `.notefig/sync.json` here, in a copy of
- * the fixture (the fixture directory is shared, and reused, by other specs).
+ * Opens the large document in a `kind` of workspace: the one place
+ * "solo-sync" differs from "regular" is a copy of the fixture that is a git
+ * repo whose project syncs (MET-270).
  */
 async function openWorkspace(
   page: Page,
-  _kind: WorkspaceKind,
+  kind: WorkspaceKind,
 ): Promise<string> {
-  return openLargeDocument(page);
+  return openLargeDocument(
+    page,
+    kind === "solo-sync" ? await soloSyncWorkspace() : undefined,
+  );
 }
 
 /** Autosave latencies: a key and its undo at every place, each timed to the write. */

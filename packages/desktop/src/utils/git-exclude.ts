@@ -66,3 +66,28 @@ async function writeExclude(
     );
   }
 }
+
+/**
+ * Replace the block of lines between `# >>> <name>` and `# <<< <name>`
+ * (appended when absent), leaving every other line alone: for entries the
+ * app derives and may change (sync's excludes).
+ */
+export async function setExcludeBlock(
+  fs: ExcludeFs,
+  gitDir: string,
+  name: string,
+  lines: string[],
+): Promise<void> {
+  const excludePath = `${gitDir}/info/exclude`;
+  const current = await readExclude(fs, excludePath);
+  const open = `# >>> ${name}`;
+  const close = `# <<< ${name}`;
+  const block = [open, ...lines, close].join("\n");
+  const start = current.indexOf(open);
+  const end = current.indexOf(close, start);
+  const next =
+    start >= 0 && end >= 0
+      ? `${current.slice(0, start)}${block}${current.slice(end + close.length)}`
+      : `${current}${current === "" || current.endsWith("\n") ? "" : "\n"}${block}\n`;
+  if (next !== current) await writeExclude(fs, excludePath, next);
+}

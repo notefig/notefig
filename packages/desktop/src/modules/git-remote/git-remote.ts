@@ -27,7 +27,7 @@ export interface WorkspaceGitRemote {
 }
 
 /** What to do about a failed SSH session. Nothing here is about tokens. */
-function sshProblemOf(code: string, url: string): string | undefined {
+export function sshProblemOf(code: string, url: string): string | undefined {
   const where = url.replace(/^ssh:\/\//, "").replace(/\.git$/, "");
   const destination = /^(ssh:\/\/[^/]+|[^:]+)/.exec(url)?.[0] ?? url;
   const problems: Record<string, string> = {

@@ -635,10 +635,11 @@ export class AgentTask {
             this.deps
               .services(this.workspacePath)
               .documents.read(path, options),
-          writeTextFile: (path, content) =>
-            this.deps
+          writeTextFile: async (path, content) => {
+            await this.deps
               .services(this.workspacePath)
-              .documents.write(path, content),
+              .documents.write(path, content);
+          },
         },
         { workspacePath: this.workspacePath, path: pathutil },
       ),
