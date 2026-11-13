@@ -67,23 +67,41 @@ export async function excludeAppDir(
   }
 }
 
+/** Every write the app makes to a user repo's `info/exclude`, one at a
+ *  time: each is a read-modify-write of the whole file, and two that
+ *  interleave would drop one's block. */
+export interface GitExcludes {
+  /** Bring the `notefig` block up to date. Best-effort, never throws. */
+  refresh(workspacePath: string): Promise<void>;
+  /** `setExcludeBlock`, in turn with every other write. Throws. */
+  setBlock(gitDir: string, name: string, lines: string[], retired?: string[]): Promise<void>;
+}
+
+export function createGitExcludes(fs: AppDirExcludeFs): GitExcludes {
+  let queue: Promise<unknown> = Promise.resolve();
+  const inTurn = <T>(write: () => Promise<T>): Promise<T> => {
+    const run = queue.then(write);
+    queue = run.catch(() => undefined);
+    return run;
+  };
+  return {
+    refresh: (workspacePath) => inTurn(() => excludeAppDir(fs, workspacePath)),
+    setBlock: (gitDir, name, lines, retired) => inTurn(() => setExcludeBlock(fs, gitDir, name, lines, retired)),
+  };
+}
+
 declare module "@notefig/core" {
   interface CoreModules {
-    "app-dir-exclude": undefined;
+    "app-dir-exclude": GitExcludes;
   }
 }
 
 export const appDirExcludeModule = defineModule({
   name: "app-dir-exclude",
   needs: [platformModule],
-  boot: (_api, ctx) => {
-    const { fs } = ctx.use("platform");
-    // One refresh at a time: two read-modify-writes of the same exclude
-    // must not interleave.
-    let queue: Promise<void> = Promise.resolve();
-    const refresh = (workspacePath: string) => {
-      queue = queue.then(() => excludeAppDir(fs, workspacePath));
-    };
+  register: (ctx) => createGitExcludes(ctx.use("platform").fs),
+  boot: (excludes, ctx) => {
+    const refresh = (workspacePath: string) => void excludes.refresh(workspacePath);
     const offs = [
       ctx.hooks.on("workspace:opened", ({ path }) => refresh(path)),
       ctx.hooks.on("project-settings:changed", ({ workspacePath }) => refresh(workspacePath)),

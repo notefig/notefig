@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTestCore } from "@/testing/test-core";
-import { appDirExcludeModule, type AppDirExcludeFs } from "./app-dir-exclude";
+import { appDirExcludeModule, createGitExcludes, type AppDirExcludeFs } from "./app-dir-exclude";
 
 const WS = "/workspace";
 const EXCLUDE = `${WS}/.git/info/exclude`;
@@ -116,6 +116,26 @@ describe("appDirExcludeModule", () => {
 
     await vi.waitFor(() => expect(disk.files.get(EXCLUDE)).toBe(`# mine\n*.log\n${BAR_CONFIG}`));
     await core.dispose();
+  });
+
+  it("takes every write to the exclude in turn, so none drops another's block", async () => {
+    const disk = memoryFs();
+    disk.dirs.add(`${WS}/.git`);
+    // Slow reads: two read-modify-writes left to overlap both read "".
+    const read = disk.raw.readFiles.getMockImplementation()!;
+    disk.raw.readFiles.mockImplementation(async (paths: string[]) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return read(paths);
+    });
+    const excludes = createGitExcludes(disk.fs);
+
+    await Promise.all([
+      excludes.refresh(WS),
+      excludes.setBlock(`${WS}/.git`, "notefig sync", ["a/"]),
+      excludes.refresh(WS),
+    ]);
+
+    expect(disk.files.get(EXCLUDE)).toBe(`${WHOLE}# >>> notefig sync\na/\n# <<< notefig sync\n`);
   });
 
   it("never throws on an exclude it cannot write", async () => {
