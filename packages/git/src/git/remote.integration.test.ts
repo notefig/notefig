@@ -99,6 +99,8 @@ describe("SSH remotes", () => {
   it.each([
     "git@github.com:team/notes.git",
     "gh:team/notes.git",
+    "g:team/notes.git",
+    "host:notes[2026].git",
     "git@host:/abs/notes.git",
     "git@[::1]:notes.git",
     "ssh://git@host:2222/team/notes.git",

@@ -85,9 +85,12 @@ fn parse_remote(raw: &str) -> Result<SshRemote, String> {
         let user = Some(url.username()).filter(|name| !name.is_empty());
         return build_remote(user, url.host_str().unwrap_or_default(), url.port(), path);
     }
-    let colon = match raw.find('[') {
-        Some(open) => raw[open..].find("]:").map(|end| open + end + 1),
-        None => raw.find(':'),
+    // `[…]` brackets an IPv6 host only where the host starts; elsewhere a
+    // bracket is part of the path.
+    let host_start = raw.find(['@', ':']).filter(|&at| raw.as_bytes()[at] == b'@').map_or(0, |at| at + 1);
+    let colon = match raw[host_start..].starts_with('[') {
+        true => raw[host_start..].find("]:").map(|end| host_start + end + 1),
+        false => raw.find(':'),
     }
     .ok_or("That isn't a valid SSH remote.")?;
     let (authority, path) = (&raw[..colon], &raw[colon + 1..]);
@@ -283,6 +286,9 @@ mod tests {
     fn reads_both_remote_forms() {
         assert_eq!(parse_remote("git@github.com:team/notes.git"), Ok(remote("git@github.com", None, "team/notes.git")));
         assert_eq!(parse_remote("gh:team/notes.git"), Ok(remote("gh", None, "team/notes.git")));
+        assert_eq!(parse_remote("g:team/notes.git"), Ok(remote("g", None, "team/notes.git")));
+        assert_eq!(parse_remote("host:notes[2026].git"), Ok(remote("host", None, "notes[2026].git")));
+        assert_eq!(parse_remote("git@host:a[1]:b.git"), Ok(remote("git@host", None, "a[1]:b.git")));
         assert_eq!(parse_remote("git@host:/abs/notes.git"), Ok(remote("git@host", None, "/abs/notes.git")));
         assert_eq!(parse_remote("git@[::1]:notes.git"), Ok(remote("git@::1", None, "notes.git")));
         assert_eq!(parse_remote("ssh://git@host:2222/team/notes.git"), Ok(remote("git@host", Some(2222), "/team/notes.git")));

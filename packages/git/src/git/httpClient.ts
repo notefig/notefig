@@ -16,10 +16,9 @@ async function collect(
  * `scheme://` URL or a `helper::address`.
  */
 export function isSshRemote(url: string): boolean {
-  return (
-    url.startsWith("ssh://") ||
-    /^(?:[^/@:\s]+@)?(?:\[[^\]\s]+\]|[^/@:\s]{2,}):(?!\/\/|:).+/.test(url)
-  );
+  if (url.startsWith("ssh://")) return true;
+  if (/^[A-Za-z]:[\\/]/.test(url)) return false;
+  return /^(?:[^/@:\s]+@)?(?:\[[^\]\s]+\]|[^/@:\s]+):(?!\/\/|:).+/.test(url);
 }
 
 /**
