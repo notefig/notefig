@@ -25,6 +25,12 @@ describe("managed exclude blocks", () => {
     expect(fs.text()).toBe("# >>> notefig sync\na/\n# <<< notefig sync\n# >>> notefig\nc/\n# <<< notefig\n");
   });
 
+  it("finds its block in a file saved with CRLF endings", async () => {
+    const fs = memory("# mine\r\n# >>> notefig\r\nold/\r\n# <<< notefig\r\n");
+    await setExcludeBlock(fs, "/r/.git", "notefig", ["new/"]);
+    expect(fs.text()).toBe("# mine\r\n# >>> notefig\nnew/\n# <<< notefig\n");
+  });
+
   it("replaces its own block in place, and drops retired lines elsewhere", async () => {
     const fs = memory("# mine\n.notefig/\n# >>> notefig\nold/\n# <<< notefig\n*.log\n");
     await setExcludeBlock(fs, "/r/.git", "notefig", ["new/"], [".notefig/"]);

@@ -248,6 +248,14 @@ describe("sync: solo", () => {
     expect(await read(join(ws, "a.md"))).toBe("Mine since.\n");
     expect(await read(join(ws, "z.md"))).toBe("Mine too.\n");
     expect(sync.state()).toMatchObject({ fault: "diverged", detail: expect.stringContaining("z.md") });
+
+    // Keep mine: the move finishes, and both saves go out on top of the remote.
+    sync.resume();
+    await sync.syncNow();
+    expect(sync.state()).toMatchObject({ fault: null, activity: "idle" });
+    expect(await runGit(remote.bare, ["show", "main:z.md"])).toBe("Mine too.");
+    expect(await runGit(remote.bare, ["show", "main:a.md"])).toBe("Mine since.");
+    expect(await runGit(remote.bare, ["show", "main:m.bin"])).toBe("PNG\u0000");
   });
 
   it("stops before taking in a change the file API can't write: an executable bit", async () => {

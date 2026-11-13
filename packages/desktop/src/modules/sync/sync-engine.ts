@@ -99,6 +99,15 @@ const SUMMARY_DEPTH = 200;
 /** git's folder and the app's never sync, but for the project's config. */
 const NEVER = /^(\.git(\/|$)|\.notefig(\/(?!config\.json$)|$))/;
 
+/** A pull that moved the branch: the files written so far, and those held
+ *  for unsaved edits (asked about once every file is done). */
+interface Move {
+  from: string;
+  to: string;
+  done: Set<string>;
+  held: string[];
+}
+
 /** Raised to end a cycle whose stop was already dispatched. */
 class CycleStop extends Error {}
 
@@ -166,7 +175,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   let integrated: string | null = null;
   /** A pull that moved the branch but not every file yet: finished before
    *  anything else, so the stale files are never committed back. */
-  let unfinished: { from: string; to: string; done: Set<string> } | null = null;
+  let unfinished: Move | null = null;
   let lastSynced = deps.lastSyncedAt;
   let lastRecorded = lastSynced ?? 0;
   let keepLocalOnce = false;
@@ -316,15 +325,22 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   /** Bring index and worktree from `from` to `to` for the files that
    *  differ; text is written through the documents write path, which holds
    *  back a file with unsaved edits. */
-  const moveWorktree = async (move: { from: string; to: string; done: Set<string> }) => {
+  const moveWorktree = async (move: Move) => {
     const { from, to, done } = move;
-    const changes = { created: [] as string[], deleted: [] as string[], held: [] as string[] };
+    const changes = { created: [] as string[], deleted: [] as string[], held: move.held };
     const remaining = (await git.changedFiles(from, to, { toApply: true })).filter((path) => !NEVER.test(path) && !done.has(path));
     // A retry: a file not written yet may have been saved here since.
     const edited = done.size > 0 ? await editedSince(remaining) : [];
     for (const filepath of remaining) {
       alive();
-      if (edited.includes(filepath)) continue;
+      if (edited.includes(filepath)) {
+        if (!keepLocalOnce) continue;
+        // Keep mine: the saved file stays, and its index takes the remote's
+        // version, so the save commits on top of it.
+        await git.unstage({ filepath, ref: to });
+        done.add(filepath);
+        continue;
+      }
       const outcome = await applyFile(filepath, to);
       changes[outcome === "written" ? "created" : outcome].push(absolute(filepath));
       // Only once the file is on disk: a failed write leaves the index at
@@ -334,7 +350,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       await git.unstage({ filepath, ref: to });
       done.add(filepath);
     }
-    if (edited.length > 0) {
+    if (edited.length > 0 && !keepLocalOnce) {
       stop({ type: "diverged", detail: `Changed here and on the remote: ${edited.join(", ")}. Sync stopped so neither side is lost.` });
     }
     unfinished = null;
@@ -343,7 +359,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       await deps.files.recordDiskChanges({ created, deleted });
       deps.hooks.emit("sync:remote-applied", { workspacePath: root, commit: to, paths: [...created, ...deleted] });
     }
-    if (held.length > 0) {
+    if (held.length > 0 && !keepLocalOnce) {
       // The remote's version is committed; the unsaved edits stay in the
       // editor. Without a merge (solo), that is a stop.
       stop({
@@ -378,7 +394,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     if (base === ours) {
       alive();
       await git.merge({ ours: branchRef, theirs, fastForwardOnly: true });
-      unfinished = { from: ours, to: theirs, done: new Set() };
+      unfinished = { from: ours, to: theirs, done: new Set(), held: [] };
       await moveWorktree(unfinished);
       integrated = theirs;
       return;
@@ -395,7 +411,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       if (!local.has(filepath)) await git.unstage({ filepath, ref: theirs });
     }
     const replayed = await git.commit({ message: commitMessage(author.name, localFiles), author, parent: [theirs] });
-    unfinished = { from: ours, to: replayed, done: new Set() };
+    unfinished = { from: ours, to: replayed, done: new Set(), held: [] };
     await moveWorktree(unfinished);
     integrated = theirs;
   };

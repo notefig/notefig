@@ -89,8 +89,10 @@ export async function setExcludeBlock(
   const close = `# <<< ${name}`;
   // Whole lines only: `# >>> notefig` must not find `# >>> notefig sync`.
   const rows = current.split("\n");
-  const start = rows.indexOf(open);
-  const end = start >= 0 ? rows.indexOf(close, start) : -1;
+  // A Windows editor may have saved it with CRLF endings.
+  const bare = rows.map((row) => row.replace(/\r$/, ""));
+  const start = bare.indexOf(open);
+  const end = start >= 0 ? bare.indexOf(close, start) : -1;
   const next =
     start >= 0 && end >= 0
       ? [...rows.slice(0, start), open, ...lines, close, ...rows.slice(end + 1)].join("\n")
