@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTestCore } from "@/testing/test-core";
-import { appDirExcludeModule, type AppDirExcludeFs } from "./app-dir-exclude";
+import { appDirExcludeModule, createGitExcludes, type AppDirExcludeFs } from "./app-dir-exclude";
 
 const WS = "/workspace";
 const EXCLUDE = `${WS}/.git/info/exclude`;
@@ -25,8 +25,8 @@ function memoryFs() {
     exists: vi.fn(async (paths: string[]) =>
       paths.map((path) => ({
         path,
-        exists: dirs.has(path),
-        type: dirs.has(path) ? "directory" : undefined,
+        exists: dirs.has(path) || files.has(path),
+        type: dirs.has(path) ? "directory" : files.has(path) ? "file" : undefined,
       })),
     ),
   };
@@ -42,6 +42,10 @@ async function bootWith(disk: ReturnType<typeof memoryFs>) {
   return core;
 }
 
+const WHOLE = "# >>> notefig\n.notefig/\n# <<< notefig\n";
+const BAR_CONFIG = "# >>> notefig\n.notefig/*\n!.notefig/config.json\n# <<< notefig\n";
+const CONFIG = `${WS}/.notefig/config.json`;
+
 const turnIn = (workspacePath: string) => ({
   taskId: "t",
   turnId: "u",
@@ -51,7 +55,7 @@ const turnIn = (workspacePath: string) => ({
 });
 
 describe("appDirExcludeModule", () => {
-  it("hides .notefig/ but its config from the user's repo after a turn, once the workspace has one", async () => {
+  it("hides .notefig/ whole from the user's repo after a turn, once the workspace has one", async () => {
     const disk = memoryFs();
     const core = await bootWith(disk);
 
@@ -63,20 +67,75 @@ describe("appDirExcludeModule", () => {
     disk.dirs.add(`${WS}/.git`);
     core.hooks.emit("agent:turn-completed", turnIn(`${WS}/`));
 
-    await vi.waitFor(() => expect(disk.files.get(EXCLUDE)).toBe("# >>> notefig\n.notefig/*\n!.notefig/config.json\n# <<< notefig\n"));
+    await vi.waitFor(() => expect(disk.files.get(EXCLUDE)).toBe(WHOLE));
+    await core.dispose();
+  });
+
+  it("opens .notefig/ for the config only once the project has one, on open and when it changes", async () => {
+    const disk = memoryFs();
+    disk.dirs.add(`${WS}/.git`);
+    const core = await bootWith(disk);
+
+    // No config: a re-include would leave git listing an empty .notefig/.
+    core.hooks.emit("workspace:opened", { key: WS, path: WS });
+    await vi.waitFor(() => expect(disk.files.get(EXCLUDE)).toBe(WHOLE));
+
+    disk.files.set(CONFIG, "{}");
+    core.hooks.emit("project-settings:changed", { workspacePath: WS });
+    await vi.waitFor(() => expect(disk.files.get(EXCLUDE)).toBe(BAR_CONFIG));
+
+    disk.files.delete(CONFIG);
+    core.hooks.emit("workspace:opened", { key: WS, path: WS });
+    await vi.waitFor(() => expect(disk.files.get(EXCLUDE)).toBe(WHOLE));
+    await core.dispose();
+  });
+
+  it("hides .notefig/ whole while an older build's history repo is in it, config or not", async () => {
+    const disk = memoryFs();
+    disk.dirs.add(`${WS}/.git`);
+    // git would list .notefig/ as an embedded repo, and `git add -A` would
+    // commit it as an empty gitlink.
+    disk.dirs.add(`${WS}/.notefig/.git`);
+    disk.files.set(CONFIG, "{}");
+    const core = await bootWith(disk);
+
+    core.hooks.emit("workspace:opened", { key: WS, path: WS });
+
+    await vi.waitFor(() => expect(disk.files.get(EXCLUDE)).toBe(WHOLE));
     await core.dispose();
   });
 
   it("drops an older build's .notefig/ line, which would hide the config, and keeps the user's own", async () => {
     const disk = memoryFs();
     disk.dirs.add(`${WS}/.git`);
+    disk.files.set(CONFIG, "{}");
     disk.files.set(EXCLUDE, "# mine\n.notefig/\n*.log\n");
     const core = await bootWith(disk);
 
     core.hooks.emit("agent:turn-completed", turnIn(WS));
 
-    await vi.waitFor(() => expect(disk.files.get(EXCLUDE)).toBe(`# mine\n*.log\n${"# >>> notefig\n.notefig/*\n!.notefig/config.json\n# <<< notefig\n"}`));
+    await vi.waitFor(() => expect(disk.files.get(EXCLUDE)).toBe(`# mine\n*.log\n${BAR_CONFIG}`));
     await core.dispose();
+  });
+
+  it("takes every write to the exclude in turn, so none drops another's block", async () => {
+    const disk = memoryFs();
+    disk.dirs.add(`${WS}/.git`);
+    // Slow reads: two read-modify-writes left to overlap both read "".
+    const read = disk.raw.readFiles.getMockImplementation()!;
+    disk.raw.readFiles.mockImplementation(async (paths: string[]) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return read(paths);
+    });
+    const excludes = createGitExcludes(disk.fs);
+
+    await Promise.all([
+      excludes.refresh(WS),
+      excludes.setBlock(`${WS}/.git`, "notefig sync", ["a/"]),
+      excludes.refresh(WS),
+    ]);
+
+    expect(disk.files.get(EXCLUDE)).toBe(`${WHOLE}# >>> notefig sync\na/\n# <<< notefig sync\n`);
   });
 
   it("never throws on an exclude it cannot write", async () => {

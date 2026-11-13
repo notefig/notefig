@@ -36,4 +36,10 @@ describe("managed exclude blocks", () => {
     await setExcludeBlock(fs, "/r/.git", "notefig", ["new/"], [".notefig/"]);
     expect(fs.text()).toBe("# mine\n# >>> notefig\nnew/\n# <<< notefig\n*.log\n");
   });
+
+  it("leaves a retired line alone inside another block", async () => {
+    const fs = memory("# >>> notefig\n.notefig/\n# <<< notefig\n");
+    await setExcludeBlock(fs, "/r/.git", "notefig sync", ["a/"], [".notefig/"]);
+    expect(fs.text()).toBe("# >>> notefig\n.notefig/\n# <<< notefig\n# >>> notefig sync\na/\n# <<< notefig sync\n");
+  });
 });

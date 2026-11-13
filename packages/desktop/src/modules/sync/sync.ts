@@ -24,8 +24,8 @@ import { filesModule, type WorkspaceFiles } from "@/modules/files";
 import { sshProblemOf } from "@/modules/git-remote";
 import { gitWorkerModule, type GitWorker } from "@/modules/git-worker";
 import { projectSettingsModule, type ProjectSettingsApi } from "@/modules/project-settings";
+import { appDirExcludeModule, type GitExcludes } from "@/modules/app-dir-exclude";
 import { APP_DIR_NAME, USER_REPO_EXCLUDE_LINES } from "@/utils/app-dir";
-import { setExcludeBlock } from "@/utils/git-exclude";
 import { path as pathutil } from "@/utils/path";
 import {
   INITIAL_SYNC_STATE,
@@ -86,6 +86,8 @@ export interface WorkspaceSyncDeps {
   documents: Pick<DocumentsApi, "write">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
   projectSettings: Pick<ProjectSettingsApi, "read" | "update">;
+  /** Writes to the repo's `info/exclude`, in turn with the app dir's. */
+  excludes: Pick<GitExcludes, "refresh" | "setBlock">;
   /** Test seam: the engine's timers and window blur. */
   engine?: { setTimer?: (run: () => void, ms: number) => () => void; onBlur?: (l: () => void) => () => void };
 }
@@ -246,12 +248,19 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     if (next.setup !== "on" || !sameRemote(next.remote, state.remote)) await stopEngine();
     dispatch(next);
     if (next.setup !== "on" || !next.remote) return;
-    // The app dir (bar the config) and the project's excludes stay out of
-    // every commit.
-    // `.notefig/`, as older builds wrote it, would keep the config out.
-    await setExcludeBlock(deps.fs, gitDir, "notefig sync", [...USER_REPO_EXCLUDE_LINES, ...BUILT_IN_EXCLUDES, ...excludes], [
-      `${APP_DIR_NAME}/`,
-    ]);
+    // The app dir (bar the config, which now exists) and the project's
+    // excludes stay out of every commit. The `notefig` block is brought up
+    // to date first so it doesn't hold the config back; this block keeps
+    // the app dir's contents out on its own, should that refresh fail.
+    // `.notefig/` outside a block, as older builds wrote it, would keep
+    // the config out.
+    await deps.excludes.refresh(root);
+    await deps.excludes.setBlock(
+      gitDir,
+      "notefig sync",
+      [...USER_REPO_EXCLUDE_LINES, ...BUILT_IN_EXCLUDES, ...excludes],
+      [`${APP_DIR_NAME}/`],
+    );
     await startEngine(next.remote);
   };
 
@@ -360,7 +369,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
 
 export const syncModule = defineModule({
   name: "sync",
-  needs: [platformModule, documentsModule, projectSettingsModule, gitWorkerModule],
+  needs: [platformModule, documentsModule, projectSettingsModule, gitWorkerModule, appDirExcludeModule],
   workspace: {
     needs: [filesModule],
     create: (ctx) =>
@@ -373,6 +382,7 @@ export const syncModule = defineModule({
         documents: ctx.use("documents"),
         files: ctx.useWorkspace("files"),
         projectSettings: ctx.use("projectSettings"),
+        excludes: ctx.use("app-dir-exclude"),
       }),
     dispose: (sync) => sync.dispose(),
   },
