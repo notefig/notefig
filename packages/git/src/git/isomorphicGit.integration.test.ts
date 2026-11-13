@@ -288,6 +288,125 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     expect(before.untracked).toEqual(["note.md"]);
   });
 
+  it("limits status to a long list of paths and folders, walking only their folders", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    await host.createDir(join(repoDir, "many"));
+    await host.createDir(join(repoDir, "other"));
+    await host.createDir(join(repoDir, "kept"));
+    for (let i = 0; i < 100; i++) await host.writeFileAtomic(join(repoDir, "many", `${i}.md`), encode(`${i}\n`));
+    await host.writeFileAtomic(join(repoDir, "other", "x.md"), encode("x\n"));
+    await host.writeFileAtomic(join(repoDir, "kept", "k.md"), encode("k\n"));
+    const asked = [...Array.from({ length: 80 }, (_, i) => `many/${i}.md`), "kept"];
+
+    const { untracked } = await service.status({ filepaths: asked });
+    expect(untracked).toHaveLength(81);
+    expect(untracked).toContain("kept/k.md");
+    expect(untracked).not.toContain("many/90.md");
+    expect(untracked).not.toContain("other/x.md");
+  });
+
+  it("limits status to the given paths", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    await host.writeFileAtomic(join(repoDir, "a.md"), encode("a\n"));
+    await host.createDir(join(repoDir, "notes"));
+    await host.writeFileAtomic(join(repoDir, "notes", "b.md"), encode("b\n"));
+    await host.writeFileAtomic(join(repoDir, "c.md"), encode("c\n"));
+
+    expect((await service.status({ filepaths: ["a.md", "notes"] })).untracked)
+      .toEqual(["a.md", "notes/b.md"]);
+    expect((await service.status()).untracked).toEqual([
+      "a.md",
+      "c.md",
+      "notes/b.md",
+    ]);
+  });
+
+  it("lists the files of a commit's tree", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    await host.createDir(join(repoDir, "notes"));
+    await host.writeFileAtomic(join(repoDir, "notes", "b.md"), encode("b\n"));
+    await host.writeFileAtomic(join(repoDir, "a.md"), encode("a\n"));
+    await service.addAllAndCommit({ message: "two", author: { name: "T", email: "t@x" } });
+
+    await expect(service.listFiles()).resolves.toEqual(["a.md", "notes/b.md"]);
+  });
+
+  it("lists the files that differ between two commits, and reads their bytes", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    const author = { name: "T", email: "t@x" };
+    await host.createDir(join(repoDir, "notes"));
+    await host.createDir(join(repoDir, "same"));
+    await host.writeFileAtomic(join(repoDir, "notes", "b.md"), encode("b\n"));
+    await host.writeFileAtomic(join(repoDir, "same", "c.md"), encode("c\n"));
+    await host.writeFileAtomic(join(repoDir, "a.md"), encode("a\n"));
+    const first = await service.addAllAndCommit({ message: "one", author });
+    await host.writeFileAtomic(join(repoDir, "notes", "b.md"), encode("b2\n"));
+    await host.deleteFile(join(repoDir, "a.md"));
+    await host.writeFileAtomic(join(repoDir, "d.md"), encode("d\n"));
+    const second = await service.addAllAndCommit({ message: "two", author });
+
+    await expect(service.changedFiles(first!, second!)).resolves.toEqual(["a.md", "d.md", "notes/b.md"]);
+    await expect(service.changedFiles(second!, second!)).resolves.toEqual([]);
+    await expect(service.readFile({ ref: second!, filepath: "notes/b.md" })).resolves.toEqual(encode("b2\n"));
+    await expect(service.readFile({ ref: second!, filepath: "a.md" })).resolves.toBeNull();
+    await expect(service.mergeBase(second!, first!)).resolves.toBe(first);
+    await expect(service.mergeBase("refs/heads/main", first!)).resolves.toBe(first);
+  });
+
+  it("refuses what a file API can't write when asked: a new mode, a file swapped with a folder", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    const author = { name: "T", email: "t@x" };
+    await host.writeFileAtomic(join(repoDir, "run.sh"), encode("echo\n"));
+    await host.writeFileAtomic(join(repoDir, "doc"), encode("a file\n"));
+    const first = await service.addAllAndCommit({ message: "one", author });
+    await host.writeFileAtomic(join(repoDir, "run.sh"), encode("echo hi\n"));
+    await host.chmod(join(repoDir, "run.sh"), 0o755);
+    const second = await service.addAllAndCommit({ message: "two", author });
+
+    await expect(service.changedFiles(first!, second!)).resolves.toEqual(["run.sh"]);
+    await expect(service.changedFiles(first!, second!, { toApply: true })).rejects.toMatchObject({
+      code: "PullRefused",
+      message: expect.stringContaining("File permissions changed for run.sh"),
+    });
+
+    await host.deleteFile(join(repoDir, "doc"));
+    await host.createDir(join(repoDir, "doc"));
+    await host.writeFileAtomic(join(repoDir, "doc", "inside.md"), encode("now a folder\n"));
+    const third = await service.addAllAndCommit({ message: "three", author });
+    await expect(service.changedFiles(second!, third!)).resolves.toEqual(["doc", "doc/inside.md"]);
+    await expect(service.changedFiles(second!, third!, { toApply: true })).rejects.toMatchObject({
+      code: "PullRefused",
+      message: expect.stringContaining("between a file and a folder"),
+    });
+  });
+
+  it("reads the repo's config and checked-out branch", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    await host.writeFileAtomic(
+      join(repoDir, ".git", "config"),
+      new TextEncoder().encode('[remote "origin"]\n\turl = https://h/o/r.git\n[user]\n\tname = Ada\n'),
+    );
+
+    await expect(service.getConfig("remote.origin.url")).resolves.toBe("https://h/o/r.git");
+    await expect(service.getConfig("user.name")).resolves.toBe("Ada");
+    await expect(service.getConfig("user.email")).resolves.toBeUndefined();
+    await expect(service.currentBranch()).resolves.toBe("main");
+    await host.writeFileAtomic(join(repoDir, ".gitignore"), new TextEncoder().encode(".claude/\n"));
+    await expect(service.isIgnored(".claude/settings.json")).resolves.toBe(true);
+    await expect(service.isIgnored("notes.md")).resolves.toBe(false);
+  });
+
   describe("remoteTarget", () => {
     const withConfig = async (config: string) => {
       const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });

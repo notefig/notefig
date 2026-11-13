@@ -51,6 +51,12 @@ function toEpochMs(value: Date | number): number {
   return value;
 }
 
+/** A loose object (`objects/ab/cdef…`) or a pack (`objects/pack/pack-<sha>.pack|.idx`). */
+const CONTENT_ADDRESSED = /\/objects\/(?:[0-9a-f]{2}\/[0-9a-f]{38}|pack\/pack-[0-9a-f]{40}\.(?:pack|idx))$/;
+function isContentAddressed(path: string): boolean {
+  return CONTENT_ADDRESSED.test(path.split("\\").join("/"));
+}
+
 function requireSuccess<T>(
   path: string,
   result: BatchResult<T>,
@@ -95,6 +101,13 @@ export function createGitStorageHost(
     ): Promise<void> => {
       const path = native(rawPath);
       const result = await fs.writeBinaryFiles([{ path, data }]);
+      // An object or pack is named by its content: one already there holds
+      // these bytes. system git leaves them read-only, so writing it again
+      // (a fetch that brings a pack a clone already has) would fail.
+      if (result.failed.length > 0 && isContentAddressed(path)) {
+        const existing = await fs.getMetadata([path]);
+        if (existing.succeeded.length > 0) return;
+      }
       requireSuccess(path, result, "write");
     },
 

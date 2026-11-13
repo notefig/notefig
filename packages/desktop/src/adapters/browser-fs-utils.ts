@@ -71,18 +71,18 @@ export function getRelativePath(path: string, workspaceRoot: string): string {
 }
 
 /** The app's own directory is deliberately NOT hidden (MET-135) — it
- * appears in the tree — but the only child of it that is visible is the
- * scratchpads folder; everything else it holds (`.notefig/.git`, agent
- * state, …) is hidden by position rather than by name. Mirrors
- * walkdir_utils::{APP_DIR_NAME, APP_VISIBLE_CHILD_NAME} and
- * modules/scratchpads/scratchpads.ts. */
+ * appears in the tree — but only two children of it are visible: the
+ * scratchpads folder and the project's config; everything else it holds
+ * (`.notefig/.git`, agent state, …) is hidden by position rather than by
+ * name. Mirrors walkdir_utils::{APP_DIR_NAME, APP_VISIBLE_CHILD_NAMES} and
+ * utils/app-dir.ts. */
 const APP_DIR_NAME = ".notefig";
-const APP_VISIBLE_CHILD_NAME = "scratchpads";
+const APP_VISIBLE_CHILD_NAMES = ["scratchpads", "config.json"];
 
 /** Whether `name`, sitting directly inside `parent`, is hidden: dot-named,
- * or any child of the app dir other than the scratchpads folder. */
+ * or any child of the app dir other than its visible ones. */
 function isHiddenSegment(parent: string | undefined, name: string): boolean {
-  if (parent === APP_DIR_NAME) return name !== APP_VISIBLE_CHILD_NAME;
+  if (parent === APP_DIR_NAME) return !APP_VISIBLE_CHILD_NAMES.includes(name);
   return (
     name.startsWith(".") &&
     name.length > 1 &&

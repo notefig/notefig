@@ -66,3 +66,36 @@ async function writeExclude(
     );
   }
 }
+
+/**
+ * Replace the block of lines between `# >>> <name>` and `# <<< <name>`
+ * (appended when absent), leaving every other line alone but those in
+ * `retired` (lines an older build wrote outside a block): for entries the
+ * app derives and may change.
+ */
+export async function setExcludeBlock(
+  fs: ExcludeFs,
+  gitDir: string,
+  name: string,
+  lines: string[],
+  retired: string[] = [],
+): Promise<void> {
+  const excludePath = `${gitDir}/info/exclude`;
+  const existing = await readExclude(fs, excludePath);
+  const current = retired.length
+    ? existing.split("\n").filter((line) => !retired.includes(line.trim())).join("\n")
+    : existing;
+  const open = `# >>> ${name}`;
+  const close = `# <<< ${name}`;
+  // Whole lines only: `# >>> notefig` must not find `# >>> notefig sync`.
+  const rows = current.split("\n");
+  // A Windows editor may have saved it with CRLF endings.
+  const bare = rows.map((row) => row.replace(/\r$/, ""));
+  const start = bare.indexOf(open);
+  const end = start >= 0 ? bare.indexOf(close, start) : -1;
+  const next =
+    start >= 0 && end >= 0
+      ? [...rows.slice(0, start), open, ...lines, close, ...rows.slice(end + 1)].join("\n")
+      : `${current}${current === "" || current.endsWith("\n") ? "" : "\n"}${[open, ...lines, close].join("\n")}\n`;
+  if (next !== existing) await writeExclude(fs, excludePath, next);
+}

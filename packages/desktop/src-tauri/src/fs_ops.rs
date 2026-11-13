@@ -846,7 +846,7 @@ mod tests {
     }
 
     /// MET-135: the app dir (".notefig") is not hidden — it is walked by
-    /// default — but only its scratchpads folder is: every other child is
+    /// default — but only its scratchpads folder and config are: every other child is
     /// hidden by position, dot-named (".notefig/.git") or not.
     #[tokio::test]
     async fn test_read_directory_walks_app_dir_but_not_its_hidden_children() {
@@ -857,6 +857,7 @@ mod tests {
         create_test_file(&temp_dir, ".notefig/scratchpads/untitled.md", "x").await;
         create_test_file(&temp_dir, ".notefig/.git/HEAD", "x").await;
         create_test_file(&temp_dir, ".notefig/tasks.json", "x").await;
+        create_test_file(&temp_dir, ".notefig/config.json", "{}").await;
         create_test_file(&temp_dir, ".git/HEAD", "x").await;
 
         let result =
@@ -866,6 +867,7 @@ mod tests {
         if let Result::Ok { value, .. } = result {
             assert!(value.iter().any(|e| e.path.contains("untitled.md")));
             assert!(value.iter().any(|e| e.path.contains("notes.md")));
+            assert!(value.iter().any(|e| e.path.ends_with("config.json")));
             assert!(!value.iter().any(|e| e.path.contains("HEAD")));
             assert!(!value.iter().any(|e| e.path.contains("tasks.json")));
         }

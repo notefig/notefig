@@ -1,6 +1,6 @@
 /**
  * Demo data generator for browser mode
- * Creates a realistic workspace with markdown files and metrists.json
+ * Creates a realistic workspace with markdown files and a project config
  */
 
 import { path as pathutil } from "./path";
@@ -86,7 +86,7 @@ Happy note-taking!
   const readmeEntry = createEntry("README.md", "file", readmeContent);
   files[readmeEntry.path] = readmeEntry;
 
-  const metristsConfig = {
+  const projectConfig = {
     workspace: {
       name: "Demo Workspace",
       created: new Date().toISOString(),
@@ -97,8 +97,10 @@ Happy note-taking!
       fontSize: 14,
     },
   };
-  const configContent = JSON.stringify(metristsConfig, null, 2);
-  const configEntry = createEntry("metrists.json", "file", configContent);
+  const configContent = JSON.stringify(projectConfig, null, 2);
+  const appDirEntry = createEntry(".notefig", "directory", "");
+  files[appDirEntry.path] = appDirEntry;
+  const configEntry = createEntry(".notefig/config.json", "file", configContent);
   files[configEntry.path] = configEntry;
 
   const gettingStartedContent = `

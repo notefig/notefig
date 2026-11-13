@@ -7,6 +7,7 @@ import {
   type ElementType,
   type MutableRefObject,
 } from "react";
+import { remoteLabel } from "@notefig/git";
 import {
   FileText,
   Settings,
@@ -147,7 +148,7 @@ function gitCommands(core: Core, workspacePath: string, t: TFunction): CommandTy
       KeyRound,
       onCredential(async (url) => {
         const token = await ui.promptText({
-          title: t("gitTokenTitle", { where: url.replace(/^https:\/\//, "").replace(/\.git$/, "") }),
+          title: t("gitTokenTitle", { where: remoteLabel(url) }),
           message: t("gitTokenMessage"),
           secret: true,
         });

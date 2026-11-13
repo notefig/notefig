@@ -1,13 +1,15 @@
 import git from "isomorphic-git";
 import type { FsClient, MergeResult } from "isomorphic-git";
 
-import { isSshRemote, sshBridgeUrl, toIsomorphicHttp } from "./httpClient";
+import { sshBridgeUrl, toIsomorphicHttp } from "./httpClient";
+import { isSshRemote } from "./remoteUrl";
 import { createIsomorphicGitFs } from "./isomorphicGitFs";
 import {
   GitError,
   type GitAddInput,
   type GitBranchTarget,
   type GitDirection,
+  type GitStatusInput,
   type GitCheckoutPathsInput,
   type GitCommitInput,
   type GitCreateBranchInput,
@@ -228,6 +230,47 @@ function localChangesError(paths: string[]): GitError {
   return new GitError("PullRefused", `Local changes in ${listPaths(paths)} would be overwritten. Commit them first.`);
 }
 
+/** `path`, or a folder it's in, is among `asked`. */
+function askedFor(asked: Set<string>, path: string): boolean {
+  for (let at = path; at; at = at.includes("/") ? at.slice(0, at.lastIndexOf("/")) : "") {
+    if (asked.has(at)) return true;
+  }
+  return false;
+}
+
+/** What a status walks for `filepaths`: them, or past `WALK_ROOTS_FROM`
+ *  their folders, comparing only the paths asked for (the filter runs
+ *  before any hashing; a folder passes through). */
+function statusScope(filepaths: string[] | undefined): { filepaths?: string[]; filter?: (path: string) => boolean } {
+  if (!filepaths) return {};
+  if (filepaths.length <= WALK_ROOTS_FROM) return { filepaths };
+  const asked = new Set(filepaths);
+  return { filepaths: walkRoots(filepaths), filter: (path) => askedFor(asked, path) };
+}
+
+/** Past this many paths, a status walks their folders instead. */
+const WALK_ROOTS_FROM = 64;
+
+/**
+ * Where a status walk for `filepaths` starts. isomorphic-git checks each
+ * walked path against every one asked for, so 4,000 paths in a 20,000-file
+ * tree cost 80 million checks (6 s). Past `WALK_ROOTS_FROM` paths, the walk
+ * covers the folders they're in instead (a handful, usually), and a set
+ * keeps it to the paths.
+ */
+function walkRoots(filepaths: string[]): string[] {
+  const folders = new Set(filepaths.map((path) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ".")));
+  if (folders.has(".")) return ["."];
+  // A folder inside another one listed is walked with it.
+  const sorted = [...folders].sort();
+  const roots: string[] = [];
+  for (const folder of sorted) {
+    const last = roots[roots.length - 1];
+    if (last === undefined || !folder.startsWith(`${last}/`)) roots.push(folder);
+  }
+  return roots;
+}
+
 export class IsomorphicGitService implements GitService {
   private readonly fsClient;
   private readonly dir: string;
@@ -356,7 +399,7 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async status(): Promise<RepoStatus> {
+  async status(input?: GitStatusInput): Promise<RepoStatus> {
     try {
       let branch: string | null = null;
 
@@ -393,6 +436,7 @@ export class IsomorphicGitService implements GitService {
         dir: this.dir,
         gitdir: this.gitdir,
         cache: this.cache,
+        ...statusScope(input?.filepaths),
       });
 
       const staged: GitFileChange[] = [];
@@ -996,9 +1040,127 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
+  async listFiles(input?: { ref?: string }): Promise<string[]> {
+    try {
+      return await git.listFiles({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        ref: input?.ref ?? "HEAD",
+      });
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async readFile(input: GitReadTextFileInput): Promise<Uint8Array | null> {
+    try {
+      const { blob } = await git.readBlob({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        oid: input.ref,
+        filepath: input.filepath,
+      });
+      return blob;
+    } catch (error) {
+      if ((error as { name?: string }).name === "NotFoundError") return null;
+      throw this.fail(error);
+    }
+  }
+
+  async mergeBase(a: string, b: string): Promise<string | null> {
+    try {
+      const resolve = (ref: string) =>
+        /^[0-9a-f]{40}$/.test(ref)
+          ? ref
+          : git.resolveRef({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, ref });
+      const oids = await Promise.all([resolve(a), resolve(b)]);
+      const [base] = await git.findMergeBase({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        oids,
+      });
+      return base ?? null;
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async changedFiles(from: string, to: string, options?: { toApply?: boolean }): Promise<string[]> {
+    const swapped: string[] = [];
+    const modes: string[] = [];
+    try {
+      const changed = await git.walk({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        trees: [git.TREE({ ref: from }), git.TREE({ ref: to })],
+        map: async (filepath, [a, b]) => {
+          if (filepath === ".") return undefined;
+          const [oidA, oidB, typeA, typeB, modeA, modeB] = await Promise.all([a?.oid(), b?.oid(), a?.type(), b?.type(), a?.mode(), b?.mode()]);
+          // Equal subtrees are skipped whole (null stops the descent).
+          if (oidA === oidB && modeA === modeB) return null;
+          if (typeA === "tree" || typeB === "tree") {
+            // A file replaced by a folder (or back) is a change too.
+            if (typeA !== "blob" && typeB !== "blob") return undefined;
+            swapped.push(filepath);
+            return filepath;
+          }
+          if (b && modeA !== modeB && (a || modeB !== PLAIN_FILE_MODE)) modes.push(filepath);
+          return filepath;
+        },
+      });
+      if (options?.toApply && swapped.length > 0) {
+        throw new GitError("PullRefused", `${listPaths(swapped)} changed between a file and a folder. Pull it in a terminal.`);
+      }
+      if (options?.toApply && modes.length > 0) {
+        throw new GitError("PullRefused", `File permissions changed for ${listPaths(modes)}. Pull it in a terminal.`);
+      }
+      return (changed as string[]).sort();
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async getConfig(path: string): Promise<string | undefined> {
+    try {
+      return await this.config(path);
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async currentBranch(): Promise<string | null> {
+    try {
+      const branch = await git.currentBranch({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+      });
+      return branch ?? null;
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async isIgnored(filepath: string): Promise<boolean> {
+    try {
+      return await git.isIgnored({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, filepath });
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
   async listRemoteRefs(
     remote: GitRemote,
     prefixes: string[] = [],
+    options: { forPush?: boolean } = {},
   ): Promise<GitRemoteRef[]> {
     try {
       // Protocol v1 lists every ref in one GET, filtered here; v2 filters
@@ -1006,6 +1168,7 @@ export class IsomorphicGitService implements GitService {
       const refs = await git.listServerRefs({
         ...this.remote(remote),
         protocolVersion: 1,
+        forPush: options.forPush === true,
       });
       return refs
         .filter(

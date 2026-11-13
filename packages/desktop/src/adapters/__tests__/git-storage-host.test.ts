@@ -92,3 +92,28 @@ describe("createGitStorageHost lock registry", () => {
     await expect(second.lock("index")).resolves.toBeUndefined();
   });
 });
+
+describe("createGitStorageHost writes", () => {
+  const refused = { succeeded: [], failed: [{ path: "", type: "permission_denied", message: "EACCES" }] };
+  const pack = "/ws/.git/objects/pack/pack-d3b012557885e2a1e960b7d12798b9f648f05484.pack";
+
+  it("takes an object or pack already there as written: it's named by its content", async () => {
+    const fs = fsStub();
+    vi.mocked(fs.writeBinaryFiles).mockResolvedValue(refused as never);
+    vi.mocked(fs.getMetadata).mockResolvedValue({ succeeded: [{ path: pack }], failed: [] } as never);
+    const host = createGitStorageHost(fs, gitDir());
+
+    await expect(host.writeFileAtomic(pack, new Uint8Array([1]))).resolves.toBeUndefined();
+    await expect(host.writeFileAtomic("/ws/.git/objects/ab/cdef0123456789abcdef0123456789abcdef01", new Uint8Array([1]))).resolves.toBeUndefined();
+  });
+
+  it("still fails any other refused write", async () => {
+    const fs = fsStub();
+    vi.mocked(fs.writeBinaryFiles).mockResolvedValue(refused as never);
+    vi.mocked(fs.getMetadata).mockResolvedValue({ succeeded: [{ path: "x" }], failed: [] } as never);
+    const host = createGitStorageHost(fs, gitDir());
+
+    await expect(host.writeFileAtomic("/ws/.git/index", new Uint8Array([1]))).rejects.toThrow("EACCES");
+    await expect(host.writeFileAtomic("/ws/.git/objects/pack/pack-xyz.pack", new Uint8Array([1]))).rejects.toThrow("EACCES");
+  });
+});

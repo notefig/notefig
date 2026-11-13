@@ -61,7 +61,7 @@ describe("git remote", () => {
 
   it.each([
     ["AuthRequired", /ssh-add/],
-    ["AuthFailed", /SSH key can't write to git@github.com:team\/notes/],
+    ["AuthFailed", /SSH key can.t write to github.com\/team\/notes\./],
     ["RepoNotFound", /SSH key can't see it/],
     ["HostUnverified", /ssh -T git@github.com in a terminal/],
     ["Network", /over SSH/],

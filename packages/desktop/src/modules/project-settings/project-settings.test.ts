@@ -43,8 +43,8 @@ beforeEach(() => {
 });
 
 describe("projectSettingsPath", () => {
-  it("points at metrists.json in the workspace root", () => {
-    expect(SETTINGS_PATH).toBe("/workspace/metrists.json");
+  it("points at the config in the app dir", () => {
+    expect(SETTINGS_PATH).toBe("/workspace/.notefig/config.json");
   });
 });
 

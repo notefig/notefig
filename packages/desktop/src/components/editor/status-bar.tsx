@@ -4,13 +4,19 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@notefig/ui/utils";
 import { TunnelStatus } from "@/components/tunnel/tunnel-status";
 import { useContentFetching, useOpenFileRows } from "@/modules/files/react";
-import { useWorkspaceOfPath } from "@/modules/workspaces/react";
+import {
+  useFocusedWorkspace,
+  useWorkspaceOfPath,
+} from "@/modules/workspaces/react";
+import { SyncStatusCell } from "@/components/sync/sync-status";
 import { fileTabPath } from "@/modules/tabs";
 
 interface StatusBarProps {
   /** The tab in front; its file content, if it is a file, is counted. */
   activeTabId: string | null;
   direction?: "ltr" | "rtl";
+  /** Show the focused workspace's Remote tool in the sidebar. */
+  onOpenRemote: () => void;
 }
 
 /** The active tab's file content, "" unless a file tab is active and its
@@ -66,10 +72,11 @@ function useDebouncedSyncState(
  *  bottom corner at the reading-direction end (the shell root is its
  *  containing block, so it sits under the root padding, flush with the
  *  window edge). */
-export function StatusBar({ activeTabId, direction = "ltr" }: StatusBarProps) {
+export function StatusBar({ activeTabId, direction = "ltr", onOpenRemote }: StatusBarProps) {
   const content = useActiveFileContent(activeTabId);
   const wordCount = useMemo(() => countWords(content), [content]);
   const debouncedSynced = useDebouncedSyncState(!useContentFetching());
+  const focusedWorkspace = useFocusedWorkspace();
 
   return (
     <div
@@ -79,6 +86,7 @@ export function StatusBar({ activeTabId, direction = "ltr" }: StatusBarProps) {
       )}
     >
       <SaveCell synced={debouncedSynced} />
+      <SyncStatusCell workspacePath={focusedWorkspace} onOpen={onOpenRemote} />
       {wordCount !== null && <WordCountCell count={wordCount} />}
       <TunnelStatus />
     </div>

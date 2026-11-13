@@ -170,7 +170,8 @@ fn is_recent_app_write(path: &Path, content_hash: &str) -> bool {
 
 /// Check if a path should be filtered (hidden files, temp files, etc.)
 /// `is_hidden_path` exempts the app dir (walkdir_utils::APP_DIR_NAME) and
-/// its scratchpads folder, so scratchpad events flow while every other
+/// its visible children (scratchpads, the project's config), so their
+/// events flow while every other
 /// app-internal path (`.notefig/.git`, …) stays filtered.
 fn should_filter_path(path: &Path, watch_id: &str) -> bool {
     if is_hidden_path(path) {

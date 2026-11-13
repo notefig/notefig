@@ -12,22 +12,14 @@ async function collect(
 }
 
 /**
- * `ssh://…` or git's `[user@]host:path`, but not a Windows drive (`C:\\…`), a
- * `scheme://` URL or a `helper::address`.
- */
-export function isSshRemote(url: string): boolean {
-  if (url.startsWith("ssh://")) return true;
-  if (/^[A-Za-z]:[\\/]/.test(url)) return false;
-  return /^(?:[^/@:\s]+@)?(?:\[[^\]\s]+\]|[^/@:\s]+):(?!\/\/|:).+/.test(url);
-}
-
-/**
  * What isomorphic-git is told an SSH remote's URL is: it refuses any scheme
  * but http(s), and every request it makes goes through our port anyway. The
  * desktop port recognises this host and serves the request over ssh.
  */
 export function sshBridgeUrl(url: string): string {
-  return `https://ssh.notefig.invalid/${encodeURIComponent(url)}`;
+  // git's older spellings of `ssh://`, which the desktop transport reads as one.
+  const canonical = url.replace(/^(?:git\+ssh|ssh\+git):\/\//i, "ssh://");
+  return `https://ssh.notefig.invalid/${encodeURIComponent(canonical)}`;
 }
 
 /**

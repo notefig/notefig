@@ -89,7 +89,7 @@ describe("a workspace's history repo", () => {
     // an excluded directory — history keeps checkpointing scratchpads while
     // never seeing the app's own gitdir or agent state.
     expect(disk.files.get(`${GIT_DIR}/info/exclude`)).toBe(
-      ".notefig/*\n!.notefig/scratchpads\n.git/\n",
+      ".notefig/*\n!.notefig/scratchpads\n!.notefig/config.json\n.git/\n",
     );
   });
 
@@ -102,7 +102,7 @@ describe("a workspace's history repo", () => {
     disk.dirs.add(`${WS}/.git`);
     await repo.ready();
 
-    expect(disk.files.get(`${WS}/.git/info/exclude`)).toBe(".notefig/\n");
+    expect(disk.files.get(`${WS}/.git/info/exclude`)).toBe("# >>> notefig\n.notefig/*\n!.notefig/config.json\n# <<< notefig\n");
   });
 
   it("never blocks init on an exclude it cannot write", async () => {
