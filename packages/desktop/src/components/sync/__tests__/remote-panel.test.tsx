@@ -29,6 +29,8 @@ function fakeSync(): WorkspaceSync {
     decline: vi.fn(async () => {}),
     turnOffForEveryone: vi.fn(async () => {}),
     resume: vi.fn(),
+    takeRemote: vi.fn(),
+    dismissOverwritten: vi.fn(),
     syncNow: vi.fn(async () => {}),
   } as unknown as WorkspaceSync;
 }
@@ -131,8 +133,14 @@ describe("the Remote tool", () => {
   it("shows why sync stopped, and the way on", async () => {
     const diverged = await render({ setup: "on", fault: "diverged", detail: "Changed here and on the remote: a.md." });
     expect(diverged.text()).toContain("a.md");
-    await click("Keep my versions and go on");
+    await click("Try again");
     expect(diverged.sync.resume).toHaveBeenCalled();
+    act(() => root?.unmount());
+
+    const rewritten = await render({ setup: "on", fault: "diverged", detail: "It was force-pushed.", remedy: "take-remote" });
+    expect(actions()).toEqual(["Use the remote's version"]);
+    await click("Use the remote's version");
+    expect(rewritten.sync.takeRemote).toHaveBeenCalled();
     act(() => root?.unmount());
 
     const paused = await render({
@@ -154,7 +162,7 @@ describe("the Remote tool", () => {
     ["offline", { setup: "on", fault: "offline", detail: "Can't reach it." }, [], ["Sync now", "More"]],
     ["throttled", { setup: "on", fault: "throttled", detail: "Slow down." }, [], ["Sync now", "More"]],
     ["auth-error", { setup: "on", fault: "auth-error", detail: "Rejected." }, ["Try again"], ["More"]],
-    ["diverged", { setup: "on", fault: "diverged", detail: "a.md" }, ["Keep my versions and go on"], ["More"]],
+    ["diverged", { setup: "on", fault: "diverged", detail: "a.md" }, ["Try again"], ["More"]],
     [
       "paused",
       { setup: "on", fault: "paused", summary: { since: null, localFiles: [], remoteFiles: [], people: [] } },
@@ -167,6 +175,26 @@ describe("the Remote tool", () => {
     expect(document.querySelector("[data-sync-remote]")?.textContent).toContain("github.com/team/notes");
     expect(actions()).toEqual(ways);
     expect(bar()).toEqual(controls);
+  });
+
+  it("lists the text a merge replaced, newest first, with where it's kept, until dismissed", async () => {
+    const { sync, text } = await render({
+      setup: "on",
+      overwritten: [
+        { path: "a.md", text: "Mine, first.", recovery: "refs/notefig/recovery/1-abc:a.md" },
+        { path: "img.png", text: null, recovery: "refs/notefig/recovery/2-def:img.png" },
+      ],
+    });
+    expect(text()).toContain("Newer edits replaced 2 pieces of your text");
+    const items = [...document.querySelectorAll("[data-sync-overwritten] li")].map((item) => item.textContent);
+    expect(items).toEqual([
+      "img.pngYour version of this file was replaced.Kept on this device: git show refs/notefig/recovery/2-def:img.png",
+      "a.mdMine, first.Kept on this device: git show refs/notefig/recovery/1-abc:a.md",
+    ]);
+    // Running sync's own message and buttons stay as they are.
+    expect(actions()).toEqual([]);
+    await click("Dismiss");
+    expect(sync.dismissOverwritten).toHaveBeenCalled();
   });
 
   it("offers nothing to press where sync can't run, only why", async () => {

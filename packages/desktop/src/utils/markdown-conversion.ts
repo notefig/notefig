@@ -12,6 +12,7 @@
 
 import type { JSONContent } from "@tiptap/core";
 import type { MarkdownWorkerApi } from "@/workers/markdown-codec.worker";
+import type { MergedMarkdown } from "@/modules/sync/sync-merge";
 import {
   createWorkerClient,
   WorkerRpcError,
@@ -37,6 +38,10 @@ async function createInlineConverter(): Promise<Converter> {
       return { markdown, hash: codec.hash(markdown) };
     },
     renderHtml: async (markdown: string) => renderMarkdownHtml(markdown),
+    merge: async (base: string, ours: string, theirs: string) => {
+      const { mergeMarkdown } = await import("@/modules/sync/sync-merge");
+      return mergeMarkdown(base, ours, theirs);
+    },
   };
 }
 
@@ -107,6 +112,12 @@ export function serializeDoc(doc: JSONContent): Promise<SerializedDoc> {
 /** Chat/LLM output markdown → HTML, off the main thread. */
 export function renderMarkdown(markdown: string): Promise<string> {
   return withConverter((c) => c.renderHtml(markdown));
+}
+
+/** Sync's three-way merge of a markdown file, `theirs` holding
+ *  (`modules/sync/sync-merge.ts`), off the main thread. */
+export function mergeMarkdownOffThread(base: string, ours: string, theirs: string): Promise<MergedMarkdown> {
+  return withConverter((c) => c.merge(base, ours, theirs));
 }
 
 /** Test hook: force a fresh boot (e.g. after stubbing Worker). */
@@ -311,11 +322,25 @@ export function whenDocumentSyncClean(path: string): Promise<void> {
   return documentSyncs.get(path)?.whenClean() ?? Promise.resolve();
 }
 
+/** Closed syncs whose last save is still landing, until it lands. */
+const landingSaves = new Map<string, Promise<void>>();
+
 /** Called when an editor is disposed (tab closed / workspace switch). */
 export function closeDocumentSync(path: string): void {
-  documentSyncs.get(path)?.close();
+  const sync = documentSyncs.get(path);
+  sync?.close();
   documentSyncs.delete(path);
   parsedDocuments.delete(path);
+  if (!sync?.isDirty()) return;
+  const landing = sync.whenClean().finally(() => {
+    if (landingSaves.get(path) === landing) landingSaves.delete(path);
+  });
+  landingSaves.set(path, landing);
+}
+
+/** A closed editor's last save is still on its way to disk. */
+export function isSaveLanding(path: string): boolean {
+  return landingSaves.has(path);
 }
 
 /**

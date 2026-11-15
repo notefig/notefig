@@ -34,6 +34,14 @@ export function SyncStatusCell({ workspacePath, onOpen }: { workspacePath: strin
     >
       <Icon className={cn("h-3.5 w-3.5", look.tone, look.spin && "animate-spin")} />
       <span>{t(look.label)}</span>
+      <OverwrittenDot count={state.overwritten.length} />
     </button>
   );
+}
+
+/** Some of the user's text was replaced by a merge: the Remote tool lists it. */
+function OverwrittenDot({ count }: { count: number }) {
+  const { t } = useTranslation();
+  if (count === 0) return null;
+  return <span data-sync-overwritten-dot="" className="size-1.5 rounded-full bg-warning" aria-label={t("syncOverwrittenDot")} />;
 }

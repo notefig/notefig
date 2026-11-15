@@ -13,9 +13,11 @@
  *    at start, a scan for edits made while closed;
  * 2. poll the branch (one ref advertisement);
  * 3. if the remote moved, fetch and take it in: a fast-forward, or the
- *    local commits replayed as one commit on the remote tip when they
- *    touch other files, so the branch stays linear. Files changed on both
- *    sides stop at `diverged` (the shared level brings the merge);
+ *    local commits replayed as one commit on the remote tip, so the branch
+ *    stays linear. A file changed on both sides is merged
+ *    (`sync-overlap.ts`): in the replay when both changes are committed,
+ *    once its editor's save lands when unsaved edits held the remote's
+ *    version back. What a collision replaced is flagged and kept;
  * 4. push if ahead, compare-and-swap against the polled tip. A refused
  *    push reruns the cycle (bounded, with jitter); a push with no answer
  *    may have landed, so the next poll comes soon.
@@ -30,6 +32,8 @@ import type { DocumentsApi } from "@/modules/documents";
 import type { WorkspaceFiles } from "@/modules/files";
 import { sshProblemOf } from "@/modules/git-remote";
 import { IGNORE_RULES } from "@/utils/ignore";
+import type { MergedMarkdown } from "./sync-merge";
+import { createOverlaps, MergeFailed, writeSynced } from "./sync-overlap";
 import { path as pathutil } from "@/utils/path";
 import {
   IDLE_COMMIT_MS,
@@ -58,11 +62,17 @@ export interface SyncEngineDeps {
   hooks: Hooks;
   documents: Pick<DocumentsApi, "write">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
-  fs: Pick<FileSystemSurface, "readDirectory" | "getMetadata" | "writeBinaryFiles" | "deleteFiles">;
+  fs: Pick<FileSystemSurface, "readDirectory" | "getMetadata" | "readBinaryFiles" | "writeBinaryFiles" | "deleteFiles">;
+  /** The markdown three-way merge (`sync-merge.ts`), off the main thread. */
+  merge(base: string, ours: string, theirs: string): Promise<MergedMarkdown>;
   state(): SyncState;
   dispatch(event: SyncEvent): void;
   /** Keep the last successful sync (this device's file). */
   recordSynced(at: number): Promise<void>;
+  /** Files held for unsaved edits and their bases, as last recorded. */
+  held: Readonly<Record<string, string>>;
+  /** Keep them (this device's file), so a restart merges them too. */
+  recordHeld(held: Record<string, string>): Promise<void>;
   /** Another branch was checked out (a terminal, another app): this
    *  engine syncs `branch` only, so it hands back to be restarted. */
   branchChanged(): void;
@@ -74,9 +84,11 @@ export interface SyncEngineDeps {
 
 export interface SyncEngine {
   syncNow(): Promise<void>;
-  /** Leave a stop: after `diverged`, the next cycle keeps local files
-   *  where both sides changed; after `paused`, it goes on. */
+  /** Leave a stop and go on (after `paused`, without asking again). */
   resume(): Promise<void>;
+  /** Leave a stop on a branch that shares no history with this one: take
+   *  the remote's version, keeping ours on a local ref. */
+  takeRemote(): Promise<void>;
   /** Commit and push what's left (briefly), then stop. */
   stop(): Promise<void>;
 }
@@ -96,16 +108,18 @@ const SCAN_SLACK_MS = 2_000;
 const COMMIT_SCAN_SLACK_MS = 120_000;
 const METADATA_BATCH = 500;
 const SUMMARY_DEPTH = 200;
+/** A held file was saved: settle it about this soon, not a sitting later. */
+const HELD_SETTLE_MS = 500;
+/** Files listed as replaced when the remote's version is taken whole. */
+const MAX_REPLACED_LISTED = 50;
 /** git's folder and the app's never sync, but for the project's config. */
 const NEVER = /^(\.git(\/|$)|\.notefig(\/(?!config\.json$)|$))/;
 
-/** A pull that moved the branch: the files written so far, and those held
- *  for unsaved edits (asked about once every file is done). */
+/** A pull that moved the branch, and the files written so far. */
 interface Move {
   from: string;
   to: string;
   done: Set<string>;
-  held: string[];
 }
 
 /** Raised to end a cycle whose stop was already dispatched. */
@@ -145,6 +159,7 @@ export function faultOf(error: unknown, url: string): SyncEvent {
   // A change only a terminal can take in (a mode, a file swapped with a
   // folder): the user's to sort out.
   if (code === "PullRefused") return { type: "diverged", detail };
+  if (error instanceof MergeFailed) return { type: "diverged", detail };
   return { type: "failed", fault: "offline", detail };
 }
 
@@ -195,7 +210,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   let unfinished: Move | null = null;
   let lastSynced = deps.lastSyncedAt;
   let lastRecorded = lastSynced ?? 0;
-  let keepLocalOnce = false;
+  /** The user chose the remote's version over a branch with no shared
+   *  history: the next pull takes it. */
+  let takeRemoteOnce = false;
   let returnApproved = false;
   let stopped = false;
   let running: Promise<void> | null = null;
@@ -222,6 +239,21 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     throw new CycleStop();
   };
   const head = async () => (await git.log({ ref: branchRef, depth: 1 }).catch(() => []))[0]?.oid ?? null;
+  const overlaps = createOverlaps({
+    git,
+    documents: deps.documents,
+    fs: deps.fs,
+    absolute,
+    merge: deps.merge,
+    dispatch: deps.dispatch,
+    held: deps.held,
+    recordHeld: deps.recordHeld,
+    alive,
+    now,
+  });
+  const markDirty = (paths: string[]) => {
+    if (typeof dirty !== "string") for (const path of paths) dirty.add(path);
+  };
 
   // --- Commit -------------------------------------------------------------
 
@@ -289,10 +321,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     dirty = new Set();
     deps.dispatch({ type: "step", activity: "committing" });
     try {
-      const paths = taken === "all" ? null : taken === "scan" ? await scan() : [...taken];
-      if (paths?.length === 0) return;
-      if (paths) await stageByHash(paths);
-      const all = await stageChanges(git, paths);
+      const listed = taken === "all" ? null : taken === "scan" ? await scan() : [...taken];
+      if (listed?.length === 0) return;
+      // A held file's disk copy is stale until its edits land (`overlaps`).
+      if (listed) await stageByHash(listed.filter((path) => !overlaps.isHeld(path)));
+      const all = await stageChanges(git, listed, overlaps.isHeld);
       if (all.length === 0) return;
       await git.commit({ message: commitMessage(author.name, all), author });
     } catch (error) {
@@ -313,12 +346,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     return [...status.unstaged.map((change) => change.path), ...status.untracked];
   };
 
-  /** Files among `paths` with uncommitted edits. */
+  /** Files among `paths` with uncommitted edits, but for held ones. */
   const dirtyAmong = async (paths: string[]) => {
     if (paths.length === 0) return [];
     const status = await git.status({ filepaths: paths });
     const edited = new Set([...status.staged, ...status.unstaged].map((c) => c.path).concat(status.untracked));
-    return paths.filter((path) => edited.has(path));
+    return paths.filter((path) => edited.has(path) && !overlaps.isHeld(path));
   };
 
   /** Write one file as it is at `to`; `held` when its editor keeps unsaved
@@ -326,69 +359,112 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const applyFile = async (filepath: string, to: string): Promise<"written" | "deleted" | "held"> => {
     const bytes = await git.readFile({ ref: to, filepath });
     const path = absolute(filepath);
-    if (bytes === null) {
-      alive();
-      const { failed } = await deps.fs.deleteFiles([path]);
-      const refused = failed.find((failure) => failure.type !== "not_found");
-      if (refused) throw new Error(`Couldn't delete ${filepath}: ${refused.message}`);
-      return "deleted";
-    }
     alive();
-    const text = bytes.includes(0) ? null : decodeText(bytes);
-    if (text !== null) return (await deps.documents.write(path, text, { source: "sync" })) === "held" ? "held" : "written";
-    const { failed } = await deps.fs.writeBinaryFiles([{ path, data: bytes }]);
-    if (failed[0]) throw new Error(`Couldn't write ${filepath}: ${failed[0].message}`);
-    return "written";
+    if (bytes !== null) return writeSynced(deps, path, bytes);
+    const { failed } = await deps.fs.deleteFiles([path]);
+    const refused = failed.find((failure) => failure.type !== "not_found");
+    if (refused) throw new Error(`Couldn't delete ${filepath}: ${refused.message}`);
+    return "deleted";
   };
 
   /** Bring index and worktree from `from` to `to` for the files that
    *  differ; text is written through the documents write path, which holds
-   *  back a file with unsaved edits. */
+   *  back a file with unsaved edits. A held file, or one saved here during
+   *  a retried move, is merged once its edits land (`overlaps.settle`). */
   const moveWorktree = async (move: Move) => {
     const { from, to, done } = move;
-    const changes = { created: [] as string[], deleted: [] as string[], held: move.held };
+    const created: string[] = [];
+    const deleted: string[] = [];
     const remaining = (await git.changedFiles(from, to, { toApply: true })).filter((path) => !NEVER.test(path) && !done.has(path));
     // A retry: a file not written yet may have been saved here since.
-    const edited = done.size > 0 ? await editedSince(remaining) : [];
+    const edited = new Set(done.size > 0 ? await editedSince(remaining) : []);
     for (const filepath of remaining) {
       alive();
-      if (edited.includes(filepath)) {
-        if (!keepLocalOnce) continue;
-        // Keep mine: the saved file stays, and its index takes the remote's
-        // version, so the save commits on top of it.
-        await git.unstage({ filepath, ref: to });
-        done.add(filepath);
-        continue;
-      }
-      const outcome = await applyFile(filepath, to);
-      changes[outcome === "written" ? "created" : outcome].push(absolute(filepath));
-      // Only once the file is on disk: a failed write leaves the index at
-      // the old version, and the cycle finishes the move (`unfinished`)
-      // before it commits anything. A held file's index takes the remote's
-      // version: the unsaved edits then read as a change on top of it.
+      const outcome = edited.has(filepath) ? "held" : await applyFile(filepath, to);
+      if (outcome === "held") await overlaps.hold(filepath, from);
+      else (outcome === "written" ? created : deleted).push(absolute(filepath));
+      // Only once the file is on disk (or held): a failed write leaves the
+      // index at the old version, and the cycle finishes the move
+      // (`unfinished`) before it commits anything.
       await git.unstage({ filepath, ref: to });
       done.add(filepath);
     }
-    if (edited.length > 0 && !keepLocalOnce) {
-      stop({ type: "diverged", detail: `Changed here and on the remote: ${edited.join(", ")}. Sync stopped so neither side is lost.` });
-    }
     unfinished = null;
-    const { created, deleted, held } = changes;
     if (created.length > 0 || deleted.length > 0) {
       await deps.files.recordDiskChanges({ created, deleted });
       deps.hooks.emit("sync:remote-applied", { workspacePath: root, commit: to, paths: [...created, ...deleted] });
     }
-    if (held.length > 0 && !keepLocalOnce) {
-      // The remote's version is committed; the unsaved edits stay in the
-      // editor. Without a merge (solo), that is a stop.
-      stop({
-        type: "diverged",
-        detail: `Unsaved edits kept in ${held.map((path) => pathutil.basename(path)).join(", ")} while the remote changed them. Sync stopped so neither side is lost.`,
-      });
-    }
   };
 
-  const pullStep = async () => {
+  /** The branch was rewritten, and the user chose its version: ours stays
+   *  on a local ref, listed file by file. */
+  const takeRemoteVersion = async (ours: string, theirs: string) => {
+    // What the file API can't write refuses before anything moves.
+    const changed = await git.changedFiles(ours, theirs, { toApply: true });
+    const ref = await overlaps.keep(ours);
+    const mine = new Set(await git.listFiles({ ref: ours }));
+    await git.writeRef(branchRef, theirs);
+    unfinished = { from: ours, to: theirs, done: new Set() };
+    await moveWorktree(unfinished);
+    integrated = theirs;
+    const replaced = changed.filter((path) => mine.has(path) && !NEVER.test(path)).slice(0, MAX_REPLACED_LISTED);
+    deps.dispatch({ type: "overwritten", items: replaced.map((path) => ({ path, text: null, recovery: `${ref}:${path}` })) });
+  };
+
+  /** No shared history: stop, or take the remote's version if the user
+   *  chose it. */
+  const unrelated = (ours: string, theirs: string) => {
+    if (takeRemoteOnce) return takeRemoteVersion(ours, theirs);
+    return stop({
+      type: "diverged",
+      detail: "The remote branch shares no history with this workspace: it was rewritten or force-pushed.",
+      remedy: "take-remote",
+    });
+  };
+
+  /** Files the remote changed that are saved here and not committed: true
+   *  once they're committed, for the replay to merge. A second time, they
+   *  are files the excludes keep out of every commit: stop. */
+  const commitEdited = async (remoteFiles: string[], committed: boolean): Promise<boolean> => {
+    const edited = await dirtyAmong(remoteFiles);
+    if (edited.length === 0) return false;
+    if (committed) {
+      stop({ type: "diverged", detail: `Changed here and on the remote, and not synced: ${edited.join(", ")}. Sync stopped so neither side is lost.` });
+    }
+    markDirty(edited);
+    await commitStep();
+    return true;
+  };
+
+  const fastForward = async (ours: string, theirs: string) => {
+    await git.merge({ ours: branchRef, theirs, fastForwardOnly: true });
+    unfinished = { from: ours, to: theirs, done: new Set() };
+    await moveWorktree(unfinished);
+  };
+
+  /** The local commits since `base` as one commit on `theirs`, with the
+   *  files both sides changed merged. */
+  const replay = async (base: string, ours: string, theirs: string, remoteFiles: string[]) => {
+    const localFiles = await git.changedFiles(base, ours);
+    const local = new Set(localFiles);
+    const lost: Awaited<ReturnType<typeof overlaps.mergeCommitted>> = [];
+    try {
+      for (const filepath of remoteFiles) {
+        if (!local.has(filepath)) await git.unstage({ filepath, ref: theirs });
+        else lost.push(...(await overlaps.mergeCommitted(filepath, base, ours, theirs)));
+      }
+    } catch (error) {
+      // Nothing is committed yet: the index goes back to ours, as on disk.
+      for (const filepath of remoteFiles) await git.unstage({ filepath, ref: ours }).catch(() => {});
+      throw error;
+    }
+    await overlaps.flagReplaced(lost, ours);
+    const replayed = await git.commit({ message: commitMessage(author.name, localFiles), author, parent: [theirs] });
+    unfinished = { from: ours, to: replayed, done: new Set() };
+    await moveWorktree(unfinished);
+  };
+
+  const pullStep = async (committed = false): Promise<void> => {
     deps.dispatch({ type: "step", activity: "pulling" });
     // Also moves refs/remotes/origin/<branch>, keeping a diverged tip reachable.
     const [fetched] = await git.fetchRefs(remote, [branchRef]);
@@ -397,39 +473,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     const ours = await head();
     if (!ours) throw new GitError("InvalidInput", "The branch has no commits.");
     const base = ours === theirs ? ours : await git.mergeBase(ours, theirs);
-    if (!base) {
-      stop({ type: "diverged", detail: "The remote branch shares no history with this workspace (it was rewritten or force-pushed)." });
+    if (!base) return unrelated(ours, theirs);
+    if (base !== theirs) {
+      // Before the branch moves: what the file API can't write stops here.
+      const remoteFiles = await git.changedFiles(base, theirs, { toApply: true });
+      if (await commitEdited(remoteFiles, committed)) return pullStep(true);
+      if (base === ours) await fastForward(ours, theirs);
+      else await replay(base, ours, theirs, remoteFiles);
     }
-    if (base === theirs) {
-      integrated = theirs;
-      return;
-    }
-    // Before the branch moves: what the file API can't write stops here.
-    const remoteFiles = await git.changedFiles(base!, theirs, { toApply: true });
-    const edited = await dirtyAmong(remoteFiles);
-    if (edited.length > 0) {
-      stop({ type: "diverged", detail: `Changed here and on the remote: ${edited.join(", ")}. Sync stopped so neither side is lost.` });
-    }
-    if (base === ours) {
-      await git.merge({ ours: branchRef, theirs, fastForwardOnly: true });
-      unfinished = { from: ours, to: theirs, done: new Set(), held: [] };
-      await moveWorktree(unfinished);
-      integrated = theirs;
-      return;
-    }
-    // Replay: the local commits since `base` as one commit on `theirs`.
-    const localFiles = await git.changedFiles(base!, ours);
-    const local = new Set(localFiles);
-    const both = remoteFiles.filter((path) => local.has(path));
-    if (both.length > 0 && !keepLocalOnce) {
-      stop({ type: "diverged", detail: `Changed here and on the remote: ${both.join(", ")}. Sync stopped so neither side is lost.` });
-    }
-    for (const filepath of remoteFiles) {
-      if (!local.has(filepath)) await git.unstage({ filepath, ref: theirs });
-    }
-    const replayed = await git.commit({ message: commitMessage(author.name, localFiles), author, parent: [theirs] });
-    unfinished = { from: ours, to: replayed, done: new Set(), held: [] };
-    await moveWorktree(unfinished);
     integrated = theirs;
   };
 
@@ -495,6 +546,16 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     return pushStep(theirs);
   };
 
+  /** Held files whose edits landed, merged: they commit in this cycle. */
+  const settleHeld = async () => {
+    const current = overlaps.size > 0 ? await head() : null;
+    if (!current) return;
+    const changed = await overlaps.settle(current);
+    if (changed.length === 0) return;
+    markDirty(changed);
+    commitDue = true;
+  };
+
   const markSynced = () => {
     returnApproved = false;
     lastSynced = now();
@@ -513,6 +574,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
         return;
       }
       if (unfinished) await moveWorktree(unfinished);
+      await settleHeld();
       if (commitDue) await commitStep();
       let refused = await reconcile();
       for (let retry = 0; refused && retry < MAX_PUSH_RETRIES && !stopped; retry++) {
@@ -571,11 +633,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const written = (paths: string[]) => {
     const trees = paths.map(tree).filter((path): path is string => path !== null);
     if (trees.length === 0 || stopped) return;
-    if (typeof dirty !== "string") for (const path of trees) dirty.add(path);
+    markDirty(trees);
     cancelIdle?.();
-    cancelIdle = setTimer(() => void syncNow(), IDLE_COMMIT_MS);
+    // A held file's save is what its merge waits for.
+    const settle = trees.some(overlaps.isHeld);
+    cancelIdle = setTimer(() => void syncNow(), settle ? HELD_SETTLE_MS : IDLE_COMMIT_MS);
   };
-  const pending = () => typeof dirty === "string" || dirty.size > 0;
+  const pending = () => typeof dirty === "string" || dirty.size > 0 || overlaps.size > 0;
   const onBlur =
     deps.onBlur ??
     ((listener: () => void) => {
@@ -600,13 +664,18 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     },
     syncNow: () => syncNow(),
     async resume() {
-      if (deps.state().fault !== "paused") keepLocalOnce = true;
+      returnApproved = true;
+      deps.dispatch({ type: "resume" });
+      await syncNow();
+    },
+    async takeRemote() {
+      takeRemoteOnce = true;
       returnApproved = true;
       deps.dispatch({ type: "resume" });
       try {
         await syncNow();
       } finally {
-        keepLocalOnce = false;
+        takeRemoteOnce = false;
       }
     },
     async stop() {
@@ -627,15 +696,16 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   };
 }
 
-/** Stage what status reports among `paths` (all when null); the paths
- *  the commit will hold. `.gitignore` and the sync excludes apply. */
-async function stageChanges(git: GitService, paths: string[] | null): Promise<string[]> {
+/** Stage what status reports among `paths` (all when null), but for the
+ *  `held` files; the paths the commit will hold. `.gitignore` and the
+ *  sync excludes apply. */
+async function stageChanges(git: GitService, paths: string[] | null, held: (path: string) => boolean): Promise<string[]> {
   const status = await git.status(paths ? { filepaths: paths } : undefined);
-  const add = [...status.untracked];
+  const add = status.untracked.filter((path) => !held(path));
   for (const change of status.unstaged) {
     // A tracked file the excludes name (`.claude/` committed before sync)
     // stays as it is on the remote.
-    if (await git.isIgnored(change.path)) continue;
+    if (held(change.path) || (await git.isIgnored(change.path))) continue;
     if (change.type === "deleted") await git.remove({ filepath: change.path });
     else add.push(change.path);
   }
@@ -660,12 +730,4 @@ async function returnSummary(
   const end = log.findIndex((entry) => entry.oid === base);
   const people = [...new Set((end < 0 ? log : log.slice(0, end)).map((e) => e.commit.author.name))];
   return { since, localFiles, remoteFiles, people };
-}
-
-function decodeText(bytes: Uint8Array): string | null {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return null;
-  }
 }

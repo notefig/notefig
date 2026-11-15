@@ -29,7 +29,7 @@ import {
 import type { ChangeSource, WorkspaceFiles } from "@/modules/files";
 import type { EditorsApi } from "@/modules/editors";
 import { calculateContentHash } from "@/utils/hash";
-import { getDocumentSync } from "@/utils/markdown-conversion";
+import { getDocumentSync, isSaveLanding } from "@/utils/markdown-conversion";
 import { path as pathutil } from "@/utils/path";
 import {
   adoptExternalContent,
@@ -52,10 +52,14 @@ export interface DocumentsApi {
    *  settled.
    *
    *  `source` is whose change it is, announced with it on `files:written`.
-   *  A `"sync"` write (remote content) never overwrites unsaved edits: when
-   *  the open editor has edits not yet saved, nothing is written and the
-   *  write answers `"held"` (the editor's save lands as usual). Any other
-   *  write keeps last-writer-wins and answers `"written"`. */
+   *  A `"sync"` write (remote content) never overwrites unsaved edits, and
+   *  stays out of the editor's undo: undo takes back the user's own
+   *  edits, not a collaborator's. When the open editor has edits not yet
+   *  saved, nothing is written and the write answers `"held"` (the
+   *  editor's save lands as usual); it answers `"held"` too when typing
+   *  kept the written file out of the editor, whose next save then
+   *  replaces it. Any other write keeps last-writer-wins and answers
+   *  `"written"`. */
   write(
     path: string,
     content: string,
@@ -152,26 +156,30 @@ export function createDocuments({
    *  debounce (flushed into a save now) or in a save still running. */
   const hasUnsavedEdits = (path: string): boolean => {
     const editor = editors.markdownEditor(path);
-    if (!editor || editor.isDestroyed) return false;
+    // Closed, with its last save on the way: that save would replace this.
+    if (!editor || editor.isDestroyed) return isSaveLanding(path);
     const sync = getDocumentSync(path);
     sync.flushPendingEdits?.();
     return sync.isDirty();
   };
 
-  /** Push written content into the path's live editor, if one is open. */
-  const adoptIntoEditor = async (target: string, content: string) => {
+  /** Push written content into the path's live editor, if one is open;
+   *  false when typing in flight kept it out. */
+  const adoptIntoEditor = async (target: string, content: string, source: ChangeSource): Promise<boolean> => {
     const editor = editors.markdownEditor(target);
-    if (!editor || editor.isDestroyed) return;
+    if (!editor || editor.isDestroyed) return true;
     const sync = getDocumentSync(target);
     const doc = await sync.prepareAdoption(content);
-    if (!doc || editor.isDestroyed) return;
+    if (editor.isDestroyed) return true;
+    if (!doc) return false;
     const contentHash = calculateContentHash(content);
     const adoption = adoptExternalContent(editor, doc, {
       source: { path: target, contentHash, attribute },
+      addToHistory: source !== "sync",
     });
     if (adoption.reinsertedWidgets === 0) {
       sync.commitAdoption(content, contentHash);
-      return;
+      return true;
     }
     // Re-asserted widget markers exist only in the editor at this point.
     // Repair the file INSIDE this tracked write — a fire-and-forget save
@@ -182,6 +190,7 @@ export function createDocuments({
     await writeToDisk(target, repaired);
     updateLoadedRows(target, repaired);
     sync.commitAdoption(repaired, calculateContentHash(repaired));
+    return true;
   };
 
   return {
@@ -214,8 +223,8 @@ export function createDocuments({
         await writeToDisk(target, content);
         updateLoadedRows(target, content);
         hooks?.emit("files:written", { paths: [target], source });
-        await adoptIntoEditor(target, content);
-        return "written";
+        const shown = await adoptIntoEditor(target, content, source);
+        return shown || source !== "sync" ? "written" : "held";
       });
     },
 

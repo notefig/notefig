@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GitError } from "@notefig/git";
 import { faultOf } from "./sync-engine";
+import { MergeFailed } from "./sync-overlap";
 
 describe("sync: what a failure stops on", () => {
   const ssh = "git@github.com:team/notes.git";
@@ -28,6 +29,13 @@ describe("sync: what a failure stops on", () => {
       type: "failed",
       fault: "auth-error",
       detail: "No credentials",
+    });
+  });
+
+  it("stops on a merge that threw, rather than retrying it forever", () => {
+    expect(faultOf(new MergeFailed("Couldn't merge a.md: boom"), "https://github.com/team/notes.git")).toEqual({
+      type: "diverged",
+      detail: "Couldn't merge a.md: boom",
     });
   });
 });
