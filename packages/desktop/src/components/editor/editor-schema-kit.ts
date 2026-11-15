@@ -274,6 +274,7 @@ interface FrontmatterMarkdownEditor {
     markdown?: {
       parser: {
         parse(content: unknown, options?: { inline?: boolean }): unknown;
+        md: Parameters<typeof usePluginsOnce>[0];
       };
     };
   };
@@ -285,6 +286,27 @@ const baseMarkdownOnBeforeCreate = (
   }
 ).onBeforeCreate;
 
+/**
+ * tiptap-markdown's `MarkdownParser.parse` re-runs every extension's
+ * `parse.setup(md)` on each call, and TaskList's setup is
+ * `md.use(taskListPlugin)`: every parse added one more task-list core rule
+ * to the parser's markdown-it instance, so parse cost grew with the
+ * parser's lifetime (the codec in the conversion worker, a long-lived
+ * editor's setContent). Applying each plugin once per instance makes the
+ * repeated setup a no-op.
+ */
+export function usePluginsOnce(md: {
+  use: (plugin: never, ...options: never[]) => unknown;
+}): void {
+  const applied = new Set<unknown>();
+  const use = md.use.bind(md);
+  md.use = ((plugin: never, ...options: never[]) => {
+    if (applied.has(plugin)) return md;
+    applied.add(plugin);
+    return use(plugin, ...options);
+  }) as typeof md.use;
+}
+
 export const FrontmatterMarkdown = Markdown.extend({
   onBeforeCreate() {
     const editor = this.editor as unknown as FrontmatterMarkdownEditor;
@@ -295,9 +317,12 @@ export const FrontmatterMarkdown = Markdown.extend({
     // fake editor invokes this hook outside tiptap's extension plumbing,
     // where parent() doesn't exist.)
     const initialContent = editor.options.content;
-    editor.options.content = "";
+    // Not a string, so the base hook's parse skips the extensions' setup:
+    // the plugins are applied once, below, behind `usePluginsOnce`.
+    editor.options.content = null;
     baseMarkdownOnBeforeCreate.call(this);
     const storage = editor.storage.markdown!;
+    usePluginsOnce(storage.parser.md);
     wrapParserWithFrontmatter(storage);
     editor.options.initialContent = initialContent;
     editor.options.content = storage.parser.parse(initialContent);
