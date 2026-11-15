@@ -142,14 +142,36 @@ function resolve(ours: string[], base: string[], theirs: string[], overwritten: 
 
 const pairKey = (unit: string, next: string) => `${unit}\u0000${next}`;
 
-/** The whitespace between each pair of neighbouring units, as a side has
- *  it; `sides` from the one that yields to the one that holds. */
-function gapsOf(sides: Unit[][]): Map<string, string> {
-  const gaps = new Map<string, string>();
+/** What a unit is, as far as the line break after it goes: a table row
+ *  or a list item runs on to the next of its kind on the next line. */
+function kindOf(unit: string): "row" | "item" | "block" {
+  const line = unit.trimStart();
+  if (line.startsWith("|")) return "row";
+  return /^([-*+]|\d+[.)])(\s|$)/.test(line) ? "item" : "block";
+}
+
+/** The whitespace between neighbouring units, as the sides have it; read
+ *  from the one that yields to the one that holds, so the holder's wins. */
+function gapsOf(sides: Unit[][]) {
+  const pairs = new Map<string, string>();
+  const after = new Map<string, string>();
   for (const units of sides) {
-    for (let i = 0; i + 1 < units.length; i++) gaps.set(pairKey(units[i]!.text, units[i + 1]!.text), units[i]!.gap);
+    for (let i = 0; i + 1 < units.length; i++) {
+      pairs.set(pairKey(units[i]!.text, units[i + 1]!.text), units[i]!.gap);
+      after.set(units[i]!.text, units[i]!.gap);
+    }
   }
-  return gaps;
+  /** Between `unit` and `next`: as a side had them; else, for two rows or
+   *  two items (edited side by side), the line break `unit` had before one
+   *  of its kind; else a blank line, which never runs one unit into the
+   *  next (a paragraph into the list item above it). */
+  return (unit: string, next: string, eol: string): string => {
+    const known = pairs.get(pairKey(unit, next));
+    if (known !== undefined) return known;
+    const kind = kindOf(unit);
+    if (kind === "block" || kind !== kindOf(next)) return eol + eol;
+    return after.get(unit) ?? eol;
+  };
 }
 
 /** Merge three versions of a markdown file; `theirs` holds. */
@@ -163,12 +185,10 @@ export async function mergeMarkdown(base: string, ours: string, theirs: string):
     region.conflict ? resolve(region.conflict.a, region.conflict.o, region.conflict.b, overwritten) : region.ok,
   );
   const eol = /\r\n/.test(theirs || ours) ? "\r\n" : "\n";
-  // A pair no side had: a blank line, which never runs one unit into the
-  // next (a paragraph into a list item above it).
-  const gaps = gapsOf([o!, a!, b!]);
+  const gapBetween = gapsOf([o!, a!, b!]);
   const end = (b!.length > 0 ? b! : a!).at(-1)?.gap ?? eol;
   const text = merged
-    .map((unit, i) => unit + (i === merged.length - 1 ? end : (gaps.get(pairKey(unit, merged[i + 1]!)) ?? eol + eol)))
+    .map((unit, i) => unit + (i === merged.length - 1 ? end : gapBetween(unit, merged[i + 1]!, eol)))
     .join("");
   return { text, overwritten };
 }

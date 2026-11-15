@@ -380,7 +380,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     const edited = new Set(done.size > 0 ? await editedSince(remaining) : []);
     for (const filepath of remaining) {
       alive();
-      const outcome = edited.has(filepath) ? "held" : await applyFile(filepath, to);
+      // Held already: its save may have landed since it was settled, so
+      // it's merged with this version too rather than written over.
+      const outcome = edited.has(filepath) || overlaps.isHeld(filepath) ? "held" : await applyFile(filepath, to);
       if (outcome === "held") await overlaps.hold(filepath, from);
       else (outcome === "written" ? created : deleted).push(absolute(filepath));
       // Only once the file is on disk (or held): a failed write leaves the
@@ -401,6 +403,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const takeRemoteVersion = async (ours: string, theirs: string) => {
     // What the file API can't write refuses before anything moves.
     const changed = await git.changedFiles(ours, theirs, { toApply: true });
+    // Edits no commit holds (a file the excludes keep out): kept as they are.
+    await overlaps.keepFiles(await dirtyAmong(changed));
     const ref = await overlaps.keep(ours);
     const mine = new Set(await git.listFiles({ ref: ours }));
     await git.writeRef(branchRef, theirs);

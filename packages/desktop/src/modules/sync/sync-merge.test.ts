@@ -86,6 +86,14 @@ describe("mergeMarkdown", () => {
     expect((await mergeMarkdown(list, "- a\n- b\n- c\n- mine\n", "- a\n- b!\n- c\n")).text).toBe("- a\n- b!\n- c\n- mine\n");
   });
 
+  it("keeps a table whole when each side edits a row next to the other's", async () => {
+    const table = "| a | b |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\n";
+    const merged = await mergeMarkdown(table, table.replace("| 1 | 2 |", "| one | 2 |"), table.replace("| 3 | 4 |", "| 3 | four |"));
+    expect(merged).toEqual({ text: "| a | b |\n| - | - |\n| one | 2 |\n| 3 | four |\n", overwritten: [] });
+    const list = "- a\n- b\n";
+    expect((await mergeMarkdown(list, "- a!\n- b\n", "- a\n- b!\n")).text).toBe("- a!\n- b!\n");
+  });
+
   it("never runs a paragraph into the list item before it", async () => {
     const list = "- a\n- b\n";
     const merged = await mergeMarkdown(list, "- a\n- b\n- mine\n", "- a\n- b\n\nTheirs.\n");

@@ -129,6 +129,27 @@ export function createOverlaps(deps: OverlapDeps) {
     throw new Error(`Couldn't read ${filepath}: ${failed[0]?.message}`);
   };
 
+  /** A held file's saved edits merged with the branch's version (null:
+   *  the branch's stands). Without its base (a blob pruned since), a merge
+   *  can't tell edits from text: the branch's version stands, and ours is
+   *  flagged whole. */
+  const mergeSaved = (filepath: string, base: Uint8Array | null, disk: Uint8Array, theirs: Uint8Array) =>
+    base ? combine(filepath, base, disk, theirs) : Promise.resolve({ bytes: null, lost: [{ path: filepath, text: asText(disk) }] });
+
+  /** Put a held file's merge in place: true when it has something to
+   *  commit. Typing again holds the write back: the merge then goes in
+   *  through the index, and the edits on top of this save meet it next. */
+  const applyMerged = async (filepath: string, disk: Uint8Array, bytes: Uint8Array | null, theirs: Uint8Array, head: string) => {
+    if ((await write(filepath, bytes ?? theirs)) === "written") {
+      held.delete(filepath);
+      return true;
+    }
+    held.set(filepath, await git.writeBlob(disk));
+    if (!bytes) return false;
+    await stage(filepath, bytes, head);
+    return true;
+  };
+
   /** One held file: true when it now has something to commit. */
   const settleOne = async (filepath: string, baseOid: string, head: string): Promise<boolean> => {
     const [theirs, disk, base] = await Promise.all([
@@ -147,26 +168,16 @@ export function createOverlaps(deps: OverlapDeps) {
       if ((await write(filepath, theirs)) === "written") held.delete(filepath);
       return false;
     }
-    // Without its base (a blob pruned since), a merge can't tell edits
-    // from text: the branch's version stands, and ours is flagged whole.
-    const { bytes, lost } = base
-      ? await combine(filepath, base, disk, theirs)
-      : { bytes: null, lost: [{ path: filepath, text: asText(disk) }] };
+    const { bytes, lost } = await mergeSaved(filepath, base, disk, theirs);
+    // Saved again during the merge: this result is stale, and the next
+    // round merges the newer save.
+    const latest = await readDisk(filepath);
+    if (!latest || !sameBytes(latest, disk)) return false;
     if (lost.length > 0) {
       const ref = await keep(await git.writeBlob(disk));
       deps.dispatch({ type: "overwritten", items: lost.map((item) => ({ ...item, recovery: ref })) });
     }
-    const result = bytes ?? theirs;
-    if ((await write(filepath, result)) === "written") {
-      held.delete(filepath);
-      return true;
-    }
-    // Still typing: the merge goes in through the index now, and the edits
-    // made on top of this save meet it the next time.
-    held.set(filepath, await git.writeBlob(disk));
-    if (!bytes) return false;
-    await stage(filepath, bytes, head);
-    return true;
+    return applyMerged(filepath, disk, bytes, theirs, head);
   };
 
   return {
@@ -203,6 +214,17 @@ export function createOverlaps(deps: OverlapDeps) {
 
     /** Our whole side, before something replaces it outright; the ref. */
     keep,
+
+    /** Files about to be replaced whose edits no commit holds: each kept
+     *  as it is on disk, and flagged. */
+    async keepFiles(filepaths: string[]) {
+      const items = [];
+      for (const filepath of filepaths) {
+        const disk = await readDisk(filepath);
+        if (disk) items.push({ path: filepath, text: asText(disk), recovery: await keep(await git.writeBlob(disk)) });
+      }
+      if (items.length > 0) deps.dispatch({ type: "overwritten", items });
+    },
 
     /** The branch moved `filepath` to a version its editor's unsaved edits
      *  don't have: keep what they started from, as it is at `from`. */

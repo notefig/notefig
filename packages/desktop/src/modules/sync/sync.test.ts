@@ -600,7 +600,9 @@ describe("sync: solo", () => {
   });
 
   it("offers the remote's version of a rewritten branch, keeping this one on the device", async () => {
-    const { sync, remote, ws, core } = await setup();
+    const { sync, remote, ws, core } = await setup("synced", { ".claude/settings.json": "{}\n" });
+    // Edited, and kept out of every commit by the excludes.
+    await fsp.writeFile(join(ws, ".claude", "settings.json"), '{"mine":true}\n');
     await fsp.writeFile(join(ws, "mine.md"), "Only here.\n");
     written(core, join(ws, "mine.md"));
     await sync.syncNow();
@@ -608,7 +610,7 @@ describe("sync: solo", () => {
     const plain = await remote.clone("rewriter");
     await runGit(plain, ["checkout", "-q", "--orphan", "fresh"]);
     await runGit(plain, ["rm", "-rqf", "."]);
-    for (const [file, text] of Object.entries({ ...SYNCED, "fresh.md": "A new start.\n" })) {
+    for (const [file, text] of Object.entries({ ...SYNCED, "fresh.md": "A new start.\n", ".claude/settings.json": '{"theirs":true}\n' })) {
       await fsp.mkdir(join(plain, file, ".."), { recursive: true });
       await fsp.writeFile(join(plain, file), text);
     }
@@ -627,11 +629,15 @@ describe("sync: solo", () => {
     expect(await runGit(ws, ["rev-parse", "HEAD"])).toBe(rewritten);
     expect(await read(join(ws, "fresh.md"))).toBe("A new start.\n");
     await expect(fsp.access(join(ws, "mine.md"))).rejects.toThrow();
+    expect(await read(join(ws, ".claude", "settings.json"))).toBe('{"theirs":true}\n');
     expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
     const replaced = sync.state().overwritten.map((item) => item.path);
     expect(replaced).toEqual(expect.arrayContaining(["mine.md", "note.md"]));
-    const [kept] = sync.state().overwritten;
-    expect(await runGit(ws, ["rev-parse", kept!.recovery.split(":")[0]!])).toBe(before);
+    const kept = sync.state().overwritten.find((item) => item.path === "note.md")!;
+    expect(await runGit(ws, ["rev-parse", kept.recovery.split(":")[0]!])).toBe(before);
+    const settings = sync.state().overwritten.find((item) => item.path === ".claude/settings.json")!;
+    expect(settings.text).toBe('{"mine":true}\n');
+    expect(await runGit(ws, ["show", settings.recovery])).toBe('{"mine":true}');
     expect(await remote.tip()).toBe(rewritten);
   });
 
@@ -678,6 +684,59 @@ describe("sync: solo", () => {
     expect(JSON.parse(await read(join(ws, ".git", "notefig-sync.json"))).held).toBeUndefined();
     expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
     expect(sync.state()).toMatchObject({ fault: null, overwritten: [] });
+    disposeEditor(editors, path);
+  });
+
+  it("merges a held file's save that lands while a pull is on its way, rather than writing over it", async () => {
+    const { sync, remote, ws, editors, core } = await setup();
+    const path = join(ws, "note.md");
+    const plain = await remote.clone("plain");
+    const { land } = await editUnsaved(core, editors, ws, path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+    await remote.pushFromPlainGit(plain, { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" }, "cli");
+    await sync.syncNow();
+    await remote.pushFromPlainGit(plain, { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n\nThird, theirs.\n" }, "cli");
+    // The save lands during the next pull's fetch.
+    const request = remote.http.request.bind(remote.http);
+    let landed = false;
+    remote.http.request = async (input) => {
+      if (!landed && input.method === "POST" && input.url.endsWith("git-upload-pack")) {
+        landed = true;
+        land();
+        await vi.waitFor(async () => expect(await read(path)).toContain("mine"));
+      }
+      return request(input);
+    };
+    await sync.syncNow();
+    await sync.syncNow();
+
+    const merged = "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.\n\nThird, theirs.\n";
+    await vi.waitFor(async () => expect(await read(path)).toBe(merged), { timeout: 10_000 });
+    await sync.syncNow();
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(merged.trimEnd());
+    disposeEditor(editors, path);
+  });
+
+  it("merges again when a save lands during a merge, instead of writing the older result", async () => {
+    const { sync, remote, ws, editors, core } = await setup();
+    const path = join(ws, "note.md");
+    const { land } = await editUnsaved(core, editors, ws, path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+    await remote.pushFromPlainGit(await remote.clone("plain"), { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" }, "cli");
+    await sync.syncNow();
+    const real = merging.mergeMarkdown;
+    const merge = vi.spyOn(merging, "mergeMarkdown").mockImplementationOnce(async (base, ours, theirs) => {
+      // A newer save, while the worker merges the older one.
+      await fsp.writeFile(path, "# Note\n\nFirst paragraph, mine, again.\n\nSecond paragraph.\n");
+      return real(base, ours, theirs);
+    });
+    land();
+    await vi.waitFor(() => expect(merge).toHaveBeenCalled(), { timeout: 10_000 });
+    await sync.syncNow();
+    await sync.syncNow();
+
+    const merged = "# Note\n\nFirst paragraph, mine, again.\n\nSecond paragraph, theirs.\n";
+    expect(await read(path)).toBe(merged);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(merged.trimEnd());
+    merge.mockRestore();
     disposeEditor(editors, path);
   });
 
