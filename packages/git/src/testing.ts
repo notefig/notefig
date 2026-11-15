@@ -60,6 +60,9 @@ export function httpBackend(root: string): GitHttpClient {
         child.stderr.resume();
         child.on("error", reject);
         child.on("close", () => resolve(cgiResponse(Buffer.concat(out))));
+        // http-backend can answer (a refusal) and exit before reading the
+        // whole body: its response says what happened, not the broken pipe.
+        child.stdin.on("error", () => {});
         child.stdin.end(body);
       });
     },
