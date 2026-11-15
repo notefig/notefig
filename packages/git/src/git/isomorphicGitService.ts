@@ -1062,11 +1062,85 @@ export class IsomorphicGitService implements GitService {
         gitdir: this.gitdir,
         cache: this.cache,
         oid: input.ref,
-        filepath: input.filepath,
+        // None: `ref` is the blob itself.
+        filepath: input.filepath || undefined,
       });
       return blob;
     } catch (error) {
       if ((error as { name?: string }).name === "NotFoundError") return null;
+      throw this.fail(error);
+    }
+  }
+
+  async writeBlob(bytes: Uint8Array): Promise<string> {
+    try {
+      return await git.writeBlob({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, blob: bytes });
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async stageBlob(input: { filepath: string; oid: string; modeFrom: string }): Promise<void> {
+    try {
+      const mode = await this.modeOf(input.modeFrom, input.filepath);
+      await git.updateIndex({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        filepath: input.filepath,
+        oid: input.oid,
+        mode,
+        add: true,
+      });
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  /** A file's mode in a commit's tree; a plain file's when it isn't there. */
+  private async modeOf(ref: string, filepath: string): Promise<number> {
+    const slash = filepath.lastIndexOf("/");
+    const name = filepath.slice(slash + 1);
+    try {
+      const { tree } = await git.readTree({
+        fs: this.fsClient,
+        dir: this.dir,
+        gitdir: this.gitdir,
+        cache: this.cache,
+        oid: ref,
+        filepath: slash >= 0 ? filepath.slice(0, slash) : undefined,
+      });
+      const entry = tree.find((item) => item.path === name);
+      return entry ? parseInt(entry.mode, 8) : PLAIN_FILE_MODE;
+    } catch (error) {
+      if ((error as { name?: string }).name === "NotFoundError") return PLAIN_FILE_MODE;
+      throw error;
+    }
+  }
+
+  async writeRef(ref: string, oid: string): Promise<void> {
+    try {
+      await git.writeRef({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, ref, value: oid, force: true });
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async listRefs(prefix: string): Promise<string[]> {
+    const base = prefix.replace(/\/+$/, "");
+    try {
+      const names = await git.listRefs({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, filepath: base });
+      return names.map((name) => `${base}/${name}`).sort();
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
+  async deleteRef(ref: string): Promise<void> {
+    try {
+      await git.deleteRef({ fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, ref });
+    } catch (error) {
       throw this.fail(error);
     }
   }

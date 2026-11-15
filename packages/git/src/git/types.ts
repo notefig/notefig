@@ -237,7 +237,8 @@ export interface GitService {
   /** Every file path (`/`-separated) in a commit's tree (`ref`: oid or
    *  ref, default `HEAD`). */
   listFiles(input?: { ref?: string }): Promise<string[]>;
-  /** A file's bytes as of a ref/commit; null when it isn't there. */
+  /** A file's bytes as of a ref/commit; null when it isn't there. With an
+   *  empty `filepath`, `ref` is a blob's oid. */
   readFile(input: GitReadTextFileInput): Promise<Uint8Array | null>;
   /** The file paths whose content differs between two commits (oids or
    *  refs): added, modified, deleted or with a new mode, `/`-separated,
@@ -245,6 +246,18 @@ export interface GitService {
    *  file swapped with a folder, or a mode it can't set (executable,
    *  symlink), is refused (`PullRefused`) as `pullBranch` refuses it. */
   changedFiles(from: string, to: string, options?: { toApply?: boolean }): Promise<string[]>;
+  /** Store bytes as a blob; its oid. */
+  writeBlob(bytes: Uint8Array): Promise<string>;
+  /** Point the index entry for `filepath` at a stored blob, without
+   *  touching the worktree. The mode is the file's in `modeFrom` (a ref or
+   *  oid), so the next commit doesn't change it. */
+  stageBlob(input: { filepath: string; oid: string; modeFrom: string }): Promise<void>;
+  /** Point a local ref at an object (a commit, or a blob), creating or
+   *  moving it. */
+  writeRef(ref: string, oid: string): Promise<void>;
+  /** The full names of the local refs under a prefix (`refs/x/`), sorted. */
+  listRefs(prefix: string): Promise<string[]>;
+  deleteRef(ref: string): Promise<void>;
   /** The best common ancestor of two commits (oids or refs); null when
    *  they share no history. */
   mergeBase(a: string, b: string): Promise<string | null>;

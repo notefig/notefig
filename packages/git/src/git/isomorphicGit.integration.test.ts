@@ -407,6 +407,46 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     await expect(service.isIgnored("notes.md")).resolves.toBe(false);
   });
 
+  it("stages a stored blob without touching the worktree, keeping the file's mode", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    const author = { name: "T", email: "t@x" };
+    await host.writeFileAtomic(join(repoDir, "run.md"), encode("one\n"));
+    await host.chmod(join(repoDir, "run.md"), 0o755);
+    await host.writeFileAtomic(join(repoDir, "sub", "note.md"), encode("one\n"));
+    const first = (await service.addAllAndCommit({ message: "one", author }))!;
+
+    for (const filepath of ["run.md", "sub/note.md", "sub/new.md"]) {
+      const oid = await service.writeBlob(encode(`staged ${filepath}\n`));
+      await service.stageBlob({ filepath, oid, modeFrom: first });
+    }
+    const second = await service.commit({ message: "two", author });
+
+    expect(new TextDecoder().decode((await service.readFile({ ref: second, filepath: "sub/new.md" }))!)).toBe("staged sub/new.md\n");
+    expect(new TextDecoder().decode((await service.readFile({ ref: second, filepath: "run.md" }))!)).toBe("staged run.md\n");
+    await expect(service.changedFiles(first, second, { toApply: true })).resolves.toEqual(["run.md", "sub/new.md", "sub/note.md"]);
+    // The worktree still has what was there.
+    expect(new TextDecoder().decode(await host.readFile(join(repoDir, "run.md")))).toBe("one\n");
+  });
+
+  it("writes, lists and deletes local refs under a prefix", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    await host.writeFileAtomic(join(repoDir, "a.md"), new TextEncoder().encode("a\n"));
+    const oid = (await service.addAllAndCommit({ message: "one", author: { name: "T", email: "t@x" } }))!;
+    const blob = await service.writeBlob(new TextEncoder().encode("kept\n"));
+
+    expect(new TextDecoder().decode((await service.readFile({ ref: blob, filepath: "" }))!)).toBe("kept\n");
+    await expect(service.listRefs("refs/keep/")).resolves.toEqual([]);
+    await service.writeRef("refs/keep/2", oid);
+    await service.writeRef("refs/keep/1", blob);
+    await expect(service.listRefs("refs/keep/")).resolves.toEqual(["refs/keep/1", "refs/keep/2"]);
+    await service.deleteRef("refs/keep/1");
+    await expect(service.listRefs("refs/keep")).resolves.toEqual(["refs/keep/2"]);
+    expect((await service.log({ ref: "refs/keep/2", depth: 1 }))[0]?.oid).toBe(oid);
+  });
+
   describe("remoteTarget", () => {
     const withConfig = async (config: string) => {
       const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
