@@ -196,4 +196,36 @@ describe("TauriStdioTransport", () => {
     ]);
     expect(transport.spawnInfo).toBeUndefined();
   });
+
+  it("kills a process whose spawn lands while close's kill is in flight", async () => {
+    let finishSpawn!: () => void;
+    let finishKill: (() => void) | undefined;
+    const tauri = withMockedTauri({
+      spawn_agent: () =>
+        new Promise((resolve) => {
+          finishSpawn = () => resolve(spawnOk);
+        }),
+      // The first kill runs before the process is registered (a no-op in
+      // Rust) and answers late; later kills answer at once.
+      kill_agent: () =>
+        finishKill
+          ? { ok: true }
+          : new Promise((resolve) => {
+              finishKill = () => resolve({ ok: true });
+            }),
+    });
+    const transport = new TauriStdioTransport(OPTIONS);
+
+    const starting = transport.start();
+    await vi.waitFor(() => expect(finishSpawn).toBeTypeOf("function"));
+    const closing = transport.close();
+    await vi.waitFor(() => expect(finishKill).toBeTypeOf("function"));
+    finishSpawn();
+    await starting;
+    finishKill?.();
+    await closing;
+
+    expect(tauri.calls("kill_agent")).toHaveLength(2);
+    expect(transport.spawnInfo).toBeUndefined();
+  });
 });

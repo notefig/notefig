@@ -60,6 +60,9 @@ export class TauriStdioTransport implements AgentTransport {
   /** Serializes stdin writes so JSON-RPC lines reach Rust in emit order. */
   private writeChain: Promise<unknown> = Promise.resolve();
   private closed = false;
+  /** Set the moment close() is called, before its kill is answered: a spawn
+   * that lands in between must still be killed (MET-288). */
+  private closeRequested = false;
   private _spawnInfo?: SpawnAgentInfo;
   private stdoutPuller?: StreamPuller;
   private stderrPuller?: StreamPuller;
@@ -126,7 +129,7 @@ export class TauriStdioTransport implements AgentTransport {
       // close() may have landed while one of the listener registrations was
       // awaiting. In that case there is no process to spawn and the late
       // listener handles must be released now.
-      if (this.closed) {
+      if (this.closeRequested) {
         this.teardown();
         return;
       }
@@ -195,7 +198,8 @@ export class TauriStdioTransport implements AgentTransport {
   }
 
   async close(): Promise<void> {
-    if (!this.closed) {
+    if (!this.closed && !this.closeRequested) {
+      this.closeRequested = true;
       await this.killProcess();
     }
     this.handleClose();
@@ -213,9 +217,10 @@ export class TauriStdioTransport implements AgentTransport {
       );
     }
     // close() can race the Rust spawn: its first kill sees no registered
-    // process, then spawn_agent completes. Kill again after registration so
-    // a task deleted during startup cannot leave that late process alive.
-    if (this.closed) {
+    // process, then spawn_agent completes — possibly before that kill is
+    // even answered. Kill again after registration so a task deleted during
+    // startup cannot leave that late process alive.
+    if (this.closed || this.closeRequested) {
       await this.killProcess();
       this.teardown();
       return;
