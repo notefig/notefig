@@ -48,6 +48,7 @@ import {
 import { kvModule } from "@/modules/kv";
 import { projectSettingsModule } from "@/modules/project-settings";
 import { lastToolModule, sidebarViewModule } from "@/modules/sidebar-view";
+import { workspaceFollowsTabModule } from "@/modules/workspace-follows-tab";
 import { workspaceKey } from "@/utils/path";
 
 /** What every root that renders a workspace needs running. */
@@ -62,6 +63,8 @@ export function runtimeModules(): AnyModule[] {
     recentDocumentsModule,
     layoutModule,
     tabsModule,
+    // Bringing a tab forward focuses its workspace.
+    workspaceFollowsTabModule,
     editorsModule,
     documentsModule,
     projectSettingsModule,

@@ -45,8 +45,8 @@ import {
 import { platformModule, queryClientModule } from "@/core/services";
 import { createMetadataCollection } from "./metadata-collection";
 
-/** How long a walked listing counts as current: returning to a workspace
- *  (its tree remounting, its focus) re-walks only an older one. */
+/** How long a walked listing counts as current: a file tree mounting (a
+ *  return to its workspace) re-walks only an older one. */
 const LISTING_FRESH_MS = 10_000;
 const INVALIDATE_DEBOUNCE_MS = 500;
 
@@ -312,12 +312,6 @@ export interface WorkspaceFiles {
   file(filePath: string): FileHandle;
   /** Refetch the listing; call when files are known to have changed. */
   refresh(): Promise<void>;
-  /**
-   * Re-walk unless a walk is in flight or landed within `maxAgeMs` — for
-   * catching watcher gaps on a return, without a full walk (and a cancel
-   * of the one running) on every switch.
-   */
-  catchUp(maxAgeMs: number): Promise<void>;
   /**
    * Re-walk after out-of-band disk mutations (the entry-time scratchpad
    * sweep). Resolves once a walk that STARTED after this call has landed: a
@@ -830,14 +824,6 @@ export function createWorkspaceFiles(deps: FilesDeps): WorkspaceFiles {
     refresh: async () => {
       await collections.metadata.utils.refetch();
     },
-    catchUp: async (maxAgeMs) => {
-      const state = queryClient.getQueryState(
-        fileQueryKeys.metadata(workspacePath),
-      );
-      if (state?.fetchStatus === "fetching") return;
-      if (state && Date.now() - state.dataUpdatedAt < maxAgeMs) return;
-      await collections.metadata.utils.refetch();
-    },
     refetchMetadata,
     recordDiskChanges,
     hydrateDirectoryStats,
@@ -892,9 +878,10 @@ declare module "@notefig/core" {
 export const filesModule = defineModule({
   name: "files",
   needs: [platformModule, queryClientModule],
-  // Coming back to a workspace re-walks its listing (catches watcher gaps)
-  // unless a walk is running or recent, and gives a watcher whose start
-  // failed another chance.
+  // Focusing a workspace gives a watcher whose start failed another
+  // chance. It walks nothing: focus follows the tab in front, and the
+  // watcher keeps every open workspace current; its file tree, mounting,
+  // re-walks a listing older than `LISTING_FRESH_MS`.
   boot: (_api, ctx) =>
     ctx.hooks.on("workspace:focused", ({ path }) => {
       // An earlier focus step can still be waiting when the workspace
@@ -902,9 +889,7 @@ export const filesModule = defineModule({
       // this also skips one whose instances are being disposed.
       const workspace = ctx.workspaceHandle(path);
       if (!workspace.isOpen()) return;
-      const { files } = workspace;
-      files.ensureWatching();
-      void files.catchUp(LISTING_FRESH_MS);
+      workspace.files.ensureWatching();
     }),
   workspace: {
     create: (ctx) =>
