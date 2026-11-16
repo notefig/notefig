@@ -311,6 +311,9 @@ function ComposerOverlay({
         <PermissionCard taskId={taskRow.taskId} />
       </div>
       {taskRow.authRequired && <AuthCard task={taskRow} />}
+      {taskRow.status === "restored" && (
+        <RestoredSessionCard taskId={taskRow.taskId} />
+      )}
       {taskRow.status === "unavailable" ? (
         <UnavailableCard taskId={taskRow.taskId} />
       ) : (
@@ -328,6 +331,26 @@ function ComposerOverlay({
           composerRef={composerRef}
         />
       )}
+    </div>
+  );
+}
+
+/** Harness-backed history is intentionally not loaded merely by viewing an
+ * old session (MET-288). Make the network/process work an explicit action. */
+function RestoredSessionCard({ taskId }: { taskId: string }) {
+  const { t } = useTranslation();
+  const { agents } = useCore();
+  return (
+    <div className="pointer-events-auto flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
+      <span className="min-w-0 flex-1">{t("agentSessionHistoryDormant")}</span>
+      <Button
+        variant="outline"
+        size="sm"
+        className="shrink-0"
+        onClick={() => agents.task(taskId).revive()}
+      >
+        {t("agentLoadSessionHistory")}
+      </Button>
     </div>
   );
 }

@@ -124,7 +124,9 @@ describe("AgentChatTab composer isolation (MET-139)", () => {
       createdAt: 1,
       updatedAt: 1,
     });
-    const revive = vi.spyOn(agents.runtime, "revive");
+    const revive = vi
+      .spyOn(agents.runtime, "revive")
+      .mockReturnValue({ started: Promise.resolve() });
 
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -150,6 +152,12 @@ describe("AgentChatTab composer isolation (MET-139)", () => {
         "contenteditable",
       ),
     ).toBe("true");
+    const load = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "agentLoadSessionHistory",
+    );
+    expect(load).toBeDefined();
+    act(() => load?.click());
+    expect(revive).toHaveBeenCalledWith(TASK_ID);
   });
 
   it("keystrokes update the composer without re-rendering the transcript", async () => {

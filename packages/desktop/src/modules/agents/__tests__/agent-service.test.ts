@@ -2118,6 +2118,23 @@ describe("AgentTask dispose (MET-72)", () => {
     expect(endpoint.close).toHaveBeenCalled();
   });
 
+  it("treats an ACP request rejected by disposal as a normal stop", async () => {
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    agent.onLoadSession = () => new Promise(() => {});
+    const task = new TaskManager(deps, "/ws").createTask(harness);
+
+    const started = task.start(() => client, {
+      resumeSessionId: "sess_old",
+    });
+    await vi.waitFor(() =>
+      expect(agent.loadSessionParams).toMatchObject({ sessionId: "sess_old" }),
+    );
+    await task.dispose();
+
+    await expect(started).resolves.toBeUndefined();
+  });
+
   it("closes the transport and the MCP endpoint", async () => {
     const [client, agentSide] = createLoopbackPair();
     new FakeAgent(agentSide);

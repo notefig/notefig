@@ -172,4 +172,28 @@ describe("TauriStdioTransport", () => {
 
     expect(() => transport.send("nope")).toThrow(AgentTransportError);
   });
+
+  it("kills a process whose spawn finishes after close", async () => {
+    let finishSpawn!: () => void;
+    const tauri = withMockedTauri({
+      spawn_agent: () =>
+        new Promise((resolve) => {
+          finishSpawn = () => resolve(spawnOk);
+        }),
+      kill_agent: () => ({ ok: true }),
+    });
+    const transport = new TauriStdioTransport(OPTIONS);
+
+    const starting = transport.start();
+    await vi.waitFor(() => expect(finishSpawn).toBeTypeOf("function"));
+    await transport.close();
+    finishSpawn();
+    await starting;
+
+    expect(tauri.calls("kill_agent")).toEqual([
+      { procId: "p1" },
+      { procId: "p1" },
+    ]);
+    expect(transport.spawnInfo).toBeUndefined();
+  });
 });

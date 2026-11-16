@@ -587,7 +587,7 @@ export class AgentTask {
       // instead of erroring — run them now.
       this.drainPromptsAfterStart();
     } catch (error) {
-      if (error instanceof TaskDisposedDuringStartError) return;
+      if (this.isDisposedStartupError(error)) return;
       const message = errorMessage(error);
       this.warn("start failed", message);
       // A REJECTED session/load means the harness no longer has the
@@ -664,6 +664,10 @@ export class AgentTask {
 
   private assertNotDisposed(): void {
     if (this.disposed) throw new TaskDisposedDuringStartError();
+  }
+
+  private isDisposedStartupError(error: unknown): boolean {
+    return this.disposed || error instanceof TaskDisposedDuringStartError;
   }
 
   private persistSessionId(): void {
