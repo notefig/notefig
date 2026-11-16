@@ -378,9 +378,14 @@ describe("sync: solo", () => {
     docSync.pushUpdate(() => editor.getJSON());
     await sync.syncNow();
     await sync.syncNow();
-    landAgain();
+    expect(await runGit(remote.bare, ["show", "main:.claude/plan.md"])).toBe("# Plan\n\nFirst.\n\nSecond, theirs.");
 
+    // The next save is merged from where the edits started, keeping both.
+    landAgain();
+    await vi.waitFor(async () => expect(await read(path)).toContain("mine again"), { timeout: 10_000 });
+    await sync.syncNow();
     expect(sync.state().fault).toBe(null);
+    expect(await read(path)).toBe("# Plan\n\nFirst, mine again.\n\nSecond, theirs.\n");
     expect(await runGit(remote.bare, ["show", "main:.claude/plan.md"])).toBe("# Plan\n\nFirst.\n\nSecond, theirs.");
     disposeEditor(editors, path);
   });
