@@ -656,22 +656,24 @@ export function followActiveTab(
   focus: (workspacePath: string) => Promise<void>,
 ): () => void {
   let shown: string | null = null;
-  // Focuses under way, and those a later tab joined: core folds a second
-  // focus of a workspace into the first, so it records nothing newer than
-  // a focus elsewhere in between (B, A, B). That later tab asks again once
-  // the first is done; a choice in the rail meanwhile is never undone.
+  // Focuses under way, and when a later tab joined one: core folds a
+  // second focus of a workspace into the first, so it records nothing
+  // newer than a focus elsewhere in between (B, A, B). That later tab asks
+  // again once the first is done, unless a focus landed after it asked (a
+  // choice in the rail), which stands.
   const underWay = new Set<string>();
-  const joined = new Set<string>();
-  const follow = (again = false) => {
+  const joined = new Map<string, number>();
+  const follow = (askedAt?: number) => {
     const active = tabs.activeTabId();
-    if (active === shown && !again) return;
+    if (active === shown && askedAt === undefined) return;
     shown = active;
     const workspace = active && workspaceOfTab(active, registry, tasks);
     const focused = mostRecentlyFocused(registry.collection.values());
     if (!workspace || (focused && workspaceKey(focused.path) === workspaceKey(workspace))) return;
+    if (askedAt !== undefined && focused && focused.focusedAt > askedAt) return;
     const key = workspaceKey(workspace);
     if (underWay.has(key)) {
-      joined.add(key);
+      joined.set(key, Date.now());
       return;
     }
     underWay.add(key);
@@ -679,7 +681,9 @@ export function followActiveTab(
       .catch((error: unknown) => console.error(`Couldn't focus ${workspace}:`, error))
       .finally(() => {
         underWay.delete(key);
-        if (joined.delete(key)) follow(true);
+        const asked = joined.get(key);
+        joined.delete(key);
+        if (asked !== undefined) follow(asked);
       });
   };
   let off: (() => void) | null = null;
