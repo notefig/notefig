@@ -21,7 +21,8 @@ vi.mock("@/modules/tabs/tab-controllers", () => ({
   revealTabMatch: vi.fn(),
   searchTab: vi.fn(),
 }));
-vi.mock("@/modules/workspaces", () => ({
+vi.mock("@/modules/workspaces", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/modules/workspaces")>()),
   useOpenWorkspacesReady: vi.fn(() => true),
   useOpenWorkspaces: vi.fn(() => []),
   workspaceOfPath: vi.fn(() => null),
