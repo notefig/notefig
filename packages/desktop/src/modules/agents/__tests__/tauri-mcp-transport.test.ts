@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { withMockedTauri } from "@/testing/tauri-mock";
 import { TauriMcpTransport } from "../tauri-mcp-transport";
 import type { PullResult } from "../stream-puller";
@@ -135,5 +135,29 @@ describe("TauriMcpTransport", () => {
 
     const transport = new TauriMcpTransport("task_3");
     await expect(transport.start()).rejects.toThrow(/cannot bind/);
+  });
+
+  it("stops a relay whose start finishes after close", async () => {
+    let finishStart!: () => void;
+    const tauri = withMockedTauri({
+      start_mcp_relay: () =>
+        new Promise((resolve) => {
+          finishStart = () => resolve(relayOk);
+        }),
+      stop_mcp_relay: () => ({ ok: true }),
+    });
+    const transport = new TauriMcpTransport("task_late");
+
+    const starting = transport.start();
+    await vi.waitFor(() => expect(finishStart).toBeTypeOf("function"));
+    await transport.close();
+    finishStart();
+    await starting;
+
+    expect(tauri.calls("stop_mcp_relay")).toEqual([
+      { taskId: "task_late" },
+      { taskId: "task_late" },
+    ]);
+    expect(transport.mcpServer).toBeUndefined();
   });
 });

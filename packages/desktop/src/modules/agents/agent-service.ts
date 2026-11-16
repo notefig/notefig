@@ -132,6 +132,10 @@ class StartupTimeoutError extends Error {
   }
 }
 
+/** Internal control flow: disposal owns teardown and is a successful end to
+ * startup, not a task failure to surface or persist. */
+class TaskDisposedDuringStartError extends Error {}
+
 function withStartupTimeout<T>(
   promise: Promise<T>,
   step: string,
@@ -503,6 +507,11 @@ export class AgentTask {
         : this.deps.proc.createMcpEndpoint({ taskId: this.taskId });
       this.mcpEndpoint = mcpEndpoint;
       await mcpEndpoint.start();
+      // Delete/workspace close can land while any startup step is awaiting.
+      // dispose() closes everything constructed so far; do not advance into
+      // the next step afterward (most importantly, never spawn a process for
+      // a task whose row the user has already deleted).
+      this.assertNotDisposed();
       const services = this.deps.services(this.workspacePath);
       this.unsubscribers.push(
         attachMcpEndpoint(
@@ -540,6 +549,7 @@ export class AgentTask {
         writeFiles: (files) => this.deps.fs.writeFiles(files),
         warn: (label, detail) => this.warn(label, detail),
       });
+      this.assertNotDisposed();
       this.spawnPrep = prep;
 
       const transport = createTransport({ extraEnv: prep.env });
@@ -560,26 +570,24 @@ export class AgentTask {
       // Bring the transport live before any ACP traffic; spawn failure
       // surfaces here as an AgentTransportError and marks the task errored.
       await transport.start();
+      this.assertNotDisposed();
       await withStartupTimeout(this.client.connect(), "initialize");
+      this.assertNotDisposed();
       // Note: we do NOT surface authHint here — the adapter always advertises
       // authMethods regardless of login (see the auth spike), so the hint only
       // becomes meaningful when a prompt actually fails with "auth required".
       await this.establishSession(this.client, options?.resumeSessionId);
+      this.assertNotDisposed();
       // The sessionId rides the task row — it's what agent-persistence.ts
       // persists and what revival needs back (the old `session:<taskId>` KV
       // side-key is retired; stale keys are inert).
-      if (this.store.tasks.get(this.taskId)) {
-        this.store.tasks.update(this.taskId, (draft) => {
-          draft.sessionId = this.sessionId ?? undefined;
-        });
-      }
+      this.persistSessionId();
       this.setStatus("idle");
       // Prompts that arrived during the spawn/handshake (or replay) queued
       // instead of erroring — run them now.
-      if (this.pendingPrompts.length > 0 && !this.authBlocked) {
-        void this.drainQueue();
-      }
+      this.drainPromptsAfterStart();
     } catch (error) {
+      if (this.isDisposedStartupError(error)) return;
       const message = errorMessage(error);
       this.warn("start failed", message);
       // A REJECTED session/load means the harness no longer has the
@@ -652,6 +660,27 @@ export class AgentTask {
       onSessionConfigChange: (_sessionId, options) =>
         this.writeConfigOptions(options),
     });
+  }
+
+  private assertNotDisposed(): void {
+    if (this.disposed) throw new TaskDisposedDuringStartError();
+  }
+
+  private isDisposedStartupError(error: unknown): boolean {
+    return this.disposed || error instanceof TaskDisposedDuringStartError;
+  }
+
+  private persistSessionId(): void {
+    if (!this.store.tasks.get(this.taskId)) return;
+    this.store.tasks.update(this.taskId, (draft) => {
+      draft.sessionId = this.sessionId ?? undefined;
+    });
+  }
+
+  private drainPromptsAfterStart(): void {
+    if (this.pendingPrompts.length > 0 && !this.authBlocked) {
+      void this.drainQueue();
+    }
   }
 
   /** session/load for a revival, session/new otherwise; sets `sessionId`. */

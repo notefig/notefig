@@ -60,6 +60,9 @@ export class TauriStdioTransport implements AgentTransport {
   /** Serializes stdin writes so JSON-RPC lines reach Rust in emit order. */
   private writeChain: Promise<unknown> = Promise.resolve();
   private closed = false;
+  /** Set the moment close() is called, before its kill is answered: a spawn
+   * that lands in between must still be killed (MET-288). */
+  private closeRequested = false;
   private _spawnInfo?: SpawnAgentInfo;
   private stdoutPuller?: StreamPuller;
   private stderrPuller?: StreamPuller;
@@ -123,6 +126,13 @@ export class TauriStdioTransport implements AgentTransport {
           },
         ),
       );
+      // close() may have landed while one of the listener registrations was
+      // awaiting. In that case there is no process to spawn and the late
+      // listener handles must be released now.
+      if (this.closeRequested) {
+        this.teardown();
+        return;
+      }
     } catch (error) {
       this.teardown();
       throw new AgentTransportError(
@@ -143,22 +153,7 @@ export class TauriStdioTransport implements AgentTransport {
         error instanceof Error ? error.message : String(error),
       );
     }
-    if (!result.ok) {
-      this.teardown();
-      throw new AgentTransportError(
-        result.error?.type === "shell_env_unavailable"
-          ? "shell_env_unavailable"
-          : "spawn_failed",
-        result.error?.message ?? "failed to spawn agent process",
-      );
-    }
-    this._spawnInfo = {
-      pid: result.value?.pid,
-      resolvedPath: result.value?.resolvedPath,
-      program: this.options.program,
-      args: this.options.args,
-      cwd: this.options.cwd,
-    };
+    await this.finishSpawn(result);
   }
 
   send(line: string): void {
@@ -203,14 +198,47 @@ export class TauriStdioTransport implements AgentTransport {
   }
 
   async close(): Promise<void> {
-    if (!this.closed) {
-      try {
-        await invoke("kill_agent", { procId: this.options.procId });
-      } catch {
-        // idempotent: killing an already-dead process is not an error
-      }
+    if (!this.closed && !this.closeRequested) {
+      this.closeRequested = true;
+      await this.killProcess();
     }
     this.handleClose();
+  }
+
+  /** Validate a landed spawn and own the close-vs-registration race. */
+  private async finishSpawn(result: AgentResult<SpawnResult>): Promise<void> {
+    if (!result.ok) {
+      this.teardown();
+      throw new AgentTransportError(
+        result.error?.type === "shell_env_unavailable"
+          ? "shell_env_unavailable"
+          : "spawn_failed",
+        result.error?.message ?? "failed to spawn agent process",
+      );
+    }
+    // close() can race the Rust spawn: its first kill sees no registered
+    // process, then spawn_agent completes — possibly before that kill is
+    // even answered. Kill again after registration so a task deleted during
+    // startup cannot leave that late process alive.
+    if (this.closed || this.closeRequested) {
+      await this.killProcess();
+      this.teardown();
+      return;
+    }
+    this._spawnInfo = {
+      pid: result.value?.pid,
+      resolvedPath: result.value?.resolvedPath,
+      program: this.options.program,
+      args: this.options.args,
+      cwd: this.options.cwd,
+    };
+  }
+
+  private killProcess(): Promise<unknown> {
+    // Idempotent: killing an unregistered or already-dead process is fine.
+    return invoke("kill_agent", { procId: this.options.procId }).catch(
+      () => undefined,
+    );
   }
 
   /** Close once the exit event AND the stdout tail have both arrived. A

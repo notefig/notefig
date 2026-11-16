@@ -65,6 +65,10 @@ export class TauriMcpTransport implements McpEndpoint {
       (event) => this.pullerFor(event.payload.connId).schedule(),
     );
     this.unlistenFns.push(doorbell);
+    if (this.closed) {
+      this.teardown();
+      return;
+    }
 
     let result: AgentResult<McpRelayInfo>;
     try {
@@ -84,6 +88,13 @@ export class TauriMcpTransport implements McpEndpoint {
         "spawn_failed",
         result.error?.message ?? "failed to start mcp relay listener",
       );
+    }
+    // close() may have stopped the relay before start_mcp_relay registered
+    // it. Stop again once that pending start lands so no late relay survives.
+    if (this.closed) {
+      await this.stopRelay();
+      this.teardown();
+      return;
     }
     const { command, args, token } = result.value;
     this._mcpServer = {
@@ -148,12 +159,16 @@ export class TauriMcpTransport implements McpEndpoint {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    await this.stopRelay();
+    this.teardown();
+  }
+
+  private async stopRelay(): Promise<void> {
     try {
       await invoke("stop_mcp_relay", { taskId: this.taskId });
     } catch {
       // idempotent: stopping an already-stopped listener is not an error
     }
-    this.teardown();
   }
 
   private teardown(): void {
