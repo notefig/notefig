@@ -69,7 +69,7 @@ describe("a workspace's metadata watch", () => {
     error.mockRestore();
   });
 
-  it("gets another chance whenever the workspace is focused, and a re-walk once its listing is stale", async () => {
+  it("gets another chance whenever the workspace is focused, without a re-walk", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     fsMock.startWatchingMetadata.mockRejectedValueOnce(new Error("denied"));
     const core = coreWithFiles();
@@ -78,17 +78,13 @@ describe("a workspace's metadata watch", () => {
     await settle();
     fsMock.readDirectory.mockClear();
 
-    // Just walked: the focus retries the watch but doesn't walk again.
+    // Even long after the last walk: focus follows tabs, and walks nothing.
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + 60_000);
     await core.workspace("/ws").focus();
     await settle();
     expect(fsMock.startWatchingMetadata).toHaveBeenCalledTimes(2);
     expect(fsMock.readDirectory).not.toHaveBeenCalled();
-
-    // A return after a while catches up on whatever the watcher missed.
-    const now = Date.now();
-    const clock = vi.spyOn(Date, "now").mockReturnValue(now + 60_000);
-    await core.workspace("/ws").focus();
-    await vi.waitFor(() => expect(fsMock.readDirectory).toHaveBeenCalled());
     clock.mockRestore();
     error.mockRestore();
   });

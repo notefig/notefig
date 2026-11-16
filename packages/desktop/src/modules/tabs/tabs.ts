@@ -80,6 +80,9 @@ import {
 import { layoutModule } from "@/modules/layout";
 import { editorsModule } from "@/modules/editors";
 import { documentsModule } from "@/modules/documents";
+import { agentStoreModule } from "@/modules/agents/agent-collections";
+import { mostRecentlyFocused, workspacesModule, type WorkspaceRegistry } from "@/modules/workspaces";
+import { workspaceKey } from "@/utils/path";
 
 // ---------------------------------------------------------------------------
 // Public re-exports: the layout codec and the tab-id scheme.
@@ -627,9 +630,78 @@ export const focusedWindowModule = defineModule({
   boot: (focusedWindow) => focusedWindow.track(),
 });
 
+/** The open workspace a tab belongs to: its file's, or its agent's. */
+function workspaceOfTab(
+  tabId: string,
+  registry: Pick<WorkspaceRegistry, "workspaceOf" | "isOpen">,
+  tasks: { get(taskId: string): { workspacePath: string } | undefined },
+): string | null {
+  const ref = parseTabId(tabId);
+  if (ref.kind === "file") return registry.workspaceOf(ref.path);
+  const workspace = ref.kind === "agent" ? tasks.get(ref.taskId)?.workspacePath : undefined;
+  return workspace && registry.isOpen(workspace) ? workspace : null;
+}
+
+/**
+ * The focused workspace follows the tab in front (MET-290), so the sidebar
+ * and the status bar never disagree about which workspace they show. Only
+ * a change of tab moves it: a workspace picked in the rail stays focused
+ * until another tab is. Starts once the open set and the agent tasks are
+ * loaded, so a restored tab finds its workspace.
+ */
+export function followActiveTab(
+  tabs: Pick<TabsApi, "activeTabId" | "subscribe">,
+  registry: Pick<WorkspaceRegistry, "collection" | "whenReady" | "workspaceOf" | "isOpen">,
+  tasks: { get(taskId: string): { workspacePath: string } | undefined; preload(): Promise<void> },
+  focus: (workspacePath: string) => Promise<void>,
+): () => void {
+  let shown: string | null = null;
+  // Focuses under way, and when a later tab joined one: core folds a
+  // second focus of a workspace into the first, so it records nothing
+  // newer than a focus elsewhere in between (B, A, B). That later tab asks
+  // again once the first is done, unless a focus landed after it asked (a
+  // choice in the rail), which stands.
+  const underWay = new Set<string>();
+  const joined = new Map<string, number>();
+  const follow = (askedAt?: number) => {
+    const active = tabs.activeTabId();
+    if (active === shown && askedAt === undefined) return;
+    shown = active;
+    const workspace = active && workspaceOfTab(active, registry, tasks);
+    const focused = mostRecentlyFocused(registry.collection.values());
+    if (!workspace || (focused && workspaceKey(focused.path) === workspaceKey(workspace))) return;
+    if (askedAt !== undefined && focused && focused.focusedAt > askedAt) return;
+    const key = workspaceKey(workspace);
+    if (underWay.has(key)) {
+      joined.set(key, Date.now());
+      return;
+    }
+    underWay.add(key);
+    focus(workspace)
+      .catch((error: unknown) => console.error(`Couldn't focus ${workspace}:`, error))
+      .finally(() => {
+        underWay.delete(key);
+        const asked = joined.get(key);
+        joined.delete(key);
+        if (asked !== undefined) follow(asked);
+      });
+  };
+  let off: (() => void) | null = null;
+  let stopped = false;
+  void Promise.all([registry.whenReady(), tasks.preload()]).then(() => {
+    if (stopped) return;
+    follow();
+    off = tabs.subscribe(() => follow());
+  });
+  return () => {
+    stopped = true;
+    off?.();
+  };
+}
+
 export const tabsModule = defineModule({
   name: "tabs",
-  needs: [layoutModule, editorsModule, documentsModule, focusedWindowModule],
+  needs: [layoutModule, editorsModule, documentsModule, focusedWindowModule, workspacesModule, agentStoreModule],
   register: (ctx) =>
     createTabs({
       layout: ctx.use("layout"),
@@ -638,4 +710,8 @@ export const tabsModule = defineModule({
       editors: ctx.use("editors"),
       documents: ctx.use("documents"),
     }),
+  boot: (tabs, ctx) =>
+    followActiveTab(tabs, ctx.use("workspaceRegistry"), ctx.use("agentStore").tasks, (workspacePath) =>
+      ctx.workspaceHandle(workspacePath).focus(),
+    ),
 });

@@ -4,6 +4,7 @@ import {
   seedTestFiles,
   waitForFileTree,
   openWorkspace,
+  openWorkspaceInPlace,
 } from "../setup/test-helpers";
 import { workspaceNavigationFixture } from "./workspace-navigation.fixture";
 
@@ -58,5 +59,21 @@ test.describe("Workspace Navigation", () => {
 
     const newFileButton = page.getByRole("button", { name: "New file" });
     await expect(newFileButton).toBeVisible();
+  });
+
+  test("bringing a tab forward focuses its workspace", async ({ page }) => {
+    // Two empty projects, each landing in its own scratchpad tab.
+    await openWorkspace(page, "/workspace/follows-tab-a");
+    await openWorkspaceInPlace(page, "/workspace/follows-tab-b");
+    const tabs = page.locator('div[title]:has(> div > button[aria-label="Close tab"])');
+    await expect(tabs).toHaveCount(2);
+    await page.getByRole("button", { name: "Everything", exact: true }).click();
+    const project = (name: string) => page.getByRole("button", { name, exact: true });
+    await expect(project("follows-tab-b")).toHaveAttribute("aria-current", "true");
+
+    await tabs.first().click();
+    await expect(project("follows-tab-a")).toHaveAttribute("aria-current", "true");
+    await tabs.last().click();
+    await expect(project("follows-tab-b")).toHaveAttribute("aria-current", "true");
   });
 });

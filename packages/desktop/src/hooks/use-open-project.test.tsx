@@ -59,7 +59,10 @@ const scratchpadsModule = defineModule({
  *  workspace is in the open set before anything lands in it. */
 const registry = defineModule({
   name: "workspaceRegistry",
-  register: () => ({ workspaceOf: workspaces.workspaceOf }) as never,
+  // The open set never finishes restoring here, so the tabs' focus
+  // following (tabs.test) stays out of these landings.
+  register: () =>
+    ({ workspaceOf: workspaces.workspaceOf, whenReady: () => new Promise<void>(() => {}) }) as never,
   boot: (_api, ctx) =>
     ctx.hooks.on("workspace:focused", ({ path }) => {
       workspaces.open.add(path);
