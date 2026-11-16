@@ -361,33 +361,38 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     await expect(service.mergeBase("refs/heads/main", first!)).resolves.toBe(first);
   });
 
-  it("refuses what a file API can't write when asked: a new mode, a file swapped with a folder", async () => {
+  it("lists a new mode and a file swapped with a folder; unstaging follows the ref, not the worktree", async () => {
     const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
     await service.init({ defaultBranch: "main" });
     const encode = (text: string) => new TextEncoder().encode(text);
     const author = { name: "T", email: "t@x" };
     await host.writeFileAtomic(join(repoDir, "run.sh"), encode("echo\n"));
     await host.writeFileAtomic(join(repoDir, "doc"), encode("a file\n"));
-    const first = await service.addAllAndCommit({ message: "one", author });
+    const first = (await service.addAllAndCommit({ message: "one", author }))!;
     await host.writeFileAtomic(join(repoDir, "run.sh"), encode("echo hi\n"));
     await host.chmod(join(repoDir, "run.sh"), 0o755);
-    const second = await service.addAllAndCommit({ message: "two", author });
+    const second = (await service.addAllAndCommit({ message: "two", author }))!;
+    await expect(service.changedFiles(first, second)).resolves.toEqual(["run.sh"]);
 
-    await expect(service.changedFiles(first!, second!)).resolves.toEqual(["run.sh"]);
-    await expect(service.changedFiles(first!, second!, { toApply: true })).rejects.toMatchObject({
-      code: "PullRefused",
-      message: expect.stringContaining("File permissions changed for run.sh"),
-    });
+    // A file API writes the bytes and can't set the bit: the index keeps
+    // the ref's mode, so the next commit doesn't take it back.
+    await host.chmod(join(repoDir, "run.sh"), 0o644);
+    await service.unstage({ filepath: "run.sh", ref: second });
+    const kept = await service.commit({ message: "same", author });
+    await expect(service.changedFiles(second, kept)).resolves.toEqual([]);
 
     await host.deleteFile(join(repoDir, "doc"));
     await host.createDir(join(repoDir, "doc"));
     await host.writeFileAtomic(join(repoDir, "doc", "inside.md"), encode("now a folder\n"));
-    const third = await service.addAllAndCommit({ message: "three", author });
-    await expect(service.changedFiles(second!, third!)).resolves.toEqual(["doc", "doc/inside.md"]);
-    await expect(service.changedFiles(second!, third!, { toApply: true })).rejects.toMatchObject({
-      code: "PullRefused",
-      message: expect.stringContaining("between a file and a folder"),
-    });
+    const third = (await service.addAllAndCommit({ message: "three", author }))!;
+    await expect(service.changedFiles(second, third)).resolves.toEqual(["doc", "doc/inside.md"]);
+    await expect(service.readFile({ ref: third, filepath: "doc" })).resolves.toBeNull();
+    await expect(service.readFile({ ref: second, filepath: "doc/inside.md" })).resolves.toBeNull();
+
+    // A folder at the ref is never staged as a file.
+    await service.unstage({ filepath: "doc", ref: third });
+    const same = await service.commit({ message: "same", author });
+    await expect(service.changedFiles(third, same)).resolves.toEqual([]);
   });
 
   it("reads the repo's config and checked-out branch", async () => {
@@ -405,6 +410,46 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     await host.writeFileAtomic(join(repoDir, ".gitignore"), new TextEncoder().encode(".claude/\n"));
     await expect(service.isIgnored(".claude/settings.json")).resolves.toBe(true);
     await expect(service.isIgnored("notes.md")).resolves.toBe(false);
+  });
+
+  it("stages a stored blob without touching the worktree, keeping the file's mode", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    const author = { name: "T", email: "t@x" };
+    await host.writeFileAtomic(join(repoDir, "run.md"), encode("one\n"));
+    await host.chmod(join(repoDir, "run.md"), 0o755);
+    await host.writeFileAtomic(join(repoDir, "sub", "note.md"), encode("one\n"));
+    const first = (await service.addAllAndCommit({ message: "one", author }))!;
+
+    for (const filepath of ["run.md", "sub/note.md", "sub/new.md"]) {
+      const oid = await service.writeBlob(encode(`staged ${filepath}\n`));
+      await service.stageBlob({ filepath, oid, modeFrom: first });
+    }
+    const second = await service.commit({ message: "two", author });
+
+    expect(new TextDecoder().decode((await service.readFile({ ref: second, filepath: "sub/new.md" }))!)).toBe("staged sub/new.md\n");
+    expect(new TextDecoder().decode((await service.readFile({ ref: second, filepath: "run.md" }))!)).toBe("staged run.md\n");
+    await expect(service.changedFiles(first, second)).resolves.toEqual(["run.md", "sub/new.md", "sub/note.md"]);
+    // The worktree still has what was there.
+    expect(new TextDecoder().decode(await host.readFile(join(repoDir, "run.md")))).toBe("one\n");
+  });
+
+  it("writes, lists and deletes local refs under a prefix", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    await host.writeFileAtomic(join(repoDir, "a.md"), new TextEncoder().encode("a\n"));
+    const oid = (await service.addAllAndCommit({ message: "one", author: { name: "T", email: "t@x" } }))!;
+    const blob = await service.writeBlob(new TextEncoder().encode("kept\n"));
+
+    expect(new TextDecoder().decode((await service.readFile({ ref: blob, filepath: "" }))!)).toBe("kept\n");
+    await expect(service.listRefs("refs/keep/")).resolves.toEqual([]);
+    await service.writeRef("refs/keep/2", oid);
+    await service.writeRef("refs/keep/1", blob);
+    await expect(service.listRefs("refs/keep/")).resolves.toEqual(["refs/keep/1", "refs/keep/2"]);
+    await service.deleteRef("refs/keep/1");
+    await expect(service.listRefs("refs/keep")).resolves.toEqual(["refs/keep/2"]);
+    expect((await service.log({ ref: "refs/keep/2", depth: 1 }))[0]?.oid).toBe(oid);
   });
 
   describe("remoteTarget", () => {

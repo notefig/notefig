@@ -17,9 +17,15 @@ import { createEditors } from "@/modules/editors";
 import { projectSettingsModule } from "@/modules/project-settings";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { disposeEditor, getOrCreateEditor, type EditorFs } from "@/components/editor/editor-store";
-import { getDocumentSync } from "@/utils/markdown-conversion";
+import { getDocumentSync, whenDocumentSyncClean } from "@/utils/markdown-conversion";
 import { IDLE_COMMIT_MS, POLL_MS, syncModule } from "@/modules/sync";
 import { OFFLINE_RETURN_MS } from "./sync-engine";
+import * as merging from "./sync-merge";
+import * as telemetry from "@/telemetry/telemetry";
+
+// Each test runs a real remote: many `git http-backend` processes, slow
+// when the whole suite runs at once.
+vi.setConfig({ testTimeout: 30_000 });
 
 const codec = createMarkdownCodec();
 const editorFs: EditorFs = {
@@ -224,7 +230,7 @@ describe("sync: solo", () => {
     expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
   });
 
-  it("retries a half-done pull without overwriting what was saved since", async () => {
+  it("retries a half-done pull, merging what was saved since", async () => {
     const { sync, remote, ws, fs, core } = await setup();
     await remote.pushFromPlainGit(await remote.clone("plain"), { "a.md": "Remote a.\n", "m.bin": "PNG\u0000", "z.md": "Remote z.\n" }, "three");
     const blocked = join(ws, "m.bin");
@@ -245,17 +251,15 @@ describe("sync: solo", () => {
     failing.mockRestore();
     await sync.syncNow();
 
-    expect(await read(join(ws, "a.md"))).toBe("Mine since.\n");
-    expect(await read(join(ws, "z.md"))).toBe("Mine too.\n");
-    expect(sync.state()).toMatchObject({ fault: "diverged", detail: expect.stringContaining("z.md") });
-
-    // Keep mine: the move finishes, and both saves go out on top of the remote.
-    sync.resume();
-    await sync.syncNow();
+    // The move finishes; the save it wrote over goes out on top, and the
+    // one it hadn't reached is merged with the remote's (both added it).
     expect(sync.state()).toMatchObject({ fault: null, activity: "idle" });
-    expect(await runGit(remote.bare, ["show", "main:z.md"])).toBe("Mine too.");
+    expect(await read(join(ws, "a.md"))).toBe("Mine since.\n");
+    expect(await read(join(ws, "z.md"))).toBe("Remote z.\n\nMine too.\n");
+    expect(await runGit(remote.bare, ["show", "main:z.md"])).toBe("Remote z.\n\nMine too.");
     expect(await runGit(remote.bare, ["show", "main:a.md"])).toBe("Mine since.");
     expect(await runGit(remote.bare, ["show", "main:m.bin"])).toBe("PNG\u0000");
+    expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
   });
 
   it("closes within its deadline while a request hangs, and writes nothing after", async () => {
@@ -286,17 +290,221 @@ describe("sync: solo", () => {
     expect(await runGit(ws, ["log", "--format=%s", `${before}..HEAD`])).toBe("notefig: User device-a edited mine.md");
   }, 20_000);
 
-  it("stops before taking in a change the file API can't write: an executable bit", async () => {
-    const { sync, remote, ws } = await setup();
-    const before = await runGit(ws, ["rev-parse", "HEAD"]);
+  it("takes in a mode the file API can't set, and never commits it back: an executable bit, a symlink", async () => {
+    const { sync, remote, ws, core } = await setup();
     const plain = await remote.clone("plain");
     await runGit(plain, ["update-index", "--chmod=+x", "note.md"]);
-    await runGit(plain, ["commit", "-q", "-m", "chmod"]);
+    await fsp.symlink("note.md", join(plain, "link.md"));
+    await runGit(plain, ["add", "link.md"]);
+    await runGit(plain, ["commit", "-q", "-m", "modes"]);
     await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
     await sync.syncNow();
 
-    expect(sync.state()).toMatchObject({ fault: "diverged", detail: expect.stringContaining("File permissions changed for note.md") });
-    expect(await runGit(ws, ["rev-parse", "HEAD"])).toBe(before);
+    expect(sync.state().fault).toBe(null);
+    expect(await runGit(ws, ["rev-parse", "HEAD"])).toBe(await remote.tip());
+    // A symlink comes in as a file holding its target, as git writes it
+    // where symlinks can't be made.
+    expect(await read(join(ws, "link.md"))).toBe("note.md");
+    await fsp.writeFile(join(ws, "mine.md"), "Mine.\n");
+    written(core, join(ws, "mine.md"));
+    await sync.syncNow();
+    const listing = await runGit(remote.bare, ["ls-tree", "main"]);
+    expect(listing).toMatch(/^100755 blob \w+\tnote\.md$/m);
+    expect(listing).toMatch(/^120000 blob \w+\tlink\.md$/m);
+    expect(listing).toMatch(/^100644 blob \w+\tmine\.md$/m);
+  });
+
+  it("takes in a file that became a folder, keeping and flagging a version of it only this device has", async () => {
+    const { sync, remote, ws, core } = await setup("synced", { topics: "A file.\n" });
+    remote.mode = "offline";
+    await fsp.writeFile(join(ws, "topics"), "A file, mine.\n");
+    written(core, join(ws, "topics"));
+    await sync.syncNow();
+    remote.mode = "ok";
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["rm", "-q", "topics"]);
+    await fsp.mkdir(join(plain, "topics"));
+    await fsp.writeFile(join(plain, "topics", "first.md"), "In a folder.\n");
+    await runGit(plain, ["add", "topics"]);
+    await runGit(plain, ["commit", "-q", "-m", "folder"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+    await sync.syncNow();
+
+    expect(sync.state().fault).toBe(null);
+    expect(await read(join(ws, "topics", "first.md"))).toBe("In a folder.\n");
+    expect(await tree(remote.bare)).toEqual([".notefig/config.json", "note.md", "topics/first.md"]);
+    expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
+    const [lost] = sync.state().overwritten;
+    expect(lost).toMatchObject({ path: "topics", text: "A file, mine.\n" });
+    expect(await runGit(ws, ["show", lost!.recovery])).toBe("A file, mine.");
+  });
+
+  it("takes in a folder that became a file, keeping and flagging what only this device had in it", async () => {
+    const { sync, remote, ws } = await setup("synced", { "topics/first.md": "In a folder.\n" });
+    // Never committed: it stays out of the remote's change.
+    await fsp.writeFile(join(ws, "topics", "draft.md"), "Only here.\n");
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["rm", "-rq", "topics"]);
+    await fsp.writeFile(join(plain, "topics"), "A file now.\n");
+    await runGit(plain, ["add", "topics"]);
+    await runGit(plain, ["commit", "-q", "-m", "file"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+    await sync.syncNow();
+
+    expect(sync.state().fault).toBe(null);
+    expect(await read(join(ws, "topics"))).toBe("A file now.\n");
+    expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
+    expect(sync.state().overwritten).toEqual([expect.objectContaining({ path: "topics/draft.md", text: "Only here.\n" })]);
+    expect(await runGit(ws, ["show", sync.state().overwritten[0]!.recovery])).toBe("Only here.");
+  });
+
+  it("never commits a file the excludes keep out, even when typing holds its merge back", async () => {
+    const { sync, remote, ws, editors, core } = await setup("synced", { ".claude/plan.md": "# Plan\n\nFirst.\n\nSecond.\n" });
+    const path = join(ws, ".claude", "plan.md");
+    const { editor, land } = await editUnsaved(core, editors, ws, path, "# Plan\n\nFirst, mine.\n\nSecond.\n");
+    await remote.pushFromPlainGit(await remote.clone("plain"), { ".claude/plan.md": "# Plan\n\nFirst.\n\nSecond, theirs.\n" }, "cli");
+    await sync.syncNow();
+    land();
+    await vi.waitFor(async () => expect(await read(path)).toContain("mine"), { timeout: 10_000 });
+    // Typing again, its save still on the way, holds the merge's write back.
+    const docSync = getDocumentSync(path);
+    let landAgain!: () => void;
+    const again = new Promise<void>((done) => (landAgain = done));
+    docSync.writer = async (markdown) => {
+      await again;
+      await fsp.writeFile(path, `${markdown}\n`);
+    };
+    editor.commands.setContent(codec.parse("# Plan\n\nFirst, mine again.\n\nSecond.\n"));
+    docSync.pushUpdate(() => editor.getJSON());
+    await sync.syncNow();
+    await sync.syncNow();
+    expect(await runGit(remote.bare, ["show", "main:.claude/plan.md"])).toBe("# Plan\n\nFirst.\n\nSecond, theirs.");
+
+    // The next save is merged from where the edits started, keeping both.
+    landAgain();
+    await vi.waitFor(async () => expect(await read(path)).toContain("mine again"), { timeout: 10_000 });
+    await sync.syncNow();
+    expect(sync.state().fault).toBe(null);
+    expect(await read(path)).toBe("# Plan\n\nFirst, mine again.\n\nSecond, theirs.\n");
+    expect(await runGit(remote.bare, ["show", "main:.claude/plan.md"])).toBe("# Plan\n\nFirst.\n\nSecond, theirs.");
+    disposeEditor(editors, path);
+  });
+
+  it("merges a file saved during the pull that commits other saved edits, rather than writing over it", async () => {
+    const { sync, remote, ws } = await setup("synced", { "a.md": "A.\n" });
+    const path = join(ws, "note.md");
+    // Saved and not committed: the pull commits it, then fetches again.
+    await fsp.writeFile(join(ws, "a.md"), "A, mine.\n");
+    await remote.pushFromPlainGit(
+      await remote.clone("plain"),
+      { "a.md": "A.\n\nTheirs.\n", "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" },
+      "cli",
+    );
+    const request = remote.http.request.bind(remote.http);
+    let fetches = 0;
+    remote.http.request = async (input) => {
+      // A save lands during that second fetch.
+      if (input.method === "POST" && input.url.endsWith("git-upload-pack") && ++fetches === 2) {
+        await fsp.writeFile(path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+      }
+      return request(input);
+    };
+    await sync.syncNow();
+    await sync.syncNow();
+
+    expect(sync.state()).toMatchObject({ fault: null, overwritten: [] });
+    const merged = "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.\n";
+    expect(await read(path)).toBe(merged);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(merged.trimEnd());
+    expect(await runGit(remote.bare, ["show", "main:a.md"])).toBe("A, mine.\n\nTheirs.");
+  });
+
+  it("waits for an edit on its way to a file in a folder the remote turned into a file, then keeps it", async () => {
+    const { sync, remote, ws, editors, core } = await setup("synced", { "topics/first.md": "# First\n\nIn a folder.\n" });
+    const path = join(ws, "topics", "first.md");
+    const note = join(ws, "note.md");
+    const { land } = await editUnsaved(core, editors, ws, path, "# First\n\nIn a folder, mine.\n");
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["rm", "-rq", "topics"]);
+    await fsp.writeFile(join(plain, "topics"), "A file now.\n");
+    await fsp.writeFile(join(plain, "note.md"), "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n");
+    await runGit(plain, ["add", "-A"]);
+    await runGit(plain, ["commit", "-q", "-m", "file"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+    await sync.syncNow();
+
+    // Taken in (the branch moved), but nothing cleared under the edit.
+    expect(sync.state().fault).toBe(null);
+    expect(await runGit(ws, ["rev-parse", "HEAD"])).toBe(await remote.tip());
+    expect(await read(path)).toBe("# First\n\nIn a folder.\n");
+
+    // Saved while the move waits: merged, not written over.
+    await fsp.writeFile(note, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+    land();
+    await vi.waitFor(async () => expect(await read(path)).toContain("mine"), { timeout: 10_000 });
+    await sync.syncNow();
+    expect(await read(join(ws, "topics"))).toBe("A file now.\n");
+    const [kept] = sync.state().overwritten;
+    expect(kept).toMatchObject({ path: "topics/first.md", text: "# First\n\nIn a folder, mine.\n" });
+    expect(await runGit(ws, ["show", kept!.recovery])).toContain("In a folder, mine.");
+    await sync.syncNow();
+    const merged = "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.\n";
+    expect(await read(note)).toBe(merged);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(merged.trimEnd());
+    disposeEditor(editors, path);
+  });
+
+  it("never clears a folder it couldn't read", async () => {
+    const { sync, remote, ws, fs } = await setup("synced", { "topics/first.md": "In a folder.\n" });
+    await fsp.writeFile(join(ws, "topics", "draft.md"), "Only here.\n");
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["rm", "-rq", "topics"]);
+    await fsp.writeFile(join(plain, "topics"), "A file now.\n");
+    await runGit(plain, ["add", "topics"]);
+    await runGit(plain, ["commit", "-q", "-m", "file"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+    const readDirectory = fs.readDirectory.bind(fs);
+    // Sync's listing of the folder fails; git's own reads still work.
+    const denied = vi.spyOn(fs, "readDirectory").mockImplementation(async (path, options) =>
+      path.endsWith("topics") && options?.recursive
+        ? ({ ok: false, error: { type: "permission_denied", path, message: "denied" } } as never)
+        : readDirectory(path, options),
+    );
+    await sync.syncNow();
+
+    expect(sync.state()).toMatchObject({ fault: "offline", detail: "Couldn't read topics: denied" });
+    expect(await read(join(ws, "topics", "draft.md"))).toBe("Only here.\n");
+
+    denied.mockRestore();
+    await sync.syncNow();
+    expect(sync.state().fault).toBe(null);
+    expect(await read(join(ws, "topics"))).toBe("A file now.\n");
+    expect(sync.state().overwritten).toEqual([expect.objectContaining({ path: "topics/draft.md", text: "Only here.\n" })]);
+  });
+
+  it("replays local commits into a folder the remote turned into a file, flagging them", async () => {
+    const { sync, remote, ws, core } = await setup("synced", { "topics/first.md": "In a folder.\n" });
+    remote.mode = "offline";
+    await fsp.writeFile(join(ws, "topics", "first.md"), "In a folder, mine.\n");
+    await fsp.writeFile(join(ws, "topics", "new.md"), "New here.\n");
+    written(core, join(ws, "topics", "first.md"), join(ws, "topics", "new.md"));
+    await sync.syncNow();
+    remote.mode = "ok";
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["rm", "-rq", "topics"]);
+    await fsp.writeFile(join(plain, "topics"), "A file now.\n");
+    await runGit(plain, ["add", "topics"]);
+    await runGit(plain, ["commit", "-q", "-m", "file"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+    await sync.syncNow();
+
+    expect(sync.state().fault).toBe(null);
+    expect(await read(join(ws, "topics"))).toBe("A file now.\n");
+    expect(await tree(remote.bare)).toEqual([".notefig/config.json", "note.md", "topics"]);
+    expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
+    const flagged = sync.state().overwritten;
+    expect(flagged.map((item) => item.path).sort()).toEqual(["topics/first.md", "topics/new.md"]);
+    expect(await runGit(ws, ["show", flagged.find((item) => item.path === "topics/new.md")!.recovery])).toBe("New here.");
   });
 
   it("commits once per sitting and pushes, with the repo's identity", async () => {
@@ -470,46 +678,299 @@ describe("sync: solo", () => {
     expect(await read(join(ws, "theirs.md"))).toBe("From the CLI.\n");
   });
 
-  it("stops at diverged when both sides changed a file; resuming keeps mine", async () => {
+  it("merges a file both sides changed, flagging what a collision replaced and keeping it", async () => {
     const { sync, remote, ws, core } = await setup();
     const path = join(ws, "note.md");
+    const seed = await runGit(ws, ["rev-parse", "HEAD"]);
+    for (let n = 0; n < 50; n++) await runGit(ws, ["update-ref", `refs/notefig/recovery/0000000000000-${n}`, seed]);
     remote.mode = "offline";
-    await fsp.writeFile(path, "# Note\n\nMine.\n");
+    await fsp.writeFile(path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
     written(core, path);
     await sync.syncNow();
     remote.mode = "ok";
-    const theirs = await remote.pushFromPlainGit(await remote.clone("plain"), { "note.md": "# Note\n\nTheirs.\n" }, "cli");
+    const theirs = await remote.pushFromPlainGit(
+      await remote.clone("plain"),
+      { "note.md": "# Note\n\nFirst paragraph, theirs.\n\nSecond paragraph, theirs.\n" },
+      "cli",
+    );
     await sync.syncNow();
 
-    expect(sync.state()).toMatchObject({ fault: "diverged" });
-    expect(sync.state().detail).toContain("note.md");
-    expect(await read(path)).toBe("# Note\n\nMine.\n");
-    expect(await remote.tip()).toBe(theirs);
-
-    sync.resume();
-    await sync.syncNow();
     expect(sync.state().fault).toBe(null);
-    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nMine.");
+    const merged = "# Note\n\nFirst paragraph, theirs.\n\nSecond paragraph, theirs.\n";
+    expect(await read(path)).toBe(merged);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(merged.trimEnd());
     expect(await runGit(remote.bare, ["merge-base", "--is-ancestor", theirs, "main"])).toBe("");
+    expect(await runGit(remote.bare, ["rev-list", "--merges", "--count", "main"])).toBe("0");
+    const [lost] = sync.state().overwritten;
+    expect(lost).toMatchObject({ path: "note.md", text: "First paragraph, mine.", recovery: expect.stringMatching(/^refs\/notefig\/recovery\/.+:note\.md$/) });
+
+    // This side stays whole on a ref that never leaves the device; the oldest go.
+    expect(await runGit(ws, ["show", lost!.recovery])).toContain("First paragraph, mine.");
+    const kept = await runGit(ws, ["for-each-ref", "--format=%(refname)", "refs/notefig/recovery"]);
+    expect(kept.split("\n")).toHaveLength(50);
+    expect(kept).not.toContain("0000000000000-0\n");
+    expect(await runGit(remote.bare, ["for-each-ref", "refs/notefig"])).toBe("");
+
+    sync.dismissOverwritten();
+    expect(sync.state().overwritten).toEqual([]);
   });
 
-  it("holds remote content back from an editor with unsaved edits, and stops", async () => {
-    const { sync, remote, ws, editors } = await setup();
+  it("merges edits to different paragraphs of one file with nothing flagged", async () => {
+    const { sync, remote, ws, core } = await setup();
     const path = join(ws, "note.md");
+    remote.mode = "offline";
+    await fsp.writeFile(path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+    written(core, path);
+    await sync.syncNow();
+    remote.mode = "ok";
+    await remote.pushFromPlainGit(await remote.clone("plain"), { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" }, "cli");
+    await sync.syncNow();
+
+    const merged = "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.\n";
+    expect(await read(path)).toBe(merged);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(merged.trimEnd());
+    expect(sync.state().overwritten).toEqual([]);
+    expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
+  });
+
+  it("commits a saved edit the remote also changed before merging it", async () => {
+    const { sync, remote, ws } = await setup();
+    const path = join(ws, "note.md");
+    // Saved, and not committed yet (no save reached sync: a poll would see it).
+    await fsp.writeFile(path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+    await remote.pushFromPlainGit(await remote.clone("plain"), { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" }, "cli");
+    await sync.syncNow();
+
+    expect(sync.state().fault).toBe(null);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.");
+    expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
+  });
+
+  it("takes the remote's version of a file whose merge throws, flagging mine and reporting it", async () => {
+    const { sync, remote, ws, core } = await setup();
+    const path = join(ws, "note.md");
+    remote.mode = "offline";
+    await fsp.writeFile(path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+    written(core, path);
+    await sync.syncNow();
+    remote.mode = "ok";
+    await remote.pushFromPlainGit(
+      await remote.clone("plain"),
+      { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n", "other.md": "Other.\n" },
+      "cli",
+    );
+    const boom = new Error("boom");
+    const merge = vi.spyOn(merging, "mergeMarkdown").mockRejectedValue(boom);
+    const reported = vi.spyOn(telemetry, "captureError");
+    await sync.syncNow();
+    merge.mockRestore();
+
+    expect(sync.state().fault).toBe(null);
+    expect(reported).toHaveBeenCalledWith(boom, { boundary: "sync-merge" });
+    reported.mockRestore();
+    expect(await read(path)).toBe("# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n");
+    expect(await read(join(ws, "other.md"))).toBe("Other.\n");
+    expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
+    const [lost] = sync.state().overwritten;
+    expect(lost).toMatchObject({ path: "note.md", text: "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n" });
+    expect(await runGit(ws, ["show", lost!.recovery])).toContain("First paragraph, mine.");
+  });
+
+  it("lets the branch's version of a file that isn't markdown stand, flagging mine", async () => {
+    const { sync, remote, ws, core } = await setup();
+    const path = join(ws, "data.txt");
+    await fsp.writeFile(path, "base\n");
+    written(core, path);
+    await sync.syncNow();
+    remote.mode = "offline";
+    await fsp.writeFile(path, "mine\n");
+    written(core, path);
+    await sync.syncNow();
+    remote.mode = "ok";
+    await remote.pushFromPlainGit(await remote.clone("plain"), { "data.txt": "theirs\n" }, "cli");
+    await sync.syncNow();
+
+    expect(await read(path)).toBe("theirs\n");
+    const [lost] = sync.state().overwritten;
+    expect(lost).toMatchObject({ path: "data.txt", text: "mine\n" });
+    expect(await runGit(ws, ["show", lost!.recovery])).toBe("mine");
+  });
+
+  it("takes the remote's version of a file the excludes keep from syncing, keeping and flagging the one edited here", async () => {
+    const { sync, remote, ws } = await setup("synced", { ".claude/settings.json": "{}\n" });
+    await fsp.writeFile(join(ws, ".claude", "settings.json"), '{"mine":true}\n');
+    await remote.pushFromPlainGit(await remote.clone("plain"), { ".claude/settings.json": '{"theirs":true}\n', "other.md": "Other.\n" }, "cli");
+    await sync.syncNow();
+
+    expect(sync.state().fault).toBe(null);
+    expect(await read(join(ws, ".claude", "settings.json"))).toBe('{"theirs":true}\n');
+    expect(await read(join(ws, "other.md"))).toBe("Other.\n");
+    const [lost] = sync.state().overwritten;
+    expect(lost).toMatchObject({ path: ".claude/settings.json", text: '{"mine":true}\n' });
+    expect(await runGit(ws, ["show", lost!.recovery])).toBe('{"mine":true}');
+  });
+
+  it("offers the remote's version of a rewritten branch, keeping this one on the device", async () => {
+    const { sync, remote, ws, core } = await setup("synced", { ".claude/settings.json": "{}\n" });
+    // Edited, and kept out of every commit by the excludes.
+    await fsp.writeFile(join(ws, ".claude", "settings.json"), '{"mine":true}\n');
+    await fsp.writeFile(join(ws, "mine.md"), "Only here.\n");
+    written(core, join(ws, "mine.md"));
+    await sync.syncNow();
+    const before = await runGit(ws, ["rev-parse", "HEAD"]);
+    const plain = await remote.clone("rewriter");
+    await runGit(plain, ["checkout", "-q", "--orphan", "fresh"]);
+    await runGit(plain, ["rm", "-rqf", "."]);
+    for (const [file, text] of Object.entries({ ...SYNCED, "fresh.md": "A new start.\n", ".claude/settings.json": '{"theirs":true}\n' })) {
+      await fsp.mkdir(join(plain, file, ".."), { recursive: true });
+      await fsp.writeFile(join(plain, file), text);
+    }
+    await runGit(plain, ["add", "-A"]);
+    await runGit(plain, ["commit", "-qm", "rewrite"]);
+    await runGit(plain, ["push", "-qf", remote.bare, "fresh:main"]);
+    const rewritten = await remote.tip();
+
+    await sync.syncNow();
+    expect(sync.state()).toMatchObject({ fault: "diverged" });
+    expect(await read(join(ws, "mine.md"))).toBe("Only here.\n");
+
+    sync.takeRemote();
+    await vi.waitFor(() => expect(sync.state()).toMatchObject({ fault: null }), { timeout: 10_000 });
+    await sync.syncNow();
+    expect(await runGit(ws, ["rev-parse", "HEAD"])).toBe(rewritten);
+    expect(await read(join(ws, "fresh.md"))).toBe("A new start.\n");
+    await expect(fsp.access(join(ws, "mine.md"))).rejects.toThrow();
+    expect(await read(join(ws, ".claude", "settings.json"))).toBe('{"theirs":true}\n');
+    expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
+    const replaced = sync.state().overwritten.map((item) => item.path);
+    expect(replaced).toEqual(expect.arrayContaining(["mine.md", "note.md"]));
+    const kept = sync.state().overwritten.find((item) => item.path === "note.md")!;
+    expect(await runGit(ws, ["rev-parse", kept.recovery.split(":")[0]!])).toBe(before);
+    const settings = sync.state().overwritten.find((item) => item.path === ".claude/settings.json")!;
+    expect(settings.text).toBe('{"mine":true}\n');
+    expect(await runGit(ws, ["show", settings.recovery])).toBe('{"mine":true}');
+    expect(await remote.tip()).toBe(rewritten);
+  });
+
+  /** An editor on `path` with an edit whose save waits for `land()`. */
+  async function editUnsaved(core: Core, editors: ReturnType<typeof createEditors>, ws: string, path: string, text: string) {
     getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
     const editor = editors.markdownEditor(path)!;
     const docSync = getDocumentSync(path);
     docSync.ensureBaseline(await read(path));
-    // A save that never finishes: the edit is not on disk yet.
-    docSync.writer = () => new Promise<void>(() => {});
+    let land!: () => void;
+    const landed = new Promise<void>((done) => (land = done));
+    docSync.writer = async (markdown) => {
+      await landed;
+      await fsp.writeFile(path, `${markdown}\n`);
+      written(core, path);
+    };
+    editor.commands.setContent(codec.parse(text));
     docSync.pushUpdate(() => editor.getJSON());
+    return { editor, land };
+  }
 
-    await remote.pushFromPlainGit(await remote.clone("plain"), { "note.md": "# Note\n\nTheirs.\n" }, "cli");
+  it("holds a remote change back from an editor with unsaved edits, and merges once they're saved", async () => {
+    const { sync, remote, ws, editors, core } = await setup();
+    const path = join(ws, "note.md");
+    const { editor, land } = await editUnsaved(core, editors, ws, path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+    await remote.pushFromPlainGit(await remote.clone("plain"), { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" }, "cli");
     await sync.syncNow();
 
-    expect(sync.state().fault).toBe("diverged");
-    expect(codec.serialize(editor.getJSON())).not.toContain("Theirs.");
+    // Held, not stopped: the editor and the file keep what they had, and
+    // nothing commits the stale file over the remote's.
+    expect(sync.state().fault).toBe(null);
+    expect(codec.serialize(editor.getJSON())).not.toContain("theirs");
+    expect(await read(path)).toBe(SEED["note.md"]);
+    expect(JSON.parse(await read(join(ws, ".git", "notefig-sync.json"))).held).toHaveProperty(["note.md"]);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toContain("Second paragraph, theirs.");
+
+    land();
+    await vi.waitFor(async () => expect(await read(path)).toBe("# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.\n"), {
+      timeout: 10_000,
+    });
+    await sync.syncNow();
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.");
+    expect(codec.serialize(editor.getJSON())).toContain("Second paragraph, theirs.");
+    expect(JSON.parse(await read(join(ws, ".git", "notefig-sync.json"))).held).toBeUndefined();
+    expect(await runGit(ws, ["status", "--porcelain"])).toBe("");
+    expect(sync.state()).toMatchObject({ fault: null, overwritten: [] });
     disposeEditor(editors, path);
+  });
+
+  it("merges a held file's save that lands while a pull is on its way, rather than writing over it", async () => {
+    const { sync, remote, ws, editors, core } = await setup();
+    const path = join(ws, "note.md");
+    const plain = await remote.clone("plain");
+    const { land } = await editUnsaved(core, editors, ws, path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+    await remote.pushFromPlainGit(plain, { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" }, "cli");
+    await sync.syncNow();
+    await remote.pushFromPlainGit(plain, { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n\nThird, theirs.\n" }, "cli");
+    // The save lands during the next pull's fetch.
+    const request = remote.http.request.bind(remote.http);
+    let landed = false;
+    remote.http.request = async (input) => {
+      if (!landed && input.method === "POST" && input.url.endsWith("git-upload-pack")) {
+        landed = true;
+        land();
+        await vi.waitFor(async () => expect(await read(path)).toContain("mine"));
+      }
+      return request(input);
+    };
+    await sync.syncNow();
+    await sync.syncNow();
+
+    const merged = "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.\n\nThird, theirs.\n";
+    await vi.waitFor(async () => expect(await read(path)).toBe(merged), { timeout: 10_000 });
+    await sync.syncNow();
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(merged.trimEnd());
+    disposeEditor(editors, path);
+  });
+
+  it("merges again when a save lands during a merge, instead of writing the older result", async () => {
+    const { sync, remote, ws, editors, core } = await setup();
+    const path = join(ws, "note.md");
+    const { land } = await editUnsaved(core, editors, ws, path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+    await remote.pushFromPlainGit(await remote.clone("plain"), { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" }, "cli");
+    await sync.syncNow();
+    const real = merging.mergeMarkdown;
+    const merge = vi.spyOn(merging, "mergeMarkdown").mockImplementationOnce(async (base, ours, theirs) => {
+      // A newer save, while the worker merges the older one.
+      await fsp.writeFile(path, "# Note\n\nFirst paragraph, mine, again.\n\nSecond paragraph.\n");
+      return real(base, ours, theirs);
+    });
+    land();
+    await vi.waitFor(() => expect(merge).toHaveBeenCalled(), { timeout: 10_000 });
+    await sync.syncNow();
+    await sync.syncNow();
+
+    const merged = "# Note\n\nFirst paragraph, mine, again.\n\nSecond paragraph, theirs.\n";
+    expect(await read(path)).toBe(merged);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(merged.trimEnd());
+    merge.mockRestore();
+    disposeEditor(editors, path);
+  });
+
+  it("merges a held file after a restart, when its edits landed while closed", async () => {
+    const { sync, remote, ws, editors, core, open } = await setup();
+    const path = join(ws, "note.md");
+    const { land } = await editUnsaved(core, editors, ws, path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+    await remote.pushFromPlainGit(await remote.clone("plain"), { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" }, "cli");
+    await sync.syncNow();
+    // Sync closes while the editor still holds its edits; their save lands
+    // after it.
+    await core.workspace(ws).close();
+    land();
+    await vi.waitFor(async () => expect(await read(path)).toContain("First paragraph, mine."));
+    await whenDocumentSyncClean(path);
+    disposeEditor(editors, path);
+
+    const reopened = await open(ws);
+    await reopened.syncNow();
+    expect(await read(path)).toBe("# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.\n");
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.");
+    expect(JSON.parse(await read(join(ws, ".git", "notefig-sync.json"))).held).toBeUndefined();
+    void sync;
   });
 
   it("asks before going on after a long time away, and goes when told", async () => {
@@ -529,8 +990,9 @@ describe("sync: solo", () => {
     await expect(fsp.access(join(ws, "theirs.md"))).rejects.toThrow();
 
     sync.resume();
-    await vi.waitFor(async () =>
-      expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nWritten on the plane."),
+    await vi.waitFor(
+      async () => expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nWritten on the plane."),
+      { timeout: 10_000 },
     );
     expect(await read(join(ws, "theirs.md"))).toBe("Meanwhile.\n");
   });
@@ -594,5 +1056,30 @@ describe("sync: solo", () => {
 
     expect(await read(join(wsB, "from-a.md"))).toBe("Hello from A.\n");
     expect(await runGit(wsB, ["log", "-1", "--format=%an"])).toBe("User device-a");
+  });
+
+  it("converges two devices that edited one file at once", async () => {
+    const { sync: a, remote, ws: wsA, core, open } = await setup();
+    const wsB = await remote.clone("device-b");
+    await writeDevice(wsB, { on: true });
+    const b = await open(wsB);
+    const edit = async (ws: string, text: string) => {
+      await fsp.writeFile(join(ws, "note.md"), text);
+      written(core, join(ws, "note.md"));
+    };
+
+    await edit(wsA, "# Note\n\nFirst paragraph, from A.\n\nSecond paragraph.\n");
+    await edit(wsB, "# Note\n\nFirst paragraph.\n\nSecond paragraph, from B.\n");
+    await Promise.all([a.syncNow(), b.syncNow()]);
+    await a.syncNow();
+    await b.syncNow();
+    await a.syncNow();
+
+    const merged = "# Note\n\nFirst paragraph, from A.\n\nSecond paragraph, from B.\n";
+    expect(await read(join(wsA, "note.md"))).toBe(merged);
+    expect(await read(join(wsB, "note.md"))).toBe(merged);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(merged.trimEnd());
+    expect(await runGit(remote.bare, ["rev-list", "--merges", "--count", "main"])).toBe("0");
+    expect([a.state().overwritten, b.state().overwritten]).toEqual([[], []]);
   });
 });

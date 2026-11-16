@@ -9,8 +9,11 @@
  *   device: a local copy), `on`.
  * - `activity`: what the engine is doing right now.
  * - `fault`: why it isn't simply in sync. `offline` and `throttled` clear
- *   on the next step that works; `auth-error`, `diverged` (the failsafe)
- *   and `paused` (back after a long time offline) wait for the user.
+ *   on the next step that works; `auth-error`, `diverged` (the remote
+ *   branch was rewritten: the way on is its version) and `paused` (back
+ *   after a long time offline) wait for the user.
+ * - `overwritten`: our text a merge replaced with the branch's, flagged
+ *   until dismissed, whatever the state.
  */
 
 export type SyncSetup = "unavailable" | "off" | "ask" | "declined" | "on";
@@ -36,6 +39,17 @@ export interface SyncReturnSummary {
   people: string[];
 }
 
+/** Our text a merge replaced with the branch's. */
+export interface SyncOverwrite {
+  /** `/`-separated path. */
+  path: string;
+  /** What was replaced; null when the whole file was (or isn't text). */
+  text: string | null;
+  /** Where this side is kept on this device, for `git show`: a ref to
+   *  the file, or `<ref>:<path>`. Never pushed. */
+  recovery: string;
+}
+
 export interface SyncState {
   setup: SyncSetup;
   /** Why sync can't run here (`setup: "unavailable"`). */
@@ -49,6 +63,8 @@ export interface SyncState {
   detail: string | null;
   /** Set while `paused`. */
   summary: SyncReturnSummary | null;
+  /** Newest last, at most `MAX_OVERWRITTEN`. */
+  overwritten: SyncOverwrite[];
 }
 
 export type SyncEvent =
@@ -58,7 +74,9 @@ export type SyncEvent =
   | { type: "failed"; fault: "offline" | "throttled" | "auth-error"; detail: string }
   | { type: "diverged"; detail: string }
   | { type: "paused"; detail: string; summary: SyncReturnSummary }
-  | { type: "resume" };
+  | { type: "resume" }
+  | { type: "overwritten"; items: SyncOverwrite[] }
+  | { type: "dismiss-overwritten" };
 
 export const INITIAL_SYNC_STATE: SyncState = {
   setup: "off",
@@ -69,9 +87,11 @@ export const INITIAL_SYNC_STATE: SyncState = {
   failures: 0,
   detail: null,
   summary: null,
+  overwritten: [],
 };
 
 const RUNNING_CLEAR = { activity: "idle", fault: null, failures: 0, detail: null, summary: null } as const;
+const MAX_OVERWRITTEN = 100;
 
 /** Waiting on the user: nothing runs until `resume`. */
 export function isStuck(state: SyncState): boolean {
@@ -98,6 +118,9 @@ const WHILE_ON: Handlers = {
   diverged: (state, { detail }) => ({ ...state, activity: "idle", fault: "diverged", detail, summary: null }),
   paused: (state, { detail, summary }) => ({ ...state, activity: "idle", fault: "paused", detail, summary }),
   resume: (state) => ({ ...state, ...RUNNING_CLEAR, activity: state.activity }),
+  overwritten: (state, { items }) =>
+    items.length === 0 ? state : { ...state, overwritten: [...state.overwritten, ...items].slice(-MAX_OVERWRITTEN) },
+  "dismiss-overwritten": (state) => (state.overwritten.length === 0 ? state : { ...state, overwritten: [] }),
 };
 
 export function sameRemote(a: SyncRemote | null, b: SyncRemote | null): boolean {
@@ -112,8 +135,11 @@ function sameSetup(state: SyncState, event: Extract<SyncEvent, { type: "setup" }
 export function transition(state: SyncState, event: SyncEvent): SyncState {
   if (event.type === "setup") {
     if (sameSetup(state, event)) return state;
-    return { ...INITIAL_SYNC_STATE, setup: event.setup, remote: event.remote, reason: event.reason ?? null };
+    // The flags outlast it: the text was replaced either way.
+    const { overwritten } = state;
+    return { ...INITIAL_SYNC_STATE, setup: event.setup, remote: event.remote, reason: event.reason ?? null, overwritten };
   }
+  if (event.type === "dismiss-overwritten") return WHILE_ON[event.type](state, event);
   if (state.setup !== "on") return state;
   return (WHILE_ON[event.type] as (state: SyncState, event: SyncEvent) => SyncState)(state, event);
 }

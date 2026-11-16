@@ -27,6 +27,7 @@ import { projectSettingsModule, type ProjectSettingsApi } from "@/modules/projec
 import { appDirExcludeModule, type GitExcludes } from "@/modules/app-dir-exclude";
 import { APP_DIR_NAME, USER_REPO_EXCLUDE_LINES } from "@/utils/app-dir";
 import { path as pathutil } from "@/utils/path";
+import { captureError } from "@/telemetry/telemetry";
 import {
   INITIAL_SYNC_STATE,
   sameRemote,
@@ -64,9 +65,14 @@ export interface WorkspaceSync {
   decline(): Promise<void>;
   /** Commit `sync.enabled: false` and push it; every device stops. */
   turnOffForEveryone(): Promise<void>;
-  /** Carry on from a stop (new credential, keep local files, or go after
-   *  the offline-return question). */
+  /** Carry on from a stop (new credential, try again, or go after the
+   *  offline-return question). */
   resume(): void;
+  /** Leave a `diverged` stop (the branch was rewritten): take its
+   *  version, keeping ours on this device. */
+  takeRemote(): void;
+  /** Clear the flags on text a merge replaced. */
+  dismissOverwritten(): void;
   syncNow(): Promise<void>;
   /** Resolves once the open-time read is done and the engine started. */
   whenReady(): Promise<void>;
@@ -77,13 +83,21 @@ export interface WorkspaceSyncDeps {
   workspacePath: string;
   fs: Pick<
     FileSystemSurface,
-    "readFiles" | "writeFiles" | "deleteFiles" | "exists" | "readDirectory" | "getMetadata" | "writeBinaryFiles"
+    | "readFiles"
+    | "writeFiles"
+    | "deleteFiles"
+    | "exists"
+    | "readDirectory"
+    | "getMetadata"
+    | "readBinaryFiles"
+    | "writeBinaryFiles"
+    | "deleteDirectories"
   >;
   hooks: Hooks;
   gitWorker: GitWorker;
   /** The platform can sync (desktop). */
   supported: boolean;
-  documents: Pick<DocumentsApi, "write">;
+  documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
   projectSettings: Pick<ProjectSettingsApi, "read" | "update">;
   /** Writes to the repo's `info/exclude`, in turn with the app dir's. */
@@ -97,6 +111,9 @@ interface SyncDevice {
   deviceId: string;
   on: boolean;
   lastSyncedAt?: number;
+  /** Files whose unsaved edits held a remote change back, and the blob
+   *  their edits started from: merged once the edits land. */
+  held?: Record<string, string>;
 }
 
 /** Kept out of every synced project, on top of its `.gitignore`: agent
@@ -191,8 +208,9 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
   const startEngine = async (remote: SyncRemote) => {
     if (engine || disposed || !device) return;
     const git = service();
-    const [{ createSyncEngine }, name, email] = await Promise.all([
+    const [{ createSyncEngine }, { mergeMarkdownOffThread }, name, email] = await Promise.all([
       import("./sync-engine"),
+      import("@/utils/markdown-conversion"),
       git.getConfig("user.name"),
       git.getConfig("user.email"),
     ]);
@@ -214,6 +232,14 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       dispatch,
       recordSynced: async (at) => {
         if (device?.on) await writeDevice({ ...device, lastSyncedAt: at });
+      },
+      merge: mergeMarkdownOffThread,
+      reportError: (error) => captureError(error, { boundary: "sync-merge" }),
+      held: device.held ?? {},
+      recordHeld: async (held) => {
+        if (!device?.on) return;
+        const { held: _, ...rest } = device;
+        await writeDevice(Object.keys(held).length > 0 ? { ...rest, held } : rest);
       },
       // The engine syncs the branch it started on; the new one is read
       // again, with its own remote.
@@ -347,6 +373,10 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
         void evaluate();
       }
     },
+    takeRemote() {
+      if (engine) void engine.takeRemote();
+    },
+    dismissOverwritten: () => dispatch({ type: "dismiss-overwritten" }),
     syncNow: async () => {
       await chain;
       await engine?.syncNow();

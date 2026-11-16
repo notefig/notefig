@@ -185,6 +185,48 @@ describe("documents.write adoption (open editor)", () => {
     expect(liveMarkdown()).toContain("User draft.");
   });
 
+  it("answers held when typing kept a sync write out of the editor", async () => {
+    writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
+    openEditor("# Doc\n\nOld.\n");
+    vi.spyOn(getDocumentSync(path), "prepareAdoption").mockResolvedValue(null);
+
+    await expect(documents.write(path, "# Doc\n\nRemote.\n", { source: "sync" })).resolves.toBe("held");
+    await expect(documents.write(path, "# Doc\n\nAgent.\n", { source: "agent" })).resolves.toBe("written");
+  });
+
+  it("holds a sync write back while a closed editor's last save lands", async () => {
+    writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
+    openEditor("# Doc\n\nOld.\n");
+    const editor = editors.markdownEditor(path)!;
+    const docSync = getDocumentSync(path);
+    let land!: () => void;
+    docSync.writer = () => new Promise<void>((done) => (land = done));
+    docSync.pushUpdate(() => editor.getJSON());
+    await vi.waitFor(() => expect(land).toBeTypeOf("function"));
+    disposeEditor(editors, path);
+
+    await expect(documents.write(path, "# Doc\n\nRemote.\n", { source: "sync" })).resolves.toBe("held");
+    land();
+    await vi.waitFor(async () =>
+      expect(await documents.write(path, "# Doc\n\nRemote.\n", { source: "sync" })).toBe("written"),
+    );
+  });
+
+  it("keeps a sync write out of undo, and an agent's in it", async () => {
+    writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
+    openEditor("# Doc\n\nOld.\n");
+    const editor = editors.markdownEditor(path)!;
+    const history: unknown[] = [];
+    editor.on("transaction", ({ transaction }) => {
+      if (transaction.docChanged) history.push(transaction.getMeta("addToHistory"));
+    });
+
+    await documents.write(path, "# Doc\n\nRemote.\n", { source: "sync" });
+    await documents.write(path, "# Doc\n\nAgent.\n", { source: "agent" });
+
+    expect(history).toEqual([false, undefined]);
+  });
+
   it("applies a sync write to a clean editor and announces it as sync's", async () => {
     writeMock.mockResolvedValue({ succeeded: [path], failed: [] });
     const hooks = createHooks();

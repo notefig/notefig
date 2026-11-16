@@ -7,7 +7,8 @@
  * state on the left and its actions on the right (sync now, and the ways
  *  out in a menu); the repository, branch and sign-in, stacked; then one message — what
  * the state means, or what to fix — and at most two small buttons under
- * it. Every state keeps that order, so nothing jumps between them.
+ * it. Every state keeps that order, so nothing jumps between them. Under
+ * it all, while there are any, the text of yours a merge replaced.
  *
  * One snapshot drives it (`useSyncState`), and the credential is one query
  * each change replaces in place, so switching never flashes.
@@ -41,7 +42,7 @@ import { useCore, useWorkspaceModule } from "@notefig/core/react";
 import { isSshRemote, remoteLabel } from "@notefig/git";
 import { SidebarSeparator, ToolBar } from "@/components/editor/tool-bar";
 import type { CredentialStatus } from "@/adapters/platform-adapter.interface";
-import type { SyncState, WorkspaceSync } from "@/modules/sync";
+import type { SyncOverwrite, SyncState, WorkspaceSync } from "@/modules/sync";
 import { useSyncState } from "@/modules/sync/react";
 import { lookOf, statusOf } from "./sync-look";
 
@@ -124,6 +125,12 @@ export function SyncPanel({
         <Message state={state} error={action.error}>
           {usable && <Actions sync={sync} state={state} action={action} />}
         </Message>
+        {state.overwritten.length > 0 && (
+          <>
+            <SidebarSeparator className="mx-0" />
+            <Overwritten sync={sync} items={state.overwritten} />
+          </>
+        )}
       </div>
     </div>
   );
@@ -354,7 +361,7 @@ function actionsOf(
   }
   // A stop waits on the user, and `syncNow` does nothing until `resume`.
   if (state.fault === "diverged")
-    return [{ key: "resume", label: "syncKeepMine", run: () => sync.resume() }];
+    return [{ key: "takeRemote", label: "syncTakeRemote", run: () => sync.takeRemote() }];
   if (state.fault === "auth-error")
     return [{ key: "resume", label: "syncRetry", run: () => sync.resume() }];
   if (state.fault === "paused")
@@ -386,6 +393,46 @@ function Actions({
           {t(label)}
         </Small>
       ))}
+    </div>
+  );
+}
+
+/** The text of yours a merge replaced with a newer edit, newest first,
+ *  each with where this device keeps it. */
+function Overwritten({
+  sync,
+  items,
+}: {
+  sync: WorkspaceSync;
+  items: SyncOverwrite[];
+}) {
+  const { t } = useTranslation();
+  return (
+    <div data-sync-overwritten="" className="space-y-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-muted-foreground">
+          {t("syncOverwritten", { count: items.length })}
+        </span>
+        <Link onClick={() => sync.dismissOverwritten()}>{t("syncDismiss")}</Link>
+      </div>
+      <ul className="space-y-2">
+        {[...items].reverse().map((item, i) => (
+          <li key={i} className="min-w-0 space-y-0.5">
+            <div className="truncate text-muted-foreground" title={item.path}>
+              {item.path}
+            </div>
+            <div className="line-clamp-4 whitespace-pre-wrap break-words select-text">
+              {item.text ?? t("syncOverwrittenFile")}
+            </div>
+            <div
+              className="truncate font-mono text-[0.625rem] text-muted-foreground select-text"
+              title={item.recovery}
+            >
+              {t("syncOverwrittenKept", { recovery: item.recovery })}
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

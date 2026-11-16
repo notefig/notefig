@@ -23,6 +23,10 @@
  * The diff has a budget: pathological documents fall back to the old
  * `setContent` path (drafts still carried), because a multi-second
  * synchronous diff is worse than a lost caret.
+ *
+ * `addToHistory: false` keeps the transaction out of undo: sync brings
+ * collaborators' edits in that way, so undo takes back only the user's own
+ * typing, never someone else's edit.
  */
 import type { Editor } from "@tiptap/core";
 import type { JSONContent } from "@tiptap/core";
@@ -102,8 +106,9 @@ export type AdoptionSource = {
 export function adoptExternalContent(
   editor: Editor,
   incoming: JSONContent,
-  options: { maxDiffNodeSize?: number; source?: AdoptionSource } = {},
+  options: { maxDiffNodeSize?: number; source?: AdoptionSource; addToHistory?: boolean } = {},
 ): AdoptionResult {
+  const history = options.addToHistory ?? true;
   const maxDiffNodeSize = options.maxDiffNodeSize ?? MAX_DIFF_NODE_SIZE;
   const oldDoc = editor.state.doc;
   // Drafts ride along in both modes: harmless when the diff would have
@@ -119,7 +124,7 @@ export function adoptExternalContent(
   }
 
   if (!newDoc || oldDoc.nodeSize + newDoc.nodeSize > maxDiffNodeSize) {
-    return applyReplaceFallback(editor, prepared, oldDoc);
+    return applyReplaceFallback(editor, prepared, oldDoc, history);
   }
 
   try {
@@ -139,6 +144,7 @@ export function adoptExternalContent(
     );
     restoreDraftCaret(tr, draftCaret);
     tr.setMeta(ADOPTION_TRANSACTION_META, true);
+    if (!history) tr.setMeta("addToHistory", false);
     const round = options.source?.attribute?.(
       options.source.path,
       options.source.contentHash,
@@ -153,7 +159,7 @@ export function adoptExternalContent(
       "[adoption] differential adoption failed, falling back to replace",
       error,
     );
-    return applyReplaceFallback(editor, prepared, oldDoc);
+    return applyReplaceFallback(editor, prepared, oldDoc, history);
   }
 }
 
@@ -171,12 +177,14 @@ function applyReplaceFallback(
   editor: Editor,
   prepared: JSONContent,
   oldDoc: PMNode,
+  history: boolean,
 ): AdoptionResult {
   const draftCaret = captureDraftCaret(editor);
   let reinsertedWidgets = 0;
   editor
     .chain()
     .setMeta(ADOPTION_TRANSACTION_META, true)
+    .setMeta("addToHistory", history)
     .setContent(prepared, { emitUpdate: false })
     .command(({ tr }) => {
       const scale = tr.doc.content.size / Math.max(oldDoc.content.size, 1);
