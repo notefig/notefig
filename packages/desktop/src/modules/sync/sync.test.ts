@@ -358,6 +358,33 @@ describe("sync: solo", () => {
     expect(await runGit(ws, ["show", sync.state().overwritten[0]!.recovery])).toBe("Only here.");
   });
 
+  it("never commits a file the excludes keep out, even when typing holds its merge back", async () => {
+    const { sync, remote, ws, editors, core } = await setup("synced", { ".claude/plan.md": "# Plan\n\nFirst.\n\nSecond.\n" });
+    const path = join(ws, ".claude", "plan.md");
+    const { editor, land } = await editUnsaved(core, editors, ws, path, "# Plan\n\nFirst, mine.\n\nSecond.\n");
+    await remote.pushFromPlainGit(await remote.clone("plain"), { ".claude/plan.md": "# Plan\n\nFirst.\n\nSecond, theirs.\n" }, "cli");
+    await sync.syncNow();
+    land();
+    await vi.waitFor(async () => expect(await read(path)).toContain("mine"), { timeout: 10_000 });
+    // Typing again, its save still on the way, holds the merge's write back.
+    const docSync = getDocumentSync(path);
+    let landAgain!: () => void;
+    const again = new Promise<void>((done) => (landAgain = done));
+    docSync.writer = async (markdown) => {
+      await again;
+      await fsp.writeFile(path, `${markdown}\n`);
+    };
+    editor.commands.setContent(codec.parse("# Plan\n\nFirst, mine again.\n\nSecond.\n"));
+    docSync.pushUpdate(() => editor.getJSON());
+    await sync.syncNow();
+    await sync.syncNow();
+    landAgain();
+
+    expect(sync.state().fault).toBe(null);
+    expect(await runGit(remote.bare, ["show", "main:.claude/plan.md"])).toBe("# Plan\n\nFirst.\n\nSecond, theirs.");
+    disposeEditor(editors, path);
+  });
+
   it("merges a file saved during the pull that commits other saved edits, rather than writing over it", async () => {
     const { sync, remote, ws } = await setup("synced", { "a.md": "A.\n" });
     const path = join(ws, "note.md");
@@ -390,11 +417,13 @@ describe("sync: solo", () => {
   it("waits for an edit on its way to a file in a folder the remote turned into a file, then keeps it", async () => {
     const { sync, remote, ws, editors, core } = await setup("synced", { "topics/first.md": "# First\n\nIn a folder.\n" });
     const path = join(ws, "topics", "first.md");
+    const note = join(ws, "note.md");
     const { land } = await editUnsaved(core, editors, ws, path, "# First\n\nIn a folder, mine.\n");
     const plain = await remote.clone("plain");
     await runGit(plain, ["rm", "-rq", "topics"]);
     await fsp.writeFile(join(plain, "topics"), "A file now.\n");
-    await runGit(plain, ["add", "topics"]);
+    await fsp.writeFile(join(plain, "note.md"), "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n");
+    await runGit(plain, ["add", "-A"]);
     await runGit(plain, ["commit", "-q", "-m", "file"]);
     await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
     await sync.syncNow();
@@ -404,6 +433,8 @@ describe("sync: solo", () => {
     expect(await runGit(ws, ["rev-parse", "HEAD"])).toBe(await remote.tip());
     expect(await read(path)).toBe("# First\n\nIn a folder.\n");
 
+    // Saved while the move waits: merged, not written over.
+    await fsp.writeFile(note, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
     land();
     await vi.waitFor(async () => expect(await read(path)).toContain("mine"), { timeout: 10_000 });
     await sync.syncNow();
@@ -411,6 +442,10 @@ describe("sync: solo", () => {
     const [kept] = sync.state().overwritten;
     expect(kept).toMatchObject({ path: "topics/first.md", text: "# First\n\nIn a folder, mine.\n" });
     expect(await runGit(ws, ["show", kept!.recovery])).toContain("In a folder, mine.");
+    await sync.syncNow();
+    const merged = "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.\n";
+    expect(await read(note)).toBe(merged);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(merged.trimEnd());
     disposeEditor(editors, path);
   });
 
@@ -760,9 +795,6 @@ describe("sync: solo", () => {
     const { sync, remote, ws } = await setup("synced", { ".claude/settings.json": "{}\n" });
     await fsp.writeFile(join(ws, ".claude", "settings.json"), '{"mine":true}\n');
     await remote.pushFromPlainGit(await remote.clone("plain"), { ".claude/settings.json": '{"theirs":true}\n', "other.md": "Other.\n" }, "cli");
-    await sync.syncNow();
-    // Held like a file with unsaved edits, and settled on the next cycle.
-    expect(sync.state().fault).toBe(null);
     await sync.syncNow();
 
     expect(sync.state().fault).toBe(null);

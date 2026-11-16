@@ -143,14 +143,15 @@ export function createOverlaps(deps: OverlapDeps) {
 
   /** Put a held file's merge in place: true when it has something to
    *  commit. Typing again holds the write back: the merge then goes in
-   *  through the index, and the edits on top of this save meet it next. */
+   *  through the index, and the edits on top of this save meet it next.
+   *  Never for a file the excludes keep out, which no commit takes. */
   const applyMerged = async (filepath: string, disk: Uint8Array, bytes: Uint8Array | null, theirs: Uint8Array, head: string) => {
     if ((await write(filepath, bytes ?? theirs)) === "written") {
       held.delete(filepath);
       return true;
     }
     held.set(filepath, await git.writeBlob(disk));
-    if (!bytes) return false;
+    if (!bytes || (await git.isIgnored(filepath))) return false;
     await stage(filepath, bytes, head);
     return true;
   };

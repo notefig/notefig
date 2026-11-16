@@ -127,6 +127,8 @@ interface Move {
   from: string;
   to: string;
   done: Set<string>;
+  /** Tried before: a file not written yet may have been saved since. */
+  started?: boolean;
 }
 
 /** Raised to end a cycle whose stop was already dispatched. */
@@ -397,6 +399,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       : await deps.fs.deleteFiles([absolute(path)]);
     const refused = failed.find((failure) => failure.type !== "not_found");
     if (refused) throw new Error(`Couldn't clear ${path}: ${refused.message}`);
+    // Kept and gone: a save to one of them has nothing left to commit.
+    if (typeof dirty !== "string") for (const filepath of inTheWay) dirty.delete(filepath);
     // The folder's files, or the file: already gone on disk.
     for (const filepath of listed) {
       if (becomesFile ? !filepath.startsWith(`${path}/`) : filepath !== path) continue;
@@ -426,8 +430,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     const { from, to, done } = move;
     const created: string[] = [];
     const deleted: string[] = [];
-    // A retry: a file not written yet may have been saved here since.
-    const retry = done.size > 0;
+    const retry = move.started === true;
+    move.started = true;
     const changed = (await git.changedFiles(from, to)).filter((path) => !NEVER.test(path) && !done.has(path));
     const cleared = await clearSwaps(move, changed);
     if (!cleared) return;
@@ -482,14 +486,21 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
 
   /** Files the remote changed that are saved here and not committed: true
    *  once they're committed, for the replay to merge. A second time, they
-   *  were saved since that commit, or the excludes keep them out of every
-   *  commit: held, as for unsaved edits, so they're merged with the
-   *  remote's version from what they started from (`ours`). */
+   *  were saved since that commit: held, as for unsaved edits, so they're
+   *  merged with the remote's version from what they started from
+   *  (`ours`). Or the excludes keep them out of every commit, so no merge
+   *  can carry them: kept as they are and flagged, and the remote's
+   *  version taken. */
   const commitEdited = async (remoteFiles: string[], ours: string, committed: boolean): Promise<boolean> => {
     const edited = await dirtyAmong(remoteFiles);
     if (edited.length === 0) return false;
     if (committed) {
-      for (const filepath of edited) await overlaps.hold(filepath, ours);
+      const excluded: string[] = [];
+      for (const filepath of edited) {
+        if (await git.isIgnored(filepath)) excluded.push(filepath);
+        else await overlaps.hold(filepath, ours);
+      }
+      await overlaps.keepFiles(excluded);
       return false;
     }
     markDirty(edited);
