@@ -114,21 +114,12 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
   const { rootRef, composerRef } = useAgentTabController(taskId);
   const taskRow = useTaskRow(taskId);
   const isRunning = taskRow?.status === "running";
-  // The session/load window (MET-54): a restored row waiting for its revive,
-  // or one whose revival is mid-flight ("starting" + a sessionId — a brand
-  // new task spawns as "starting" but has no sessionId yet). History is
-  // streaming into the transcript; the composer must not accept input.
+  // The session/load window (MET-54): once a prompt revives a restored row,
+  // it becomes "starting" with its old session id while history streams in.
+  // A merely viewed restored session stays dormant and its composer remains
+  // available; sending is the explicit act that revives it.
   const isLoadingSession =
-    taskRow?.status === "restored" ||
-    (taskRow?.status === "starting" && taskRow.sessionId != null);
-
-  // A restored session revives transparently when its tab is viewed: the
-  // dock mounts only the selected tab, so this fires on open/selection, and
-  // session/load streams the history back into the transcript (MET-54).
-  const status = taskRow?.status;
-  useEffect(() => {
-    if (status === "restored") agents.task(taskId).revive();
-  }, [agents, status, taskId]);
+    taskRow?.status === "starting" && taskRow.sessionId != null;
 
   // The floating composer overlay's live height (it grows when permission/
   // auth cards stack above the prompt box); the transcript pads its scroll

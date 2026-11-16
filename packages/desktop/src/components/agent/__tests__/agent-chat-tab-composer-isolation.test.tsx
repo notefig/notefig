@@ -113,6 +113,45 @@ function typeIntoComposer(element: HTMLElement, char: string) {
 }
 
 describe("AgentChatTab composer isolation (MET-139)", () => {
+  it("keeps a restored session dormant until the user sends", async () => {
+    agents.store.tasks.insert({
+      taskId: TASK_ID,
+      workspacePath: "/ws",
+      title: "old session",
+      harnessId: "claude-code",
+      status: "restored",
+      sessionId: "sess_old",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const revive = vi.spyOn(agents.runtime, "revive");
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root!.render(
+        createElement(CoreProvider, {
+          core,
+          children: withHost(
+            fakePromptWidgetHost(),
+            createElement(AgentChatTab, { taskId: TASK_ID }),
+          ),
+        }),
+      ),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(revive).not.toHaveBeenCalled();
+    expect(
+      container.querySelector<HTMLElement>(".ProseMirror")?.getAttribute(
+        "contenteditable",
+      ),
+    ).toBe("true");
+  });
+
   it("keystrokes update the composer without re-rendering the transcript", async () => {
     seedTaskWithEntries(8);
 
