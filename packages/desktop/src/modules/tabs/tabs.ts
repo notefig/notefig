@@ -656,6 +656,12 @@ export function followActiveTab(
   focus: (workspacePath: string) => Promise<void>,
 ): () => void {
   let shown: string | null = null;
+  // Focuses under way, and those a later tab joined: core folds a second
+  // focus of a workspace into the first, so it records nothing newer than
+  // a focus elsewhere in between (B, A, B). That later tab asks again once
+  // the first is done; a choice in the rail meanwhile is never undone.
+  const underWay = new Set<string>();
+  const joined = new Set<string>();
   const follow = (again = false) => {
     const active = tabs.activeTabId();
     if (active === shown && !again) return;
@@ -663,12 +669,18 @@ export function followActiveTab(
     const workspace = active && workspaceOfTab(active, registry, tasks);
     const focused = mostRecentlyFocused(registry.collection.values());
     if (!workspace || (focused && workspaceKey(focused.path) === workspaceKey(workspace))) return;
-    // A focus that joined one still under way records nothing new, and a
-    // newer focus elsewhere can land in between: check again once it's done.
-    focus(workspace).then(
-      () => follow(true),
-      (error: unknown) => console.error(`Couldn't focus ${workspace}:`, error),
-    );
+    const key = workspaceKey(workspace);
+    if (underWay.has(key)) {
+      joined.add(key);
+      return;
+    }
+    underWay.add(key);
+    focus(workspace)
+      .catch((error: unknown) => console.error(`Couldn't focus ${workspace}:`, error))
+      .finally(() => {
+        underWay.delete(key);
+        if (joined.delete(key)) follow(true);
+      });
   };
   let off: (() => void) | null = null;
   let stopped = false;

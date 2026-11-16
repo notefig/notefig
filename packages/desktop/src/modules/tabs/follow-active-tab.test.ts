@@ -160,4 +160,20 @@ describe("the focused workspace follows the active tab", () => {
 
     await vi.waitFor(() => expect(focused()).toBe("/b"));
   });
+
+  it("never undoes a workspace picked in the rail while a focus was under way", async () => {
+    await start("/a/one.md");
+    let finish!: () => void;
+    release = new Promise<void>((done) => (finish = done));
+    vi.setSystemTime(4_000);
+    tabs.show("/b/two.md");
+    await vi.waitFor(() => expect(focused()).toBe("/b"));
+    vi.setSystemTime(5_000);
+    await registry.recordFocus("/a");
+    vi.setSystemTime(6_000);
+    finish();
+    await new Promise((done) => setTimeout(done, 10));
+
+    expect(focused()).toBe("/a");
+  });
 });
