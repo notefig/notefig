@@ -131,13 +131,8 @@ describe("the Remote tool", () => {
   });
 
   it("shows why sync stopped, and the way on", async () => {
-    const diverged = await render({ setup: "on", fault: "diverged", detail: "Changed here and on the remote: a.md." });
-    expect(diverged.text()).toContain("a.md");
-    await click("Try again");
-    expect(diverged.sync.resume).toHaveBeenCalled();
-    act(() => root?.unmount());
-
-    const rewritten = await render({ setup: "on", fault: "diverged", detail: "It was force-pushed.", remedy: "take-remote" });
+    const rewritten = await render({ setup: "on", fault: "diverged", detail: "It was force-pushed." });
+    expect(rewritten.text()).toContain("It was force-pushed.");
     expect(actions()).toEqual(["Use the remote's version"]);
     await click("Use the remote's version");
     expect(rewritten.sync.takeRemote).toHaveBeenCalled();
@@ -162,7 +157,7 @@ describe("the Remote tool", () => {
     ["offline", { setup: "on", fault: "offline", detail: "Can't reach it." }, [], ["Sync now", "More"]],
     ["throttled", { setup: "on", fault: "throttled", detail: "Slow down." }, [], ["Sync now", "More"]],
     ["auth-error", { setup: "on", fault: "auth-error", detail: "Rejected." }, ["Try again"], ["More"]],
-    ["diverged", { setup: "on", fault: "diverged", detail: "a.md" }, ["Try again"], ["More"]],
+    ["diverged", { setup: "on", fault: "diverged", detail: "a.md" }, ["Use the remote's version"], ["More"]],
     [
       "paused",
       { setup: "on", fault: "paused", summary: { since: null, localFiles: [], remoteFiles: [], people: [] } },

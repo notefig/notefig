@@ -27,6 +27,7 @@ import { projectSettingsModule, type ProjectSettingsApi } from "@/modules/projec
 import { appDirExcludeModule, type GitExcludes } from "@/modules/app-dir-exclude";
 import { APP_DIR_NAME, USER_REPO_EXCLUDE_LINES } from "@/utils/app-dir";
 import { path as pathutil } from "@/utils/path";
+import { captureError } from "@/telemetry/telemetry";
 import {
   INITIAL_SYNC_STATE,
   sameRemote,
@@ -67,8 +68,8 @@ export interface WorkspaceSync {
   /** Carry on from a stop (new credential, try again, or go after the
    *  offline-return question). */
   resume(): void;
-  /** Leave a stop on a branch that was rewritten (`remedy:
-   *  "take-remote"`): take its version, keeping ours on this device. */
+  /** Leave a `diverged` stop (the branch was rewritten): take its
+   *  version, keeping ours on this device. */
   takeRemote(): void;
   /** Clear the flags on text a merge replaced. */
   dismissOverwritten(): void;
@@ -90,6 +91,7 @@ export interface WorkspaceSyncDeps {
     | "getMetadata"
     | "readBinaryFiles"
     | "writeBinaryFiles"
+    | "deleteDirectories"
   >;
   hooks: Hooks;
   gitWorker: GitWorker;
@@ -232,6 +234,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
         if (device?.on) await writeDevice({ ...device, lastSyncedAt: at });
       },
       merge: mergeMarkdownOffThread,
+      reportError: (error) => captureError(error, { boundary: "sync-merge" }),
       held: device.held ?? {},
       recordHeld: async (held) => {
         if (!device?.on) return;

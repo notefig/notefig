@@ -221,6 +221,9 @@ function hasRevertConflict(change: RevertChange): boolean {
  * gitdir by a call-site mistake.
  */
 const PLAIN_FILE_MODE = 0o100644;
+/** What reading a path that holds no file throws: nothing there, or a
+ *  folder where a file was asked for (or a file where a folder was). */
+const NOT_A_FILE = new Set(["NotFoundError", "ObjectTypeError"]);
 
 function listPaths(paths: string[]): string {
   return paths.length > 3 ? `${paths.slice(0, 3).join(", ")} and ${paths.length - 3} more` : paths.join(", ");
@@ -534,14 +537,18 @@ export class IsomorphicGitService implements GitService {
   }
 
   async unstage(input: GitUnstageInput): Promise<void> {
+    const at = { fs: this.fsClient, dir: this.dir, gitdir: this.gitdir, cache: this.cache, filepath: input.filepath };
     try {
-      await git.resetIndex({
-        ...input,
-        fs: this.fsClient,
-        dir: this.dir,
-        gitdir: this.gitdir,
-        cache: this.cache,
-      });
+      const entry = await this.entryOf(input.ref ?? "HEAD", input.filepath);
+      // A folder at `ref`: no file entry there, and the files in it stay
+      // as they are (resetIndex would stage the folder as a file).
+      if (entry?.type === "tree") {
+        await git.updateIndex({ ...at, remove: true, force: true });
+        return;
+      }
+      await git.resetIndex({ ...input, ...at });
+      // resetIndex takes the mode from the worktree's copy: `ref`'s stands.
+      if (entry && entry.mode !== PLAIN_FILE_MODE) await git.updateIndex({ ...at, oid: entry.oid, mode: entry.mode, add: true });
     } catch (error) {
       throw this.fail(error);
     }
@@ -1067,7 +1074,8 @@ export class IsomorphicGitService implements GitService {
       });
       return blob;
     } catch (error) {
-      if ((error as { name?: string }).name === "NotFoundError") return null;
+      // Not there, or a folder (or under a file) at that path.
+      if (NOT_A_FILE.has((error as { name?: string }).name ?? "")) return null;
       throw this.fail(error);
     }
   }
@@ -1082,7 +1090,7 @@ export class IsomorphicGitService implements GitService {
 
   async stageBlob(input: { filepath: string; oid: string; modeFrom: string }): Promise<void> {
     try {
-      const mode = await this.modeOf(input.modeFrom, input.filepath);
+      const mode = (await this.entryOf(input.modeFrom, input.filepath))?.mode ?? PLAIN_FILE_MODE;
       await git.updateIndex({
         fs: this.fsClient,
         dir: this.dir,
@@ -1099,7 +1107,9 @@ export class IsomorphicGitService implements GitService {
   }
 
   /** A file's mode in a commit's tree; a plain file's when it isn't there. */
-  private async modeOf(ref: string, filepath: string): Promise<number> {
+  /** What `filepath` is at `ref`: a file (its mode and blob) or a folder;
+   *  null when nothing is there. */
+  private async entryOf(ref: string, filepath: string): Promise<{ type: "blob" | "tree" | "commit"; mode: number; oid: string } | null> {
     const slash = filepath.lastIndexOf("/");
     const name = filepath.slice(slash + 1);
     try {
@@ -1112,9 +1122,9 @@ export class IsomorphicGitService implements GitService {
         filepath: slash >= 0 ? filepath.slice(0, slash) : undefined,
       });
       const entry = tree.find((item) => item.path === name);
-      return entry ? parseInt(entry.mode, 8) : PLAIN_FILE_MODE;
+      return entry ? { type: entry.type, mode: parseInt(entry.mode, 8), oid: entry.oid } : null;
     } catch (error) {
-      if ((error as { name?: string }).name === "NotFoundError") return PLAIN_FILE_MODE;
+      if (NOT_A_FILE.has((error as { name?: string }).name ?? "")) return null;
       throw error;
     }
   }
@@ -1165,9 +1175,7 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async changedFiles(from: string, to: string, options?: { toApply?: boolean }): Promise<string[]> {
-    const swapped: string[] = [];
-    const modes: string[] = [];
+  async changedFiles(from: string, to: string): Promise<string[]> {
     try {
       const changed = await git.walk({
         fs: this.fsClient,
@@ -1180,22 +1188,12 @@ export class IsomorphicGitService implements GitService {
           const [oidA, oidB, typeA, typeB, modeA, modeB] = await Promise.all([a?.oid(), b?.oid(), a?.type(), b?.type(), a?.mode(), b?.mode()]);
           // Equal subtrees are skipped whole (null stops the descent).
           if (oidA === oidB && modeA === modeB) return null;
-          if (typeA === "tree" || typeB === "tree") {
-            // A file replaced by a folder (or back) is a change too.
-            if (typeA !== "blob" && typeB !== "blob") return undefined;
-            swapped.push(filepath);
-            return filepath;
-          }
-          if (b && modeA !== modeB && (a || modeB !== PLAIN_FILE_MODE)) modes.push(filepath);
+          // A folder's own path is listed only when it was a file (or
+          // becomes one); the files in it are listed either way.
+          if ((typeA === "tree" || typeB === "tree") && typeA !== "blob" && typeB !== "blob") return undefined;
           return filepath;
         },
       });
-      if (options?.toApply && swapped.length > 0) {
-        throw new GitError("PullRefused", `${listPaths(swapped)} changed between a file and a folder. Pull it in a terminal.`);
-      }
-      if (options?.toApply && modes.length > 0) {
-        throw new GitError("PullRefused", `File permissions changed for ${listPaths(modes)}. Pull it in a terminal.`);
-      }
       return (changed as string[]).sort();
     } catch (error) {
       throw this.fail(error);

@@ -212,6 +212,8 @@ export interface GitService {
   status(input?: GitStatusInput): Promise<RepoStatus>;
   add(input: GitAddInput): ReturnType<typeof igAdd>;
   remove(input: GitRemoveInput): ReturnType<typeof igRemove>;
+  /** Set the index entry for `filepath` to its version at `ref` (default
+   *  `HEAD`), mode included; none when `ref` has no file there. */
   unstage(input: GitUnstageInput): ReturnType<typeof igResetIndex>;
   commit(input: GitCommitInput): ReturnType<typeof igCommit>;
   addAllAndCommit(input: GitAddAllAndCommitInput): Promise<string | null>;
@@ -237,15 +239,15 @@ export interface GitService {
   /** Every file path (`/`-separated) in a commit's tree (`ref`: oid or
    *  ref, default `HEAD`). */
   listFiles(input?: { ref?: string }): Promise<string[]>;
-  /** A file's bytes as of a ref/commit; null when it isn't there. With an
-   *  empty `filepath`, `ref` is a blob's oid. */
+  /** A file's bytes as of a ref/commit; null when there's no file at
+   *  that path (nothing, or a folder). With an empty `filepath`, `ref` is
+   *  a blob's oid. */
   readFile(input: GitReadTextFileInput): Promise<Uint8Array | null>;
   /** The file paths whose content differs between two commits (oids or
    *  refs): added, modified, deleted or with a new mode, `/`-separated,
-   *  sorted. `toApply` is for writing the change through a file API: a
-   *  file swapped with a folder, or a mode it can't set (executable,
-   *  symlink), is refused (`PullRefused`) as `pullBranch` refuses it. */
-  changedFiles(from: string, to: string, options?: { toApply?: boolean }): Promise<string[]>;
+   *  sorted. A file swapped with a folder lists the path itself as well as
+   *  the files in the folder. */
+  changedFiles(from: string, to: string): Promise<string[]>;
   /** Store bytes as a blob; its oid. */
   writeBlob(bytes: Uint8Array): Promise<string>;
   /** Point the index entry for `filepath` at a stored blob, without

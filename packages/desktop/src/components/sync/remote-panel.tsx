@@ -360,10 +360,8 @@ function actionsOf(
     ];
   }
   // A stop waits on the user, and `syncNow` does nothing until `resume`.
-  if (state.fault === "diverged" && state.remedy === "take-remote")
-    return [{ key: "takeRemote", label: "syncTakeRemote", run: () => sync.takeRemote() }];
   if (state.fault === "diverged")
-    return [{ key: "resume", label: "syncRetry", run: () => sync.resume() }];
+    return [{ key: "takeRemote", label: "syncTakeRemote", run: () => sync.takeRemote() }];
   if (state.fault === "auth-error")
     return [{ key: "resume", label: "syncRetry", run: () => sync.resume() }];
   if (state.fault === "paused")

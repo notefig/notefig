@@ -12,9 +12,14 @@
  *   `settle` merges them with the branch's version. Until then the file
  *   stays out of every commit, so its stale copy never reverts the branch.
  *
+ * - **Swapped**: a path became a folder on one side and stayed a file on
+ *   the other. The branch's side has the path; ours is flagged.
+ *
  * Markdown is merged by `sync-merge.ts`, in the markdown worker; any other
- * file takes the branch's version. Whatever of ours a merge replaces is
- * flagged (`overwritten`) and kept on a local ref that's never pushed.
+ * file takes the branch's version, as does a file whose merge threw (a
+ * bug, reported). Whatever of ours a merge replaces is flagged
+ * (`overwritten`) and kept on a local ref that's never pushed: one file's
+ * collision never stops sync.
  */
 import type { GitService } from "@notefig/git";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
@@ -28,6 +33,8 @@ export interface OverlapDeps {
   fs: Pick<FileSystemSurface, "readBinaryFiles" | "writeBinaryFiles">;
   absolute(path: string): string;
   merge(base: string, ours: string, theirs: string): Promise<MergedMarkdown>;
+  /** A merge that threw: a bug to hear about, not the user's to fix. */
+  reportError(error: unknown): void;
   dispatch(event: SyncEvent): void;
   /** Held files and their bases (path → blob oid), as last recorded. */
   held: Readonly<Record<string, string>>;
@@ -42,9 +49,6 @@ interface Lost {
   path: string;
   text: string | null;
 }
-
-/** A merge that threw (a bug, not a conflict): sync stops on it. */
-export class MergeFailed extends Error {}
 
 const MARKDOWN = /\.(md|markdown)$/i;
 export const RECOVERY_PREFIX = "refs/notefig/recovery/";
@@ -98,7 +102,8 @@ export function createOverlaps(deps: OverlapDeps) {
     try {
       merged = await deps.merge((base && asText(base)) ?? "", mine, incoming);
     } catch (error) {
-      throw new MergeFailed(`Couldn't merge ${filepath}: ${error instanceof Error ? error.message : String(error)}`);
+      deps.reportError(error);
+      return { bytes: null, lost: [{ path: filepath, text: mine }] };
     }
     const bytes = merged.text === incoming ? null : encoder.encode(merged.text);
     return { bytes, lost: merged.overwritten.map((text): Lost => ({ path: filepath, text })) };
@@ -152,13 +157,11 @@ export function createOverlaps(deps: OverlapDeps) {
 
   /** One held file: true when it now has something to commit. */
   const settleOne = async (filepath: string, baseOid: string, head: string): Promise<boolean> => {
-    const [theirs, disk, base] = await Promise.all([
-      git.readFile({ ref: head, filepath }),
-      readDisk(filepath),
-      git.readFile({ ref: baseOid, filepath: "" }),
-    ]);
-    // Gone from the branch, or from disk: what's on disk is the last word
-    // (an edit against a delete keeps the edit; a delete here is the user's).
+    // Gone from the branch (or a folder there now), or from disk: what's
+    // on disk is the last word (an edit against a delete keeps the edit; a
+    // delete here is the user's).
+    const theirs = await git.readFile({ ref: head, filepath });
+    const [disk, base] = theirs ? await Promise.all([readDisk(filepath), git.readFile({ ref: baseOid, filepath: "" })]) : [null, null];
     if (theirs === null || disk === null) {
       held.delete(filepath);
       return true;
@@ -205,6 +208,24 @@ export function createOverlaps(deps: OverlapDeps) {
       return lost;
     },
 
+    /** A replay's paths that became a folder on the branch where ours
+     *  has a file, or a file where ours has files in a folder: the
+     *  branch's stand in the index, and ours come back, for
+     *  `flagReplaced`. */
+    async yieldSwapped(swapped: string[], localFiles: string[], ours: string, theirs: string): Promise<Lost[]> {
+      const lost: Lost[] = [];
+      for (const path of swapped) {
+        const becomesFile = (await git.readFile({ ref: theirs, filepath: path })) !== null;
+        const inTheWay = localFiles.filter((filepath) => (becomesFile ? filepath.startsWith(`${path}/`) : filepath === path));
+        for (const filepath of inTheWay) {
+          const bytes = await git.readFile({ ref: ours, filepath });
+          await git.unstage({ filepath, ref: theirs });
+          if (bytes) lost.push({ path: filepath, text: asText(bytes) });
+        }
+      }
+      return lost;
+    },
+
     /** Flag what a replay replaced, kept whole on a ref to our commit. */
     async flagReplaced(lost: Lost[], ours: string) {
       if (lost.length === 0) return;
@@ -216,12 +237,16 @@ export function createOverlaps(deps: OverlapDeps) {
     keep,
 
     /** Files about to be replaced whose edits no commit holds: each kept
-     *  as it is on disk, and flagged. */
-    async keepFiles(filepaths: string[]) {
+     *  as it is on disk, and flagged; with `unlessAt`, only those that
+     *  differ from their version there. */
+    async keepFiles(filepaths: string[], unlessAt?: string) {
       const items = [];
       for (const filepath of filepaths) {
         const disk = await readDisk(filepath);
-        if (disk) items.push({ path: filepath, text: asText(disk), recovery: await keep(await git.writeBlob(disk)) });
+        if (!disk) continue;
+        const known = unlessAt ? await git.readFile({ ref: unlessAt, filepath }) : null;
+        if (known && sameBytes(disk, known)) continue;
+        items.push({ path: filepath, text: asText(disk), recovery: await keep(await git.writeBlob(disk)) });
       }
       if (items.length > 0) deps.dispatch({ type: "overwritten", items });
     },
@@ -254,3 +279,17 @@ export function createOverlaps(deps: OverlapDeps) {
 }
 
 export type Overlaps = ReturnType<typeof createOverlaps>;
+
+/** Paths among a change's that were a file on one side and a folder on
+ *  the other: `changedFiles` lists them along with the files in the
+ *  folder. */
+export function swapsAmong(paths: string[]): string[] {
+  const listed = new Set(paths);
+  const swapped = new Set<string>();
+  for (const path of paths) {
+    for (let at = path.lastIndexOf("/"); at > 0; at = path.lastIndexOf("/", at - 1)) {
+      if (listed.has(path.slice(0, at))) swapped.add(path.slice(0, at));
+    }
+  }
+  return [...swapped];
+}

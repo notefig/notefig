@@ -9,8 +9,9 @@
  *   device: a local copy), `on`.
  * - `activity`: what the engine is doing right now.
  * - `fault`: why it isn't simply in sync. `offline` and `throttled` clear
- *   on the next step that works; `auth-error`, `diverged` (the failsafe)
- *   and `paused` (back after a long time offline) wait for the user.
+ *   on the next step that works; `auth-error`, `diverged` (the remote
+ *   branch was rewritten: the way on is its version) and `paused` (back
+ *   after a long time offline) wait for the user.
  * - `overwritten`: our text a merge replaced with the branch's, flagged
  *   until dismissed, whatever the state.
  */
@@ -49,9 +50,6 @@ export interface SyncOverwrite {
   recovery: string;
 }
 
-/** The way out of a `diverged` stop besides trying again. */
-export type SyncRemedy = "take-remote";
-
 export interface SyncState {
   setup: SyncSetup;
   /** Why sync can't run here (`setup: "unavailable"`). */
@@ -65,8 +63,6 @@ export interface SyncState {
   detail: string | null;
   /** Set while `paused`. */
   summary: SyncReturnSummary | null;
-  /** Set while `diverged`, when there's more to do than try again. */
-  remedy: SyncRemedy | null;
   /** Newest last, at most `MAX_OVERWRITTEN`. */
   overwritten: SyncOverwrite[];
 }
@@ -76,7 +72,7 @@ export type SyncEvent =
   | { type: "step"; activity: Exclude<SyncActivity, "idle"> }
   | { type: "settled" }
   | { type: "failed"; fault: "offline" | "throttled" | "auth-error"; detail: string }
-  | { type: "diverged"; detail: string; remedy?: SyncRemedy }
+  | { type: "diverged"; detail: string }
   | { type: "paused"; detail: string; summary: SyncReturnSummary }
   | { type: "resume" }
   | { type: "overwritten"; items: SyncOverwrite[] }
@@ -91,11 +87,10 @@ export const INITIAL_SYNC_STATE: SyncState = {
   failures: 0,
   detail: null,
   summary: null,
-  remedy: null,
   overwritten: [],
 };
 
-const RUNNING_CLEAR = { activity: "idle", fault: null, failures: 0, detail: null, summary: null, remedy: null } as const;
+const RUNNING_CLEAR = { activity: "idle", fault: null, failures: 0, detail: null, summary: null } as const;
 const MAX_OVERWRITTEN = 100;
 
 /** Waiting on the user: nothing runs until `resume`. */
@@ -120,8 +115,8 @@ const WHILE_ON: Handlers = {
     state.fault === "diverged" || state.fault === "paused"
       ? { ...state, activity: "idle" }
       : { ...state, activity: "idle", fault, failures: state.failures + 1, detail },
-  diverged: (state, { detail, remedy }) => ({ ...state, activity: "idle", fault: "diverged", detail, summary: null, remedy: remedy ?? null }),
-  paused: (state, { detail, summary }) => ({ ...state, activity: "idle", fault: "paused", detail, summary, remedy: null }),
+  diverged: (state, { detail }) => ({ ...state, activity: "idle", fault: "diverged", detail, summary: null }),
+  paused: (state, { detail, summary }) => ({ ...state, activity: "idle", fault: "paused", detail, summary }),
   resume: (state) => ({ ...state, ...RUNNING_CLEAR, activity: state.activity }),
   overwritten: (state, { items }) =>
     items.length === 0 ? state : { ...state, overwritten: [...state.overwritten, ...items].slice(-MAX_OVERWRITTEN) },
