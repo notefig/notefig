@@ -67,6 +67,9 @@ export interface DocumentsApi {
   ): Promise<DocumentWriteResult>;
   /** Resolves once every write in flight for `path` has landed (or failed). */
   whenWritesSettled(path: string): Promise<void>;
+  /** The file's editor has edits not on disk yet: typed and not saved
+   *  (flushed into a save now), or a save still landing, open or closed. */
+  hasUnsavedEdits(path: string): boolean;
   /**
    * The file at `path` is about to move. Until `settle` names where it
    * ended up (the new path, or `path` itself if the move failed), a write
@@ -231,6 +234,8 @@ export function createDocuments({
     whenWritesSettled(path) {
       return inFlight.get(path) ?? Promise.resolve();
     },
+
+    hasUnsavedEdits,
 
     beginMove(path) {
       if (pendingMoves.has(path)) {

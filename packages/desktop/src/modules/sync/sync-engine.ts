@@ -62,7 +62,7 @@ export interface SyncEngineDeps {
   /** Sync was just turned on: commit everything, not a scan. */
   fullScan: boolean;
   hooks: Hooks;
-  documents: Pick<DocumentsApi, "write">;
+  documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
   fs: Pick<
     FileSystemSurface,
@@ -372,16 +372,24 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   };
 
   /** A path that's a file at `from` and a folder at `to`, or the other way
-   *  round: what's in its way on disk goes first, kept (and flagged) when
-   *  it isn't `from`'s, since the move doesn't write over it. Returns the
-   *  files it removed. */
-  const clearSwap = async (path: string, { from, to, done }: Move, listed: string[]) => {
+   *  round, and what's in its way on disk: the folder's files, or the file. */
+  const swapAt = async (path: string, to: string) => {
     const becomesFile = (await git.readFile({ ref: to, filepath: path })) !== null;
-    let inTheWay = [path];
-    if (becomesFile) {
-      const listing = await deps.fs.readDirectory(absolute(path), { recursive: true, includeFiles: true, includeDirectories: false, includeHidden: true });
-      inTheWay = listing.ok ? listing.value.map((entry) => tree(entry.path)).filter((filepath): filepath is string => filepath !== null) : [];
-    }
+    if (!becomesFile) return { path, becomesFile, inTheWay: [path] };
+    const listing = await deps.fs.readDirectory(absolute(path), { recursive: true, includeFiles: true, includeDirectories: false, includeHidden: true });
+    // Never cleared unread: what's only here would go unkept.
+    if (!listing.ok && listing.error.type !== "not_found") throw new Error(`Couldn't read ${path}: ${listing.error.message}`);
+    const files = listing.ok ? listing.value.map((entry) => tree(entry.path)) : [];
+    return { path, becomesFile, inTheWay: files.filter((filepath): filepath is string => filepath !== null) };
+  };
+
+  /** Clear a swap's way, keeping (and flagging) what isn't `from`'s, since
+   *  the move doesn't write over it. Returns the files it removed. */
+  const clearSwap = async (
+    { path, becomesFile, inTheWay }: Awaited<ReturnType<typeof swapAt>>,
+    { from, to, done }: Move,
+    listed: string[],
+  ) => {
     await overlaps.keepFiles(inTheWay, from);
     alive();
     const { failed } = becomesFile
@@ -398,6 +406,18 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     return inTheWay.map(absolute);
   };
 
+  /** Clear the way of every swap among `changed`: the files removed, or
+   *  null while an edit is on its way to one of them. The move then waits
+   *  (`unfinished`), and a later cycle keeps the edit once it's on disk. */
+  const clearSwaps = async (move: Move, changed: string[]): Promise<string[] | null> => {
+    const swaps = [];
+    for (const path of swapsAmong(changed)) swaps.push(await swapAt(path, move.to));
+    if (swaps.some((swap) => swap.inTheWay.some((filepath) => deps.documents.hasUnsavedEdits(absolute(filepath))))) return null;
+    const removed: string[] = [];
+    for (const swap of swaps) removed.push(...(await clearSwap(swap, move, changed)));
+    return removed;
+  };
+
   /** Bring index and worktree from `from` to `to` for the files that
    *  differ; text is written through the documents write path, which holds
    *  back a file with unsaved edits. A held file, or one saved here during
@@ -409,7 +429,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     // A retry: a file not written yet may have been saved here since.
     const retry = done.size > 0;
     const changed = (await git.changedFiles(from, to)).filter((path) => !NEVER.test(path) && !done.has(path));
-    for (const path of swapsAmong(changed)) deleted.push(...(await clearSwap(path, move, changed)));
+    const cleared = await clearSwaps(move, changed);
+    if (!cleared) return;
+    deleted.push(...cleared);
     const remaining = changed.filter((path) => !done.has(path));
     const edited = new Set(retry ? await editedSince(remaining) : []);
     for (const filepath of remaining) {
@@ -460,13 +482,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
 
   /** Files the remote changed that are saved here and not committed: true
    *  once they're committed, for the replay to merge. A second time, they
-   *  are files the excludes keep out of every commit, which can't be
-   *  merged: kept as they are and flagged, and the remote's version taken. */
-  const commitEdited = async (remoteFiles: string[], committed: boolean): Promise<boolean> => {
+   *  were saved since that commit, or the excludes keep them out of every
+   *  commit: held, as for unsaved edits, so they're merged with the
+   *  remote's version from what they started from (`ours`). */
+  const commitEdited = async (remoteFiles: string[], ours: string, committed: boolean): Promise<boolean> => {
     const edited = await dirtyAmong(remoteFiles);
     if (edited.length === 0) return false;
     if (committed) {
-      await overlaps.keepFiles(edited);
+      for (const filepath of edited) await overlaps.hold(filepath, ours);
       return false;
     }
     markDirty(edited);
@@ -515,7 +538,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     if (!base) return unrelated(ours, theirs);
     if (base !== theirs) {
       const remoteFiles = await git.changedFiles(base, theirs);
-      if (await commitEdited(remoteFiles, committed)) return pullStep(true);
+      if (await commitEdited(remoteFiles, ours, committed)) return pullStep(true);
       if (base === ours) await fastForward(ours, theirs);
       else await replay(base, ours, theirs, remoteFiles);
     }
@@ -612,6 +635,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
         return;
       }
       if (unfinished) await moveWorktree(unfinished);
+      // Still waiting on a save: nothing is committed over a stale worktree.
+      if (unfinished) return;
       await settleHeld();
       if (commitDue) await commitStep();
       let refused = await reconcile();

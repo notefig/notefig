@@ -358,6 +358,90 @@ describe("sync: solo", () => {
     expect(await runGit(ws, ["show", sync.state().overwritten[0]!.recovery])).toBe("Only here.");
   });
 
+  it("merges a file saved during the pull that commits other saved edits, rather than writing over it", async () => {
+    const { sync, remote, ws } = await setup("synced", { "a.md": "A.\n" });
+    const path = join(ws, "note.md");
+    // Saved and not committed: the pull commits it, then fetches again.
+    await fsp.writeFile(join(ws, "a.md"), "A, mine.\n");
+    await remote.pushFromPlainGit(
+      await remote.clone("plain"),
+      { "a.md": "A.\n\nTheirs.\n", "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" },
+      "cli",
+    );
+    const request = remote.http.request.bind(remote.http);
+    let fetches = 0;
+    remote.http.request = async (input) => {
+      // A save lands during that second fetch.
+      if (input.method === "POST" && input.url.endsWith("git-upload-pack") && ++fetches === 2) {
+        await fsp.writeFile(path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+      }
+      return request(input);
+    };
+    await sync.syncNow();
+    await sync.syncNow();
+
+    expect(sync.state()).toMatchObject({ fault: null, overwritten: [] });
+    const merged = "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.\n";
+    expect(await read(path)).toBe(merged);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(merged.trimEnd());
+    expect(await runGit(remote.bare, ["show", "main:a.md"])).toBe("A, mine.\n\nTheirs.");
+  });
+
+  it("waits for an edit on its way to a file in a folder the remote turned into a file, then keeps it", async () => {
+    const { sync, remote, ws, editors, core } = await setup("synced", { "topics/first.md": "# First\n\nIn a folder.\n" });
+    const path = join(ws, "topics", "first.md");
+    const { land } = await editUnsaved(core, editors, ws, path, "# First\n\nIn a folder, mine.\n");
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["rm", "-rq", "topics"]);
+    await fsp.writeFile(join(plain, "topics"), "A file now.\n");
+    await runGit(plain, ["add", "topics"]);
+    await runGit(plain, ["commit", "-q", "-m", "file"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+    await sync.syncNow();
+
+    // Taken in (the branch moved), but nothing cleared under the edit.
+    expect(sync.state().fault).toBe(null);
+    expect(await runGit(ws, ["rev-parse", "HEAD"])).toBe(await remote.tip());
+    expect(await read(path)).toBe("# First\n\nIn a folder.\n");
+
+    land();
+    await vi.waitFor(async () => expect(await read(path)).toContain("mine"), { timeout: 10_000 });
+    await sync.syncNow();
+    expect(await read(join(ws, "topics"))).toBe("A file now.\n");
+    const [kept] = sync.state().overwritten;
+    expect(kept).toMatchObject({ path: "topics/first.md", text: "# First\n\nIn a folder, mine.\n" });
+    expect(await runGit(ws, ["show", kept!.recovery])).toContain("In a folder, mine.");
+    disposeEditor(editors, path);
+  });
+
+  it("never clears a folder it couldn't read", async () => {
+    const { sync, remote, ws, fs } = await setup("synced", { "topics/first.md": "In a folder.\n" });
+    await fsp.writeFile(join(ws, "topics", "draft.md"), "Only here.\n");
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["rm", "-rq", "topics"]);
+    await fsp.writeFile(join(plain, "topics"), "A file now.\n");
+    await runGit(plain, ["add", "topics"]);
+    await runGit(plain, ["commit", "-q", "-m", "file"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+    const readDirectory = fs.readDirectory.bind(fs);
+    // Sync's listing of the folder fails; git's own reads still work.
+    const denied = vi.spyOn(fs, "readDirectory").mockImplementation(async (path, options) =>
+      path.endsWith("topics") && options?.recursive
+        ? ({ ok: false, error: { type: "permission_denied", path, message: "denied" } } as never)
+        : readDirectory(path, options),
+    );
+    await sync.syncNow();
+
+    expect(sync.state()).toMatchObject({ fault: "offline", detail: "Couldn't read topics: denied" });
+    expect(await read(join(ws, "topics", "draft.md"))).toBe("Only here.\n");
+
+    denied.mockRestore();
+    await sync.syncNow();
+    expect(sync.state().fault).toBe(null);
+    expect(await read(join(ws, "topics"))).toBe("A file now.\n");
+    expect(sync.state().overwritten).toEqual([expect.objectContaining({ path: "topics/draft.md", text: "Only here.\n" })]);
+  });
+
   it("replays local commits into a folder the remote turned into a file, flagging them", async () => {
     const { sync, remote, ws, core } = await setup("synced", { "topics/first.md": "In a folder.\n" });
     remote.mode = "offline";
@@ -676,6 +760,9 @@ describe("sync: solo", () => {
     const { sync, remote, ws } = await setup("synced", { ".claude/settings.json": "{}\n" });
     await fsp.writeFile(join(ws, ".claude", "settings.json"), '{"mine":true}\n');
     await remote.pushFromPlainGit(await remote.clone("plain"), { ".claude/settings.json": '{"theirs":true}\n', "other.md": "Other.\n" }, "cli");
+    await sync.syncNow();
+    // Held like a file with unsaved edits, and settled on the next cycle.
+    expect(sync.state().fault).toBe(null);
     await sync.syncNow();
 
     expect(sync.state().fault).toBe(null);
