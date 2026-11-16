@@ -2086,6 +2086,38 @@ describe("session hydration: buffered replay + manual refresh", () => {
 describe("AgentTask dispose (MET-72)", () => {
   const opencodeHarness = BUILT_IN_HARNESSES.find((h) => h.id === "opencode")!;
 
+  it("does not spawn after deletion lands during startup (MET-288)", async () => {
+    let releaseEndpoint!: () => void;
+    const endpoint = createMcpEndpoint();
+    vi.mocked(endpoint.start).mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseEndpoint = resolve;
+        }),
+    );
+    const createAgentTransport = vi.fn(() => {
+      throw new Error("spawned after deletion");
+    });
+    const layer = testAgents({
+      fs: deps.fs,
+      proc: {
+        createMcpEndpoint: () => endpoint,
+        createAgentTransport,
+      },
+    });
+
+    const { taskId, started } = layer.runtime.start("/ws", harness);
+    await vi.waitFor(() => expect(releaseEndpoint).toBeTypeOf("function"));
+
+    await layer.runtime.delete(taskId);
+    releaseEndpoint();
+    await started;
+
+    expect(createAgentTransport).not.toHaveBeenCalled();
+    expect(layer.store.tasks.get(taskId)).toBeUndefined();
+    expect(endpoint.close).toHaveBeenCalled();
+  });
+
   it("closes the transport and the MCP endpoint", async () => {
     const [client, agentSide] = createLoopbackPair();
     new FakeAgent(agentSide);
