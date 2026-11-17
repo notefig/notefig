@@ -35,7 +35,10 @@ export interface PresenceDeps {
 
 export interface Presence {
   /** One poll's refs: note what moved, and announce who's here. */
-  observe(refs: GitRemoteRef[]): Promise<void>;
+  observe(refs: GitRemoteRef[]): void;
+  /** Read the names of devices that came, in one fetch: after the cycle's
+   *  branch work, which never waits on it. */
+  readNames(): Promise<void>;
   /** Replace this device's ref when a heartbeat is due, or someone new
    *  needs to see it. */
   heartbeat(): Promise<void>;
@@ -50,6 +53,9 @@ interface Seen {
   name: string | null;
 }
 
+/** A host's lasting answer to this device's ref. */
+const REFUSALS = new Set(["PushRejected", "AuthFailed", "AuthRequired"]);
+
 export function createPresence(deps: PresenceDeps): Presence {
   const { git, remote, now } = deps;
   const prefix = presencePrefix(deps.branch);
@@ -61,19 +67,14 @@ export function createPresence(deps: PresenceDeps): Presence {
   /** Two commits of one tree, parent and second share an oid: this keeps a
    *  republish from leaving the ref where it was. */
   let beat = 0;
-  /** The host won't take the ref: this session stays solo. */
+  /** The host won't take this device's ref: this session stays solo. */
   let refused = false;
 
-  /** A device's user, read once from its ref's commit. */
-  const nameOf = async (ref: string): Promise<string | null> => {
-    try {
-      const [fetched] = await git.fetchRefs(remote, [ref]);
-      const [tip] = fetched?.oid ? await git.log({ ref: fetched.oid, depth: 1 }) : [];
-      const name = (JSON.parse(tip?.commit.message ?? "null") as { name?: unknown } | null)?.name;
-      return typeof name === "string" ? name : null;
-    } catch {
-      return null;
-    }
+  /** A device's user, from its ref's commit. */
+  const nameIn = async (oid: string): Promise<string | null> => {
+    const [tip] = await git.log({ ref: oid, depth: 1 });
+    const name = (JSON.parse(tip?.commit.message ?? "null") as { name?: unknown } | null)?.name;
+    return typeof name === "string" ? name : null;
   };
 
   /** Note when each ref moved; true when a device came since the last poll. */
@@ -90,25 +91,41 @@ export function createPresence(deps: PresenceDeps): Presence {
     return arrived;
   };
 
-  /** The devices whose ref moved lately, by name. */
-  const live = async (at: number): Promise<SyncPeer[]> => {
-    const peers: SyncPeer[] = [];
-    for (const [ref, entry] of seen) {
-      if (entry.movedAt === null || at - entry.movedAt >= PRESENCE_STALE_MS) continue;
-      entry.name ??= await nameOf(ref);
-      if (entry.name) peers.push({ deviceId: ref.slice(prefix.length), name: entry.name });
-    }
-    return peers.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+  /** The refs of the devices whose ref moved lately. */
+  const live = (at: number) =>
+    [...seen].filter(([, entry]) => entry.movedAt !== null && at - entry.movedAt < PRESENCE_STALE_MS);
+
+  /** Announce who's here, unless this device can't be seen itself. */
+  const announce = () => {
+    const peers: SyncPeer[] = refused
+      ? []
+      : live(now())
+          .map(([ref, entry]) => ({ deviceId: ref.slice(prefix.length), name: entry.name }))
+          .sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+    if (JSON.stringify(peers) !== JSON.stringify(deps.state().peers)) deps.dispatch({ type: "peers", peers });
   };
 
   return {
-    async observe(refs) {
-      const at = now();
+    observe(refs) {
       const present = refs.filter(({ ref }) => ref.startsWith(prefix) && ref !== own);
       // Someone new: show them this device now, not a heartbeat later.
-      if (stamp(new Map(present.map(({ ref, oid }) => [ref, oid])), at)) nextBeatAt = 0;
-      const peers = await live(at);
-      if (JSON.stringify(peers) !== JSON.stringify(deps.state().peers)) deps.dispatch({ type: "peers", peers });
+      if (stamp(new Map(present.map(({ ref, oid }) => [ref, oid])), now())) nextBeatAt = 0;
+      announce();
+    },
+
+    async readNames() {
+      const unnamed = live(now()).filter(([, entry]) => entry.name === null);
+      if (refused || unnamed.length === 0) return;
+      try {
+        const fetched = await git.fetchRefs(remote, unnamed.map(([ref]) => ref));
+        for (const { ref, oid } of fetched) {
+          const entry = seen.get(ref);
+          if (entry && oid) entry.name = await nameIn(oid);
+        }
+      } catch {
+        // Unread names wait for the next cycle; the devices count already.
+      }
+      announce();
     },
 
     async heartbeat() {
@@ -127,9 +144,11 @@ export function createPresence(deps: PresenceDeps): Presence {
         published = true;
         nextBeatAt = now() + HEARTBEAT_MS;
       } catch (error) {
-        // Unreachable: the next cycle tries again. Refused: never again.
-        if (!(error instanceof GitError) || error.code === "Network") return;
+        // The host turned the ref down (a hook, a token for branches only):
+        // never again this session. Anything else, the next cycle retries.
+        if (!(error instanceof GitError && REFUSALS.has(error.code))) return;
         refused = true;
+        announce();
         console.warn("[sync] The remote refused this device's presence ref; syncing solo.", error);
       }
     },

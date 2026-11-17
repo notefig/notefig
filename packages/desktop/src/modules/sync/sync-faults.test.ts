@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GitError } from "@notefig/git";
 import { faultOf } from "./sync-engine";
+import { INITIAL_SYNC_STATE, transition, type SyncState } from "./sync-machine";
 
 describe("sync: what a failure stops on", () => {
   const ssh = "git@github.com:team/notes.git";
@@ -29,5 +30,14 @@ describe("sync: what a failure stops on", () => {
       fault: "auth-error",
       detail: "No credentials",
     });
+  });
+});
+
+describe("sync: who it shows while stopped", () => {
+  it("forgets the devices it saw once it stops for the user", () => {
+    const shared: SyncState = { ...INITIAL_SYNC_STATE, setup: "on", peers: [{ deviceId: "b", name: "Bob" }] };
+    const summary = { since: null, localFiles: [], remoteFiles: [], people: [] };
+    expect(transition(shared, { type: "diverged", detail: "rewritten" }).peers).toEqual([]);
+    expect(transition(shared, { type: "paused", detail: "away", summary }).peers).toEqual([]);
   });
 });

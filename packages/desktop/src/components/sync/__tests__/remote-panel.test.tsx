@@ -47,21 +47,24 @@ async function render(state: Partial<SyncState>, credential: CredentialStatus | 
   const host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () =>
-    root!.render(
-      createElement(
-        QueryClientProvider,
-        { client: new QueryClient() },
-        createElement(CoreProvider, {
-          core,
-          children: createElement(SyncPanel, { sync, state: { ...INITIAL_SYNC_STATE, remote, ...state } }),
-        }),
+  const client = new QueryClient();
+  const show = (next: Partial<SyncState>) =>
+    act(async () =>
+      root!.render(
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(CoreProvider, {
+            core,
+            children: createElement(SyncPanel, { sync, state: { ...INITIAL_SYNC_STATE, remote, ...next } }),
+          }),
+        ),
       ),
-    ),
-  );
+    );
+  await show(state);
   // The credential query resolves.
   await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-  return { sync, credentials, text: () => host.textContent ?? "" };
+  return { sync, credentials, text: () => host.textContent ?? "", show };
 }
 
 const button = (label: string) =>
@@ -193,10 +196,10 @@ describe("the Remote tool", () => {
   });
 
   it("names who else syncs the branch now, and nobody when solo", async () => {
-    const shared = await render({ setup: "on", peers: [{ deviceId: "b", name: "Bob" }, { deviceId: "c", name: "Carol" }] });
-    expect(shared.text()).toContain("Bob, Carol");
-    const solo = await render({ setup: "on" });
-    expect(solo.text()).not.toContain("Bob");
+    const { text, show } = await render({ setup: "on", peers: [{ deviceId: "b", name: "Bob" }, { deviceId: "c", name: null }] });
+    expect(text()).toContain("Bob, Someone");
+    await show({ setup: "on" });
+    expect(text()).not.toContain("Bob");
   });
 
   it("offers nothing to press where sync can't run, only why", async () => {

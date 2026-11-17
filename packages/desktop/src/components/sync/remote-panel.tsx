@@ -283,7 +283,7 @@ function RemoteRows({
             aria-label={t("syncPeers")}
           >
             <Users className="size-3 shrink-0" />
-            <span className="truncate">{state.peers.map((peer) => peer.name).join(", ")}</span>
+            <span className="truncate">{state.peers.map((peer) => peer.name ?? t("syncUnnamedPeer")).join(", ")}</span>
           </div>
         )}
       </div>

@@ -20,7 +20,7 @@ import { disposeEditor, getOrCreateEditor, type EditorFs } from "@/components/ed
 import { getDocumentSync, whenDocumentSyncClean } from "@/utils/markdown-conversion";
 import { IDLE_COMMIT_MS, POLL_MS, SHARED_COMMIT_MS, SHARED_POLL_MS, pollInterval, syncModule } from "@/modules/sync";
 import { OFFLINE_RETURN_MS } from "./sync-engine";
-import { PRESENCE_STALE_MS } from "./sync-presence";
+import { HEARTBEAT_MS, PRESENCE_STALE_MS } from "./sync-presence";
 import * as merging from "./sync-merge";
 import * as telemetry from "@/telemetry/telemetry";
 
@@ -108,6 +108,8 @@ async function setup(mode: "synced" | "asked" | "plain" = "synced", extra: Recor
 const read = (path: string) => fsp.readFile(path, "utf8");
 const tree = async (bare: string) => (await runGit(bare, ["ls-tree", "-r", "--name-only", "main"])).split("\n").sort();
 const written = (core: Core, ...paths: string[]) => core.hooks.emit("files:written", { paths, source: "user" });
+/** The remote's presence refs, one per line. */
+const presence = (bare: string) => runGit(bare, ["for-each-ref", "--format=%(refname)", "refs/notefig"]);
 
 describe("sync: a project's setting, each device's answer", () => {
   it("costs nothing in a project that doesn't sync until asked", async () => {
@@ -201,6 +203,8 @@ describe("sync: solo", () => {
 
     expect(await remote.tip("draft")).toBe(await runGit(ws, ["rev-parse", "HEAD"]));
     expect(await remote.tip()).toBe(before);
+    // Present on the branch it syncs now, gone from the one it left.
+    await vi.waitFor(async () => expect(await presence(remote.bare)).toBe("refs/notefig/v1/presence/draft/dev"));
   });
 
   it("leaves a branch that pulls from one remote branch and pushes to another to git", async () => {
@@ -1098,8 +1102,6 @@ describe("sync: shared, while another device syncs the branch", () => {
     await b.syncNow();
     return { ...first, a: first.sync, b, wsB };
   }
-  const presence = (bare: string) => runGit(bare, ["for-each-ref", "--format=%(refname)", "refs/notefig"]);
-
   it("goes shared while another device syncs the branch, and solo once it leaves", async () => {
     const { a, b, remote, core, wsB } = await meet();
     expect(a.state().peers).toEqual([{ deviceId: "b", name: "User device-b" }]);
@@ -1161,21 +1163,41 @@ describe("sync: shared, while another device syncs the branch", () => {
     expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nWaiting for the sitting.");
   });
 
-  it("syncs solo when the remote refuses presence refs, trying them once", async () => {
+  it("syncs solo when the remote refuses this device's presence ref, trying it once", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     remote = await createTestRemote({ ...SEED, ...SYNCED });
     const hook = join(remote.bare, "hooks", "pre-receive");
-    await fsp.writeFile(hook, '#!/bin/sh\nwhile read old new ref; do case "$ref" in refs/notefig/*) exit 1;; esac; done\n', { mode: 0o755 });
-    const { sync, ws, core } = await setup("synced", {}, remote);
+    await fsp.writeFile(hook, '#!/bin/sh\nwhile read old new ref; do case "$ref" in refs/notefig/*/dev) exit 1;; esac; done\n', { mode: 0o755 });
+    const { sync: a, ws, core, open } = await setup("synced", {}, remote);
+    const wsB = await remote.clone("device-b");
+    await writeDevice(wsB, { on: true, deviceId: "b" });
+    const b = await open(wsB);
     await fsp.writeFile(join(ws, "note.md"), "# Note\n\nStill syncs.\n");
     written(core, join(ws, "note.md"));
-    await sync.syncNow();
-    await sync.syncNow();
+    await a.syncNow();
+    await b.syncNow();
+    await a.syncNow();
 
-    expect(sync.state()).toMatchObject({ fault: null, peers: [] });
+    // B can be seen, but A can't: A stays solo rather than share one way.
+    expect(a.state()).toMatchObject({ fault: null, peers: [] });
+    expect(b.state().peers).toEqual([]);
     expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nStill syncs.");
-    expect(await presence(remote.bare)).toBe("");
+    expect(await presence(remote.bare)).toBe("refs/notefig/v1/presence/main/b");
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps its presence after a passing failure to push it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { sync, remote } = await setup();
+    const ref = "refs/notefig/v1/presence/main/dev";
+    const first = await runGit(remote.bare, ["rev-parse", ref]);
+    vi.setSystemTime(Date.now() + HEARTBEAT_MS);
+    remote.mode = "throttle-push";
+    await sync.syncNow();
+    expect(await runGit(remote.bare, ["rev-parse", ref])).toBe(first);
+    remote.mode = "ok";
+    await sync.syncNow();
+    expect(await runGit(remote.bare, ["rev-parse", ref])).not.toBe(first);
   });
 });
 

@@ -631,7 +631,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const reconcile = async (): Promise<boolean> => {
     const refs = await git.listRemoteRefs(remote, [branchRef, presencePrefix(branch)]);
     const solo = !isShared(deps.state());
-    await presence.observe(refs);
+    presence.observe(refs);
     // Someone came: what's waiting for the sitting to end goes now.
     if (solo && isShared(deps.state()) && pending()) again = commitDue = true;
     const theirs = refs.find((ref) => ref.ref === branchRef)?.oid ?? null;
@@ -665,6 +665,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     if (!isRunning(deps.state())) return;
     try {
       if ((await git.currentBranch()) !== branch) {
+        // Its delete is sent before git closes; nothing waits for it.
+        void presence.leave();
         stopped = true;
         deps.branchChanged();
         return;
@@ -684,6 +686,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
         return;
       }
       await presence.heartbeat();
+      await presence.readNames();
       markSynced();
       deps.dispatch({ type: "settled" });
     } catch (error) {

@@ -43,7 +43,7 @@ export function runGit(cwd: string, args: string[]): Promise<string> {
 }
 
 /** How the remote behaves right now. */
-export type RemoteMode = "ok" | "offline" | "unauthorized" | "hang-push";
+export type RemoteMode = "ok" | "offline" | "unauthorized" | "hang-push" | "throttle-push";
 
 export interface TestRemote {
   root: string;
@@ -95,6 +95,7 @@ export async function createTestRemote(
         requests.push(`${request.method} ${service?.[1] ?? service?.[2] ?? request.url}`);
         if (remote.mode === "offline") throw new Error("connection refused");
         if (remote.mode === "unauthorized") return empty(401);
+        if (remote.mode === "throttle-push" && request.url.endsWith("/git-receive-pack")) return empty(429);
         const response = await backend.request(request);
         if (remote.mode === "hang-push" && request.url.endsWith("/git-receive-pack")) {
           throw new Error("timed out");

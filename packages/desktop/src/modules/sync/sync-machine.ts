@@ -45,8 +45,8 @@ export interface SyncReturnSummary {
 /** Another device syncing the branch now (`sync-presence.ts`). */
 export interface SyncPeer {
   deviceId: string;
-  /** Its user's git name. */
-  name: string;
+  /** Its user's git name; null until read. */
+  name: string | null;
 }
 
 /** Our text a merge replaced with the branch's. */
@@ -134,8 +134,9 @@ const WHILE_ON: Handlers = {
     state.fault === "diverged" || state.fault === "paused"
       ? { ...state, activity: "idle", peers: [] }
       : { ...state, activity: "idle", fault, failures: state.failures + 1, detail, peers: [] },
-  diverged: (state, { detail }) => ({ ...state, activity: "idle", fault: "diverged", detail, summary: null }),
-  paused: (state, { detail, summary }) => ({ ...state, activity: "idle", fault: "paused", detail, summary }),
+  // Stopped until the user says go: nobody is watched meanwhile.
+  diverged: (state, { detail }) => ({ ...state, activity: "idle", fault: "diverged", detail, summary: null, peers: [] }),
+  paused: (state, { detail, summary }) => ({ ...state, activity: "idle", fault: "paused", detail, summary, peers: [] }),
   resume: (state) => ({ ...state, ...RUNNING_CLEAR, activity: state.activity }),
   overwritten: (state, { items }) =>
     items.length === 0 ? state : { ...state, overwritten: [...state.overwritten, ...items].slice(-MAX_OVERWRITTEN) },
