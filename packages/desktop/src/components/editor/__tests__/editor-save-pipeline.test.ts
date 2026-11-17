@@ -148,6 +148,20 @@ describe("save pipeline (inline fallback = worker-boot-failure path)", () => {
     expect(markdown).toBe("start typed");
   });
 
+  it("keeps the file's own bytes where the edit didn't reach (MET-292)", async () => {
+    // The first edit prepares the file while the save waits out the debounce.
+    const source = "* one\n* two\n\nPara.\n";
+    editor.commands.setContent(source);
+    await render(makeFile(source));
+
+    await act(async () => {
+      editor.commands.insertContentAt(editor.state.doc.content.size - 1, " typed");
+    });
+    await flushSaves();
+
+    expect(fileWriteMock.mock.calls.at(-1)![2]).toBe("* one\n* two\n\nPara. typed\n");
+  });
+
   it("coalesces a burst of edits and always persists the final state", async () => {
     await render(makeFile("start"));
 

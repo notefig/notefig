@@ -372,7 +372,7 @@ describe("sync: solo", () => {
     const again = new Promise<void>((done) => (landAgain = done));
     docSync.writer = async (markdown) => {
       await again;
-      await fsp.writeFile(path, `${markdown}\n`);
+      await fsp.writeFile(path, markdown);
     };
     editor.commands.setContent(codec.parse("# Plan\n\nFirst, mine again.\n\nSecond.\n"));
     docSync.pushUpdate(() => editor.getJSON());
@@ -862,7 +862,7 @@ describe("sync: solo", () => {
     const landed = new Promise<void>((done) => (land = done));
     docSync.writer = async (markdown) => {
       await landed;
-      await fsp.writeFile(path, `${markdown}\n`);
+      await fsp.writeFile(path, markdown);
       written(core, path);
     };
     editor.commands.setContent(codec.parse(text));

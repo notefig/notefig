@@ -11,6 +11,7 @@ import { renderMarkdownHtml } from "@/utils/markdown-html";
 import { exposeWorkerApi } from "@notefig/worker";
 import type { JSONContent } from "@tiptap/core";
 import type { MergedMarkdown } from "@/modules/sync/sync-merge";
+import { serializeKeeping, type SavedFile } from "@/utils/markdown-units";
 
 installWorkerDomShim();
 const codec = createMarkdownCodec();
@@ -19,9 +20,9 @@ const api = {
   parse(markdown: string): JSONContent {
     return codec.parse(markdown);
   },
-  serialize(doc: JSONContent): { markdown: string; hash: string } {
-    const markdown = codec.serialize(doc);
-    return { markdown, hash: codec.hash(markdown) };
+  /** The save: what didn't change since `previous` keeps its bytes. */
+  serialize(doc: JSONContent, previous: SavedFile | null = null) {
+    return serializeKeeping(codec, doc, previous);
   },
   renderHtml(markdown: string): string {
     return renderMarkdownHtml(markdown);

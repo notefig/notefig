@@ -3,7 +3,7 @@
  * shape as calling the codec directly — just promise-based:
  *
  *   const doc = await parseMarkdown(markdown);
- *   const { markdown, hash } = await serializeDoc(doc);
+ *   const { markdown, hash } = await serializeDoc(doc, previous);
  *
  * Conversion runs in a Web Worker; if the worker cannot boot (or dies), the
  * identical codec runs inline on the main thread so behavior never changes,
@@ -13,6 +13,7 @@
 import type { JSONContent } from "@tiptap/core";
 import type { MarkdownWorkerApi } from "@/workers/markdown-codec.worker";
 import type { MergedMarkdown } from "@/modules/sync/sync-merge";
+import type { SavedFile } from "@/utils/markdown-units";
 import {
   createWorkerClient,
   WorkerRpcError,
@@ -22,6 +23,8 @@ import {
 export interface SerializedDoc {
   markdown: string;
   hash: string;
+  /** What the next save keeps bytes against. */
+  saved: SavedFile;
 }
 
 type Converter = WorkerClient<MarkdownWorkerApi>;
@@ -33,9 +36,9 @@ async function createInlineConverter(): Promise<Converter> {
   const codec = createMarkdownCodec();
   return {
     parse: async (markdown: string) => codec.parse(markdown),
-    serialize: async (doc: JSONContent) => {
-      const markdown = codec.serialize(doc);
-      return { markdown, hash: codec.hash(markdown) };
+    serialize: async (doc: JSONContent, previous: SavedFile | null = null) => {
+      const { serializeKeeping } = await import("@/utils/markdown-units");
+      return serializeKeeping(codec, doc, previous);
     },
     renderHtml: async (markdown: string) => renderMarkdownHtml(markdown),
     merge: async (base: string, ours: string, theirs: string) => {
@@ -105,8 +108,10 @@ export function parseMarkdown(markdown: string): Promise<JSONContent> {
   return withConverter((c) => c.parse(markdown));
 }
 
-export function serializeDoc(doc: JSONContent): Promise<SerializedDoc> {
-  return withConverter((c) => c.serialize(doc));
+/** `doc` as markdown; with `previous`, the file as last known, every unit
+ *  that didn't change keeps its bytes (`utils/markdown-units.ts`). */
+export function serializeDoc(doc: JSONContent, previous: SavedFile | null = null): Promise<SerializedDoc> {
+  return withConverter((c) => c.serialize(doc, previous));
 }
 
 /** Chat/LLM output markdown → HTML, off the main thread. */
@@ -148,6 +153,9 @@ export class DocumentSync {
    * compare instead of re-serializing the doc per watcher event. */
   private lastMarkdown: string | null = null;
   private lastHash: string | null = null;
+  /** The file as last loaded, adopted or saved, for the next save to keep
+   *  the bytes of what didn't change. */
+  private saved: SavedFile | null = null;
 
   /** Persists a serialization and its hash; assigned by the editor-side
    *  hook. */
@@ -194,6 +202,7 @@ export class DocumentSync {
     if (this.lastMarkdown === null) {
       this.lastMarkdown = fileContent;
       this.lastHash = contentHash ?? null;
+      this.saved = { source: fileContent };
     }
   }
 
@@ -235,6 +244,7 @@ export class DocumentSync {
     this.dirty = false;
     this.lastMarkdown = fileContent;
     this.lastHash = contentHash;
+    this.saved = { source: fileContent };
   }
 
   /** Ship an editor update. The snapshot is taken lazily so a burst of
@@ -272,13 +282,14 @@ export class DocumentSync {
         const generation = this.generation;
         const snapshot = this.getSnapshot;
         if (!snapshot) return;
-        const { markdown, hash } = await serializeDoc(snapshot());
+        const { markdown, hash, saved } = await serializeDoc(snapshot(), this.saved);
         // Document replaced (adoption) mid-serialize: drop the stale result;
         // the loop re-runs if post-adoption edits arrived.
         if (generation !== this.generation) continue;
 
         this.lastMarkdown = markdown;
         this.lastHash = hash;
+        this.saved = saved;
         await this.writer?.(markdown, hash);
       } while (this.dirty);
     } catch (error) {

@@ -1,31 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { mergeMarkdown, splitUnits } from "./sync-merge";
+import { splitUnits } from "@/utils/markdown-units";
+import { mergeMarkdown } from "./sync-merge";
 
 const units = async (source: string) => (await splitUnits(source)).map((unit) => unit.text);
+
 const base = "# Title\n\nFirst paragraph here.\n\nSecond paragraph here.\n";
-
-describe("splitUnits", () => {
-  it("cuts at paragraphs, list items, sub-items, table rows and code blocks", async () => {
-    const source =
-      "---\ntitle: a\n---\n# H\n\ntext\nwrapped\n\n- one\n  - sub\n- two\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n```js\nx\n\ny\n```\n";
-    expect(await units(source)).toEqual([
-      "---\ntitle: a\n---",
-      "# H",
-      "text\nwrapped",
-      "- one",
-      "  - sub",
-      "- two",
-      "| a | b |\n| - | - |",
-      "| 1 | 2 |",
-      "```js\nx\n\ny\n```",
-    ]);
-  });
-
-  it("loses no bytes", async () => {
-    const source = "\n\n<!-- note -->\n\n_x_  \nwrapped\n\n\n* a\n* b\n> quote\n";
-    expect((await splitUnits(source)).map((unit) => unit.text + unit.gap).join("")).toBe(source);
-  });
-});
 
 describe("mergeMarkdown", () => {
   it("takes both sides' changes to different units, and keeps untouched bytes", async () => {

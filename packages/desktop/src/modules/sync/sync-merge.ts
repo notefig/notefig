@@ -19,19 +19,12 @@
  * The holder is `theirs`: the side already on the branch.
  */
 import diff3Merge from "diff3";
-import type MarkdownIt from "markdown-it";
+import { splitUnits, type Unit } from "@/utils/markdown-units";
 
 export interface MergedMarkdown {
   text: string;
   /** The text of each of our units the holder's replaced. */
   overwritten: string[];
-}
-
-interface Unit {
-  /** What units are compared by: the chunk without its trailing blank. */
-  text: string;
-  /** The whitespace after it, up to the next unit. */
-  gap: string;
 }
 
 /** A side's change to a stretch of the base: `base[start, end)` became
@@ -42,44 +35,8 @@ interface Change {
   units: string[];
 }
 
-const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/;
-/** The tokens a unit starts at. Containers (a list, a quote, a table) have
- *  none of their own: their items, rows and paragraphs do. */
-const UNIT_STARTS = new Set(["heading_open", "paragraph_open", "list_item_open", "tr_open", "fence", "code_block", "html_block", "hr"]);
 /** Join text when units collide wholesale, for the flag. */
 const BLANK = "\n\n";
-
-let parser: MarkdownIt | null = null;
-/** Built on first use: the worker that hosts the merge boots without it. */
-async function parserOf(): Promise<MarkdownIt> {
-  if (!parser) {
-    const { default: Markdown } = await import("markdown-it");
-    parser = new Markdown({ html: true });
-  }
-  return parser;
-}
-
-function toUnit(chunk: string): Unit {
-  const text = chunk.replace(/\s+$/, "");
-  return { text, gap: chunk.slice(text.length) };
-}
-
-/** The units of `source`; text and gap, concatenated, give it back. */
-export async function splitUnits(source: string): Promise<Unit[]> {
-  const md = await parserOf();
-  const frontmatter = FRONTMATTER.exec(source)?.[0] ?? "";
-  const body = source.slice(frontmatter.length);
-  const lineStarts = [0];
-  for (let at = body.indexOf("\n"); at >= 0; at = body.indexOf("\n", at + 1)) lineStarts.push(at + 1);
-  const cuts = md
-    .parse(body, {})
-    .filter((token) => UNIT_STARTS.has(token.type) && token.map)
-    .map((token) => lineStarts[token.map![0]]!);
-  // Whatever comes before the first unit (blank lines) rides with it.
-  const starts = [...new Set(cuts)].sort((a, b) => a - b).filter((at) => at > 0);
-  const chunks = [0, ...starts].map((at, i) => body.slice(at, starts[i] ?? body.length)).filter(Boolean);
-  return [...(frontmatter ? [frontmatter] : []), ...chunks].map(toUnit);
-}
 
 const words = (text: string) => text.match(/\s+|\S+/g) ?? [];
 
