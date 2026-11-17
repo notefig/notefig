@@ -123,7 +123,7 @@ export function useEditorFileSync(
         source: { path: file.path, contentHash: targetHash, attribute },
       });
       suppressSaveRef.current = false;
-      sync.commitAdoption(fileContent, targetHash, doc);
+      sync.commitAdoption(fileContent, targetHash);
       if (adoption.reinsertedWidgets > 0) {
         sync.pushUpdate(() => editor.state.doc.toJSON() as JSONContent);
       }
@@ -175,7 +175,6 @@ export function useEditorFileSync(
       // children. Not a meta, because these transactions come out of
       // ProseMirror's own input handling — see draft-only-edit.ts.
       if (isDraftOnlyEdit(transaction)) return;
-      sync.prepare();
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         saveTimerRef.current = null;

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
-import type { JSONContent } from "@tiptap/core";
 import { serializeKeeping, splitUnits, type KeptSave } from "./markdown-units";
 
 const codec = createMarkdownCodec();
@@ -47,9 +46,9 @@ const SOURCE = [
 
 /** Save `edited` (as the editor would hold it) over `source` on disk: the
  *  first save after a load, or the next one after `last`. */
-async function save(source: string, edited: string, last?: KeptSave, doc: JSONContent | null = null) {
+async function save(source: string, edited: string, last?: KeptSave) {
   const saved = codec.parse(edited);
-  const result = await serializeKeeping(codec, saved, last?.saved ?? { source, doc });
+  const result = await serializeKeeping(codec, saved, last?.saved ?? { source });
   // Whatever is written reads back as the document that was saved, or at
   // worst as the plain serialization does (which loses table alignment,
   // and runs two lists of one kind into one).
@@ -134,12 +133,6 @@ describe("serializeKeeping", () => {
     const crlf = SOURCE.replace(/\n/g, "\r\n");
     const edited = crlf.replace("Plain paragraph one.", "Plain paragraph uno.");
     expect((await save(crlf, edited)).markdown).toBe(edited);
-  });
-
-  it("gives the same result with the loaded doc handed in", async () => {
-    const edited = SOURCE.replace("Plain paragraph two.", "Plain paragraph deux.");
-    const withDoc = await save(SOURCE, edited, undefined, codec.parse(SOURCE));
-    expect(withDoc.markdown).toBe((await save(SOURCE, edited)).markdown);
   });
 
   it("writes the plain serialization when there's no previous file", async () => {
@@ -227,6 +220,19 @@ describe("serializeKeeping", () => {
       expect(second.markdown).toBe(big.replace("__Para 10__ text.", "**Para 10** text!.").replace("__Para 40__ text.", "**Para 40** x text."));
       for (const [rendered] of render.mock.calls) expect(rendered.length).toBeLessThan(100);
       render.mockRestore();
+    });
+
+    it("cuts only the units around a first save's change", async () => {
+      const big = Array.from({ length: 200 }, (_, i) => `Para ${i} text.\n`).join("\n");
+      const edited = big.replace("Para 100 text.", "Para 100 text, edited.");
+      const doc = codec.parse(edited);
+      const parse = vi.spyOn(codec, "parse");
+      const result = await serializeKeeping(codec, doc, { source: big });
+      expect(result.markdown).toBe(edited);
+      // No parse of the whole file: only the edited paragraph's stretch.
+      expect(parse.mock.calls.map(([text]) => text.length)).toEqual([expect.any(Number)]);
+      expect(parse.mock.calls[0]![0].length).toBeLessThan(100);
+      parse.mockRestore();
     });
 
     it("renders nothing in a file already in the serializer's style", async () => {

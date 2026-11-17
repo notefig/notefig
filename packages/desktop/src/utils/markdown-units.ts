@@ -61,10 +61,9 @@ export interface Segment {
 }
 
 /** The file as the editor last knew it, for the next save to keep its bytes:
- *  cut into segments by the last save, or as loaded or adopted (with the
- *  doc it was parsed into, when at hand). Callers hand back what the last
- *  save returned. */
-export type SavedFile = { segments: Segment[] } | { source: string; doc: JSONContent | null };
+ *  cut into segments by the last save, or as loaded or adopted. Callers hand
+ *  back what the last save returned. */
+export type SavedFile = { segments: Segment[] } | { source: string };
 
 export interface KeptSave {
   markdown: string;
@@ -78,6 +77,8 @@ const joinSource = (segments: Segment[]) => segments.map((segment) => segment.so
 const joinCanonical = (segments: Segment[]) => segments.map((segment) => segment.canonical).join("");
 const endingOf = (text: string) => text.slice(text.trimEnd().length);
 const wordsOf = (text: string) => text.replace(/[^\p{L}\p{N}]+/gu, "");
+const chunk = (unit: Unit) => unit.text + unit.gap;
+const lf = (text: string) => text.replace(/\r\n/g, "\n");
 const BLANK_END = /\n[ \t]*\r?\n[ \t]*$/;
 /** A list item, an indented line or a quote: after a blank line, still part
  *  of the list or quote above when that's one too. */
@@ -92,7 +93,8 @@ const DEFINITION = /^ {0,3}\[[^\]]+\]:/m;
  *
  * The file is carried from save to save as segments, so a save diffs the new
  * serialization against the last one by characters and swaps the segments
- * the change touched for the new text. Whatever is written parses to the
+ * the change touched for the new text. The first save after a load cuts the
+ * file around its change only (`cut`). Whatever is written parses to the
  * same document as the plain serialization: the blocks around the change
  * (the whole file, when a definition could reach into them) must render to
  * the same HTML as their serialization, or they're written plain.
@@ -100,7 +102,7 @@ const DEFINITION = /^ {0,3}\[[^\]]+\]:/m;
 export async function serializeKeeping(codec: Codec, doc: JSONContent, previous: SavedFile | null): Promise<KeptSave> {
   const canonical = codec.serialize(doc);
   if (!previous) return saved(codec, [{ source: canonical, canonical }]);
-  const { segments } = await prepareSaved(codec, previous);
+  const segments = "segments" in previous ? previous.segments : await cut(codec, previous.source, canonical);
   // An emptied file has nothing to keep.
   if (segments.length === 0) return saved(codec, [{ source: canonical, canonical }]);
   const source = joinSource(segments);
@@ -127,30 +129,50 @@ function plain(canonical: string, ending: string, crlf: boolean): Segment {
   return { source: crlf ? source.replace(/\r?\n/g, "\r\n") : source, canonical };
 }
 
-/** `saved` cut into segments, as the next save needs it: the work a first
- *  save would do, done ahead (`DocumentSync.prepare`). */
-export async function prepareSaved(codec: Pick<Codec, "parse" | "serialize">, saved: SavedFile): Promise<{ segments: Segment[] }> {
-  return "segments" in saved ? saved : { segments: await cut(codec, saved.source, saved.doc) };
-}
-
 /**
- * `source` paired unit for unit with what the serializer makes of it. A pair
- * whose words differ (misaligned, or text the serializer rewrites, like an
- * entity) joins the segment before it; a file already in the serializer's
- * style, or that doesn't cut into as many units, is one segment.
+ * The file as loaded or adopted, cut for its first save against `canonical`,
+ * the save's serialization. Where the two read the same, the file is the
+ * serializer's text already: one segment each side of the change. The units
+ * between, out to blocks that read the same alone (the whole file when a
+ * definition could reach into them), are serialized alone and paired unit
+ * for unit; a pair whose words differ (misaligned, or text the serializer
+ * rewrites, like an entity) joins the segment before it, and the stretch is
+ * one segment when the two don't cut into as many units.
  */
-async function cut(codec: Pick<Codec, "parse" | "serialize">, source: string, doc: JSONContent | null): Promise<Segment[]> {
-  const canonical = codec.serialize(doc ?? codec.parse(source));
-  if (source.trimEnd() === canonical.trimEnd()) return [{ source, canonical }];
-  const [ours, theirs] = await Promise.all([splitUnits(source), splitUnits(canonical)]);
-  if (ours.length !== theirs.length) return [{ source, canonical }];
-  const segments: Segment[] = [];
-  ours.forEach((unit, i) => {
-    const pair = { source: unit.text + unit.gap, canonical: theirs[i]!.text + theirs[i]!.gap };
-    const last = segments.at(-1);
-    if (!last || wordsOf(unit.text) === wordsOf(theirs[i]!.text)) segments.push(pair);
-    else segments[segments.length - 1] = { source: last.source + pair.source, canonical: last.canonical + pair.canonical };
-  });
+async function cut(codec: Pick<Codec, "parse" | "serialize">, source: string, canonical: string): Promise<Segment[]> {
+  const units = await splitUnits(source);
+  if (units.length === 0) return [];
+  // Compared as the serializer writes line ends, and without the file's
+  // ending, which isn't content.
+  const ends: number[] = [];
+  for (const unit of units) ends.push((ends.at(-1) ?? 0) + lf(chunk(unit)).length);
+  const [head, changedEnd] = changed(lf(source).trimEnd(), canonical.trimEnd());
+  const apartAt = (k: number) => k <= 0 || k >= units.length || apart(chunk(units[k - 1]!), chunk(units[k]!));
+  // Appending at the very end belongs to the last unit.
+  const touched = ends.findIndex((end) => end > head);
+  let from = touched < 0 ? units.length - 1 : touched;
+  let to = Math.max(from + 1, ends.findIndex((end) => end >= changedEnd) + 1 || units.length);
+  if (DEFINITION.test(source)) [from, to] = [0, units.length];
+  while (!apartAt(from)) from--;
+  while (!apartAt(to)) to++;
+  const ours = units.slice(from, to);
+  const text = ours.map(chunk).join("");
+  const plain = codec.serialize(codec.parse(text)).trimEnd() + lf(endingOf(text));
+  const theirs = await splitUnits(plain);
+  const pairs: Segment[] = [];
+  if (ours.length !== theirs.length) pairs.push({ source: text, canonical: plain });
+  else
+    ours.forEach((unit, i) => {
+      const pair = { source: chunk(unit), canonical: chunk(theirs[i]!) };
+      const last = pairs.at(-1);
+      if (!last || wordsOf(unit.text) === wordsOf(theirs[i]!.text)) pairs.push(pair);
+      else pairs[pairs.length - 1] = { source: last.source + pair.source, canonical: last.canonical + pair.canonical };
+    });
+  const same = (text: string) => (text ? [{ source: text, canonical: lf(text) }] : []);
+  const segments = [...same(units.slice(0, from).map(chunk).join("")), ...pairs, ...same(units.slice(to).map(chunk).join(""))];
+  // The serializer never ends a file with a newline; the file may.
+  const last = segments.at(-1)!;
+  segments[segments.length - 1] = { ...last, canonical: last.canonical.trimEnd() };
   return segments;
 }
 
@@ -189,10 +211,13 @@ function changed(before: string, after: string): [number, number] {
   return [head, before.length - tail];
 }
 
+/** Whether `below` reads the same with `above` before it or not: a blank
+ *  line between, and not both in a list or quote. */
+const apart = (above: string, below: string) => BLANK_END.test(above) && !(IN_LIST.test(above) && IN_LIST.test(below));
+
 /** The blocks around segment `at` that render on their own: out to a blank
  *  line between two blocks that aren't both in a list or quote. */
 function around(segments: Segment[], at: number): [number, number] {
-  const apart = (above: string, below: string) => BLANK_END.test(above) && !(IN_LIST.test(above) && IN_LIST.test(below));
   const boundary = (k: number) =>
     k <= 0 ||
     k >= segments.length ||
