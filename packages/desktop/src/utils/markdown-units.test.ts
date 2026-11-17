@@ -99,6 +99,13 @@ describe("serializeKeeping", () => {
     expect(markdown).toBe(SOURCE.replace("* star one\n* star two\n    * deep", "- star one\n- star 2\n  - deep"));
   });
 
+  it("rewrites a loose list whose item changed, and nothing around it", async () => {
+    const source = "__bold__ before.\n\n* one\n\n* two\n\n* three\n\n__bold__ outside.\n";
+    const edited = source.replace("* two", "* 2");
+    const list = codec.serialize(codec.parse("* one\n\n* 2\n\n* three\n"));
+    expect((await save(source, edited)).markdown).toBe(`__bold__ before.\n\n${list}\n\n__bold__ outside.\n`);
+  });
+
   it("keeps an untouched table's column alignment, which the serializer drops", async () => {
     const source = "| x | y |\n|:--|--:|\n| 3 | 4 |\n\nText.\n";
     const edited = source.replace("Text.", "Text, more.");
