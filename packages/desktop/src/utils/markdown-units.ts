@@ -27,6 +27,8 @@ async function parserOf(): Promise<MarkdownIt> {
   if (!parser) {
     const { default: Markdown } = await import("markdown-it");
     parser = new Markdown({ html: true });
+    // Units are blocks: parsing their inline content would only cost.
+    parser.core.ruler.enableOnly(["normalize", "block"]);
   }
   return parser;
 }
@@ -79,12 +81,15 @@ const endingOf = (text: string) => text.slice(text.trimEnd().length);
 const wordsOf = (text: string) => text.replace(/[^\p{L}\p{N}]+/gu, "");
 const chunk = (unit: Unit) => unit.text + unit.gap;
 const lf = (text: string) => text.replace(/\r\n/g, "\n");
-const BLANK_END = /\n[ \t]*\r?\n[ \t]*$/;
+/** A blank line, in the whitespace a unit ends with. */
+const BLANK = /\n[ \t]*\r?\n/;
 /** A list item, an indented line or a quote: after a blank line, still part
  *  of the list or quote above when that's one too. */
 const IN_LIST = /^(?:\r?\n)*([ \t]+\S|[-*+](\s|$)|\d+[.)](\s|$)|>)/;
 /** A link reference or footnote definition: read wherever it stands. */
 const DEFINITION = /^ {0,3}\[[^\]]+\]:/m;
+/** Whether `text` has a definition; the plain search spares most files the regex. */
+const hasDefinition = (text: string) => text.includes("]:") && DEFINITION.test(text);
 
 /**
  * The save: `doc` serialized, keeping the bytes of what didn't change since
@@ -111,7 +116,7 @@ export async function serializeKeeping(codec: Codec, doc: JSONContent, previous:
   if (before === canonical) return saved(codec, segments);
   const { at, next } = replace(segments, before, canonical, crlf);
   // A definition the change removed still reached the blocks it kept.
-  const [start, end] = DEFINITION.test(source) ? [0, next.length] : around(next, at);
+  const [start, end] = hasDefinition(source) ? [0, next.length] : around(next, at);
   const window = next.slice(start, end);
   if (sameHtml(codec, window, end === next.length)) return saved(codec, next);
   return saved(codec, [...next.slice(0, start), plain(joinCanonical(window), endingOf(joinSource(window)), crlf), ...next.slice(end)]);
@@ -142,21 +147,26 @@ function plain(canonical: string, ending: string, crlf: boolean): Segment {
 async function cut(codec: Pick<Codec, "parse" | "serialize">, source: string, canonical: string): Promise<Segment[]> {
   const units = await splitUnits(source);
   if (units.length === 0) return [];
-  // Compared as the serializer writes line ends, and without the file's
-  // ending, which isn't content.
+  // Where each unit ends in the file, and as the serializer writes line ends
+  // (compared that way, and without the file's ending, which isn't content).
+  const crlf = source.includes("\r\n");
+  const offsets = [0];
   const ends: number[] = [];
-  for (const unit of units) ends.push((ends.at(-1) ?? 0) + lf(chunk(unit)).length);
-  const [head, changedEnd] = changed(lf(source).trimEnd(), canonical.trimEnd());
+  for (const unit of units) {
+    offsets.push(offsets.at(-1)! + unit.text.length + unit.gap.length);
+    ends.push(crlf ? (ends.at(-1) ?? 0) + lf(chunk(unit)).length : offsets.at(-1)!);
+  }
+  const [head, changedEnd] = changed(crlf ? lf(source).trimEnd() : source.trimEnd(), canonical.trimEnd());
   const apartAt = (k: number) => k <= 0 || k >= units.length || apart(chunk(units[k - 1]!), chunk(units[k]!));
   // Appending at the very end belongs to the last unit.
   const touched = ends.findIndex((end) => end > head);
   let from = touched < 0 ? units.length - 1 : touched;
   let to = Math.max(from + 1, ends.findIndex((end) => end >= changedEnd) + 1 || units.length);
-  if (DEFINITION.test(source)) [from, to] = [0, units.length];
+  if (hasDefinition(source)) [from, to] = [0, units.length];
   while (!apartAt(from)) from--;
   while (!apartAt(to)) to++;
   const ours = units.slice(from, to);
-  const text = ours.map(chunk).join("");
+  const text = source.slice(offsets[from], offsets[to]);
   const plain = codec.serialize(codec.parse(text)).trimEnd() + lf(endingOf(text));
   const theirs = await splitUnits(plain);
   const pairs: Segment[] = [];
@@ -169,7 +179,7 @@ async function cut(codec: Pick<Codec, "parse" | "serialize">, source: string, ca
       else pairs[pairs.length - 1] = { source: last.source + pair.source, canonical: last.canonical + pair.canonical };
     });
   const same = (text: string) => (text ? [{ source: text, canonical: lf(text) }] : []);
-  const segments = [...same(units.slice(0, from).map(chunk).join("")), ...pairs, ...same(units.slice(to).map(chunk).join(""))];
+  const segments = [...same(source.slice(0, offsets[from])), ...pairs, ...same(source.slice(offsets[to]))];
   // The serializer never ends a file with a newline; the file may.
   const last = segments.at(-1)!;
   segments[segments.length - 1] = { ...last, canonical: last.canonical.trimEnd() };
@@ -213,7 +223,7 @@ function changed(before: string, after: string): [number, number] {
 
 /** Whether `below` reads the same with `above` before it or not: a blank
  *  line between, and not both in a list or quote. */
-const apart = (above: string, below: string) => BLANK_END.test(above) && !(IN_LIST.test(above) && IN_LIST.test(below));
+const apart = (above: string, below: string) => BLANK.test(endingOf(above)) && !(IN_LIST.test(above) && IN_LIST.test(below));
 
 /** The blocks around segment `at` that render on their own: out to a blank
  *  line between two blocks that aren't both in a list or quote. */
