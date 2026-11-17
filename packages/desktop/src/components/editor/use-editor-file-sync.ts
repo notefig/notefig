@@ -175,6 +175,7 @@ export function useEditorFileSync(
       // children. Not a meta, because these transactions come out of
       // ProseMirror's own input handling — see draft-only-edit.ts.
       if (isDraftOnlyEdit(transaction)) return;
+      sync.prepare();
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         saveTimerRef.current = null;

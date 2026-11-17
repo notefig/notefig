@@ -40,6 +40,10 @@ async function createInlineConverter(): Promise<Converter> {
       const { serializeKeeping } = await import("@/utils/markdown-units");
       return serializeKeeping(codec, doc, previous);
     },
+    prepare: async (saved: SavedFile) => {
+      const { prepareSaved } = await import("@/utils/markdown-units");
+      return prepareSaved(codec, saved);
+    },
     renderHtml: async (markdown: string) => renderMarkdownHtml(markdown),
     merge: async (base: string, ours: string, theirs: string) => {
       const { mergeMarkdown } = await import("@/modules/sync/sync-merge");
@@ -114,6 +118,11 @@ export function serializeDoc(doc: JSONContent, previous: SavedFile | null = null
   return withConverter((c) => c.serialize(doc, previous));
 }
 
+/** `saved` made ready for its next save, off the main thread. */
+export function prepareSave(saved: SavedFile): Promise<SavedFile> {
+  return withConverter((c) => c.prepare(saved));
+}
+
 /** Chat/LLM output markdown → HTML, off the main thread. */
 export function renderMarkdown(markdown: string): Promise<string> {
   return withConverter((c) => c.renderHtml(markdown));
@@ -156,6 +165,8 @@ export class DocumentSync {
   /** The file as last loaded, adopted or saved, for the next save to keep
    *  the bytes of what didn't change. */
   private saved: SavedFile | null = null;
+  /** `prepare` in flight; a save waits for it rather than redo it. */
+  private preparing: Promise<void> | null = null;
 
   /** Persists a serialization and its hash; assigned by the editor-side
    *  hook. */
@@ -249,6 +260,25 @@ export class DocumentSync {
     this.saved = { source: fileContent, doc: doc ?? null };
   }
 
+  /**
+   * An edit is on its way: cut the file as last loaded or adopted now, in
+   * the autosave debounce, so its save doesn't do it first. A file that's
+   * only read never pays for it.
+   */
+  prepare(): void {
+    const saved = this.saved;
+    if (!saved || "segments" in saved || this.preparing) return;
+    this.preparing = prepareSave(saved)
+      .then((ready) => {
+        // Adopted meanwhile: that file is the one to keep bytes against.
+        if (this.saved === saved) this.saved = ready;
+      })
+      .catch(() => {})
+      .finally(() => {
+        this.preparing = null;
+      });
+  }
+
   /** Ship an editor update. The snapshot is taken lazily so a burst of
    * updates costs one `doc.toJSON()` per serialize round, not per edit. */
   pushUpdate(getSnapshot: () => JSONContent): void {
@@ -284,6 +314,7 @@ export class DocumentSync {
         const generation = this.generation;
         const snapshot = this.getSnapshot;
         if (!snapshot) return;
+        await this.preparing;
         const { markdown, hash, saved } = await serializeDoc(snapshot(), this.saved);
         // Document replaced (adoption) mid-serialize: drop the stale result;
         // the loop re-runs if post-adoption edits arrived.

@@ -100,7 +100,7 @@ const DEFINITION = /^ {0,3}\[[^\]]+\]:/m;
 export async function serializeKeeping(codec: Codec, doc: JSONContent, previous: SavedFile | null): Promise<KeptSave> {
   const canonical = codec.serialize(doc);
   if (!previous) return saved(codec, [{ source: canonical, canonical }]);
-  const segments = "segments" in previous ? previous.segments : await cut(codec, previous.source, previous.doc);
+  const { segments } = await prepareSaved(codec, previous);
   // An emptied file has nothing to keep.
   if (segments.length === 0) return saved(codec, [{ source: canonical, canonical }]);
   const source = joinSource(segments);
@@ -127,13 +127,19 @@ function plain(canonical: string, ending: string, crlf: boolean): Segment {
   return { source: crlf ? source.replace(/\r?\n/g, "\r\n") : source, canonical };
 }
 
+/** `saved` cut into segments, as the next save needs it: the work a first
+ *  save would do, done ahead (`DocumentSync.prepare`). */
+export async function prepareSaved(codec: Pick<Codec, "parse" | "serialize">, saved: SavedFile): Promise<{ segments: Segment[] }> {
+  return "segments" in saved ? saved : { segments: await cut(codec, saved.source, saved.doc) };
+}
+
 /**
  * `source` paired unit for unit with what the serializer makes of it. A pair
  * whose words differ (misaligned, or text the serializer rewrites, like an
  * entity) joins the segment before it; a file already in the serializer's
  * style, or that doesn't cut into as many units, is one segment.
  */
-async function cut(codec: Codec, source: string, doc: JSONContent | null): Promise<Segment[]> {
+async function cut(codec: Pick<Codec, "parse" | "serialize">, source: string, doc: JSONContent | null): Promise<Segment[]> {
   const canonical = codec.serialize(doc ?? codec.parse(source));
   if (source.trimEnd() === canonical.trimEnd()) return [{ source, canonical }];
   const [ours, theirs] = await Promise.all([splitUnits(source), splitUnits(canonical)]);
