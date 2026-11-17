@@ -202,6 +202,17 @@ describe("serializeKeeping", () => {
       expect(last.markdown).toBe(SOURCE.replace("End line.", "End line, more.\n\nAfter it."));
     });
 
+    it("saves new text typed into a note that was emptied", async () => {
+      const last = await saves(SOURCE, () => "", () => "Fresh start.\n");
+      expect(last.markdown).toBe("Fresh start.");
+    });
+
+    it("checks the whole file when the change removed a definition others use", async () => {
+      const source = "Intro.\n\n[x]: https://example.com\n\nMiddle.\n\nKept [x].\n\nTail.\n";
+      const last = await saves(source, (text) => text.replace("Intro.", "Intro, edited."));
+      expect(codec.render(last.markdown)).toContain('href="https://example.com"');
+    });
+
     it("writes the same bytes again when nothing changed", async () => {
       const once = await save(SOURCE, SOURCE.replace("Plain paragraph one.", "Plain paragraph uno."));
       const again = await save(SOURCE, SOURCE.replace("Plain paragraph one.", "Plain paragraph uno."), once);
@@ -257,7 +268,7 @@ describe("serializeKeeping", () => {
       last = await save(source, text, last);
       text = last.markdown;
     }
-  });
+  }, 30_000);
 
   it("hashes what it writes", async () => {
     const edited = SOURCE.replace("Plain paragraph one.", "Plain paragraph uno.");

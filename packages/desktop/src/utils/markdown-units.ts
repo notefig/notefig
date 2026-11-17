@@ -101,11 +101,15 @@ export async function serializeKeeping(codec: Codec, doc: JSONContent, previous:
   const canonical = codec.serialize(doc);
   if (!previous) return saved(codec, [{ source: canonical, canonical }]);
   const segments = "segments" in previous ? previous.segments : await cut(codec, previous.source, previous.doc);
-  const crlf = joinSource(segments).includes("\r\n");
+  // An emptied file has nothing to keep.
+  if (segments.length === 0) return saved(codec, [{ source: canonical, canonical }]);
+  const source = joinSource(segments);
+  const crlf = source.includes("\r\n");
   const before = joinCanonical(segments);
   if (before === canonical) return saved(codec, segments);
   const { at, next } = replace(segments, before, canonical, crlf);
-  const [start, end] = DEFINITION.test(joinSource(next)) ? [0, next.length] : around(next, at);
+  // A definition the change removed still reached the blocks it kept.
+  const [start, end] = DEFINITION.test(source) ? [0, next.length] : around(next, at);
   const window = next.slice(start, end);
   if (sameHtml(codec, window, end === next.length)) return saved(codec, next);
   return saved(codec, [...next.slice(0, start), plain(joinCanonical(window), endingOf(joinSource(window)), crlf), ...next.slice(end)]);
