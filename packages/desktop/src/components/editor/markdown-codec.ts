@@ -31,11 +31,15 @@ export interface MarkdownCodec {
   serialize(doc: JSONContent): string;
   /** MD5 content hash, matching hash.ts / the Rust watcher */
   hash(content: string): string;
+  /** markdown string → the HTML `parse` builds the doc from: two sources
+   *  that render the same parse to the same doc, at a fraction of the
+   *  cost (no DOM). */
+  render(markdown: string): string;
 }
 
 interface MarkdownStorage {
   options: Record<string, unknown>;
-  parser: { parse(content: string): string };
+  parser: { parse(content: string): string; md: { render(content: string): string } };
   serializer: { serialize(content: PMNode): string };
 }
 
@@ -70,6 +74,9 @@ export function createMarkdownCodec(): MarkdownCodec {
   });
 
   const { parser, serializer } = fakeEditor.storage.markdown!;
+  // `parse` installs the extensions' markdown-it plugins on its first call;
+  // `render` uses the same instance, so make sure they're in.
+  parser.parse("");
 
   return {
     parse(markdown: string): JSONContent {
@@ -85,5 +92,9 @@ export function createMarkdownCodec(): MarkdownCodec {
     },
 
     hash: calculateContentHash,
+
+    render(markdown: string): string {
+      return parser.md.render(markdown ?? "");
+    },
   };
 }

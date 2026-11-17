@@ -123,7 +123,7 @@ export function useEditorFileSync(
         source: { path: file.path, contentHash: targetHash, attribute },
       });
       suppressSaveRef.current = false;
-      sync.commitAdoption(fileContent, targetHash);
+      sync.commitAdoption(fileContent, targetHash, doc);
       if (adoption.reinsertedWidgets > 0) {
         sync.pushUpdate(() => editor.state.doc.toJSON() as JSONContent);
       }

@@ -122,3 +122,31 @@ test.describe("Typing integrity", () => {
     }
   });
 });
+
+test.describe("Saving keeps untouched bytes", () => {
+  // Written the way the editor's serializer never would: `*` bullets,
+  // 4-space sub-items, `__bold__`, extra blank lines, no final newline.
+  const SOURCE =
+    "Setext title\n============\n\n* star one\n* star two\n    * deep\n\n__bold__ here.\n\n\n\nPlain paragraph one.\n\nPlain paragraph two.";
+
+  test("typing in one paragraph rewrites only that paragraph on disk", async ({
+    page,
+  }) => {
+    const workspace = "/keep-bytes";
+    const path = `${workspace}/odd.md`;
+    await setupTestDatabase(page, "keep-bytes");
+    await openWorkspace(page, workspace);
+    await seedTestFiles(page, [{ path, content: SOURCE, type: "file" as const }]);
+    await page.goto("/?sidebarView=files");
+    await waitForFileTree(page, "odd.md");
+    await openFileInTree(page, "odd.md");
+
+    await page.locator('[role="textbox"] p', { hasText: "Plain paragraph one." }).click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" More.");
+
+    await expect
+      .poll(() => getIndexedDBContent(page, workspace, path), { timeout: 10_000 })
+      .toBe(SOURCE.replace("Plain paragraph one.", "Plain paragraph one. More."));
+  });
+});

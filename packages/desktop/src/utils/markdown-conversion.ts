@@ -3,7 +3,7 @@
  * shape as calling the codec directly — just promise-based:
  *
  *   const doc = await parseMarkdown(markdown);
- *   const { markdown, hash } = await serializeDoc(doc);
+ *   const { markdown, hash } = await serializeDoc(doc, previous);
  *
  * Conversion runs in a Web Worker; if the worker cannot boot (or dies), the
  * identical codec runs inline on the main thread so behavior never changes,
@@ -13,6 +13,7 @@
 import type { JSONContent } from "@tiptap/core";
 import type { MarkdownWorkerApi } from "@/workers/markdown-codec.worker";
 import type { MergedMarkdown } from "@/modules/sync/sync-merge";
+import type { SavedSource } from "@/utils/markdown-units";
 import {
   createWorkerClient,
   WorkerRpcError,
@@ -22,6 +23,8 @@ import {
 export interface SerializedDoc {
   markdown: string;
   hash: string;
+  /** The plain serialization `markdown` kept source bytes over. */
+  canonical: string;
 }
 
 type Converter = WorkerClient<MarkdownWorkerApi>;
@@ -33,9 +36,9 @@ async function createInlineConverter(): Promise<Converter> {
   const codec = createMarkdownCodec();
   return {
     parse: async (markdown: string) => codec.parse(markdown),
-    serialize: async (doc: JSONContent) => {
-      const markdown = codec.serialize(doc);
-      return { markdown, hash: codec.hash(markdown) };
+    serialize: async (doc: JSONContent, previous: SavedSource | null = null) => {
+      const { serializeKeeping } = await import("@/utils/markdown-units");
+      return serializeKeeping(codec, doc, previous);
     },
     renderHtml: async (markdown: string) => renderMarkdownHtml(markdown),
     merge: async (base: string, ours: string, theirs: string) => {
@@ -105,8 +108,10 @@ export function parseMarkdown(markdown: string): Promise<JSONContent> {
   return withConverter((c) => c.parse(markdown));
 }
 
-export function serializeDoc(doc: JSONContent): Promise<SerializedDoc> {
-  return withConverter((c) => c.serialize(doc));
+/** `doc` as markdown; with `previous`, the file as last known, every unit
+ *  that didn't change keeps its bytes (`utils/markdown-units.ts`). */
+export function serializeDoc(doc: JSONContent, previous: SavedSource | null = null): Promise<SerializedDoc> {
+  return withConverter((c) => c.serialize(doc, previous));
 }
 
 /** Chat/LLM output markdown → HTML, off the main thread. */
@@ -148,6 +153,12 @@ export class DocumentSync {
    * compare instead of re-serializing the doc per watcher event. */
   private lastMarkdown: string | null = null;
   private lastHash: string | null = null;
+  /** What the serializer makes of `lastMarkdown`: a save keeps the bytes
+   *  of what didn't change against it. Null until a save needs it, then
+   *  serialized from `lastDoc`, the doc that file content was parsed into
+   *  (or, lacking one, parsed again in the worker). */
+  private lastCanonical: string | null = null;
+  private lastDoc: JSONContent | null = null;
 
   /** Persists a serialization and its hash; assigned by the editor-side
    *  hook. */
@@ -189,11 +200,14 @@ export class DocumentSync {
     waiters.forEach((resolve) => resolve());
   }
 
-  /** Establish the file-content baseline once; later saves keep it fresh. */
-  ensureBaseline(fileContent: string, contentHash?: string): void {
+  /** Establish the file-content baseline once; later saves keep it fresh.
+   *  `doc`: what `fileContent` was parsed into, if at hand. */
+  ensureBaseline(fileContent: string, contentHash?: string, doc?: JSONContent): void {
     if (this.lastMarkdown === null) {
       this.lastMarkdown = fileContent;
       this.lastHash = contentHash ?? null;
+      this.lastCanonical = null;
+      this.lastDoc = doc ?? null;
     }
   }
 
@@ -229,12 +243,15 @@ export class DocumentSync {
     return doc;
   }
 
-  /** Record that the editor now holds the given file content. */
-  commitAdoption(fileContent: string, contentHash: string): void {
+  /** Record that the editor now holds the given file content, parsed
+   *  into `doc`. */
+  commitAdoption(fileContent: string, contentHash: string, doc?: JSONContent): void {
     this.generation++;
     this.dirty = false;
     this.lastMarkdown = fileContent;
     this.lastHash = contentHash;
+    this.lastCanonical = null;
+    this.lastDoc = doc ?? null;
   }
 
   /** Ship an editor update. The snapshot is taken lazily so a burst of
@@ -264,6 +281,20 @@ export class DocumentSync {
     }
   }
 
+  /** The file as last known, for the save to keep bytes against. */
+  private async previousSave(): Promise<SavedSource | null> {
+    if (this.lastMarkdown === null) return null;
+    const source = this.lastMarkdown;
+    if (this.lastCanonical === null && this.lastDoc) {
+      const canonical = (await serializeDoc(this.lastDoc)).canonical;
+      // A baseline replaced meanwhile keeps its own.
+      if (this.lastMarkdown === source) this.lastCanonical = canonical;
+      this.lastDoc = null;
+      return { source, canonical };
+    }
+    return { source, canonical: this.lastCanonical };
+  }
+
   private async runSaveLoop(): Promise<void> {
     this.saving = true;
     try {
@@ -272,13 +303,17 @@ export class DocumentSync {
         const generation = this.generation;
         const snapshot = this.getSnapshot;
         if (!snapshot) return;
-        const { markdown, hash } = await serializeDoc(snapshot());
+        const doc = snapshot();
+        const previous = await this.previousSave();
+        const { markdown, hash, canonical } = await serializeDoc(doc, previous);
         // Document replaced (adoption) mid-serialize: drop the stale result;
         // the loop re-runs if post-adoption edits arrived.
         if (generation !== this.generation) continue;
 
         this.lastMarkdown = markdown;
         this.lastHash = hash;
+        this.lastCanonical = canonical;
+        this.lastDoc = null;
         await this.writer?.(markdown, hash);
       } while (this.dirty);
     } catch (error) {
@@ -364,7 +399,7 @@ export function openDocument(
   if (cached && cached.content === fileContent) return cached.promise;
 
   const promise = parseMarkdown(fileContent).then((doc) => {
-    getDocumentSync(path).ensureBaseline(fileContent, contentHash);
+    getDocumentSync(path).ensureBaseline(fileContent, contentHash, doc);
     return doc;
   });
   parsedDocuments.set(path, { content: fileContent, promise });
