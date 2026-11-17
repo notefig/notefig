@@ -129,10 +129,11 @@ type Handlers = {
 const WHILE_ON: Handlers = {
   step: (state, { activity }) => (isStuck(state) || state.activity === activity ? state : { ...state, activity }),
   settled: (state) => (isStuck(state) ? { ...state, activity: "idle" } : { ...state, ...RUNNING_CLEAR }),
+  // Unreachable, nobody is seen: back off from the solo poll.
   failed: (state, { fault, detail }) =>
     state.fault === "diverged" || state.fault === "paused"
-      ? { ...state, activity: "idle" }
-      : { ...state, activity: "idle", fault, failures: state.failures + 1, detail },
+      ? { ...state, activity: "idle", peers: [] }
+      : { ...state, activity: "idle", fault, failures: state.failures + 1, detail, peers: [] },
   diverged: (state, { detail }) => ({ ...state, activity: "idle", fault: "diverged", detail, summary: null }),
   paused: (state, { detail, summary }) => ({ ...state, activity: "idle", fault: "paused", detail, summary }),
   resume: (state) => ({ ...state, ...RUNNING_CLEAR, activity: state.activity }),
@@ -179,8 +180,7 @@ const THROTTLED_MAX_MS = 600_000;
 /** How long until the next poll (before jitter), backing off on faults. */
 export function pollInterval(state: SyncState): number {
   const backoff = 2 ** Math.min(state.failures, 6);
-  const poll = isShared(state) ? SHARED_POLL_MS : POLL_MS;
-  if (state.fault === "offline") return Math.min(poll * backoff, OFFLINE_MAX_MS);
+  if (state.fault === "offline") return Math.min(POLL_MS * backoff, OFFLINE_MAX_MS);
   if (state.fault === "throttled") return Math.min(THROTTLED_BASE_MS * backoff, THROTTLED_MAX_MS);
-  return poll;
+  return isShared(state) ? SHARED_POLL_MS : POLL_MS;
 }

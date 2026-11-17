@@ -1114,6 +1114,14 @@ describe("sync: shared, while another device syncs the branch", () => {
     expect(pollInterval(a.state())).toBe(POLL_MS);
   });
 
+  it("forgets who it saw while it can't reach the remote", async () => {
+    const { a, remote } = await meet();
+    remote.mode = "offline";
+    await a.syncNow();
+    expect(a.state()).toMatchObject({ fault: "offline", peers: [] });
+    expect(pollInterval(a.state())).toBe(POLL_MS * 2);
+  });
+
   it("goes solo when the other device's ref stands still, by this device's clock", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const { a } = await meet();
