@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
-import { serializeKeeping, splitUnits } from "./markdown-units";
+import type { JSONContent } from "@tiptap/core";
+import { serializeKeeping, splitUnits, type KeptSave } from "./markdown-units";
 
 const codec = createMarkdownCodec();
 const units = async (source: string) => (await splitUnits(source)).map((unit) => unit.text);
@@ -44,19 +45,35 @@ const SOURCE = [
   "End line.\n",
 ].join("\n");
 
-/** Save `edited` (as the editor would hold it) over `source` on disk. */
-async function save(source: string, edited: string, canonical: string | null = null) {
-  const result = await serializeKeeping(codec, codec.parse(edited), { source, canonical });
-  // Whatever is written reads back as the document that was saved.
-  expect(codec.parse(result.markdown)).toEqual(codec.parse(result.canonical));
+/** Save `edited` (as the editor would hold it) over `source` on disk: the
+ *  first save after a load, or the next one after `last`. */
+async function save(source: string, edited: string, last?: KeptSave, doc: JSONContent | null = null) {
+  const saved = codec.parse(edited);
+  const result = await serializeKeeping(codec, saved, last?.saved ?? { source, doc });
+  // Whatever is written reads back as the document that was saved, or at
+  // worst as the plain serialization does (which loses table alignment,
+  // and runs two lists of one kind into one).
+  const read = codec.parse(result.markdown);
+  if (JSON.stringify(read) !== JSON.stringify(saved)) expect(read).toEqual(codec.parse(codec.serialize(saved)));
   return result;
+}
+
+/** Saves of each edit in turn, as typing makes them: each carries the
+ *  last one's segments. */
+async function saves(source: string, ...edits: ((text: string) => string)[]) {
+  let text = source;
+  let last: KeptSave | undefined;
+  for (const edit of edits) {
+    text = edit(text);
+    last = await save(source, text, last);
+  }
+  return last!;
 }
 
 describe("serializeKeeping", () => {
   it("writes the source back byte for byte when nothing changed", async () => {
-    const { markdown, canonical } = await save(SOURCE, SOURCE);
-    expect(canonical).not.toBe(SOURCE);
-    expect(markdown).toBe(SOURCE);
+    expect(codec.serialize(codec.parse(SOURCE))).not.toBe(SOURCE);
+    expect((await save(SOURCE, SOURCE)).markdown).toBe(SOURCE);
   });
 
   it("rewrites only the paragraph that changed", async () => {
@@ -80,6 +97,12 @@ describe("serializeKeeping", () => {
     // A `-` item among `*` ones would start a list of its own: the list is
     // the serializer's, everything else the source's.
     expect(markdown).toBe(SOURCE.replace("* star one\n* star two\n    * deep", "- star one\n- star 2\n  - deep"));
+  });
+
+  it("keeps an untouched table's column alignment, which the serializer drops", async () => {
+    const source = "| x | y |\n|:--|--:|\n| 3 | 4 |\n\nText.\n";
+    const edited = source.replace("Text.", "Text, more.");
+    expect((await save(source, edited)).markdown).toBe(edited);
   });
 
   it("keeps the units around an added paragraph", async () => {
@@ -106,16 +129,16 @@ describe("serializeKeeping", () => {
     expect((await save(crlf, edited)).markdown).toBe(edited);
   });
 
-  it("gives the same result with the previous serialization handed in", async () => {
+  it("gives the same result with the loaded doc handed in", async () => {
     const edited = SOURCE.replace("Plain paragraph two.", "Plain paragraph deux.");
-    const previous = codec.serialize(codec.parse(SOURCE));
-    expect((await save(SOURCE, edited, previous)).markdown).toBe((await save(SOURCE, edited)).markdown);
+    const withDoc = await save(SOURCE, edited, undefined, codec.parse(SOURCE));
+    expect(withDoc.markdown).toBe((await save(SOURCE, edited)).markdown);
   });
 
-  it("writes the plain serialization when there's no previous source", async () => {
+  it("writes the plain serialization when there's no previous file", async () => {
     const result = await serializeKeeping(codec, codec.parse(SOURCE), null);
-    expect(result.markdown).toBe(result.canonical);
-    expect(result.hash).toBe(codec.hash(result.canonical));
+    expect(result.markdown).toBe(codec.serialize(codec.parse(SOURCE)));
+    expect(result.hash).toBe(codec.hash(result.markdown));
   });
 
   it("writes the plain serialization when keeping bytes would change the document", async () => {
@@ -124,8 +147,7 @@ describe("serializeKeeping", () => {
     // inlined, so the kept paragraph below would lose its target.
     const source = "See [x].\n\n[x]: https://example.com\n\nKept [x] too.\n";
     const edited = source.replace("See", "Look at");
-    const { markdown, canonical } = await save(source, edited);
-    expect(markdown).toBe(canonical);
+    expect((await save(source, edited)).markdown).toBe(`${codec.serialize(codec.parse(edited))}\n`);
   });
 
   it("keeps only the ending of a file already in the serializer's style", async () => {
@@ -133,6 +155,101 @@ describe("serializeKeeping", () => {
     const edited = plain.replace("Text.", "Text, more.");
     expect((await save(plain, edited)).markdown).toBe(edited);
     expect((await save(plain.trimEnd(), edited)).markdown).toBe(edited.trimEnd());
+  });
+
+  describe("from save to save", () => {
+    it("keeps the untouched units across several saves in different places", async () => {
+      const last = await saves(
+        SOURCE,
+        (text) => text.replace("Plain paragraph one.", "Plain paragraph uno."),
+        (text) => text.replace("Plain paragraph uno.", "Plain paragraph uno, dos."),
+        (text) => text.replace("| 1 | 2 |", "| 1 | 3 |"),
+        (text) => text.replace("Plain paragraph two.\n", "Plain paragraph two.\n\nAdded.\n"),
+      );
+      const expected = SOURCE.replace("Plain paragraph one.", "Plain paragraph uno, dos.")
+        .replace("| 1 | 2 |", "| 1 | 3 |")
+        .replace("Plain paragraph two.\n", "Plain paragraph two.\n\nAdded.\n");
+      expect(last.markdown).toBe(expected);
+    });
+
+    it("rewrites the list around an item edited on a later save", async () => {
+      const last = await saves(
+        SOURCE,
+        (text) => text.replace("Plain paragraph one.", "Plain paragraph uno."),
+        (text) => text.replace("* star two", "* star 2"),
+      );
+      expect(last.markdown).toBe(
+        SOURCE.replace("Plain paragraph one.", "Plain paragraph uno.").replace(
+          "* star one\n* star two\n    * deep",
+          "- star one\n- star 2\n  - deep",
+        ),
+      );
+    });
+
+    it("keeps the final newline when typing at the end of the file", async () => {
+      const last = await saves(
+        SOURCE,
+        (text) => text.replace("End line.", "End line, more."),
+        (text) => text.replace("End line, more.", "End line, more.\n\nAfter it."),
+      );
+      expect(last.markdown).toBe(SOURCE.replace("End line.", "End line, more.\n\nAfter it."));
+    });
+
+    it("writes the same bytes again when nothing changed", async () => {
+      const once = await save(SOURCE, SOURCE.replace("Plain paragraph one.", "Plain paragraph uno."));
+      const again = await save(SOURCE, SOURCE.replace("Plain paragraph one.", "Plain paragraph uno."), once);
+      expect(again.markdown).toBe(once.markdown);
+    });
+
+    it("renders only the blocks around the change", async () => {
+      const big = Array.from({ length: 50 }, (_, i) => `__Para ${i}__ text.\n`).join("\n");
+      const first = await save(big, big.replace("Para 10__ text", "Para 10__ text!"));
+      const render = vi.spyOn(codec, "render");
+      const second = await save(big, big.replace("Para 10__ text", "Para 10__ text!").replace("Para 40__", "Para 40__ x"), first);
+      expect(second.markdown).toBe(big.replace("__Para 10__ text.", "**Para 10** text!.").replace("__Para 40__ text.", "**Para 40** x text."));
+      for (const [rendered] of render.mock.calls) expect(rendered.length).toBeLessThan(100);
+      render.mockRestore();
+    });
+
+    it("renders nothing in a file already in the serializer's style", async () => {
+      const plain = "# Title\n\n- one\n- two\n\nText.\n";
+      const render = vi.spyOn(codec, "render");
+      const split = await saves(plain, (text) => text.replace("Text.", "Text, more."), (text) => text.replace("- two", "- two!"));
+      expect(split.markdown).toBe(plain.replace("Text.", "Text, more.").replace("- two", "- two!"));
+      expect(render).not.toHaveBeenCalled();
+      render.mockRestore();
+    });
+  });
+
+  it("always writes what parses to the saved document, over many random edits", async () => {
+    // Deterministic: the same edits every run.
+    let seed = 7;
+    const random = (n: number) => {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31;
+      return seed % n;
+    };
+    const source = [
+      SOURCE,
+      "+ plus a\n+ plus b\n\n  indented continuation\n\n+ plus c\n",
+      "> quoted __strong__\n> more\n\nAfter the quote.\n",
+      "Lazy paragraph\ncontinued here\n",
+      "| x | y |\n|-|-|\n| 3 | 4 |\n| 5 | 6 |\n",
+    ].join("\n");
+    const words = ["alpha", "*beta*", "- gamma", "1. delta", "> eps", "\n\n", "\n", "__z__", "| q |", "    code"];
+    let text = source;
+    let last: KeptSave | undefined;
+    for (let step = 0; step < 60; step++) {
+      const lines = text.split("\n");
+      const line = random(lines.length);
+      const kind = random(3);
+      if (kind === 0) lines[line] = `${lines[line]} ${words[random(words.length)]}`;
+      else if (kind === 1) lines.splice(line, 0, words[random(words.length)]!);
+      else if (lines.length > 3) lines.splice(line, 1);
+      // What the editor would hold: the edited text as parsed.
+      text = lines.join("\n");
+      last = await save(source, text, last);
+      text = last.markdown;
+    }
   });
 
   it("hashes what it writes", async () => {

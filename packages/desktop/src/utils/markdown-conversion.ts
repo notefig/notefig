@@ -13,7 +13,7 @@
 import type { JSONContent } from "@tiptap/core";
 import type { MarkdownWorkerApi } from "@/workers/markdown-codec.worker";
 import type { MergedMarkdown } from "@/modules/sync/sync-merge";
-import type { SavedSource } from "@/utils/markdown-units";
+import type { SavedFile } from "@/utils/markdown-units";
 import {
   createWorkerClient,
   WorkerRpcError,
@@ -23,8 +23,8 @@ import {
 export interface SerializedDoc {
   markdown: string;
   hash: string;
-  /** The plain serialization `markdown` kept source bytes over. */
-  canonical: string;
+  /** What the next save keeps bytes against. */
+  saved: SavedFile;
 }
 
 type Converter = WorkerClient<MarkdownWorkerApi>;
@@ -36,7 +36,7 @@ async function createInlineConverter(): Promise<Converter> {
   const codec = createMarkdownCodec();
   return {
     parse: async (markdown: string) => codec.parse(markdown),
-    serialize: async (doc: JSONContent, previous: SavedSource | null = null) => {
+    serialize: async (doc: JSONContent, previous: SavedFile | null = null) => {
       const { serializeKeeping } = await import("@/utils/markdown-units");
       return serializeKeeping(codec, doc, previous);
     },
@@ -110,7 +110,7 @@ export function parseMarkdown(markdown: string): Promise<JSONContent> {
 
 /** `doc` as markdown; with `previous`, the file as last known, every unit
  *  that didn't change keeps its bytes (`utils/markdown-units.ts`). */
-export function serializeDoc(doc: JSONContent, previous: SavedSource | null = null): Promise<SerializedDoc> {
+export function serializeDoc(doc: JSONContent, previous: SavedFile | null = null): Promise<SerializedDoc> {
   return withConverter((c) => c.serialize(doc, previous));
 }
 
@@ -153,12 +153,9 @@ export class DocumentSync {
    * compare instead of re-serializing the doc per watcher event. */
   private lastMarkdown: string | null = null;
   private lastHash: string | null = null;
-  /** What the serializer makes of `lastMarkdown`: a save keeps the bytes
-   *  of what didn't change against it. Null until a save needs it, then
-   *  serialized from `lastDoc`, the doc that file content was parsed into
-   *  (or, lacking one, parsed again in the worker). */
-  private lastCanonical: string | null = null;
-  private lastDoc: JSONContent | null = null;
+  /** The file as last loaded, adopted or saved, for the next save to keep
+   *  the bytes of what didn't change. */
+  private saved: SavedFile | null = null;
 
   /** Persists a serialization and its hash; assigned by the editor-side
    *  hook. */
@@ -206,8 +203,7 @@ export class DocumentSync {
     if (this.lastMarkdown === null) {
       this.lastMarkdown = fileContent;
       this.lastHash = contentHash ?? null;
-      this.lastCanonical = null;
-      this.lastDoc = doc ?? null;
+      this.saved = { source: fileContent, doc: doc ?? null };
     }
   }
 
@@ -250,8 +246,7 @@ export class DocumentSync {
     this.dirty = false;
     this.lastMarkdown = fileContent;
     this.lastHash = contentHash;
-    this.lastCanonical = null;
-    this.lastDoc = doc ?? null;
+    this.saved = { source: fileContent, doc: doc ?? null };
   }
 
   /** Ship an editor update. The snapshot is taken lazily so a burst of
@@ -281,20 +276,6 @@ export class DocumentSync {
     }
   }
 
-  /** The file as last known, for the save to keep bytes against. */
-  private async previousSave(): Promise<SavedSource | null> {
-    if (this.lastMarkdown === null) return null;
-    const source = this.lastMarkdown;
-    if (this.lastCanonical === null && this.lastDoc) {
-      const canonical = (await serializeDoc(this.lastDoc)).canonical;
-      // A baseline replaced meanwhile keeps its own.
-      if (this.lastMarkdown === source) this.lastCanonical = canonical;
-      this.lastDoc = null;
-      return { source, canonical };
-    }
-    return { source, canonical: this.lastCanonical };
-  }
-
   private async runSaveLoop(): Promise<void> {
     this.saving = true;
     try {
@@ -303,17 +284,14 @@ export class DocumentSync {
         const generation = this.generation;
         const snapshot = this.getSnapshot;
         if (!snapshot) return;
-        const doc = snapshot();
-        const previous = await this.previousSave();
-        const { markdown, hash, canonical } = await serializeDoc(doc, previous);
+        const { markdown, hash, saved } = await serializeDoc(snapshot(), this.saved);
         // Document replaced (adoption) mid-serialize: drop the stale result;
         // the loop re-runs if post-adoption edits arrived.
         if (generation !== this.generation) continue;
 
         this.lastMarkdown = markdown;
         this.lastHash = hash;
-        this.lastCanonical = canonical;
-        this.lastDoc = null;
+        this.saved = saved;
         await this.writer?.(markdown, hash);
       } while (this.dirty);
     } catch (error) {
