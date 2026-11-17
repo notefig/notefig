@@ -192,6 +192,13 @@ describe("the Remote tool", () => {
     expect(sync.dismissOverwritten).toHaveBeenCalled();
   });
 
+  it("names who else syncs the branch now, and nobody when solo", async () => {
+    const shared = await render({ setup: "on", peers: [{ deviceId: "b", name: "Bob" }, { deviceId: "c", name: "Carol" }] });
+    expect(shared.text()).toContain("Bob, Carol");
+    const solo = await render({ setup: "on" });
+    expect(solo.text()).not.toContain("Bob");
+  });
+
   it("offers nothing to press where sync can't run, only why", async () => {
     const { text } = await render({ setup: "unavailable", remote: null, reason: "No remote to sync with." });
     expect(text()).toContain("No remote to sync with.");

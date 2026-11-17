@@ -14,6 +14,9 @@
  *   after a long time offline) wait for the user.
  * - `overwritten`: our text a merge replaced with the branch's, flagged
  *   until dismissed, whatever the state.
+ * - `peers`: the other devices syncing the branch now. Sync is shared
+ *   while there are any (a fast poll, a commit soon after each save), solo
+ *   otherwise.
  */
 
 export type SyncSetup = "unavailable" | "off" | "ask" | "declined" | "on";
@@ -37,6 +40,13 @@ export interface SyncReturnSummary {
   remoteFiles: string[];
   /** Authors of the remote's new commits. */
   people: string[];
+}
+
+/** Another device syncing the branch now (`sync-presence.ts`). */
+export interface SyncPeer {
+  deviceId: string;
+  /** Its user's git name. */
+  name: string;
 }
 
 /** Our text a merge replaced with the branch's. */
@@ -65,6 +75,7 @@ export interface SyncState {
   summary: SyncReturnSummary | null;
   /** Newest last, at most `MAX_OVERWRITTEN`. */
   overwritten: SyncOverwrite[];
+  peers: SyncPeer[];
 }
 
 export type SyncEvent =
@@ -76,6 +87,7 @@ export type SyncEvent =
   | { type: "paused"; detail: string; summary: SyncReturnSummary }
   | { type: "resume" }
   | { type: "overwritten"; items: SyncOverwrite[] }
+  | { type: "peers"; peers: SyncPeer[] }
   | { type: "dismiss-overwritten" };
 
 export const INITIAL_SYNC_STATE: SyncState = {
@@ -88,6 +100,7 @@ export const INITIAL_SYNC_STATE: SyncState = {
   detail: null,
   summary: null,
   overwritten: [],
+  peers: [],
 };
 
 const RUNNING_CLEAR = { activity: "idle", fault: null, failures: 0, detail: null, summary: null } as const;
@@ -96,6 +109,11 @@ const MAX_OVERWRITTEN = 100;
 /** Waiting on the user: nothing runs until `resume`. */
 export function isStuck(state: SyncState): boolean {
   return state.fault === "auth-error" || state.fault === "diverged" || state.fault === "paused";
+}
+
+/** Someone else syncs the branch now: edits travel within seconds. */
+export function isShared(state: SyncState): boolean {
+  return state.peers.length > 0;
 }
 
 /** Whether the engine commits, polls and pushes. */
@@ -121,6 +139,7 @@ const WHILE_ON: Handlers = {
   overwritten: (state, { items }) =>
     items.length === 0 ? state : { ...state, overwritten: [...state.overwritten, ...items].slice(-MAX_OVERWRITTEN) },
   "dismiss-overwritten": (state) => (state.overwritten.length === 0 ? state : { ...state, overwritten: [] }),
+  peers: (state, { peers }) => ({ ...state, peers }),
 };
 
 export function sameRemote(a: SyncRemote | null, b: SyncRemote | null): boolean {
@@ -149,6 +168,10 @@ export const POLL_MS = 12_000;
 /** Commit once per sitting: after this long without a save, on window
  *  blur, or when the workspace closes. */
 export const IDLE_COMMIT_MS = 180_000;
+/** Shared: someone may be reading along, so look every second… */
+export const SHARED_POLL_MS = 1_000;
+/** …and commit this soon after the saves settle. */
+export const SHARED_COMMIT_MS = 2_000;
 const OFFLINE_MAX_MS = 120_000;
 const THROTTLED_BASE_MS = 60_000;
 const THROTTLED_MAX_MS = 600_000;
@@ -156,7 +179,8 @@ const THROTTLED_MAX_MS = 600_000;
 /** How long until the next poll (before jitter), backing off on faults. */
 export function pollInterval(state: SyncState): number {
   const backoff = 2 ** Math.min(state.failures, 6);
-  if (state.fault === "offline") return Math.min(POLL_MS * backoff, OFFLINE_MAX_MS);
+  const poll = isShared(state) ? SHARED_POLL_MS : POLL_MS;
+  if (state.fault === "offline") return Math.min(poll * backoff, OFFLINE_MAX_MS);
   if (state.fault === "throttled") return Math.min(THROTTLED_BASE_MS * backoff, THROTTLED_MAX_MS);
-  return POLL_MS;
+  return poll;
 }

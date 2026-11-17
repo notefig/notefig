@@ -745,6 +745,7 @@ i18n
           syncMore: "More",
           syncRepository: "Repository",
           syncBranch: "Branch",
+          syncPeers: "Also syncing now",
           syncSignIn: "Sign-in",
           syncGoOn: "Go on",
           syncNotARepository: "This folder isn't a git repository, so there's no remote to sync with.",
