@@ -222,6 +222,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       remote: { url: remote.url, credential: root },
       branch: remote.branch,
       author: name && email ? { name, email } : FALLBACK_AUTHOR,
+      deviceId: device.deviceId,
       lastSyncedAt: device.lastSyncedAt ?? null,
       fullScan,
       hooks: deps.hooks,

@@ -24,6 +24,11 @@
  *    push reruns the cycle (bounded, with jitter); a push with no answer
  *    may have landed, so the next poll comes soon.
  *
+ * The same poll reads who else syncs the branch (`sync-presence.ts`), and a
+ * settled cycle keeps this device's own presence fresh. While anyone else
+ * does, sync is shared (MET-293): a poll a second, a commit two seconds
+ * after the saves settle instead of once per sitting.
+ *
  * Back after more than an hour away with local changes, or far apart from
  * the remote, it pauses before taking anything in until the user says go.
  */
@@ -37,10 +42,13 @@ import { IGNORE_RULES } from "@/utils/ignore";
 import type { MergedMarkdown } from "./sync-merge";
 import { createOverlaps, swapsAmong, writeSynced } from "./sync-overlap";
 import { path as pathutil } from "@/utils/path";
+import { createPresence, presencePrefix } from "./sync-presence";
 import {
   IDLE_COMMIT_MS,
+  SHARED_COMMIT_MS,
   pollInterval,
   isRunning,
+  isShared,
   type SyncEvent,
   type SyncReturnSummary,
   type SyncState,
@@ -57,6 +65,8 @@ export interface SyncEngineDeps {
   remote: GitRemote;
   branch: string;
   author: SyncAuthor;
+  /** This clone's, for its presence ref. */
+  deviceId: string;
   /** When this device last synced; null if never. */
   lastSyncedAt: number | null;
   /** Sync was just turned on: commit everything, not a scan. */
@@ -256,6 +266,16 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     recordHeld: deps.recordHeld,
     alive,
     now,
+  });
+  const presence = createPresence({
+    deviceId: deps.deviceId,
+    author,
+    git,
+    remote,
+    branch,
+    now,
+    state: deps.state,
+    dispatch: deps.dispatch,
   });
   const markDirty = (paths: string[]) => {
     if (typeof dirty !== "string") for (const path of paths) dirty.add(path);
@@ -609,7 +629,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
 
   /** Poll, pull if the remote moved, push if ahead. */
   const reconcile = async (): Promise<boolean> => {
-    const refs = await git.listRemoteRefs(remote, [branchRef]);
+    const refs = await git.listRemoteRefs(remote, [branchRef, presencePrefix(branch)]);
+    const solo = !isShared(deps.state());
+    presence.observe(refs);
+    // Someone came: what's waiting for the sitting to end goes now.
+    if (solo && isShared(deps.state()) && pending()) again = commitDue = true;
     const theirs = refs.find((ref) => ref.ref === branchRef)?.oid ?? null;
     const ours = await head();
     if (theirs) await checkReturn(theirs, ours);
@@ -641,6 +665,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     if (!isRunning(deps.state())) return;
     try {
       if ((await git.currentBranch()) !== branch) {
+        // Its delete is sent before git closes; nothing waits for it.
+        void presence.leave();
         stopped = true;
         deps.branchChanged();
         return;
@@ -659,6 +685,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
         deps.dispatch({ type: "failed", fault: "offline", detail: "The remote keeps moving; trying again soon." });
         return;
       }
+      await presence.heartbeat();
+      await presence.readNames();
       markSynced();
       deps.dispatch({ type: "settled" });
     } catch (error) {
@@ -711,7 +739,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     cancelIdle?.();
     // A held file's save is what its merge waits for.
     const settle = trees.some(overlaps.isHeld);
-    cancelIdle = setTimer(() => void syncNow(), settle ? HELD_SETTLE_MS : IDLE_COMMIT_MS);
+    const delay = settle ? HELD_SETTLE_MS : isShared(deps.state()) ? SHARED_COMMIT_MS : IDLE_COMMIT_MS;
+    cancelIdle = setTimer(() => void syncNow(), delay);
   };
   const pending = () => typeof dirty === "string" || dirty.size > 0 || overlaps.size > 0;
   const onBlur =
@@ -760,7 +789,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       let cancelDeadline = () => {};
       const deadline = new Promise<void>((done) => (cancelDeadline = setTimer(done, CLOSE_SYNC_MS)));
       const last = pending() && isRunning(deps.state()) ? syncNow() : running;
-      await Promise.race([last?.catch(() => {}), deadline]);
+      const leave = async () => {
+        await last?.catch(() => {});
+        await presence.leave();
+      };
+      await Promise.race([leave(), deadline]);
       cancelDeadline();
       stopped = true;
       cancelIdle?.();
