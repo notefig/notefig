@@ -4,6 +4,7 @@ import type { CodeBlockOptions } from "@tiptap/extension-code-block";
 /** Its diff blocks' paths are in `workspaceRoot`'s workspace. */
 type MarkdownCodeBlockOptions = CodeBlockOptions & { workspaceRoot: string | null };
 import { Plugin } from "@tiptap/pm/state";
+import { Fragment } from "@tiptap/pm/model";
 import Placeholder from "@tiptap/extension-placeholder";
 import CharacterCount from "@tiptap/extension-character-count";
 import { EditorImage } from "./editor-image-node";
@@ -150,6 +151,39 @@ const SkipEmptyTransactions = Extension.create({
   },
 });
 
+/**
+ * A copy's plain text is its markdown (MET-295), so a paste that only
+ * takes plain text (a terminal, a plain field) keeps links and formatting,
+ * as the HTML beside it does. Not tiptap-markdown's `transformCopiedText`:
+ * it serializes a selection inside one block as bare text nodes, and marks
+ * are only written from within a block, so a link copied from a paragraph
+ * lost its target. Inline content is put in a paragraph first (the
+ * serializer writes what a fragment holds, so the paragraph is one), and
+ * text from inside a code block is copied as it reads.
+ */
+const MarkdownCopy = Extension.create({
+  name: "markdownCopy",
+
+  addProseMirrorPlugins() {
+    const { editor } = this;
+    const serializer = () =>
+      (editor.storage as unknown as { markdown: { serializer: { serialize(content: Fragment): string } } })
+        .markdown.serializer;
+    return [
+      new Plugin({
+        props: {
+          clipboardTextSerializer: ({ content }, view) => {
+            if (!content.firstChild?.isInline) return serializer().serialize(content);
+            // Text from inside a code block is code, not markdown to escape.
+            if (view.state.selection.$from.parent.type.spec.code) return content.textBetween(0, content.size);
+            return serializer().serialize(Fragment.from(editor.schema.nodes.paragraph!.create(null, content)));
+          },
+        },
+      }),
+    ];
+  },
+});
+
 export const editorExtensions = [
   ...createSchemaExtensions(
     MarkdownImage,
@@ -176,4 +210,5 @@ export const editorExtensions = [
   NativeFormatIntercept,
   NativeHistoryFocusGuard,
   SkipEmptyTransactions,
+  MarkdownCopy,
 ];
