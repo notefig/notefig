@@ -13,6 +13,7 @@ import { Extension, Node } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { ListItem } from "@tiptap/extension-list";
 import { Markdown } from "tiptap-markdown";
+import type MarkdownIt from "markdown-it";
 import Underline from "@tiptap/extension-underline";
 import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
@@ -307,6 +308,31 @@ export function usePluginsOnce(md: {
   }) as typeof md.use;
 }
 
+/** A list item in a quote, after the quote's markers. */
+const QUOTED_ITEM = /^(?:[ ]{0,3}>[ ]?)+[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
+const QUOTED_TAB_ITEM = /^((?:[ ]{0,3}>[ ]?)+)(\t+)(?=(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$))/;
+
+/**
+ * A sub-item in a quote reads as one, as Obsidian writes it: a tab after
+ * the quote's `> ` (MET-296). CommonMark counts that tab as two columns,
+ * short of the three a numbered item's text starts at, so `> \t1. sub`
+ * under `> 1. one` read as an item of the outer list, and a save wrote the
+ * list flattened and renumbered. Under an item, each of those tabs reads as
+ * four spaces; elsewhere (a quote's first line) nothing changes. Lines stay
+ * where they are, so token line maps still point into the file.
+ */
+function quotedTabItems(md: MarkdownIt): void {
+  md.core.ruler.after("normalize", "quoted_tab_items", (state) => {
+    if (!state.src.includes(">\t") && !state.src.includes("> \t")) return;
+    const lines = state.src.split("\n");
+    lines.forEach((line, i) => {
+      if (i > 0 && QUOTED_ITEM.test(lines[i - 1]!))
+        lines[i] = line.replace(QUOTED_TAB_ITEM, (_, quote: string, tabs: string) => quote.replace(/>$/, "> ") + "    ".repeat(tabs.length));
+    });
+    state.src = lines.join("\n");
+  });
+}
+
 export const FrontmatterMarkdown = Markdown.extend({
   onBeforeCreate() {
     const editor = this.editor as unknown as FrontmatterMarkdownEditor;
@@ -323,6 +349,7 @@ export const FrontmatterMarkdown = Markdown.extend({
     baseMarkdownOnBeforeCreate.call(this);
     const storage = editor.storage.markdown!;
     usePluginsOnce(storage.parser.md);
+    storage.parser.md.use(quotedTabItems as never);
     wrapParserWithFrontmatter(storage);
     editor.options.initialContent = initialContent;
     editor.options.content = storage.parser.parse(initialContent);

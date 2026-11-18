@@ -167,6 +167,19 @@ describe("codec ↔ editor equivalence", () => {
   });
 });
 
+describe("Obsidian's quoted sub-items", () => {
+  it("reads a tab-indented item under a quoted item as its sub-item, as the editor does", () => {
+    const md = "> 1. one\n> \t1. sub\n> \t\t1. deep\n> 2. two";
+    expect(codec.serialize(codec.parse(md))).toBe("> 1. one\n>    1. sub\n>       1. deep\n> 2. two");
+    expect(codec.parse(md)).toEqual(createEditor(md).getJSON());
+  });
+
+  it("leaves a tab that follows no item as CommonMark reads it", () => {
+    expect(codec.serialize(codec.parse("> \t1. first"))).toBe("> 1. first");
+    expect(codec.serialize(codec.parse("> text\n> \tmore"))).toBe("> text more");
+  });
+});
+
 describe("parser lifetime", () => {
   const taskList = "- [ ] one\n- [x] two\n\nText.";
 
