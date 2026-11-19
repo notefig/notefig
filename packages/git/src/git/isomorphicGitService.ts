@@ -1047,15 +1047,14 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
-  async listFiles(input?: { ref?: string; index?: boolean }): Promise<string[]> {
+  async listFiles(input?: { ref?: string }): Promise<string[]> {
     try {
       return await git.listFiles({
         fs: this.fsClient,
         dir: this.dir,
         gitdir: this.gitdir,
         cache: this.cache,
-        // isomorphic-git lists the index when given no ref.
-        ref: input?.index ? undefined : (input?.ref ?? "HEAD"),
+        ref: input?.ref ?? "HEAD",
       });
     } catch (error) {
       throw this.fail(error);

@@ -241,9 +241,7 @@ export interface GitService {
   pullBranch(remote: GitRemote, target: GitBranchTarget): Promise<number>;
   /** Every file path (`/`-separated) in a commit's tree (`ref`: oid or
    *  ref, default `HEAD`). */
-  /** Files tracked at `ref` (default HEAD), or, with `index`, in the
-   *  index: no tree is read. */
-  listFiles(input?: { ref?: string; index?: boolean }): Promise<string[]>;
+  listFiles(input?: { ref?: string }): Promise<string[]>;
   /** A file's bytes as of a ref/commit; null when there's no file at
    *  that path (nothing, or a folder). With an empty `filepath`, `ref` is
    *  a blob's oid. */

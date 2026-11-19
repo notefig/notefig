@@ -14,6 +14,7 @@
  * scenarios the other specs measure.
  */
 import { test, type Page } from "@playwright/test";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
   autosave,
@@ -29,7 +30,7 @@ import {
   placeCaret,
   typeAndDelete,
 } from "./large-document";
-import { resetLargeDocument, soloSyncWorkspace } from "./fixture";
+import { largeDocument, soloSyncWorkspace } from "./fixture";
 import { saveSamples } from "./results";
 import { withShim } from "./shim";
 
@@ -144,8 +145,9 @@ test("open a solo sync workspace until its first sync is done", async ({ page })
   };
   // One extra, unrecorded open first, to warm the disk cache.
   for (let i = 0; i <= SYNC_OPEN_SAMPLES; i++) {
-    // An edit made while the app was closed, for the cycle to commit.
-    await resetLargeDocument(workspace);
+    // An edit made while the app was closed, for the cycle to commit: one
+    // the last commit doesn't have, so every open commits.
+    await fs.writeFile(path.join(workspace, "large.md"), `${largeDocument()}\nEdited before open ${i}.\n`);
     const { ms, longTasks } = await withShim(async () => {
       await page.goto("/");
       await page.waitForFunction(() => Boolean(window.__notefigTest));

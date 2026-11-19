@@ -309,9 +309,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
         .map((meta) => meta.path),
     );
     const listed = new Set(onDisk.map(tree));
-    // What the index tracks: the same paths as HEAD once committed, read
-    // without walking a tree.
-    const unlisted = (await git.listFiles({ index: true })).filter((path) => !listed.has(path));
+    const unlisted = (await git.listFiles()).filter((path) => !listed.has(path));
     const gone = await inBatches(unlisted, async (batch) =>
       (await deps.fs.getMetadata(batch.map(absolute))).failed
         .filter((failure) => failure.type === "not_found")

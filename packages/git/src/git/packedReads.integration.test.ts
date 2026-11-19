@@ -109,14 +109,6 @@ describeRealGit("[real-git] packed object reads", () => {
     expect(await service.readTextFile({ ref: head, filepath: "extra.md" })).toBe("one more\n");
   });
 
-  it("lists the index's files without reading a tree", async () => {
-    const host = new CountingHost(repoDir);
-    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
-    const fromIndex = await service.listFiles({ index: true });
-    expect(host.ranged).toBe(0);
-    expect(fromIndex.sort()).toEqual((await service.listFiles()).sort());
-  });
-
   it("refuses a pack whose trailer doesn't match its index", async () => {
     const packDir = join(repoDir, ".git", "objects", "pack");
     const file = (await readdir(packDir)).find((name) => name.endsWith(".pack"))!;
