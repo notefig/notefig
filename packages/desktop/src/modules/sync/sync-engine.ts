@@ -693,6 +693,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       }
       await presence.heartbeat();
       await presence.read();
+      await presence.sweep();
       markSynced();
       deps.dispatch({ type: "settled" });
     } catch (error) {

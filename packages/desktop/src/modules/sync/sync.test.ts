@@ -21,7 +21,7 @@ import { disposeEditor, getOrCreateEditor, type EditorFs } from "@/components/ed
 import { getDocumentSync, whenDocumentSyncClean } from "@/utils/markdown-conversion";
 import { IDLE_COMMIT_MS, POLL_MS, SHARED_COMMIT_MS, SHARED_POLL_MS, pollInterval, syncModule } from "@/modules/sync";
 import { OFFLINE_RETURN_MS } from "./sync-engine";
-import { HEARTBEAT_MS, PRESENCE_STALE_MS } from "./sync-presence";
+import { HEARTBEAT_MS, PRESENCE_STALE_MS, SWEEP_STALE_MS } from "./sync-presence";
 import { docUnits } from "./sync-editor";
 import * as merging from "./sync-merge";
 import * as telemetry from "@/telemetry/telemetry";
@@ -1131,6 +1131,23 @@ describe("sync: shared, while another device syncs the branch", () => {
     await a.syncNow();
     expect(a.state().peers).toEqual([]);
     expect(pollInterval(a.state())).toBe(POLL_MS);
+  });
+
+  it("sweeps a ref a device left standing, keeps one that moved, and drops its own replaced commits", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { sync: a, ws, remote } = await setup();
+    const ref = (id: string) => `refs/notefig/v1/presence/main/${id}`;
+    const ownBefore = await runGit(remote.bare, ["rev-parse", ref("dev")]);
+    for (const id of ["ghost", "moving"]) await runGit(remote.bare, ["update-ref", ref(id), "main"]);
+    await a.syncNow();
+    vi.setSystemTime(Date.now() + SWEEP_STALE_MS);
+    const identity = ["-c", "user.name=B", "-c", "user.email=b@example.com"];
+    const moved = await runGit(remote.bare, [...identity, "commit-tree", "main^{tree}", "-p", "main", "-m", "{}"]);
+    await runGit(remote.bare, ["update-ref", ref("moving"), moved]);
+    await a.syncNow();
+
+    expect(await presence(remote.bare)).toBe(`${ref("dev")}\n${ref("moving")}`);
+    await expect(runGit(ws, ["cat-file", "-e", ownBefore])).rejects.toThrow();
   });
 
   it("forgets who it saw while it can't reach the remote", async () => {

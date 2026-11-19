@@ -288,6 +288,8 @@ export class IsomorphicGitService implements GitService {
    * so a deleted/rebuilt gitdir never serves ghosts.
    */
   private cache: Record<string, unknown> = {};
+  /** The packs `transient` fetches wrote, and when. */
+  private transientPacks: { name: string; at: number }[] = [];
 
   constructor(
     private readonly host: GitStorageHost,
@@ -1256,8 +1258,10 @@ export class IsomorphicGitService implements GitService {
   async fetchRefs(
     remote: GitRemote,
     refs: string[],
+    options: { transient?: boolean } = {},
   ): Promise<GitRemoteRefResult[]> {
     const results: GitRemoteRefResult[] = [];
+    const before = options.transient ? new Set(await this.listPacks()) : null;
     try {
       // isomorphic-git fetches one remote ref per call (an advertisement
       // GET, then an upload-pack POST).
@@ -1283,7 +1287,41 @@ export class IsomorphicGitService implements GitService {
       return results;
     } catch (error) {
       throw this.fail(error);
+    } finally {
+      if (before) {
+        const at = Date.now();
+        for (const name of await this.listPacks()) {
+          if (!before.has(name)) this.transientPacks.push({ name, at });
+        }
+      }
     }
+  }
+
+  private async listPacks(): Promise<string[]> {
+    const entries = await this.host
+      .readDir(joinGitPath(this.gitdir, "objects/pack"))
+      .catch(() => []);
+    return entries.map(({ name }) => name).filter((name) => name.endsWith(".pack"));
+  }
+
+  /**
+   * A branch fetch never builds on a transient pack: it tells the remote
+   * only of the branch's own tip, so whatever it needs comes in its own.
+   */
+  async sweepTransient(input: { olderThanMs: number; oids?: string[] }): Promise<void> {
+    const drop = (path: string) =>
+      this.host.deleteFile(joinGitPath(this.gitdir, `objects/${path}`)).catch(() => {});
+    for (const oid of input.oids ?? []) await drop(`${oid.slice(0, 2)}/${oid.slice(2)}`);
+    const cutoff = Date.now() - input.olderThanMs;
+    const expired = this.transientPacks.filter(({ at }) => at <= cutoff);
+    if (expired.length === 0) return;
+    this.transientPacks = this.transientPacks.filter(({ at }) => at > cutoff);
+    for (const { name } of expired) {
+      await drop(`pack/${name.replace(/\.pack$/, ".idx")}`);
+      await drop(`pack/${name}`);
+    }
+    // isomorphic-git's cache lists the packs and holds their indexes.
+    this.cache = {};
   }
 
   /**
