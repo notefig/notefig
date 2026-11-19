@@ -171,6 +171,10 @@ function centerScrollTarget(
     ) {
       return false;
     }
+    // A target with no boxes is gone for good — the widget was deleted or
+    // its composer hid (a fresh rect would read zero and pull the scroll
+    // upward every frame); the landing point no longer exists to track.
+    if (target.getClientRects().length === 0) return false;
     const frame = scroller.getBoundingClientRect();
     const rect = target.getBoundingClientRect();
     let mid = (rect.top + rect.bottom) / 2;

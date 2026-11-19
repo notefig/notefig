@@ -676,4 +676,55 @@ test.describe("prompt widget navigation", () => {
     // as a whole.
     expect((await draftBox("blob_a"))!.top).toBeLessThan(0);
   });
+
+  test("deleting the widget just after a jump leaves the scroll alone (MET-286)", async ({
+    page,
+  }) => {
+    // Real paragraphs, not soft-wrapped lines: the widget must sit deep
+    // enough that centering it takes a scroll (with room below to do it).
+    const filler = (from: number, to: number) =>
+      Array.from({ length: to - from }, (_, i) => [`filler paragraph ${i}`, ""]).flat();
+    await openHarness(page, {
+      content: [
+        "para one",
+        "",
+        '<!-- notefig:prompt id="blob_a" task="task_a" -->',
+        "",
+        ...filler(0, 200),
+        '<!-- notefig:prompt id="blob_b" task="task_b" -->',
+        "",
+        ...filler(200, 400),
+        "",
+      ].join("\n"),
+    });
+
+    const scrollTop = () =>
+      page.evaluate(() => {
+        const scroller = document.querySelector(".tiptap-editor-wrapper");
+        return scroller instanceof HTMLElement ? scroller.scrollTop : null;
+      });
+
+    await page
+      .locator(".ProseMirror p", { hasText: "para one" })
+      .first()
+      .click();
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await expect
+      .poll(async () => (await scrollTop()) ?? 0)
+      .toBeGreaterThan(1000);
+    const landed = (await scrollTop())!;
+
+    // Backspace on the empty composer the jump just landed in removes the
+    // widget while the jump's settle watch is still running.
+    await page.keyboard.press("Backspace");
+    await expect
+      .poll(() => page.locator('[data-blob-id="blob_b"]').count())
+      .toBe(0);
+
+    // The watch stops instead of walking the scroll toward the document
+    // top: the viewport stays around the removal.
+    await page.waitForTimeout(600);
+    expect((await scrollTop())!).toBeGreaterThanOrEqual(landed - 700);
+  });
 });
