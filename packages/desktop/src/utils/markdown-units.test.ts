@@ -105,6 +105,13 @@ describe("serializeKeeping", () => {
     expect((await save(source, edited)).markdown).toBe(`__bold__ before.\n\n${list}\n\n__bold__ outside.\n`);
   });
 
+  it("keeps a quoted list's tab-indented numbered sub-list, as Obsidian writes it", async () => {
+    // Read as top-level items, the sub-list was saved flattened and renumbered (MET-296).
+    const source = "Intro.\n\n> 1. one\n> \t1. sub a\n> \t2. sub b\n> 2. two\n> 3. three\n\nAfter.\n";
+    const edited = source.replace("> 2. two", "> 2. two more");
+    expect((await save(source, edited)).markdown).toBe(edited);
+  });
+
   it("keeps an untouched table's column alignment, which the serializer drops", async () => {
     const source = "| x | y |\n|:--|--:|\n| 3 | 4 |\n\nText.\n";
     const edited = source.replace("Text.", "Text, more.");
