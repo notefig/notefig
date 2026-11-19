@@ -1,10 +1,10 @@
-import { Extension } from "@tiptap/core";
+import { Extension, getTextSerializersFromSchema, type TextSerializer } from "@tiptap/core";
 import type { CodeBlockOptions } from "@tiptap/extension-code-block";
 
 /** Its diff blocks' paths are in `workspaceRoot`'s workspace. */
 type MarkdownCodeBlockOptions = CodeBlockOptions & { workspaceRoot: string | null };
 import { Plugin } from "@tiptap/pm/state";
-import { Fragment } from "@tiptap/pm/model";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import Placeholder from "@tiptap/extension-placeholder";
 import CharacterCount from "@tiptap/extension-character-count";
 import { EditorImage } from "./editor-image-node";
@@ -152,37 +152,69 @@ const SkipEmptyTransactions = Extension.create({
 });
 
 /**
- * A copy's plain text is its markdown (MET-295), so a paste that only
- * takes plain text (a terminal, a plain field) keeps links and formatting,
- * as the HTML beside it does. Not tiptap-markdown's `transformCopiedText`:
- * it serializes a selection inside one block as bare text nodes, and marks
- * are only written from within a block, so a link copied from a paragraph
- * lost its target. Inline content is put in a paragraph first (the
- * serializer writes what a fragment holds, so the paragraph is one), and
- * text from inside a code block is copied as it reads.
+ * A copy's plain text keeps each link's target (MET-295), written as
+ * `[text](url)`, so a paste that only takes plain text (a terminal, Claude
+ * Code, a plain field) doesn't lose it. Everything else is tiptap's own
+ * plain text (`getTextBetween`): no other markdown, no escapes. A link
+ * whose text is its URL is written as the URL alone.
  */
-const MarkdownCopy = Extension.create({
-  name: "markdownCopy",
+const LinkKeepingCopy = Extension.create({
+  name: "linkKeepingCopy",
 
   addProseMirrorPlugins() {
     const { editor } = this;
-    const serializer = () =>
-      (editor.storage as unknown as { markdown: { serializer: { serialize(content: Fragment): string } } })
-        .markdown.serializer;
     return [
       new Plugin({
         props: {
-          clipboardTextSerializer: ({ content }, view) => {
-            if (!content.firstChild?.isInline) return serializer().serialize(content);
-            // Text from inside a code block is code, not markdown to escape.
-            if (view.state.selection.$from.parent.type.spec.code) return content.textBetween(0, content.size);
-            return serializer().serialize(Fragment.from(editor.schema.nodes.paragraph!.create(null, content)));
+          clipboardTextSerializer: () => {
+            const { doc, selection } = editor.state;
+            const serializers = getTextSerializersFromSchema(editor.schema);
+            return [...selection.ranges]
+              .sort((a, b) => a.$from.pos - b.$from.pos)
+              .map(({ $from, $to }) => textWithLinks(doc, $from.pos, $to.pos, serializers))
+              .join("\n\n");
           },
         },
       }),
     ];
   },
 });
+
+/** `getTextBetween`, with each run of linked text written as a link. */
+function textWithLinks(
+  doc: ProseMirrorNode,
+  from: number,
+  to: number,
+  serializers: Record<string, TextSerializer>,
+): string {
+  let text = "";
+  let href: string | null = null;
+  let label = 0;
+  const closeLink = () => {
+    if (href === null) return;
+    const shown = text.slice(label);
+    text = text.slice(0, label) + (shown === href ? href : `[${shown}](${href})`);
+    href = null;
+  };
+  doc.nodesBetween(from, to, (node, pos, parent, index) => {
+    const linked: unknown = node.isText ? node.marks.find((mark) => mark.type.name === "link")?.attrs.href : null;
+    const next = typeof linked === "string" && linked ? linked : null;
+    if (next !== href) {
+      closeLink();
+      if (next !== null) [href, label] = [next, text.length];
+    }
+    if (node.isBlock && pos > from) text += "\n\n";
+    const serializer = serializers[node.type.name];
+    if (serializer) {
+      if (parent) text += serializer({ node, pos, parent, index, range: { from, to } });
+      return false;
+    }
+    if (node.isText) text += node.text!.slice(Math.max(from, pos) - pos, to - pos);
+    return true;
+  });
+  closeLink();
+  return text;
+}
 
 export const editorExtensions = [
   ...createSchemaExtensions(
@@ -210,5 +242,5 @@ export const editorExtensions = [
   NativeFormatIntercept,
   NativeHistoryFocusGuard,
   SkipEmptyTransactions,
-  MarkdownCopy,
+  LinkKeepingCopy,
 ];
