@@ -79,7 +79,7 @@ async function workspace(synced: boolean) {
       projectSettingsModule,
       syncModule,
     ],
-    platform: { fs, gitHttp: { supported: true, request: remote.http.request } },
+    platform: { fs, gitHttp: { supported: true, request: remote.http.request }, ui: { onQuit: () => () => {} } as never },
   });
   cores.push(core);
   await core.boot();

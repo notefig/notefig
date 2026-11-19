@@ -211,6 +211,8 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   readonly db: DbSurface = createBrowserDb();
 
   readonly ui: PlatformUiSurface = {
+    // A tab closes without waiting.
+    onQuit: () => () => {},
     pickDirectory: this.pickDirectory.bind(this),
     promptText: this.promptText.bind(this),
     openExternal: this.openExternal.bind(this),

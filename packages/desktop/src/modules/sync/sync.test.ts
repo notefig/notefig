@@ -21,7 +21,7 @@ import { disposeEditor, getOrCreateEditor, type EditorFs } from "@/components/ed
 import { getDocumentSync, whenDocumentSyncClean } from "@/utils/markdown-conversion";
 import { IDLE_COMMIT_MS, POLL_MS, SHARED_COMMIT_MS, SHARED_POLL_MS, pollInterval, syncModule } from "@/modules/sync";
 import { OFFLINE_RETURN_MS } from "./sync-engine";
-import { HEARTBEAT_MS, PRESENCE_STALE_MS } from "./sync-presence";
+import { HEARTBEAT_MS, PRESENCE_STALE_MS, SWEEP_STALE_MS } from "./sync-presence";
 import { docUnits } from "./sync-editor";
 import * as merging from "./sync-merge";
 import * as telemetry from "@/telemetry/telemetry";
@@ -65,6 +65,9 @@ async function setup(mode: "synced" | "asked" | "plain" = "synced", extra: Recor
   const editors = createEditors();
   const gitWorker = inProcessGitWorker(fs, remote.http);
   const created = vi.spyOn(gitWorker, "register");
+  const goodbyes = new Set<() => Promise<void>>();
+  const onQuit = (prepare: () => Promise<void>) => (goodbyes.add(prepare), () => void goodbyes.delete(prepare));
+  const quit = () => Promise.all([...goodbyes].map((run) => run()));
   const core = createTestCore({
     modules: [
       defineModule({
@@ -93,7 +96,7 @@ async function setup(mode: "synced" | "asked" | "plain" = "synced", extra: Recor
       projectSettingsModule,
       syncModule,
     ],
-    platform: { fs, gitHttp: { supported: true, request: remote.http.request } },
+    platform: { fs, gitHttp: { supported: true, request: remote.http.request }, ui: { onQuit } as never },
   });
   cores.push(core);
   await core.boot();
@@ -105,7 +108,7 @@ async function setup(mode: "synced" | "asked" | "plain" = "synced", extra: Recor
     return sync;
   };
   const sync = await open(ws);
-  return { remote, ws, fs, files: filesByPath.get(ws)!, editors, core, sync, open, created };
+  return { remote, ws, fs, files: filesByPath.get(ws)!, editors, core, sync, open, created, quit, goodbyes };
 }
 
 const read = (path: string) => fsp.readFile(path, "utf8");
@@ -626,6 +629,30 @@ describe("sync: solo", () => {
     expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nLast words.");
   });
 
+  it("saves and pushes an edit still in autosave, and deletes its presence ref, when the app quits", async () => {
+    const { remote, ws, core, editors, quit, goodbyes, open } = await setup();
+    const path = join(ws, "note.md");
+    getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
+    const editor = editors.markdownEditor(path)!;
+    const docSync = getDocumentSync(path);
+    docSync.ensureBaseline(await read(path));
+    docSync.writer = async (markdown) => {
+      await fsp.writeFile(path, markdown);
+      written(core, path);
+    };
+    editor.commands.setContent(codec.parse("# Note\n\nLast words.\n"));
+    docSync.pushUpdate(() => editor.getJSON());
+    await quit();
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nLast words.");
+    expect(await presence(remote.bare)).toBe("");
+
+    await core.workspace(ws).close();
+    await open(ws);
+    expect(goodbyes.size).toBe(1);
+    await core.workspace(ws).close();
+    expect(goodbyes.size).toBe(0);
+  });
+
   it("commits what changed while the app was closed, deletions included", async () => {
     const { core, ws, remote, open } = await setup();
     await core.workspace(ws).close();
@@ -1131,6 +1158,23 @@ describe("sync: shared, while another device syncs the branch", () => {
     await a.syncNow();
     expect(a.state().peers).toEqual([]);
     expect(pollInterval(a.state())).toBe(POLL_MS);
+  });
+
+  it("sweeps a ref a device left standing, keeps one that moved, and drops its own replaced commits", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { sync: a, ws, remote } = await setup();
+    const ref = (id: string) => `refs/notefig/v1/presence/main/${id}`;
+    const ownBefore = await runGit(remote.bare, ["rev-parse", ref("dev")]);
+    for (const id of ["ghost", "moving"]) await runGit(remote.bare, ["update-ref", ref(id), "main"]);
+    await a.syncNow();
+    vi.setSystemTime(Date.now() + SWEEP_STALE_MS);
+    const identity = ["-c", "user.name=B", "-c", "user.email=b@example.com"];
+    const moved = await runGit(remote.bare, [...identity, "commit-tree", "main^{tree}", "-p", "main", "-m", "{}"]);
+    await runGit(remote.bare, ["update-ref", ref("moving"), moved]);
+    await a.syncNow();
+
+    expect(await presence(remote.bare)).toBe(`${ref("dev")}\n${ref("moving")}`);
+    await expect(runGit(ws, ["cat-file", "-e", ownBefore])).rejects.toThrow();
   });
 
   it("forgets who it saw while it can't reach the remote", async () => {

@@ -239,6 +239,28 @@ describeIfGit("remote operations over git http-backend", () => {
     expect(await git(dir, "rev-parse", "refs/remotes/origin/main")).toBe(next);
   });
 
+  it("drops a transient fetch's packs, and the branch keeps what it shared", async () => {
+    const { dir, service } = await clone("transient");
+    const packs = async () => Number(/packs: (\d+)/.exec(await git(dir, "count-objects", "-v"))![1]);
+    const before = await packs();
+    // A presence commit on a branch tip this clone hasn't fetched yet.
+    const tip = await seedCommit("two\n");
+    await git(seed, ...SYSTEM_GIT_IDENTITY, "commit", "--allow-empty", "-qm", "here");
+    await git(seed, "push", "-q", bare, "HEAD:refs/notefig/p");
+    // Side by side, as a pull can run while sync reads presence.
+    await Promise.all([
+      service.fetchRefs(remote, ["refs/notefig/p"], { transient: true }),
+      service.fetchRefs(remote, ["refs/heads/main"]),
+    ]);
+    expect(await packs()).toBe(before + 2);
+
+    // A later session drops it too.
+    await serviceAt(dir).sweepTransient({ olderThanMs: 0 });
+    expect(await packs()).toBe(before + 1);
+    expect(await service.readTextFile({ ref: tip, filepath: "note.md" })).toBe("two\n");
+    await git(dir, "fsck", "--connectivity-only", "--no-dangling");
+  });
+
   it("creates a ref only if absent, at push time and on the remote", async () => {
     const { service } = await clone("a");
     const create = { ref: "refs/notefig/lease", oid: seedOid, expect: null };

@@ -5,13 +5,18 @@
  * whose message names its user, its colour and where its caret is (all
  * of it in that one commit, checked before it's shown), replaced every
  * `HEARTBEAT_MS` (and when the caret moves) and deleted when the workspace
- * closes. Replaced, never stacked: it takes no history.
+ * closes or the app quits. Replaced, never stacked: it takes no history.
  *
  * Liveness is what this client observes: a device is live while its ref
  * moved within `PRESENCE_STALE_MS` by the local clock, so no clock but ours
  * counts. A ref already there on the first poll may be a crash's leftover:
  * it counts once it moves. Seeing a new device republishes at once, so two
  * devices that meet both find out within a poll or two.
+ *
+ * What it leaves behind stays bounded (MET-274): a ref that stood still
+ * `SWEEP_STALE_MS` is deleted by whoever sees it, only if it's still where
+ * they saw it; this device's replaced commits, and the packs fetched to read
+ * the others', are dropped locally.
  */
 import { GitError, type GitRemote, type GitRemoteRef, type GitService } from "@notefig/git";
 import type { SyncAuthor } from "./sync-engine";
@@ -23,6 +28,11 @@ export const presencePrefix = (branch: string) => `refs/notefig/v1/presence/${br
 export const HEARTBEAT_MS = 30_000;
 /** Standing still this long, by this client's clock: gone. */
 export const PRESENCE_STALE_MS = 75_000;
+/** Standing still this long: a device that never said goodbye (a crash, a
+ *  quit offline). Its ref is swept. */
+export const SWEEP_STALE_MS = 10 * 60_000;
+/** At most one sweep a minute, of one ref and of what's local. */
+const SWEEP_EVERY_MS = 60_000;
 
 export interface PresenceDeps {
   deviceId: string;
@@ -46,12 +56,16 @@ export interface Presence {
   heartbeat(): Promise<void>;
   /** Where this device's caret is, for the next heartbeat. */
   setCursor(cursor: SyncCursor | null): void;
+  /** Delete one ref left standing, and what this device no longer reads. */
+  sweep(): Promise<void>;
   /** Delete this device's ref, so the others see it go at once. */
   leave(): Promise<void>;
 }
 
 interface Seen {
   oid: string;
+  /** When this client first saw it at `oid`. */
+  since: number;
   /** When this client saw it move; null: there on the first poll. */
   movedAt: number | null;
   /** The commit the rest was read from. */
@@ -102,7 +116,10 @@ export function createPresence(deps: PresenceDeps): Presence {
   const own = `${prefix}${deps.deviceId}`;
   const seen = new Map<string, Seen>();
   let first = true;
-  let published = false;
+  let published: string | null = null;
+  /** This device's commits a heartbeat replaced: nothing reads them. */
+  let replaced: string[] = [];
+  let nextSweepAt = 0;
   let nextBeatAt = 0;
   /** Two commits of one tree, parent and second share an oid: this keeps a
    *  republish from leaving the ref where it was. */
@@ -122,7 +139,7 @@ export function createPresence(deps: PresenceDeps): Presence {
       const entry = seen.get(ref);
       if (entry?.oid === oid) continue;
       arrived ||= !entry && !first;
-      seen.set(ref, { read: null, name: null, colour: null, cursor: null, ...entry, oid, movedAt: first ? null : at });
+      seen.set(ref, { read: null, name: null, colour: null, cursor: null, ...entry, oid, since: at, movedAt: first ? null : at });
     }
     first = false;
     return arrived;
@@ -154,7 +171,7 @@ export function createPresence(deps: PresenceDeps): Presence {
       const moved = live(now()).filter(([, entry]) => entry.read !== entry.oid);
       if (refused || moved.length === 0) return;
       try {
-        const fetched = await git.fetchRefs(remote, moved.map(([ref]) => ref));
+        const fetched = await git.fetchRefs(remote, moved.map(([ref]) => ref), { transient: true });
         for (const { ref, oid } of fetched) {
           const entry = seen.get(ref);
           if (!entry || !oid) continue;
@@ -187,7 +204,8 @@ export function createPresence(deps: PresenceDeps): Presence {
       });
       try {
         await git.pushRef(remote, { ref: own, oid, force: true });
-        published = true;
+        if (published) replaced.push(published);
+        published = oid;
         nextBeatAt = sent === cursor ? now() + HEARTBEAT_MS : 0;
       } catch (error) {
         // The host turned the ref down (a hook, a token for branches only):
@@ -199,9 +217,28 @@ export function createPresence(deps: PresenceDeps): Presence {
       }
     },
 
+    async sweep() {
+      const at = now();
+      if (refused || at < nextSweepAt) return;
+      nextSweepAt = at + SWEEP_EVERY_MS;
+      const [stalest] = [...seen]
+        .filter(([, entry]) => at - entry.since >= SWEEP_STALE_MS)
+        .sort(([, a], [, b]) => a.since - b.since);
+      if (stalest) {
+        const [ref, { oid }] = stalest;
+        // Moved since, or another device swept it first: the next poll
+        // shows which. Unreachable: tried again in a minute.
+        await git.pushRef(remote, { ref, delete: true, force: true, expect: oid }).catch(() => {});
+      }
+      const oids = replaced;
+      replaced = [];
+      // A presence read finishes in its cycle; ten minutes is ample.
+      await git.sweepTransient({ olderThanMs: SWEEP_STALE_MS, oids }).catch(() => {});
+    },
+
     async leave() {
       if (!published) return;
-      published = false;
+      published = null;
       try {
         await git.pushRef(remote, { ref: own, delete: true, force: true });
       } catch {
