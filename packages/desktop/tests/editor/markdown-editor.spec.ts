@@ -483,4 +483,248 @@ test.describe("prompt widget navigation", () => {
     await page.keyboard.press("ControlOrMeta+Shift+ArrowDown");
     await expect.poll(activeBlob).toBe("blob_c");
   });
+
+  test("a jump centers the widget in the viewport, not on an edge (MET-286)", async ({
+    page,
+  }) => {
+    // Widgets a viewport or more apart, with enough content after the last
+    // one that centering is reachable (the scroll can't go past the end).
+    const filler = (from: number, to: number) =>
+      Array.from({ length: to - from }, (_, i) => `filler line ${i}`);
+    await openHarness(page, {
+      content: [
+        "para one",
+        "",
+        '<!-- notefig:prompt id="blob_a" task="task_a" -->',
+        "",
+        ...filler(0, 120),
+        "",
+        '<!-- notefig:prompt id="blob_b" task="task_b" -->',
+        "",
+        ...filler(120, 240),
+        "",
+        '<!-- notefig:prompt id="blob_c" task="task_c" -->',
+        "",
+        ...filler(240, 300),
+        "",
+      ].join("\n"),
+    });
+
+    // The widget's rect relative to the document's scroller, where a
+    // minimal scroll would leave it within a line of the viewport edge.
+    const widgetRect = (id: string) =>
+      page.evaluate((id) => {
+        const widget = document.querySelector(
+          `[data-type="ai-prompt"][data-blob-id="${id}"]`,
+        );
+        const scroller = document.querySelector(".tiptap-editor-wrapper");
+        if (
+          !(widget instanceof HTMLElement) ||
+          !(scroller instanceof HTMLElement)
+        )
+          return null;
+        const w = widget.getBoundingClientRect();
+        const s = scroller.getBoundingClientRect();
+        return {
+          center: (w.top + w.bottom) / 2 - s.top,
+          scrollerHeight: s.height,
+          scrollTop: scroller.scrollTop,
+        };
+      }, id);
+    const isCentered = (id: string) =>
+      page.evaluate((id) => {
+        const widget = document.querySelector(
+          `[data-type="ai-prompt"][data-blob-id="${id}"]`,
+        );
+        const scroller = document.querySelector(".tiptap-editor-wrapper");
+        if (
+          !(widget instanceof HTMLElement) ||
+          !(scroller instanceof HTMLElement)
+        )
+          return false;
+        const w = widget.getBoundingClientRect();
+        const s = scroller.getBoundingClientRect();
+        return (
+          Math.abs((w.top + w.bottom) / 2 - s.top - s.height / 2) <
+          s.height * 0.1
+        );
+      }, id);
+
+    await page
+      .locator(".ProseMirror p", { hasText: "para one" })
+      .first()
+      .click();
+
+    // Forward, into the middle of the document: scrolled there AND centered.
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await expect
+      .poll(async () => (await widgetRect("blob_b"))?.scrollTop)
+      .toBeGreaterThan(0);
+    await expect.poll(async () => isCentered("blob_b")).toBe(true);
+
+    // Backward from below: the previous widget centers rather than
+    // hugging the top edge.
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await page.keyboard.press("ControlOrMeta+ArrowUp");
+    await expect.poll(async () => isCentered("blob_b")).toBe(true);
+  });
+
+  test("a jump into a draft taller than the viewport keeps the caret in view (MET-286)", async ({
+    page,
+  }) => {
+    // Widgets a viewport or more apart, with enough content after each that
+    // centering is reachable (the scroll can't go past the end).
+    const filler = (from: number, to: number) =>
+      Array.from({ length: to - from }, (_, i) => `filler line ${i}`);
+    await openHarness(page, {
+      content: [
+        "para one",
+        "",
+        '<!-- notefig:prompt id="blob_a" task="task_a" -->',
+        "",
+        ...filler(0, 100),
+        "",
+        '<!-- notefig:prompt id="blob_b" task="task_b" -->',
+        "",
+        ...filler(100, 140),
+        "",
+      ].join("\n"),
+    });
+
+    // Where the DOM caret sits, relative to the document's scroller, plus
+    // which widget it is in.
+    const caretLanding = () =>
+      page.evaluate(() => {
+        const selection = document.getSelection();
+        const widget = selection?.anchorNode?.parentElement?.closest(
+          '[data-type="ai-prompt"]',
+        );
+        const scroller = document.querySelector(".tiptap-editor-wrapper");
+        if (
+          !(widget instanceof HTMLElement) ||
+          !selection?.rangeCount ||
+          !(scroller instanceof HTMLElement)
+        )
+          return null;
+        const caret = selection.getRangeAt(0).getBoundingClientRect();
+        const s = scroller.getBoundingClientRect();
+        return {
+          blob: widget.getAttribute("data-blob-id"),
+          caretMid: (caret.top + caret.bottom) / 2 - s.top,
+          scrollerHeight: s.height,
+        };
+      });
+    const draftBox = (id: string) =>
+      page.evaluate((id) => {
+        const draft = document.querySelector(
+          `[data-type="ai-prompt"][data-blob-id="${id}"] [data-prompt-draft]`,
+        );
+        const scroller = document.querySelector(".tiptap-editor-wrapper");
+        if (!(draft instanceof HTMLElement) || !(scroller instanceof HTMLElement))
+          return null;
+        const s = scroller.getBoundingClientRect();
+        const d = draft.getBoundingClientRect();
+        return { height: d.height, top: d.top - s.top };
+      }, id);
+
+    await page
+      .locator(".ProseMirror p", { hasText: "para one" })
+      .first()
+      .click();
+
+    // Jump into the first widget and fill its draft past the viewport: the
+    // caret ends up on the draft's last line.
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await expect
+      .poll(async () => (await caretLanding())?.blob)
+      .toBe("blob_a");
+    await page.keyboard.insertText("lorem ipsum dolor sit ".repeat(300));
+    const frame = (await caretLanding())!.scrollerHeight;
+    const draft = await draftBox("blob_a");
+    expect(draft!.height).toBeGreaterThan(frame);
+
+    // Jump away and back: the caret's line is what centers — the draft
+    // itself would center past its own caret, leaving it below the fold.
+    // The card's height is still settling after the big insert, so the
+    // landing is polled rather than read once.
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await page.keyboard.press("ControlOrMeta+ArrowUp");
+    const caretLandedCentered = () =>
+      page.evaluate(() => {
+        const selection = document.getSelection();
+        const widget = selection?.anchorNode?.parentElement?.closest(
+          '[data-type="ai-prompt"]',
+        );
+        const scroller = document.querySelector(".tiptap-editor-wrapper");
+        if (
+          !(widget instanceof HTMLElement) ||
+          !selection?.rangeCount ||
+          !(scroller instanceof HTMLElement)
+        )
+          return false;
+        const caret = selection.getRangeAt(0).getBoundingClientRect();
+        const s = scroller.getBoundingClientRect();
+        return (
+          widget.getAttribute("data-blob-id") === "blob_a" &&
+          Math.abs((caret.top + caret.bottom) / 2 - s.top - s.height / 2) <
+            s.height * 0.15
+        );
+      });
+    await expect.poll(caretLandedCentered).toBe(true);
+    // And the draft's start really is scrolled past — it was not centered
+    // as a whole.
+    expect((await draftBox("blob_a"))!.top).toBeLessThan(0);
+  });
+
+  test("deleting the widget just after a jump leaves the scroll alone (MET-286)", async ({
+    page,
+  }) => {
+    // Real paragraphs, not soft-wrapped lines: the widget must sit deep
+    // enough that centering it takes a scroll (with room below to do it).
+    const filler = (from: number, to: number) =>
+      Array.from({ length: to - from }, (_, i) => [`filler paragraph ${i}`, ""]).flat();
+    await openHarness(page, {
+      content: [
+        "para one",
+        "",
+        '<!-- notefig:prompt id="blob_a" task="task_a" -->',
+        "",
+        ...filler(0, 200),
+        '<!-- notefig:prompt id="blob_b" task="task_b" -->',
+        "",
+        ...filler(200, 400),
+        "",
+      ].join("\n"),
+    });
+
+    const scrollTop = () =>
+      page.evaluate(() => {
+        const scroller = document.querySelector(".tiptap-editor-wrapper");
+        return scroller instanceof HTMLElement ? scroller.scrollTop : null;
+      });
+
+    await page
+      .locator(".ProseMirror p", { hasText: "para one" })
+      .first()
+      .click();
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await expect
+      .poll(async () => (await scrollTop()) ?? 0)
+      .toBeGreaterThan(1000);
+    const landed = (await scrollTop())!;
+
+    // Backspace on the empty composer the jump just landed in removes the
+    // widget while the jump's settle watch is still running.
+    await page.keyboard.press("Backspace");
+    await expect
+      .poll(() => page.locator('[data-blob-id="blob_b"]').count())
+      .toBe(0);
+
+    // The watch stops instead of walking the scroll toward the document
+    // top: the viewport stays around the removal.
+    await page.waitForTimeout(600);
+    expect((await scrollTop())!).toBeGreaterThanOrEqual(landed - 700);
+  });
 });
