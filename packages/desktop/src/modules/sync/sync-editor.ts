@@ -11,10 +11,12 @@ import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
+import { PROMPT_NODE_NAME } from "@notefig/widgets";
 import type { EditorsApi } from "@/modules/editors";
 import { isShared, type SyncCursor, type SyncPeer, type SyncState } from "./sync-machine";
 
 const REPORT_MS = 300;
+const WHOLE = new Set(["tableRow", PROMPT_NODE_NAME]);
 const carets = new PluginKey<DecorationSet>("syncCarets");
 
 type SetTimer = (run: () => void, ms: number) => () => void;
@@ -24,13 +26,13 @@ interface Unit {
   to: number;
 }
 
-/** The document's units in order: each textblock with text, a table row
- *  or code block whole, a block atom. Empty paragraphs aren't in the
- *  markdown, so they aren't units. */
+/** The document's units in order: each textblock with text; a table row,
+ *  code block or prompt widget whole (a draft never reaches the file); a
+ *  block atom. Empty paragraphs aren't in the markdown, so aren't units. */
 export function docUnits(doc: PMNode): Unit[] {
   const units: Unit[] = [];
   doc.descendants((node, pos) => {
-    const whole = node.type.name === "tableRow" || node.type.spec.code === true;
+    const whole = WHOLE.has(node.type.name) || node.type.spec.code === true;
     if (!whole && !node.isTextblock && !(node.isAtom && node.isBlock)) return true;
     if (whole || !node.isTextblock || node.content.size > 0) units.push({ from: pos, to: pos + node.nodeSize });
     return false;
@@ -51,7 +53,7 @@ function caret(peer: SyncPeer): HTMLElement {
   el.className = "sync-caret";
   el.dataset.syncPeer = peer.deviceId;
   if (peer.name) el.title = peer.name;
-  el.style.cssText = `border-left:2px solid ${peer.colour};margin:0 -1px;`;
+  el.style.cssText = `border-left:2px solid ${peer.colour ?? "currentColor"};margin:0 -1px;`;
   return el;
 }
 
@@ -91,13 +93,17 @@ function caretPlugin(path: string, report: (view: EditorView) => void, setTimer:
           if (view.hasFocus()) report(view);
         }, REPORT_MS);
       };
-      // Someone just came: show them where this device is.
+      // Someone just came, or this tab came forward: show where this is.
       arm();
+      view.dom.addEventListener("focus", arm);
       return {
         update(_, previous) {
           if (!view.state.selection.eq(previous.selection) || view.state.doc !== previous.doc) arm();
         },
-        destroy: () => cancel?.(),
+        destroy: () => {
+          cancel?.();
+          view.dom.removeEventListener("focus", arm);
+        },
       };
     },
   });

@@ -2,7 +2,8 @@
  * Who else syncs the branch (MET-293), read in the engine's poll with no
  * channel of its own. Each device owns
  * `refs/notefig/v1/presence/<branch>/<deviceId>`: a commit on the branch tip
- * whose message names its user and where its caret is, replaced every
+ * whose message names its user, its colour and where its caret is (all
+ * of it in that one commit, checked before it's shown), replaced every
  * `HEARTBEAT_MS` (and when the caret moves) and deleted when the workspace
  * closes. Replaced, never stacked: it takes no history.
  *
@@ -53,25 +54,43 @@ interface Seen {
   oid: string;
   /** When this client saw it move; null: there on the first poll. */
   movedAt: number | null;
-  /** The commit `name` and `cursor` were read from. */
+  /** The commit the rest was read from. */
   read: string | null;
   name: string | null;
+  colour: string | null;
   cursor: SyncCursor | null;
-}
-
-/** What a presence commit's message holds. */
-interface Payload {
-  name?: unknown;
-  cursor?: SyncCursor | null;
 }
 
 const COLOURS = ["#2f7ed8", "#c0562f", "#2f9e6e", "#9256c9", "#c79a2c", "#c24580"];
 
-/** A device's colour, the same wherever it's seen. */
-export function colourOf(deviceId: string): string {
+/** The colour a device picks for itself, and sends in its heartbeat. */
+function colourOf(deviceId: string): string {
   let hash = 0;
   for (const char of deviceId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   return COLOURS[hash % COLOURS.length];
+}
+
+const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+
+/** What another device's commit says, keeping only what's well formed:
+ *  anyone who can push to the remote can write it. */
+function payloadOf(message: string): Pick<Seen, "name" | "colour" | "cursor"> {
+  let raw: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(message);
+    if (parsed && typeof parsed === "object") raw = parsed as Record<string, unknown>;
+  } catch {
+    // Not ours: nothing to show.
+  }
+  const cursor = (raw.cursor ?? null) as Record<string, unknown> | null;
+  return {
+    name: typeof raw.name === "string" ? raw.name : null,
+    colour: typeof raw.colour === "string" && /^#[0-9a-f]{6}$/i.test(raw.colour) ? raw.colour : null,
+    cursor:
+      cursor && typeof cursor.path === "string" && count(cursor.unit) && count(cursor.offset)
+        ? { path: cursor.path, unit: cursor.unit, offset: cursor.offset }
+        : null,
+  };
 }
 
 /** A host's lasting answer to this device's ref. */
@@ -93,10 +112,7 @@ export function createPresence(deps: PresenceDeps): Presence {
   let cursor: SyncCursor | null = null;
 
   /** What a device's ref's commit says. */
-  const payloadIn = async (oid: string): Promise<Payload> => {
-    const [tip] = await git.log({ ref: oid, depth: 1 });
-    return (JSON.parse(tip?.commit.message ?? "null") as Payload | null) ?? {};
-  };
+  const payloadIn = async (oid: string) => payloadOf((await git.log({ ref: oid, depth: 1 }))[0]?.commit.message ?? "");
 
   /** Note when each ref moved; true when a device came since the last poll. */
   const stamp = (present: Map<string, string>, at: number): boolean => {
@@ -106,7 +122,7 @@ export function createPresence(deps: PresenceDeps): Presence {
       const entry = seen.get(ref);
       if (entry?.oid === oid) continue;
       arrived ||= !entry && !first;
-      seen.set(ref, { read: null, name: null, cursor: null, ...entry, oid, movedAt: first ? null : at });
+      seen.set(ref, { read: null, name: null, colour: null, cursor: null, ...entry, oid, movedAt: first ? null : at });
     }
     first = false;
     return arrived;
@@ -121,10 +137,7 @@ export function createPresence(deps: PresenceDeps): Presence {
     const peers: SyncPeer[] = refused
       ? []
       : live(now())
-          .map(([ref, { name, cursor }]) => {
-            const deviceId = ref.slice(prefix.length);
-            return { deviceId, name, colour: colourOf(deviceId), cursor };
-          })
+          .map(([ref, { name, colour, cursor }]) => ({ deviceId: ref.slice(prefix.length), name, colour, cursor }))
           .sort((a, b) => a.deviceId.localeCompare(b.deviceId));
     if (JSON.stringify(peers) !== JSON.stringify(deps.state().peers)) deps.dispatch({ type: "peers", peers });
   };
@@ -145,12 +158,7 @@ export function createPresence(deps: PresenceDeps): Presence {
         for (const { ref, oid } of fetched) {
           const entry = seen.get(ref);
           if (!entry || !oid) continue;
-          const payload = await payloadIn(oid);
-          Object.assign(entry, {
-            read: oid,
-            name: typeof payload.name === "string" ? payload.name : null,
-            cursor: payload.cursor ?? null,
-          });
+          Object.assign(entry, { read: oid, ...(await payloadIn(oid)) });
         }
       } catch {
         // What's unread waits for the next cycle; the devices count already.
@@ -168,8 +176,10 @@ export function createPresence(deps: PresenceDeps): Presence {
       if (refused || now() < nextBeatAt) return;
       const [tip] = await git.log({ ref: `refs/heads/${deps.branch}`, depth: 1 }).catch(() => []);
       if (!tip) return;
+      // A caret that moves while this goes out is sent by the next cycle.
+      const sent = cursor;
       const oid = await git.commit({
-        message: JSON.stringify({ name: deps.author.name, beat: ++beat, cursor }),
+        message: JSON.stringify({ name: deps.author.name, colour: colourOf(deps.deviceId), beat: ++beat, cursor: sent }),
         author: deps.author,
         tree: tip.commit.tree,
         parent: [tip.oid],
@@ -178,7 +188,7 @@ export function createPresence(deps: PresenceDeps): Presence {
       try {
         await git.pushRef(remote, { ref: own, oid, force: true });
         published = true;
-        nextBeatAt = now() + HEARTBEAT_MS;
+        nextBeatAt = sent === cursor ? now() + HEARTBEAT_MS : 0;
       } catch (error) {
         // The host turned the ref down (a hook, a token for branches only):
         // never again this session. Anything else, the next cycle retries.

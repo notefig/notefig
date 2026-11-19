@@ -1212,12 +1212,24 @@ describe("sync: shared, while another device syncs the branch", () => {
       { timeout: 10_000 },
     );
     expect(theirs.view.dom.querySelector('[data-sync-peer="dev"]')?.parentElement?.textContent).toBe("Second paragraph.");
+    // Its colour came in the same heartbeat commit.
+    expect(b.state().peers[0].colour).toMatch(/^#[0-9a-f]{6}$/);
 
     await core.workspace(wsB).close();
     await a.syncNow();
     expect(carets(mine)).toBe(false);
     disposeEditor(editors, join(ws, "note.md"));
     disposeEditor(editors, join(wsB, "note.md"));
+  });
+
+  it("shows a device whose presence commit is malformed, but nothing it claims", async () => {
+    const { sync, remote } = await setup();
+    const tree = await runGit(remote.bare, ["rev-parse", "main^{tree}"]);
+    const forged = JSON.stringify({ name: 42, colour: "red;background:url(x)", cursor: { path: 42, unit: -1, offset: "0" } });
+    const oid = await runGit(remote.bare, ["commit-tree", tree, "-p", "main", "-m", forged]);
+    await runGit(remote.bare, ["update-ref", "refs/notefig/v1/presence/main/x", oid]);
+    await sync.syncNow();
+    expect(sync.state().peers).toEqual([{ deviceId: "x", name: null, colour: null, cursor: null }]);
   });
 
   it("keeps its presence after a passing failure to push it", async () => {

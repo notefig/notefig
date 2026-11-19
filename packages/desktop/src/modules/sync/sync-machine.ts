@@ -57,8 +57,8 @@ export interface SyncPeer {
   deviceId: string;
   /** Its user's git name; null until read. */
   name: string | null;
-  /** The same on every device that sees it. */
-  colour: string;
+  /** The colour it picked, from its heartbeat; null until read. */
+  colour: string | null;
   /** Where it last typed or clicked; null until read, or if nowhere. */
   cursor: SyncCursor | null;
 }
