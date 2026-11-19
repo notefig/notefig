@@ -483,4 +483,90 @@ test.describe("prompt widget navigation", () => {
     await page.keyboard.press("ControlOrMeta+Shift+ArrowDown");
     await expect.poll(activeBlob).toBe("blob_c");
   });
+
+  test("a jump centers the widget in the viewport, not on an edge (MET-286)", async ({
+    page,
+  }) => {
+    // Widgets a viewport or more apart, with enough content after the last
+    // one that centering is reachable (the scroll can't go past the end).
+    const filler = (from: number, to: number) =>
+      Array.from({ length: to - from }, (_, i) => `filler line ${i}`);
+    await openHarness(page, {
+      content: [
+        "para one",
+        "",
+        '<!-- notefig:prompt id="blob_a" task="task_a" -->',
+        "",
+        ...filler(0, 120),
+        "",
+        '<!-- notefig:prompt id="blob_b" task="task_b" -->',
+        "",
+        ...filler(120, 240),
+        "",
+        '<!-- notefig:prompt id="blob_c" task="task_c" -->',
+        "",
+        ...filler(240, 300),
+        "",
+      ].join("\n"),
+    });
+
+    // The widget's rect relative to the document's scroller, where a
+    // minimal scroll would leave it within a line of the viewport edge.
+    const widgetRect = (id: string) =>
+      page.evaluate((id) => {
+        const widget = document.querySelector(
+          `[data-type="ai-prompt"][data-blob-id="${id}"]`,
+        );
+        const scroller = document.querySelector(".tiptap-editor-wrapper");
+        if (
+          !(widget instanceof HTMLElement) ||
+          !(scroller instanceof HTMLElement)
+        )
+          return null;
+        const w = widget.getBoundingClientRect();
+        const s = scroller.getBoundingClientRect();
+        return {
+          center: (w.top + w.bottom) / 2 - s.top,
+          scrollerHeight: s.height,
+          scrollTop: scroller.scrollTop,
+        };
+      }, id);
+    const isCentered = (id: string) =>
+      page.evaluate((id) => {
+        const widget = document.querySelector(
+          `[data-type="ai-prompt"][data-blob-id="${id}"]`,
+        );
+        const scroller = document.querySelector(".tiptap-editor-wrapper");
+        if (
+          !(widget instanceof HTMLElement) ||
+          !(scroller instanceof HTMLElement)
+        )
+          return false;
+        const w = widget.getBoundingClientRect();
+        const s = scroller.getBoundingClientRect();
+        return (
+          Math.abs((w.top + w.bottom) / 2 - s.top - s.height / 2) <
+          s.height * 0.1
+        );
+      }, id);
+
+    await page
+      .locator(".ProseMirror p", { hasText: "para one" })
+      .first()
+      .click();
+
+    // Forward, into the middle of the document: scrolled there AND centered.
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await expect
+      .poll(async () => (await widgetRect("blob_b"))?.scrollTop)
+      .toBeGreaterThan(0);
+    await expect.poll(async () => isCentered("blob_b")).toBe(true);
+
+    // Backward from below: the previous widget centers rather than
+    // hugging the top edge.
+    await page.keyboard.press("ControlOrMeta+ArrowDown");
+    await page.keyboard.press("ControlOrMeta+ArrowUp");
+    await expect.poll(async () => isCentered("blob_b")).toBe(true);
+  });
 });

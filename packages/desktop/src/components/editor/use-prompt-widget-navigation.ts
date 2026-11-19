@@ -93,9 +93,20 @@ function focusAndScrollToWidget(editor: Editor, pos: number): void {
   } else {
     tr = selectWidget(tr, pos);
   }
-  tr = tr.scrollIntoView();
+  // Not the transaction's `scrollIntoView`: its minimal scroll drops the
+  // caret on a viewport edge and hides the card the input belongs to
+  // (MET-286). The jump centers the input in the viewport instead — the
+  // widget card when the composer is hidden — after the selection and focus
+  // land, so the browser's own scroll for the new caret can't undo it.
   editor.view.dispatch(tr);
   editor.view.focus();
+  const target =
+    draftVisible && draftEl
+      ? draftEl
+      : widgetEl instanceof HTMLElement
+        ? widgetEl
+        : null;
+  target?.scrollIntoView({ block: "center" });
 }
 
 /**
