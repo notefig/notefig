@@ -52,6 +52,8 @@ describeRealGit("[real-git] packed object reads", () => {
   beforeEach(async () => {
     repoDir = await mkdtemp(join(tmpdir(), "notefig-git-packed-"));
     await runGit(repoDir, ["init", "-q", "-b", "main"]);
+    await runGit(repoDir, ["config", "gc.auto", "0"]);
+    await runGit(repoDir, ["config", "maintenance.auto", "false"]);
     // Many files, so the pack outweighs any one object; one edited across
     // commits, so the pack holds deltas.
     for (let i = 0; i < 300; i++) {
