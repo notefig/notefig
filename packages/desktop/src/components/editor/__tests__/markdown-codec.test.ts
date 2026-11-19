@@ -177,6 +177,26 @@ describe("Obsidian's quoted sub-items", () => {
   it("leaves a tab that follows no item as CommonMark reads it", () => {
     expect(codec.serialize(codec.parse("> \t1. first"))).toBe("> 1. first");
     expect(codec.serialize(codec.parse("> text\n> \tmore"))).toBe("> text more");
+    // A paragraph after the list ends it.
+    expect(codec.serialize(codec.parse("> 1. one\n> \n> para\n> \t1. x"))).toBe("> 1. one\n>\n> para\n>\n> 1. x");
+  });
+
+  it("reads a sub-item after its parent's continuation or a blank quoted line", () => {
+    expect(codec.serialize(codec.parse("> 1. parent\n>    continuation\n> \t1. child\n> 2. next"))).toBe(
+      "> 1. parent continuation\n>    1. child\n> 2. next",
+    );
+    expect(codec.serialize(codec.parse("> 1. parent\n>\n> \t1. child\n> 2. next"))).toBe("> 1. parent\n>\n>    1. child\n>\n> 2. next");
+  });
+
+  it("leaves a code fence's tabs as they are", () => {
+    for (const md of ["```md\n> 1. example\n> \t1. literal\n```", "> ```\n> 1. a\n> \t1. b\n> ```"])
+      expect(codec.serialize(codec.parse(md))).toBe(md);
+  });
+
+  it("reads a long run of quote markers in time proportional to it", () => {
+    const start = performance.now();
+    codec.parse("> ".repeat(5000) + "text\n>\t");
+    expect(performance.now() - start).toBeLessThan(1000);
   });
 });
 

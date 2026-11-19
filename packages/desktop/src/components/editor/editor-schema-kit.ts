@@ -308,29 +308,105 @@ export function usePluginsOnce(md: {
   }) as typeof md.use;
 }
 
-/** A list item in a quote, after the quote's markers. */
-const QUOTED_ITEM = /^(?:[ ]{0,3}>[ ]?)+[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
-const QUOTED_TAB_ITEM = /^((?:[ ]{0,3}>[ ]?)+)(\t+)(?=(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$))/;
+/** A list item, after a line's quote markers. */
+const ITEM = /^[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
+/** The tabs before a list item's marker. */
+const TAB_ITEM = /^\t+(?=(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$))/;
+const FENCE = /^[ \t]*(`{3,}|~{3,})/;
+const FENCE_CLOSE = /^[ \t]*(`{3,}|~{3,})[ \t]*$/;
+
+/** Where each of a line's quote markers (`>` and its one space) ends, read in one pass. */
+function quoteEnds(line: string): number[] {
+  const ends: number[] = [];
+  for (let at = 0; ; ) {
+    let i = at;
+    while (i - at < 3 && line[i] === " ") i++;
+    if (line[i] !== ">") return ends;
+    i += line[i + 1] === " " ? 2 : 1;
+    ends.push(i);
+    at = i;
+  }
+}
 
 /**
  * A sub-item in a quote reads as one, as Obsidian writes it: a tab after
  * the quote's `> ` (MET-296). CommonMark counts that tab as two columns,
  * short of the three a numbered item's text starts at, so `> \t1. sub`
  * under `> 1. one` read as an item of the outer list, and a save wrote the
- * list flattened and renumbered. Under an item, each of those tabs reads as
- * four spaces; elsewhere (a quote's first line) nothing changes. Lines stay
- * where they are, so token line maps still point into the file.
+ * list flattened and renumbered. Inside a quoted item (its continuation
+ * and blank lines included), each of those tabs reads as four spaces;
+ * elsewhere (a quote's first line, a code fence) nothing changes. Lines
+ * stay where they are, so token line maps still point into the file.
  */
 function quotedTabItems(md: MarkdownIt): void {
   md.core.ruler.after("normalize", "quoted_tab_items", (state) => {
     if (!state.src.includes(">\t") && !state.src.includes("> \t")) return;
-    const lines = state.src.split("\n");
-    lines.forEach((line, i) => {
-      if (i > 0 && QUOTED_ITEM.test(lines[i - 1]!))
-        lines[i] = line.replace(QUOTED_TAB_ITEM, (_, quote: string, tabs: string) => quote.replace(/>$/, "> ") + "    ".repeat(tabs.length));
-    });
-    state.src = lines.join("\n");
+    const fenced = fenceTracker();
+    const list = quotedListTracker();
+    state.src = state.src
+      .split("\n")
+      .map((line) => {
+        const ends = quoteEnds(line);
+        if (fenced(line, ends)) return line;
+        if (!ends.length) {
+          list.leave();
+          return line;
+        }
+        const quote = line.slice(0, ends[ends.length - 1]);
+        const rest = line.slice(quote.length);
+        const tabs = list.next(rest);
+        return tabs ? quote.replace(/>$/, "> ") + "    ".repeat(tabs.length) + rest.slice(tabs.length) : line;
+      })
+      .join("\n");
   });
+}
+
+/** Whether each line, in turn, opens, holds or closes a code fence. */
+function fenceTracker(): (line: string, ends: number[]) => boolean {
+  let fence: { depth: number; marker: string } | null = null;
+  return (line, ends) => {
+    if (fence && ends.length < fence.depth) fence = null; // the quote holding it ended
+    const depth = fence ? fence.depth : ends.length;
+    const text = line.slice(depth ? ends[depth - 1] : 0);
+    if (!fence) {
+      const run = FENCE.exec(text)?.[1];
+      if (run) fence = { depth, marker: run };
+      return Boolean(run);
+    }
+    const close = FENCE_CLOSE.exec(text)?.[1];
+    if (close?.[0] === fence.marker[0] && close.length >= fence.marker.length) fence = null;
+    return true;
+  };
+}
+
+/**
+ * Follows a quoted list line by line (what follows each line's quote
+ * markers), and gives the tabs to read as indent: those before an item
+ * inside an item, its continuation and blank lines included.
+ */
+function quotedListTracker() {
+  let inItem = false;
+  let afterBlank = false;
+  return {
+    leave() {
+      inItem = false;
+    },
+    next(rest: string): string | undefined {
+      if (!rest.trim()) {
+        afterBlank = true;
+        return undefined;
+      }
+      const blankBefore = afterBlank;
+      afterBlank = false;
+      if (!ITEM.test(rest)) {
+        if (blankBefore && !/^[ \t]/.test(rest)) inItem = false; // a paragraph after the list
+        return undefined;
+      }
+      const tabs = inItem ? TAB_ITEM.exec(rest)?.[0] : undefined;
+      inItem = true;
+      return tabs;
+    },
+  };
 }
 
 export const FrontmatterMarkdown = Markdown.extend({
