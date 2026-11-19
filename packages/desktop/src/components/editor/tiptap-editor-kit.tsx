@@ -1,9 +1,10 @@
-import { Extension } from "@tiptap/core";
+import { Extension, getTextSerializersFromSchema, type TextSerializer } from "@tiptap/core";
 import type { CodeBlockOptions } from "@tiptap/extension-code-block";
 
 /** Its diff blocks' paths are in `workspaceRoot`'s workspace. */
 type MarkdownCodeBlockOptions = CodeBlockOptions & { workspaceRoot: string | null };
 import { Plugin } from "@tiptap/pm/state";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import Placeholder from "@tiptap/extension-placeholder";
 import CharacterCount from "@tiptap/extension-character-count";
 import { EditorImage } from "./editor-image-node";
@@ -150,6 +151,71 @@ const SkipEmptyTransactions = Extension.create({
   },
 });
 
+/**
+ * A copy's plain text keeps each link's target (MET-295), written as
+ * `[text](url)`, so a paste that only takes plain text (a terminal, Claude
+ * Code, a plain field) doesn't lose it. Everything else is tiptap's own
+ * plain text (`getTextBetween`): no other markdown, no escapes. A link
+ * whose text is its URL is written as the URL alone.
+ */
+const LinkKeepingCopy = Extension.create({
+  name: "linkKeepingCopy",
+
+  addProseMirrorPlugins() {
+    const { editor } = this;
+    return [
+      new Plugin({
+        props: {
+          clipboardTextSerializer: () => {
+            const { doc, selection } = editor.state;
+            const serializers = getTextSerializersFromSchema(editor.schema);
+            return [...selection.ranges]
+              .sort((a, b) => a.$from.pos - b.$from.pos)
+              .map(({ $from, $to }) => textWithLinks(doc, $from.pos, $to.pos, serializers))
+              .join("\n\n");
+          },
+        },
+      }),
+    ];
+  },
+});
+
+/** `getTextBetween`, with each run of linked text written as a link. */
+function textWithLinks(
+  doc: ProseMirrorNode,
+  from: number,
+  to: number,
+  serializers: Record<string, TextSerializer>,
+): string {
+  let text = "";
+  let href: string | null = null;
+  let label = 0;
+  const closeLink = () => {
+    if (href === null) return;
+    const shown = text.slice(label);
+    text = text.slice(0, label) + (shown === href ? href : `[${shown}](${href})`);
+    href = null;
+  };
+  doc.nodesBetween(from, to, (node, pos, parent, index) => {
+    const linked: unknown = node.isText ? node.marks.find((mark) => mark.type.name === "link")?.attrs.href : null;
+    const next = typeof linked === "string" && linked ? linked : null;
+    if (next !== href) {
+      closeLink();
+      if (next !== null) [href, label] = [next, text.length];
+    }
+    if (node.isBlock && pos > from) text += "\n\n";
+    const serializer = serializers[node.type.name];
+    if (serializer) {
+      if (parent) text += serializer({ node, pos, parent, index, range: { from, to } });
+      return false;
+    }
+    if (node.isText) text += node.text!.slice(Math.max(from, pos) - pos, to - pos);
+    return true;
+  });
+  closeLink();
+  return text;
+}
+
 export const editorExtensions = [
   ...createSchemaExtensions(
     MarkdownImage,
@@ -176,4 +242,5 @@ export const editorExtensions = [
   NativeFormatIntercept,
   NativeHistoryFocusGuard,
   SkipEmptyTransactions,
+  LinkKeepingCopy,
 ];
