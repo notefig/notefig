@@ -35,6 +35,10 @@
       "title": "Autosave: keystroke → file written (8k-line doc, solo sync workspace)"
     },
     {
+      "id": "sync-open",
+      "title": "Open a 20k-file solo sync workspace → first sync done"
+    },
+    {
       "id": "widget-input",
       "title": "Prompt widget: type and delete"
     },
