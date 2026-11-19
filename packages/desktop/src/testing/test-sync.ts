@@ -196,6 +196,16 @@ export function nodeFs(): FileSystemSurface {
   const fs: Partial<FileSystemSurface> = {
     readFiles: (paths) =>
       batch(paths, async (path) => ({ path, content: await fsp.readFile(path, "utf8") })),
+    readBinaryRange: async (path, offset, length) => {
+      const handle = await fsp.open(path, "r");
+      try {
+        const data = new Uint8Array(length);
+        const { bytesRead } = await handle.read(data, 0, length, offset);
+        return data.subarray(0, bytesRead);
+      } finally {
+        await handle.close();
+      }
+    },
     readBinaryFiles: (paths) =>
       batch(paths, async (path) => ({
         path,

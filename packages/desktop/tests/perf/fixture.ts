@@ -191,6 +191,9 @@ const git = (cwd: string, ...args: string[]) =>
  * nothing listens on, so the engine commits for real (in the git worker,
  * files served from the main thread) and every push fails fast as
  * offline: the main-thread cost of solo sync, without a host's latency.
+ * Its history is one pack, as a clone's is: packed here rather than by
+ * the background `gc --auto` a commit this big starts, which would leave
+ * it half loose or half packed depending on when the app opens it.
  */
 export async function soloSyncWorkspace(): Promise<string> {
   const source = await perfWorkspace();
@@ -205,7 +208,8 @@ export async function soloSyncWorkspace(): Promise<string> {
   await fs.mkdir(path.join(root, ".git", "info"), { recursive: true });
   await fs.writeFile(path.join(root, ".git", "info", "exclude"), ".notefig/*\n!.notefig/config.json\n");
   await git(root, "add", "-A");
-  await git(root, "commit", "-q", "-m", "perf fixture");
+  await git(root, "-c", "gc.auto=0", "commit", "-q", "-m", "perf fixture");
+  await git(root, "gc", "-q");
   await fs.writeFile(
     path.join(root, ".git", "notefig-sync.json"),
     JSON.stringify({ deviceId: "perf", on: true, lastSyncedAt: Date.now() }),

@@ -388,6 +388,30 @@ pub async fn read_binary_file(
     }
 }
 
+/// Bytes `[offset, offset + length)` of a file, cut short at its end, over
+/// the same raw channel as `read_binary_file`. Git reads a packfile's
+/// objects this way, so reading one object never moves the whole pack
+/// (often hundreds of MB) through the webview.
+#[tauri::command]
+pub async fn read_binary_range(
+    path: String,
+    offset: u64,
+    length: u64,
+) -> std::result::Result<tauri::ipc::Response, FileSystemError> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let read = async {
+        let mut file = fs::File::open(&path).await?;
+        file.seek(std::io::SeekFrom::Start(offset)).await?;
+        let mut data = Vec::new();
+        file.take(length).read_to_end(&mut data).await?;
+        Ok::<_, std::io::Error>(data)
+    };
+    match read.await {
+        Ok(data) => Ok(tauri::ipc::Response::new(data)),
+        Err(err) => Err(map_io_error(&path, err)),
+    }
+}
+
 #[derive(Deserialize)]
 pub struct FileToWrite {
     pub path: String,
@@ -1149,6 +1173,34 @@ mod tests {
         match response.body().expect("response body") {
             InvokeResponseBody::Raw(data) => assert_eq!(data, vec![1u8, 2, 3]),
             InvokeResponseBody::Json(_) => panic!("expected a raw body"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_binary_range_reads_a_slice_cut_at_the_end() {
+        use tauri::ipc::{InvokeResponseBody, IpcResponse};
+
+        let temp_dir = setup_test_dir();
+        let file_path = temp_dir.path().join("pack.bin");
+        tokio::fs::write(&file_path, vec![0u8, 1, 2, 3, 4, 5])
+            .await
+            .expect("Failed to write binary file");
+        let path = file_path.to_string_lossy().to_string();
+
+        for (offset, length, expected) in [(1, 3, vec![1u8, 2, 3]), (4, 10, vec![4u8, 5]), (9, 2, vec![])] {
+            let response = read_binary_range(path.clone(), offset, length)
+                .await
+                .expect("read should succeed");
+            match response.body().expect("response body") {
+                InvokeResponseBody::Raw(data) => assert_eq!(data, expected),
+                InvokeResponseBody::Json(_) => panic!("expected a raw body"),
+            }
+        }
+
+        let missing = temp_dir.path().join("missing.bin").to_string_lossy().to_string();
+        match read_binary_range(missing, 0, 1).await {
+            Ok(_) => panic!("read should fail"),
+            Err(err) => assert!(matches!(err.error_type, FileSystemErrorType::NotFound)),
         }
     }
 

@@ -141,8 +141,54 @@ function extractEncoding(
   return normalizeEncoding(options.encoding);
 }
 
+/** Packs are read in blocks this big, so neighbouring objects (a tree
+ *  walk's trees, a commit's history) share one host call. */
+const PACK_BLOCK = 64 * 1024;
+/** Blocks kept per fs, oldest dropped first: 16 MB. */
+const PACK_BLOCKS_KEPT = 256;
+/** A pack is named by its content, so its bytes never change. */
+const PACKFILE = /\/objects\/pack\/pack-[0-9a-f]{40}\.pack$/;
+
+/**
+ * Ranged reads of packfiles for the patched isomorphic-git
+ * (`patches/isomorphic-git+*.patch`), which reads a pack an object at a
+ * time instead of whole. Cached in blocks; a range past a few blocks (a
+ * large blob) is read directly.
+ */
+function createRangeReader(host: GitStorageHost) {
+  const blocks = new Map<string, Promise<Uint8Array>>();
+  const block = (path: string, index: number) => {
+    const key = `${index}:${path}`;
+    let data = blocks.get(key);
+    if (data) {
+      blocks.delete(key);
+    } else {
+      data = host.readFileRange(path, index * PACK_BLOCK, (index + 1) * PACK_BLOCK);
+      data.catch(() => blocks.delete(key));
+      if (blocks.size >= PACK_BLOCKS_KEPT) blocks.delete(blocks.keys().next().value!);
+    }
+    blocks.set(key, data);
+    return data;
+  };
+  return async (path: string, start: number, end: number): Promise<Buffer> => {
+    const first = Math.floor(start / PACK_BLOCK);
+    const last = Math.floor(Math.max(start, end - 1) / PACK_BLOCK);
+    if (!PACKFILE.test(path) || last - first >= 4) {
+      return toBuffer(await host.readFileRange(path, start, end));
+    }
+    const parts = await Promise.all(
+      Array.from({ length: last - first + 1 }, (_, at) => block(path, first + at)),
+    );
+    const joined = parts.length === 1 ? parts[0] : Buffer.concat(parts);
+    const from = start - first * PACK_BLOCK;
+    return toBuffer(joined.subarray(from, from + (end - start)));
+  };
+}
+
 export function createIsomorphicGitFs(host: GitStorageHost): FsClient {
   const promises = {
+    readFileRange: createRangeReader(host),
+
     async readFile(
       path: string,
       options?:

@@ -57,6 +57,7 @@ function hostApi(
   return {
     gitHttp: (request) => gitHttp.request(request),
     readBinaryFiles: (paths) => fs.readBinaryFiles(paths),
+    readBinaryRange: (path, offset, length) => fs.readBinaryRange(path, offset, length),
     writeBinaryFiles: (files) => fs.writeBinaryFiles(files),
     moveFile: (oldPath, newPath) => fs.moveFile(oldPath, newPath),
     deleteFiles: (paths) => fs.deleteFiles(paths),

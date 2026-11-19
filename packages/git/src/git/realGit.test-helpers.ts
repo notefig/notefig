@@ -14,6 +14,7 @@ import {
   chmod,
   lstat,
   mkdir,
+  open,
   readFile,
   readdir,
   readlink,
@@ -47,6 +48,17 @@ export class NodeGitStorageHost implements GitStorageHost {
   async readFile(path: string): Promise<Uint8Array> {
     const buffer = await readFile(this.resolvePath(path));
     return new Uint8Array(buffer);
+  }
+
+  async readFileRange(path: string, start: number, end: number): Promise<Uint8Array> {
+    const handle = await open(this.resolvePath(path), "r");
+    try {
+      const data = new Uint8Array(Math.max(0, end - start));
+      const { bytesRead } = await handle.read(data, 0, data.length, start);
+      return data.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
   }
 
   async writeFileAtomic(path: string, data: Uint8Array): Promise<void> {
