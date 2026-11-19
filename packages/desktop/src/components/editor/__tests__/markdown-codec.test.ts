@@ -188,6 +188,18 @@ describe("Obsidian's quoted sub-items", () => {
     expect(codec.serialize(codec.parse("> 1. parent\n>\n> \t1. child\n> 2. next"))).toBe("> 1. parent\n>\n>    1. child\n>\n> 2. next");
   });
 
+  it("leaves a tab alone after a block that ends the list", () => {
+    for (const block of ["# Heading", "---", "***"]) {
+      const md = `> 1. one\n> ${block}\n> \t1. first`;
+      expect(codec.serialize(codec.parse(md))).toBe(codec.serialize(createMarkdownCodec().parse(md.replace("\t", ""))));
+    }
+  });
+
+  it("reads indented code as code, not a fence that holds what follows", () => {
+    const md = "    ```\n\n> 1. parent\n> \t1. child\n> 2. next";
+    expect(codec.serialize(codec.parse(md))).toContain("> 1. parent\n>    1. child\n> 2. next");
+  });
+
   it("leaves a code fence's tabs as they are", () => {
     for (const md of ["```md\n> 1. example\n> \t1. literal\n```", "> ```\n> 1. a\n> \t1. b\n> ```"])
       expect(codec.serialize(codec.parse(md))).toBe(md);

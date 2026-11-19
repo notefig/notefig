@@ -308,11 +308,13 @@ export function usePluginsOnce(md: {
   }) as typeof md.use;
 }
 
-/** A list item, after a line's quote markers. */
-const ITEM = /^[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
+/** A list item, after a line's quote markers: its indent, marker and gap. */
+const ITEM = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]*)/;
 /** The tabs before a list item's marker. */
 const TAB_ITEM = /^\t+(?=(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$))/;
-const FENCE = /^[ \t]*(`{3,}|~{3,})/;
+/** A heading, a thematic break or a fence, after its indent: a block that ends a list it isn't inside. */
+const BLOCK_START = /^(?:#{1,6}(?:[ \t]|$)|([-*_])(?:[ \t]*\1){2,}[ \t]*$|`{3,}|~{3,})/;
+const FENCE = /^([ \t]*)(`{3,}|~{3,})/;
 const FENCE_CLOSE = /^[ \t]*(`{3,}|~{3,})[ \t]*$/;
 
 /** Where each of a line's quote markers (`>` and its one space) ends, read in one pass. */
@@ -328,6 +330,13 @@ function quoteEnds(line: string): number[] {
   }
 }
 
+/** How many columns leading whitespace takes, a tab reaching the next multiple of four. */
+function columns(space: string): number {
+  let column = 0;
+  for (const char of space) column = char === "\t" ? column + 4 - (column % 4) : column + 1;
+  return column;
+}
+
 /**
  * A sub-item in a quote reads as one, as Obsidian writes it: a tab after
  * the quote's `> ` (MET-296). CommonMark counts that tab as two columns,
@@ -335,62 +344,78 @@ function quoteEnds(line: string): number[] {
  * under `> 1. one` read as an item of the outer list, and a save wrote the
  * list flattened and renumbered. Inside a quoted item (its continuation
  * and blank lines included), each of those tabs reads as four spaces;
- * elsewhere (a quote's first line, a code fence) nothing changes. Lines
- * stay where they are, so token line maps still point into the file.
+ * elsewhere (a quote's first line, after a block that ends the list, in a
+ * code fence) nothing changes. Lines stay where they are, so token line
+ * maps still point into the file.
  */
 function quotedTabItems(md: MarkdownIt): void {
   md.core.ruler.after("normalize", "quoted_tab_items", (state) => {
     if (!state.src.includes(">\t") && !state.src.includes("> \t")) return;
-    const fenced = fenceTracker();
+    const fence = fenceTracker();
     const list = quotedListTracker();
     state.src = state.src
       .split("\n")
       .map((line) => {
         const ends = quoteEnds(line);
-        if (fenced(line, ends)) return line;
-        if (!ends.length) {
-          list.leave();
-          return line;
-        }
-        const quote = line.slice(0, ends[ends.length - 1]);
+        if (fence.holds(line, ends)) return line;
+        const depth = ends.length;
+        const quote = line.slice(0, depth ? ends[depth - 1] : 0);
         const rest = line.slice(quote.length);
-        const tabs = list.next(rest);
+        const tabs = depth ? list.next(rest) : list.leave();
+        fence.opens(rest, depth, list.fenceIndent());
         return tabs ? quote.replace(/>$/, "> ") + "    ".repeat(tabs.length) + rest.slice(tabs.length) : line;
       })
       .join("\n");
   });
 }
 
-/** Whether each line, in turn, opens, holds or closes a code fence. */
-function fenceTracker(): (line: string, ends: number[]) => boolean {
+/** Follows code fences line by line, quoted or not. */
+function fenceTracker() {
   let fence: { depth: number; marker: string } | null = null;
-  return (line, ends) => {
-    if (fence && ends.length < fence.depth) fence = null; // the quote holding it ended
-    const depth = fence ? fence.depth : ends.length;
-    const text = line.slice(depth ? ends[depth - 1] : 0);
-    if (!fence) {
-      const run = FENCE.exec(text)?.[1];
-      if (run) fence = { depth, marker: run };
-      return Boolean(run);
-    }
-    const close = FENCE_CLOSE.exec(text)?.[1];
-    if (close?.[0] === fence.marker[0] && close.length >= fence.marker.length) fence = null;
-    return true;
+  return {
+    /** Whether the line is in a fence, its closing line included. */
+    holds(line: string, ends: number[]): boolean {
+      if (fence && ends.length < fence.depth) fence = null; // the quote holding it ended
+      if (!fence) return false;
+      const close = FENCE_CLOSE.exec(line.slice(fence.depth ? ends[fence.depth - 1] : 0))?.[1];
+      if (close?.[0] === fence.marker[0] && close.length >= fence.marker.length) fence = null;
+      return true;
+    },
+    /** Opens a fence at a line that starts one: indented no further than `maxIndent`, or it's indented code. */
+    opens(text: string, depth: number, maxIndent: number): void {
+      const open = FENCE.exec(text);
+      if (open && columns(open[1]!) <= maxIndent) fence = { depth, marker: open[2]! };
+    },
   };
+}
+
+/** Where a list item's text starts, or null when the line isn't an item. */
+function itemContentColumn(line: string): number | null {
+  const item = ITEM.exec(line);
+  if (!item || (!item[3] && item[0].length < line.length)) return null;
+  const gap = columns(item[3]!);
+  return columns(item[1]!) + item[2]!.length + (gap === 0 || gap > 4 ? 1 : gap);
 }
 
 /**
  * Follows a quoted list line by line (what follows each line's quote
  * markers), and gives the tabs to read as indent: those before an item
- * inside an item, its continuation and blank lines included.
+ * inside an item, its continuation and blank lines included. A block
+ * indented less than the list's first item's text (a heading, a break, a
+ * fence, or a paragraph after a blank line) ends the list.
  */
 function quotedListTracker() {
-  let inItem = false;
+  let top = Infinity; // where the list's first item's text starts
+  let content = -1; // where the last item's text starts
   let afterBlank = false;
+  const leave = (): undefined => {
+    [top, content] = [Infinity, -1];
+    return undefined;
+  };
   return {
-    leave() {
-      inItem = false;
-    },
+    leave,
+    /** How far a fence may be indented here: three columns past its container's start. */
+    fenceIndent: () => Math.max(content, 0) + 3,
     next(rest: string): string | undefined {
       if (!rest.trim()) {
         afterBlank = true;
@@ -398,12 +423,14 @@ function quotedListTracker() {
       }
       const blankBefore = afterBlank;
       afterBlank = false;
-      if (!ITEM.test(rest)) {
-        if (blankBefore && !/^[ \t]/.test(rest)) inItem = false; // a paragraph after the list
-        return undefined;
-      }
-      const tabs = inItem ? TAB_ITEM.exec(rest)?.[0] : undefined;
-      inItem = true;
+      const lead = /^[ \t]*/.exec(rest)![0];
+      const outside = columns(lead) < top;
+      if (outside && BLOCK_START.test(rest.slice(lead.length))) return leave();
+      const itemContent = itemContentColumn(rest);
+      if (itemContent === null) return blankBefore && outside ? leave() : undefined;
+      const tabs = content >= 0 ? TAB_ITEM.exec(rest)?.[0] : undefined;
+      content = itemContent;
+      if (top === Infinity) top = content;
       return tabs;
     },
   };
