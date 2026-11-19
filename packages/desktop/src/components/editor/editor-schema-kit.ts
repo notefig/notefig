@@ -312,8 +312,8 @@ export function usePluginsOnce(md: {
 const ITEM = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]*)/;
 /** The tabs before a list item's marker. */
 const TAB_ITEM = /^\t+(?=(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$))/;
-/** A heading, a thematic break or a fence, after its indent: a block that ends a list it isn't inside. */
-const BLOCK_START = /^(?:#{1,6}(?:[ \t]|$)|([-*_])(?:[ \t]*\1){2,}[ \t]*$|`{3,}|~{3,})/;
+/** A heading, a thematic break, a fence or a quote, after its indent: a block that ends a list it isn't inside. */
+const BLOCK_START = /^(?:#{1,6}(?:[ \t]|$)|([-*_])(?:[ \t]*\1){2,}[ \t]*$|`{3,}|~{3,}|>)/;
 const FENCE = /^([ \t]*)(`{3,}|~{3,})/;
 const FENCE_CLOSE = /^[ \t]*(`{3,}|~{3,})[ \t]*$/;
 
@@ -362,6 +362,8 @@ function quotedTabItems(md: MarkdownIt): void {
         const quote = line.slice(0, depth ? ends[depth - 1] : 0);
         const rest = line.slice(quote.length);
         lists.length = Math.min(lists.length, depth + 1); // deeper quotes ended
+        // Each outer quote's list sees the inner quote as a block of its own.
+        for (let outer = 1; outer < depth; outer++) lists[outer]?.next(line.slice(ends[outer - 1]));
         const list = depth ? (lists[depth] ??= quotedListTracker()) : undefined;
         const tabs = list?.next(rest);
         fence.opens(rest, depth, list?.fenceIndent() ?? 3);

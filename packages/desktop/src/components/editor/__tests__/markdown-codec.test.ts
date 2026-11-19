@@ -196,8 +196,10 @@ describe("Obsidian's quoted sub-items", () => {
   });
 
   it("keeps each quote's list to itself", () => {
-    const md = ">> 1. inner\n> \t1. outer";
-    expect(codec.serialize(codec.parse(md))).toBe(codec.serialize(createMarkdownCodec().parse(md.replace("\t", ""))));
+    for (const md of [">> 1. inner\n> \t1. outer", "> 1. parent\n>> # heading\n> \t1. outer"])
+      expect(codec.serialize(codec.parse(md))).toBe(codec.serialize(createMarkdownCodec().parse(md.replace("\t", ""))));
+    // A quote inside the item keeps the list going.
+    expect(codec.serialize(codec.parse("> 1. parent\n>    > aside\n> \t1. child"))).toContain(">    1. child");
   });
 
   it("reads indented code as code, not a fence that holds what follows", () => {
