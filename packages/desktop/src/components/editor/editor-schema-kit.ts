@@ -352,7 +352,7 @@ function quotedTabItems(md: MarkdownIt): void {
   md.core.ruler.after("normalize", "quoted_tab_items", (state) => {
     if (!state.src.includes(">\t") && !state.src.includes("> \t")) return;
     const fence = fenceTracker();
-    const list = quotedListTracker();
+    const lists: ReturnType<typeof quotedListTracker>[] = []; // one per quote depth
     state.src = state.src
       .split("\n")
       .map((line) => {
@@ -361,8 +361,10 @@ function quotedTabItems(md: MarkdownIt): void {
         const depth = ends.length;
         const quote = line.slice(0, depth ? ends[depth - 1] : 0);
         const rest = line.slice(quote.length);
-        const tabs = depth ? list.next(rest) : list.leave();
-        fence.opens(rest, depth, list.fenceIndent());
+        lists.length = Math.min(lists.length, depth + 1); // deeper quotes ended
+        const list = depth ? (lists[depth] ??= quotedListTracker()) : undefined;
+        const tabs = list?.next(rest);
+        fence.opens(rest, depth, list?.fenceIndent() ?? 3);
         return tabs ? quote.replace(/>$/, "> ") + "    ".repeat(tabs.length) + rest.slice(tabs.length) : line;
       })
       .join("\n");
@@ -413,7 +415,6 @@ function quotedListTracker() {
     return undefined;
   };
   return {
-    leave,
     /** How far a fence may be indented here: three columns past its container's start. */
     fenceIndent: () => Math.max(content, 0) + 3,
     next(rest: string): string | undefined {
