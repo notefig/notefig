@@ -20,6 +20,7 @@ import { GitError, isHttpsRemote, isSshRemote, remoteHost, remoteLabel, type Git
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import { platformModule } from "@/core/services";
 import { documentsModule, type DocumentsApi } from "@/modules/documents";
+import { editorsModule, type EditorsApi } from "@/modules/editors";
 import { filesModule, type WorkspaceFiles } from "@/modules/files";
 import { sshProblemOf } from "@/modules/git-remote";
 import { gitWorkerModule, type GitWorker } from "@/modules/git-worker";
@@ -98,6 +99,7 @@ export interface WorkspaceSyncDeps {
   /** The platform can sync (desktop). */
   supported: boolean;
   documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
+  editors: Pick<EditorsApi, "markdownEditor" | "paths">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
   projectSettings: Pick<ProjectSettingsApi, "read" | "update">;
   /** Writes to the repo's `info/exclude`, in turn with the app dir's. */
@@ -227,6 +229,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       fullScan,
       hooks: deps.hooks,
       documents: deps.documents,
+      editors: deps.editors,
       files: deps.files,
       fs: deps.fs,
       state: () => state,
@@ -400,7 +403,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
 
 export const syncModule = defineModule({
   name: "sync",
-  needs: [platformModule, documentsModule, projectSettingsModule, gitWorkerModule, appDirExcludeModule],
+  needs: [platformModule, documentsModule, editorsModule, projectSettingsModule, gitWorkerModule, appDirExcludeModule],
   workspace: {
     needs: [filesModule],
     create: (ctx) =>
@@ -411,6 +414,7 @@ export const syncModule = defineModule({
         gitWorker: ctx.use("gitWorker"),
         supported: ctx.use("platform").gitHttp.supported,
         documents: ctx.use("documents"),
+        editors: ctx.use("editors"),
         files: ctx.useWorkspace("files"),
         projectSettings: ctx.use("projectSettings"),
         excludes: ctx.use("app-dir-exclude"),

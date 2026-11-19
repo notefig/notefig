@@ -35,6 +35,10 @@ export function SyncStatusCell({ workspacePath, onOpen }: { workspacePath: strin
       <Icon className={cn("h-3.5 w-3.5", look.tone, look.spin && "animate-spin")} />
       <span>{t(look.label)}</span>
       <OverwrittenDot count={state.overwritten.length} />
+      {/* Who else syncs the branch now, in the colours of their carets. */}
+      {state.peers.map((peer) => (
+        <span key={peer.deviceId} className="size-1.5 rounded-full" style={{ backgroundColor: peer.colour }} />
+      ))}
     </button>
   );
 }

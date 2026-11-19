@@ -27,7 +27,8 @@
  * The same poll reads who else syncs the branch (`sync-presence.ts`), and a
  * settled cycle keeps this device's own presence fresh. While anyone else
  * does, sync is shared (MET-293): a poll a second, a commit two seconds
- * after the saves settle instead of once per sitting.
+ * after the saves settle instead of once per sitting, and each other's
+ * carets in the open editors (`sync-editor.ts`).
  *
  * Back after more than an hour away with local changes, or far apart from
  * the remote, it pauses before taking anything in until the user says go.
@@ -36,6 +37,7 @@ import type { Hooks } from "@notefig/core";
 import { GitError, isSshRemote, type GitRemote, type GitService } from "@notefig/git";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import type { DocumentsApi } from "@/modules/documents";
+import type { EditorsApi } from "@/modules/editors";
 import type { WorkspaceFiles } from "@/modules/files";
 import { sshProblemOf } from "@/modules/git-remote";
 import { IGNORE_RULES } from "@/utils/ignore";
@@ -43,6 +45,7 @@ import type { MergedMarkdown } from "./sync-merge";
 import { createOverlaps, swapsAmong, writeSynced } from "./sync-overlap";
 import { path as pathutil } from "@/utils/path";
 import { createPresence, presencePrefix } from "./sync-presence";
+import { createSyncEditors } from "./sync-editor";
 import {
   IDLE_COMMIT_MS,
   SHARED_COMMIT_MS,
@@ -73,6 +76,8 @@ export interface SyncEngineDeps {
   fullScan: boolean;
   hooks: Hooks;
   documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
+  /** Where the others' carets are drawn, while shared. */
+  editors: Pick<EditorsApi, "markdownEditor" | "paths">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
   fs: Pick<
     FileSystemSurface,
@@ -277,6 +282,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     state: deps.state,
     dispatch: deps.dispatch,
   });
+  const editors = createSyncEditors({ editors: deps.editors, tree, onCursor: presence.setCursor, setTimer });
   const markDirty = (paths: string[]) => {
     if (typeof dirty !== "string") for (const path of paths) dirty.add(path);
   };
@@ -688,11 +694,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
         return;
       }
       await presence.heartbeat();
-      await presence.readNames();
+      await presence.read();
       markSynced();
       deps.dispatch({ type: "settled" });
     } catch (error) {
       if (!(error instanceof CycleStop)) deps.dispatch(faultOf(error, remote.url));
+    } finally {
+      if (!stopped) editors.reconcile(deps.state());
     }
   };
 
@@ -800,6 +808,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       stopped = true;
       cancelIdle?.();
       cancelPoll?.();
+      editors.stop();
       for (const cleanup of cleanups.splice(0)) cleanup();
     },
   };
