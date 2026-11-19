@@ -638,6 +638,20 @@ describe("sync: solo", () => {
     expect(await tree(remote.bare)).not.toContain("added.md");
   });
 
+  it("commits a deletion staged with `git rm` while the app was closed", async () => {
+    const { core, ws, remote, open } = await setup();
+    await core.workspace(ws).close();
+    await fsp.writeFile(join(ws, "added.md"), "Added while closed.\n");
+    await open(ws);
+    expect(await tree(remote.bare)).toContain("added.md");
+
+    // Gone from the disk and the index: only HEAD still has it.
+    await core.workspace(ws).close();
+    await runGit(ws, ["rm", "-q", "added.md"]);
+    await open(ws);
+    expect(await tree(remote.bare)).not.toContain("added.md");
+  });
+
   it("brings a plain-git push into an open editor, keeping the caret", async () => {
     const { sync, remote, ws, editors, core } = await setup();
     const path = join(ws, "note.md");
