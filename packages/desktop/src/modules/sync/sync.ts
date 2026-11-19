@@ -19,6 +19,7 @@ import { defineModule, type Hooks } from "@notefig/core";
 import { GitError, isHttpsRemote, isSshRemote, remoteHost, remoteLabel, type GitService } from "@notefig/git";
 import type { FileSystemSurface, PlatformUiSurface } from "@/adapters/platform-adapter.interface";
 import { platformModule } from "@/core/services";
+import { flushDocumentSync, whenDocumentSyncClean } from "@/utils/markdown-conversion";
 import { documentsModule, type DocumentsApi } from "@/modules/documents";
 import { editorsModule, type EditorsApi } from "@/modules/editors";
 import { filesModule, type WorkspaceFiles } from "@/modules/files";
@@ -256,10 +257,14 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     engine = started;
     fullScan = false;
     // Pushes what's pending and deletes the presence ref, as a close does;
-    // nothing starts again before the app exits.
-    releaseQuit = deps.onQuit(() => {
+    // nothing starts again before the app exits. An edit still in an
+    // editor's autosave is saved first, so it goes too.
+    releaseQuit = deps.onQuit(async () => {
       disposed = true;
-      return stopEngine();
+      const open = deps.editors.paths().filter((path) => path.startsWith(`${root}/`));
+      for (const path of open) flushDocumentSync(path);
+      await Promise.all(open.map(whenDocumentSyncClean));
+      await stopEngine();
     });
     started.start();
   };

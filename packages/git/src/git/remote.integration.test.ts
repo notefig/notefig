@@ -247,11 +247,15 @@ describeIfGit("remote operations over git http-backend", () => {
     const tip = await seedCommit("two\n");
     await git(seed, ...SYSTEM_GIT_IDENTITY, "commit", "--allow-empty", "-qm", "here");
     await git(seed, "push", "-q", bare, "HEAD:refs/notefig/p");
-    await service.fetchRefs(remote, ["refs/notefig/p"], { transient: true });
-    await service.fetchRefs(remote, ["refs/heads/main"]);
+    // Side by side, as a pull can run while sync reads presence.
+    await Promise.all([
+      service.fetchRefs(remote, ["refs/notefig/p"], { transient: true }),
+      service.fetchRefs(remote, ["refs/heads/main"]),
+    ]);
     expect(await packs()).toBe(before + 2);
 
-    await service.sweepTransient({ olderThanMs: 0 });
+    // A later session drops it too.
+    await serviceAt(dir).sweepTransient({ olderThanMs: 0 });
     expect(await packs()).toBe(before + 1);
     expect(await service.readTextFile({ ref: tip, filepath: "note.md" })).toBe("two\n");
     await git(dir, "fsck", "--connectivity-only", "--no-dangling");

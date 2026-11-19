@@ -629,10 +629,19 @@ describe("sync: solo", () => {
     expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nLast words.");
   });
 
-  it("pushes what is left and deletes its presence ref when the app quits, and holds no quit once closed", async () => {
-    const { files, remote, ws, core, quit, goodbyes, open } = await setup();
-    await files.collections.content.preload();
-    await files.file(join(ws, "note.md")).write("# Note\n\nLast words.\n");
+  it("saves and pushes an edit still in autosave, and deletes its presence ref, when the app quits", async () => {
+    const { remote, ws, core, editors, quit, goodbyes, open } = await setup();
+    const path = join(ws, "note.md");
+    getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
+    const editor = editors.markdownEditor(path)!;
+    const docSync = getDocumentSync(path);
+    docSync.ensureBaseline(await read(path));
+    docSync.writer = async (markdown) => {
+      await fsp.writeFile(path, markdown);
+      written(core, path);
+    };
+    editor.commands.setContent(codec.parse("# Note\n\nLast words.\n"));
+    docSync.pushUpdate(() => editor.getJSON());
     await quit();
     expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nLast words.");
     expect(await presence(remote.bare)).toBe("");

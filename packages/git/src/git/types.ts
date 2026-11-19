@@ -288,7 +288,8 @@ export interface GitService {
    * for a ref the remote doesn't have. Branches also update their
    * `refs/remotes/origin/*` tracking refs; no other local ref is written.
    * `transient`: nothing will ever build on these objects (a presence
-   * ref), so `sweepTransient` may drop the packs this fetch wrote.
+   * ref), so `sweepTransient` may drop the packs this fetch wrote. They're
+   * marked on disk, so a later session drops them too.
    */
   fetchRefs(
     remote: GitRemote,
@@ -297,7 +298,8 @@ export interface GitService {
   ): Promise<GitRemoteRefResult[]>;
   /**
    * Drop what transient refs left behind: the loose objects `oids`, and
-   * the packs of `transient` fetches older than `olderThanMs`.
+   * the packs of `transient` fetches older than `olderThanMs`, from this
+   * session or an earlier one.
    */
   sweepTransient(input: { olderThanMs: number; oids?: string[] }): Promise<void>;
   /** Update one remote ref; see `GitPushRefInput` for what is refused. */

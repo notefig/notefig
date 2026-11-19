@@ -42,6 +42,30 @@ const ZERO_OID = "0".repeat(40);
 
 const DEFAULT_REMOTE = "origin";
 
+/** Beside `pack-<sha>.idx`: the pack came in for a transient ref. */
+const TRANSIENT_MARK = ".notefig-transient";
+
+/** Whether a v2 pack index lists `oid`: its sorted names, searched within
+ *  the fan-out's range for the first byte. */
+function packIndexHas(idx: Uint8Array, oid: string): boolean {
+  const view = new DataView(idx.buffer, idx.byteOffset, idx.byteLength);
+  if (idx.byteLength < 1032 || view.getUint32(0) !== 0xff744f63 || view.getUint32(4) !== 2) return false;
+  const want = oid.toLowerCase();
+  const first = parseInt(want.slice(0, 2), 16);
+  let lo = first === 0 ? 0 : view.getUint32(8 + (first - 1) * 4);
+  let hi = view.getUint32(8 + first * 4);
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    const at = 1032 + mid * 20;
+    let name = "";
+    for (let i = at; i < at + 20; i++) name += idx[i].toString(16).padStart(2, "0");
+    if (name === want) return true;
+    if (name < want) lo = mid + 1;
+    else hi = mid;
+  }
+  return false;
+}
+
 function joinGitPath(repoPath: string, relativePath: string): string {
   const base = repoPath.endsWith("/") ? repoPath.slice(0, -1) : repoPath;
   return `${base}/${relativePath}`;
@@ -288,8 +312,6 @@ export class IsomorphicGitService implements GitService {
    * so a deleted/rebuilt gitdir never serves ghosts.
    */
   private cache: Record<string, unknown> = {};
-  /** The packs `transient` fetches wrote, and when. */
-  private transientPacks: { name: string; at: number }[] = [];
 
   constructor(
     private readonly host: GitStorageHost,
@@ -1288,20 +1310,37 @@ export class IsomorphicGitService implements GitService {
     } catch (error) {
       throw this.fail(error);
     } finally {
-      if (before) {
-        const at = Date.now();
-        for (const name of await this.listPacks()) {
-          if (!before.has(name)) this.transientPacks.push({ name, at });
-        }
-      }
+      // Unmarked, a pack only stays: never a reason to fail the fetch.
+      if (before) await this.markTransient(before, results).catch(() => {});
     }
   }
 
+  /** `pack-<sha>`, for each pack in `objects/pack`. */
   private async listPacks(): Promise<string[]> {
     const entries = await this.host
-      .readDir(joinGitPath(this.gitdir, "objects/pack"))
+      .readDir(this.packDir())
       .catch(() => []);
-    return entries.map(({ name }) => name).filter((name) => name.endsWith(".pack"));
+    return entries.flatMap(({ name }) => (name.endsWith(".idx") ? [name.slice(0, -4)] : []));
+  }
+
+  private packDir(file = ""): string {
+    return joinGitPath(this.gitdir, `objects/pack${file && `/${file}`}`);
+  }
+
+  /**
+   * Mark, on disk, each new pack that holds a fetched oid: one written by
+   * that fetch, and not by a pull running alongside it, whose pack can't
+   * hold a transient ref's commit. The mark outlives the session.
+   */
+  private async markTransient(before: Set<string>, fetched: GitRemoteRefResult[]): Promise<void> {
+    const oids = fetched.flatMap(({ oid }) => (oid ? [oid] : []));
+    for (const pack of await this.listPacks()) {
+      if (before.has(pack)) continue;
+      const idx = await this.host.readFile(this.packDir(`${pack}.idx`)).catch(() => null);
+      if (idx && oids.some((oid) => packIndexHas(idx, oid))) {
+        await this.host.writeFileAtomic(this.packDir(`${pack}${TRANSIENT_MARK}`), new Uint8Array());
+      }
+    }
   }
 
   /**
@@ -1309,19 +1348,25 @@ export class IsomorphicGitService implements GitService {
    * only of the branch's own tip, so whatever it needs comes in its own.
    */
   async sweepTransient(input: { olderThanMs: number; oids?: string[] }): Promise<void> {
-    const drop = (path: string) =>
-      this.host.deleteFile(joinGitPath(this.gitdir, `objects/${path}`)).catch(() => {});
-    for (const oid of input.oids ?? []) await drop(`${oid.slice(0, 2)}/${oid.slice(2)}`);
+    const drop = (path: string) => this.host.deleteFile(path).catch(() => {});
+    for (const oid of input.oids ?? []) {
+      await drop(joinGitPath(this.gitdir, `objects/${oid.slice(0, 2)}/${oid.slice(2)}`));
+    }
     const cutoff = Date.now() - input.olderThanMs;
-    const expired = this.transientPacks.filter(({ at }) => at <= cutoff);
-    if (expired.length === 0) return;
-    this.transientPacks = this.transientPacks.filter(({ at }) => at > cutoff);
-    for (const { name } of expired) {
-      await drop(`pack/${name.replace(/\.pack$/, ".idx")}`);
-      await drop(`pack/${name}`);
+    const entries = await this.host.readDir(this.packDir()).catch(() => []);
+    let dropped = false;
+    for (const { name } of entries) {
+      if (!name.endsWith(TRANSIENT_MARK)) continue;
+      const mark = await this.host.stat(this.packDir(name));
+      if (!mark.exists || mark.mtimeMs > cutoff) continue;
+      const pack = name.slice(0, -TRANSIENT_MARK.length);
+      await drop(this.packDir(`${pack}.idx`));
+      await drop(this.packDir(`${pack}.pack`));
+      await drop(this.packDir(name));
+      dropped = true;
     }
     // isomorphic-git's cache lists the packs and holds their indexes.
-    this.cache = {};
+    if (dropped) this.cache = {};
   }
 
   /**
