@@ -38,6 +38,7 @@ pub fn register_handlers<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         fs_ops::move_directory,
         fs_ops::read_file,
         fs_ops::read_binary_file,
+        fs_ops::read_binary_range,
         fs_ops::write_file,
         fs_ops::create_files,
         fs_ops::delete_files,

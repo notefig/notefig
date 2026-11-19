@@ -20,7 +20,7 @@ import type {
   CredentialsSurface,
   GitHttpSurface,
 } from "./platform-adapter.interface";
-import { PlatformUnsupportedError } from "./platform-adapter.interface";
+import { FsError, PlatformUnsupportedError } from "./platform-adapter.interface";
 import { createBrowserDb } from "./browser-db";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import type { HarnessDefinition } from "@notefig/shared/agent";
@@ -184,6 +184,7 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     moveDirectory: this.moveDirectory.bind(this),
     readFiles: this.readFiles.bind(this),
     readBinaryFiles: this.readBinaryFiles.bind(this),
+    readBinaryRange: this.readBinaryRange.bind(this),
     writeFiles: this.writeFiles.bind(this),
     createFiles: this.createFiles.bind(this),
     deleteFiles: this.deleteFiles.bind(this),
@@ -281,6 +282,14 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
   protected abstract readBinaryFiles(
     paths: string[],
   ): Promise<BatchResult<{ path: string; data: Uint8Array }>>;
+  /** The whole file, sliced: the IndexedDB store keeps a file as one
+   *  value. An adapter that can read part of a file overrides this. */
+  protected async readBinaryRange(path: string, offset: number, length: number): Promise<Uint8Array> {
+    const { succeeded, failed } = await this.readBinaryFiles([path]);
+    const [file] = succeeded;
+    if (!file) throw new FsError(failed[0]?.type ?? "unknown", path, failed[0]?.message ?? "read failed");
+    return file.data.slice(offset, offset + length);
+  }
   protected abstract writeFiles(
     files: { path: string; content: string }[],
   ): Promise<BatchResult<string>>;

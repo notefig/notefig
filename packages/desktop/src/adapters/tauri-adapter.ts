@@ -147,6 +147,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     moveDirectory: this.moveDirectory.bind(this),
     readFiles: this.readFiles.bind(this),
     readBinaryFiles: this.readBinaryFiles.bind(this),
+    readBinaryRange: this.readBinaryRange.bind(this),
     writeFiles: this.writeFiles.bind(this),
     createFiles: this.createFiles.bind(this),
     deleteFiles: this.deleteFiles.bind(this),
@@ -396,6 +397,14 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
       }),
     );
     return result;
+  }
+
+  private async readBinaryRange(path: string, offset: number, length: number): Promise<Uint8Array> {
+    try {
+      return new Uint8Array(await invoke<ArrayBuffer>("read_binary_range", { path, offset, length }));
+    } catch (error) {
+      throw TauriPlatformAdapter.toFileSystemError(path, error);
+    }
   }
 
   private async writeFiles(

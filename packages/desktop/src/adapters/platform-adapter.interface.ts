@@ -294,6 +294,13 @@ export interface FileSystemSurface {
   ): Promise<BatchResult<{ path: string; data: Uint8Array }>>;
 
   /**
+   * Bytes `[offset, offset + length)` of one file, cut short at its end.
+   * Git reads a packfile's objects this way instead of the whole pack.
+   * @throws FsError
+   */
+  readBinaryRange(path: string, offset: number, length: number): Promise<Uint8Array>;
+
+  /**
    * Write/update files (creates or updates)
    * Creates parent directories if they don't exist
    * @returns Batch result with succeeded paths and failed operations

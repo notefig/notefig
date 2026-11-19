@@ -15,6 +15,7 @@ import type { FileSystemSurface } from "../platform-adapter.interface";
 function fsStub(): FileSystemSurface {
   return {
     readBinaryFiles: vi.fn(),
+    readBinaryRange: vi.fn(),
     writeBinaryFiles: vi.fn(),
     moveFile: vi.fn(),
     deleteFiles: vi.fn(),
@@ -115,5 +116,16 @@ describe("createGitStorageHost writes", () => {
 
     await expect(host.writeFileAtomic("/ws/.git/index", new Uint8Array([1]))).rejects.toThrow("EACCES");
     await expect(host.writeFileAtomic("/ws/.git/objects/pack/pack-xyz.pack", new Uint8Array([1]))).rejects.toThrow("EACCES");
+  });
+});
+
+describe("createGitStorageHost ranged reads", () => {
+  it("reads [start, end) as an offset and a length", async () => {
+    const fs = fsStub();
+    vi.mocked(fs.readBinaryRange).mockResolvedValue(new Uint8Array([7, 8]));
+    const host = createGitStorageHost(fs, gitDir());
+
+    await expect(host.readFileRange("/ws/.git/objects/pack/pack-a.pack", 100, 164)).resolves.toEqual(new Uint8Array([7, 8]));
+    expect(fs.readBinaryRange).toHaveBeenCalledWith("/ws/.git/objects/pack/pack-a.pack", 100, 64);
   });
 });

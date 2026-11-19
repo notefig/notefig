@@ -460,6 +460,17 @@ export class BrowserFsPlatformAdapter extends BaseBrowserAdapter {
     return { succeeded, failed };
   }
 
+  protected override async readBinaryRange(path: string, offset: number, length: number): Promise<Uint8Array> {
+    try {
+      const handle = await this.resolveFileHandle(path, false, false);
+      const file = await handle.getFile();
+      return new Uint8Array(await file.slice(offset, offset + length).arrayBuffer());
+    } catch (error) {
+      const failure = classifyBrowserError(path, error);
+      throw new FsError(failure.type, path, failure.message);
+    }
+  }
+
   protected async writeFiles(
     files: { path: string; content: string }[],
   ): Promise<BatchResult<string>> {

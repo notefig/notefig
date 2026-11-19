@@ -13,6 +13,7 @@ import { path as pathutil } from "@/utils/path";
 export type GitHostFs = Pick<
   FileSystemSurface,
   | "readBinaryFiles"
+  | "readBinaryRange"
   | "writeBinaryFiles"
   | "moveFile"
   | "deleteFiles"
@@ -94,6 +95,9 @@ export function createGitStorageHost(
       const entry = requireSuccess(path, result, "read");
       return entry.data;
     },
+
+    readFileRange: (rawPath, start, end) =>
+      fs.readBinaryRange(native(rawPath), start, Math.max(0, end - start)),
 
     writeFileAtomic: async (
       rawPath: string,

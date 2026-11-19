@@ -1,0 +1,356 @@
+diff --git a/node_modules/isomorphic-git/index.cjs b/node_modules/isomorphic-git/index.cjs
+index bde9693..7eb68df 100644
+--- a/node_modules/isomorphic-git/index.cjs
++++ b/node_modules/isomorphic-git/index.cjs
+@@ -3248,6 +3248,21 @@ class GitPackIndex {
+     this.pack = null;
+   }
+ 
++  // notefig: where the object at `start` ends: the next object's start,
++  // or the pack's trailer.
++  endOf(start) {
++    if (!this._ends) this._ends = [...new Set(this.offsets.values())].sort((a, b) => a - b);
++    const ends = this._ends;
++    let lo = 0;
++    let hi = ends.length;
++    while (lo < hi) {
++      const mid = (lo + hi) >> 1;
++      if (ends[mid] <= start) lo = mid + 1;
++      else hi = mid;
++    }
++    return lo < ends.length ? ends[lo] : this.packEnd
++  }
++
+   async read({ oid }) {
+     if (!this.offsets.get(oid)) {
+       if (this.getExternalRefDelta) {
+@@ -3274,13 +3289,19 @@ class GitPackIndex {
+       0b1100000: 'ofs_delta',
+       0b1110000: 'ref_delta',
+     };
+-    const pack = await this.pack;
+-    if (!pack) {
+-      throw new InternalError(
+-        'Could not read packfile data. The packfile may be missing, corrupted, or too large to read into memory.'
+-      )
++    let raw;
++    if (this.readRange) {
++      // notefig: one object's bytes, not the whole pack.
++      raw = await this.readRange(start, this.endOf(start));
++    } else {
++      const pack = await this.pack;
++      if (!pack) {
++        throw new InternalError(
++          'Could not read packfile data. The packfile may be missing, corrupted, or too large to read into memory.'
++        )
++      }
++      raw = pack.slice(start);
+     }
+-    const raw = pack.slice(start);
+     const reader = new BufferCursor(raw);
+     const byte = reader.readUInt8();
+     // Object type is encoded in bits 654
+@@ -3382,6 +3403,14 @@ async function shasumRange(
+   return hash.digest('hex')
+ }
+ 
++// notefig: the pack indexes in `objects/pack`, listed once per cache.
++const PackListCache = Symbol('PackListCache');
++
++async function listPackIndexes(fs, gitdir) {
++  const list = await fs.readdir(join(gitdir, 'objects/pack'));
++  return list.filter(x => x.endsWith('.idx'))
++}
++
+ async function readObjectPacked({
+   fs,
+   cache,
+@@ -3389,11 +3418,27 @@ async function readObjectPacked({
+   oid,
+   format = 'content',
+   getExternalRefDelta,
++  refresh = true,
+ }) {
+-  // Check to see if it's in a packfile.
+-  // Iterate through all the .idx files
+-  let list = await fs.readdir(join(gitdir, 'objects/pack'));
+-  list = list.filter(x => x.endsWith('.idx'));
++  // notefig: the list of packs is read once per cache, not per object;
++  // again only when an object isn't in the packs it names (a fetch wrote
++  // one since), unless `refresh` is false.
++  const known = cache[PackListCache];
++  const list = known || (cache[PackListCache] = await listPackIndexes(fs, gitdir));
++  const found = await readFromPacks({ fs, cache, gitdir, oid, getExternalRefDelta, list });
++  if (found || !known || !refresh) return found
++  const fresh = (cache[PackListCache] = await listPackIndexes(fs, gitdir));
++  return readFromPacks({
++    fs,
++    cache,
++    gitdir,
++    oid,
++    getExternalRefDelta,
++    list: fresh.filter(name => !known.includes(name)),
++  })
++}
++
++async function readFromPacks({ fs, cache, gitdir, oid, getExternalRefDelta, list }) {
+   for (const filename of list) {
+     const indexFile = `${gitdir}/objects/pack/${filename}`;
+     const p = await readPackIndex({
+@@ -3407,6 +3452,30 @@ async function readObjectPacked({
+     if (p.offsets.has(oid)) {
+       // Derive the .pack path from the .idx path
+       const packFile = indexFile.replace(/idx$/, 'pack');
++      // notefig: an fs that reads ranges (`readFileRange`) never loads the
++      // pack whole. Its trailer is checked against the index; the payload
++      // isn't hashed whole, as git doesn't on read either: each object's
++      // inflated length still is.
++      const unwrapped = fs._original_unwrapped_fs;
++      const readFileRange = unwrapped && (unwrapped.promises || unwrapped).readFileRange;
++      if (readFileRange && !p.pack && !p.readRange) {
++        const stat = await fs.lstat(packFile);
++        if (!stat) {
++          throw new InternalError(`Could not read packfile at ${packFile}. The file may be missing.`)
++        }
++        const trailer = await readFileRange(packFile, stat.size - 20, stat.size);
++        const trailerSha = Array.from(trailer)
++          .map(b => b.toString(16).padStart(2, '0'))
++          .join('');
++        if (trailerSha !== p.packfileSha) {
++          throw new InternalError(
++            `Packfile trailer mismatch: expected ${p.packfileSha}, got ${trailerSha}. The packfile may be corrupted.`
++          )
++        }
++        p.packEnd = stat.size - 20;
++        p.readRange = (start, end) => readFileRange(packFile, start, end);
++      }
++      if (!p.readRange) {
+       if (!p.pack) {
+         p.pack = fs.read(packFile);
+       }
+@@ -3450,6 +3519,7 @@ async function readObjectPacked({
+         // Mark as verified to prevent performance regression on subsequent reads
+         p._checksumVerified = true;
+       }
++      }
+ 
+       const result = await p.read({ oid, getExternalRefDelta });
+       result.format = 'content';
+@@ -3487,19 +3557,32 @@ async function _readObject({
+   if (oid === '4b825dc642cb6eb9a060e54bf8d69288fbee4904') {
+     result = { format: 'wrapped', object: Buffer.from(`tree 0\x00`) };
+   }
++  // notefig: once the packs are listed, look in them first: an object in
++  // a pack is found in memory, where a loose read costs a failed file read.
++  // A pack that went away since (a gc) drops what was cached of the packs
++  // and the lookup runs again from the start.
++  const readPacked = async refresh => {
++    try {
++      return await readObjectPacked({ fs, cache, gitdir, oid, getExternalRefDelta, refresh })
++    } catch (err) {
++      if (!cache[PackListCache]) throw err
++      cache[PackListCache] = undefined;
++      if (cache[PackfileCache]) cache[PackfileCache].clear();
++      return readObjectPacked({ fs, cache, gitdir, oid, getExternalRefDelta, refresh })
++    }
++  };
++  if (!result && cache[PackListCache]) {
++    // Packed objects always return the 'content' format, as below.
++    const packed = await readPacked(false);
++    if (packed) return packed
++  }
+   // Look for it in the loose object directory.
+   if (!result) {
+     result = await readObjectLoose({ fs, gitdir, oid });
+   }
+   // Check to see if it's in a packfile.
+   if (!result) {
+-    result = await readObjectPacked({
+-      fs,
+-      cache,
+-      gitdir,
+-      oid,
+-      getExternalRefDelta,
+-    });
++    result = await readPacked(true);
+ 
+     if (!result) {
+       throw new NotFoundError(oid)
+diff --git a/node_modules/isomorphic-git/index.js b/node_modules/isomorphic-git/index.js
+index a80657f..f29d558 100644
+--- a/node_modules/isomorphic-git/index.js
++++ b/node_modules/isomorphic-git/index.js
+@@ -3241,6 +3241,21 @@ class GitPackIndex {
+     this.pack = null;
+   }
+ 
++  // notefig: where the object at `start` ends: the next object's start,
++  // or the pack's trailer.
++  endOf(start) {
++    if (!this._ends) this._ends = [...new Set(this.offsets.values())].sort((a, b) => a - b);
++    const ends = this._ends;
++    let lo = 0;
++    let hi = ends.length;
++    while (lo < hi) {
++      const mid = (lo + hi) >> 1;
++      if (ends[mid] <= start) lo = mid + 1;
++      else hi = mid;
++    }
++    return lo < ends.length ? ends[lo] : this.packEnd
++  }
++
+   async read({ oid }) {
+     if (!this.offsets.get(oid)) {
+       if (this.getExternalRefDelta) {
+@@ -3267,13 +3282,19 @@ class GitPackIndex {
+       0b1100000: 'ofs_delta',
+       0b1110000: 'ref_delta',
+     };
+-    const pack = await this.pack;
+-    if (!pack) {
+-      throw new InternalError(
+-        'Could not read packfile data. The packfile may be missing, corrupted, or too large to read into memory.'
+-      )
++    let raw;
++    if (this.readRange) {
++      // notefig: one object's bytes, not the whole pack.
++      raw = await this.readRange(start, this.endOf(start));
++    } else {
++      const pack = await this.pack;
++      if (!pack) {
++        throw new InternalError(
++          'Could not read packfile data. The packfile may be missing, corrupted, or too large to read into memory.'
++        )
++      }
++      raw = pack.slice(start);
+     }
+-    const raw = pack.slice(start);
+     const reader = new BufferCursor(raw);
+     const byte = reader.readUInt8();
+     // Object type is encoded in bits 654
+@@ -3369,6 +3390,14 @@ async function shasumRange(
+   return shasum(buffer.subarray(start, end))
+ }
+ 
++// notefig: the pack indexes in `objects/pack`, listed once per cache.
++const PackListCache = Symbol('PackListCache');
++
++async function listPackIndexes(fs, gitdir) {
++  const list = await fs.readdir(join(gitdir, 'objects/pack'));
++  return list.filter(x => x.endsWith('.idx'))
++}
++
+ async function readObjectPacked({
+   fs,
+   cache,
+@@ -3376,11 +3405,27 @@ async function readObjectPacked({
+   oid,
+   format = 'content',
+   getExternalRefDelta,
++  refresh = true,
+ }) {
+-  // Check to see if it's in a packfile.
+-  // Iterate through all the .idx files
+-  let list = await fs.readdir(join(gitdir, 'objects/pack'));
+-  list = list.filter(x => x.endsWith('.idx'));
++  // notefig: the list of packs is read once per cache, not per object;
++  // again only when an object isn't in the packs it names (a fetch wrote
++  // one since), unless `refresh` is false.
++  const known = cache[PackListCache];
++  const list = known || (cache[PackListCache] = await listPackIndexes(fs, gitdir));
++  const found = await readFromPacks({ fs, cache, gitdir, oid, getExternalRefDelta, list });
++  if (found || !known || !refresh) return found
++  const fresh = (cache[PackListCache] = await listPackIndexes(fs, gitdir));
++  return readFromPacks({
++    fs,
++    cache,
++    gitdir,
++    oid,
++    getExternalRefDelta,
++    list: fresh.filter(name => !known.includes(name)),
++  })
++}
++
++async function readFromPacks({ fs, cache, gitdir, oid, getExternalRefDelta, list }) {
+   for (const filename of list) {
+     const indexFile = `${gitdir}/objects/pack/${filename}`;
+     const p = await readPackIndex({
+@@ -3394,6 +3439,30 @@ async function readObjectPacked({
+     if (p.offsets.has(oid)) {
+       // Derive the .pack path from the .idx path
+       const packFile = indexFile.replace(/idx$/, 'pack');
++      // notefig: an fs that reads ranges (`readFileRange`) never loads the
++      // pack whole. Its trailer is checked against the index; the payload
++      // isn't hashed whole, as git doesn't on read either: each object's
++      // inflated length still is.
++      const unwrapped = fs._original_unwrapped_fs;
++      const readFileRange = unwrapped && (unwrapped.promises || unwrapped).readFileRange;
++      if (readFileRange && !p.pack && !p.readRange) {
++        const stat = await fs.lstat(packFile);
++        if (!stat) {
++          throw new InternalError(`Could not read packfile at ${packFile}. The file may be missing.`)
++        }
++        const trailer = await readFileRange(packFile, stat.size - 20, stat.size);
++        const trailerSha = Array.from(trailer)
++          .map(b => b.toString(16).padStart(2, '0'))
++          .join('');
++        if (trailerSha !== p.packfileSha) {
++          throw new InternalError(
++            `Packfile trailer mismatch: expected ${p.packfileSha}, got ${trailerSha}. The packfile may be corrupted.`
++          )
++        }
++        p.packEnd = stat.size - 20;
++        p.readRange = (start, end) => readFileRange(packFile, start, end);
++      }
++      if (!p.readRange) {
+       if (!p.pack) {
+         p.pack = fs.read(packFile);
+       }
+@@ -3437,6 +3506,7 @@ async function readObjectPacked({
+         // Mark as verified to prevent performance regression on subsequent reads
+         p._checksumVerified = true;
+       }
++      }
+ 
+       const result = await p.read({ oid, getExternalRefDelta });
+       result.format = 'content';
+@@ -3474,19 +3544,32 @@ async function _readObject({
+   if (oid === '4b825dc642cb6eb9a060e54bf8d69288fbee4904') {
+     result = { format: 'wrapped', object: Buffer.from(`tree 0\x00`) };
+   }
++  // notefig: once the packs are listed, look in them first: an object in
++  // a pack is found in memory, where a loose read costs a failed file read.
++  // A pack that went away since (a gc) drops what was cached of the packs
++  // and the lookup runs again from the start.
++  const readPacked = async refresh => {
++    try {
++      return await readObjectPacked({ fs, cache, gitdir, oid, getExternalRefDelta, refresh })
++    } catch (err) {
++      if (!cache[PackListCache]) throw err
++      cache[PackListCache] = undefined;
++      if (cache[PackfileCache]) cache[PackfileCache].clear();
++      return readObjectPacked({ fs, cache, gitdir, oid, getExternalRefDelta, refresh })
++    }
++  };
++  if (!result && cache[PackListCache]) {
++    // Packed objects always return the 'content' format, as below.
++    const packed = await readPacked(false);
++    if (packed) return packed
++  }
+   // Look for it in the loose object directory.
+   if (!result) {
+     result = await readObjectLoose({ fs, gitdir, oid });
+   }
+   // Check to see if it's in a packfile.
+   if (!result) {
+-    result = await readObjectPacked({
+-      fs,
+-      cache,
+-      gitdir,
+-      oid,
+-      getExternalRefDelta,
+-    });
++    result = await readPacked(true);
+ 
+     if (!result) {
+       throw new NotFoundError(oid)

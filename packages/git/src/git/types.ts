@@ -141,6 +141,9 @@ export interface RepoStatus {
 
 export interface GitStorageHost {
   readFile(path: string): Promise<Uint8Array>;
+  /** Bytes `[start, end)` of a file, cut short at its end. Packfiles are
+   *  read this way, an object at a time, never whole. */
+  readFileRange(path: string, start: number, end: number): Promise<Uint8Array>;
   writeFileAtomic(path: string, data: Uint8Array): Promise<void>;
   renameAtomic(from: string, to: string): Promise<void>;
   deleteFile(path: string): Promise<void>;
@@ -238,7 +241,9 @@ export interface GitService {
   pullBranch(remote: GitRemote, target: GitBranchTarget): Promise<number>;
   /** Every file path (`/`-separated) in a commit's tree (`ref`: oid or
    *  ref, default `HEAD`). */
-  listFiles(input?: { ref?: string }): Promise<string[]>;
+  /** Files tracked at `ref` (default HEAD), or, with `index`, in the
+   *  index: no tree is read. */
+  listFiles(input?: { ref?: string; index?: boolean }): Promise<string[]>;
   /** A file's bytes as of a ref/commit; null when there's no file at
    *  that path (nothing, or a folder). With an empty `filepath`, `ref` is
    *  a blob's oid. */
