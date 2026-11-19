@@ -9,12 +9,16 @@ const codec = createMarkdownCodec();
 const doc = (markdown: string) => PMNode.fromJSON(getSchema(editorExtensions), codec.parse(markdown));
 
 describe("sync carets' units", () => {
-  it("counts a prompt widget as one unit, whatever its unsent draft holds", () => {
+  it("counts a bound prompt widget as one unit, whatever its draft holds, and an unbound one as none", () => {
     const markdown = '<!-- notefig:prompt id="blob_a" task="task_a" -->\n\nAfter the widget.\n';
     const plain = doc(markdown);
     const json = plain.toJSON();
     json.content[0].content = [{ type: "promptDraft", content: [{ type: "text", text: "an unsent draft" }] }];
     const drafted = PMNode.fromJSON(plain.type.schema, json);
+    const unbound = plain.toJSON();
+    unbound.content[0].attrs = { ...unbound.content[0].attrs, taskId: null };
+    const [first] = docUnits(PMNode.fromJSON(plain.type.schema, unbound));
+    expect(PMNode.fromJSON(plain.type.schema, unbound).textBetween(first.from, first.to)).toBe("After the widget.");
     for (const shown of [plain, drafted]) {
       const [, after] = docUnits(shown);
       expect(shown.textBetween(after.from, after.to)).toBe("After the widget.");

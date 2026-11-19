@@ -11,12 +11,11 @@ import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
-import { PROMPT_NODE_NAME } from "@notefig/widgets";
+import { PROMPT_NODE_NAME, serializePromptMarker } from "@notefig/widgets";
 import type { EditorsApi } from "@/modules/editors";
 import { isShared, type SyncCursor, type SyncPeer, type SyncState } from "./sync-machine";
 
 const REPORT_MS = 300;
-const WHOLE = new Set(["tableRow", PROMPT_NODE_NAME]);
 const carets = new PluginKey<DecorationSet>("syncCarets");
 
 type SetTimer = (run: () => void, ms: number) => () => void;
@@ -26,13 +25,19 @@ interface Unit {
   to: number;
 }
 
-/** The document's units in order: each textblock with text; a table row,
- *  code block or prompt widget whole (a draft never reaches the file); a
- *  block atom. Empty paragraphs aren't in the markdown, so aren't units. */
+/** The document's units in order, as the file has them: each textblock
+ *  with text; a table row or code block whole; a block atom. A prompt
+ *  widget is its marker alone, and only once it's bound to a task (its
+ *  draft, and an unbound widget, never reach the file). Empty paragraphs
+ *  aren't in the markdown, so aren't units. */
 export function docUnits(doc: PMNode): Unit[] {
   const units: Unit[] = [];
   doc.descendants((node, pos) => {
-    const whole = WHOLE.has(node.type.name) || node.type.spec.code === true;
+    if (node.type.name === PROMPT_NODE_NAME) {
+      if (serializePromptMarker(node.attrs)) units.push({ from: pos, to: pos + node.nodeSize });
+      return false;
+    }
+    const whole = node.type.name === "tableRow" || node.type.spec.code === true;
     if (!whole && !node.isTextblock && !(node.isAtom && node.isBlock)) return true;
     if (whole || !node.isTextblock || node.content.size > 0) units.push({ from: pos, to: pos + node.nodeSize });
     return false;
