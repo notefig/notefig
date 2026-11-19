@@ -4,7 +4,7 @@
 // Command modules + the shared handler registration live in the library crate
 // so the app binary, the mock-app dispatch tests, and the e2e shim all share
 // one command list (MET-73).
-use notefig::{agent_proc, app_status, db_ops, mcp_bridge, register_handlers, traffic_lights};
+use notefig::{agent_proc, app_status, db_ops, mcp_bridge, quit, register_handlers, traffic_lights};
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager};
@@ -260,7 +260,8 @@ fn main() {
     register_handlers(builder)
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| {
+        .run(|app_handle, event| {
+            quit::on_run_event(app_handle, &event);
             // Kill every spawned agent process when the app exits.
             if let tauri::RunEvent::Exit = event {
                 agent_proc::kill_all_agents();

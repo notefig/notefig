@@ -17,7 +17,7 @@
  */
 import { defineModule, type Hooks } from "@notefig/core";
 import { GitError, isHttpsRemote, isSshRemote, remoteHost, remoteLabel, type GitService } from "@notefig/git";
-import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
+import type { FileSystemSurface, PlatformUiSurface } from "@/adapters/platform-adapter.interface";
 import { platformModule } from "@/core/services";
 import { documentsModule, type DocumentsApi } from "@/modules/documents";
 import { editorsModule, type EditorsApi } from "@/modules/editors";
@@ -102,6 +102,8 @@ export interface WorkspaceSyncDeps {
   editors: Pick<EditorsApi, "markdownEditor" | "paths">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
   projectSettings: Pick<ProjectSettingsApi, "read" | "update">;
+  /** While an engine runs, the app's quit waits for its goodbye. */
+  onQuit: PlatformUiSurface["onQuit"];
   /** Writes to the repo's `info/exclude`, in turn with the app dir's. */
   excludes: Pick<GitExcludes, "refresh" | "setBlock">;
   /** Test seam: the engine's timers and window blur. */
@@ -157,6 +159,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
   let device: SyncDevice | null = null;
   let git: GitService | null = null;
   let engine: SyncEngine | null = null;
+  let releaseQuit: (() => void) | null = null;
   /** The start or stop in flight; the next waits for it. */
   let chain: Promise<void> = Promise.resolve();
   /** Sync was just turned on here: the first commit takes everything. */
@@ -252,12 +255,20 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
     });
     engine = started;
     fullScan = false;
+    // Pushes what's pending and deletes the presence ref, as a close does;
+    // nothing starts again before the app exits.
+    releaseQuit = deps.onQuit(() => {
+      disposed = true;
+      return stopEngine();
+    });
     started.start();
   };
 
   const stopEngine = async () => {
     const running = engine;
     engine = null;
+    releaseQuit?.();
+    releaseQuit = null;
     await running?.stop();
   };
 
@@ -418,6 +429,7 @@ export const syncModule = defineModule({
         files: ctx.useWorkspace("files"),
         projectSettings: ctx.use("projectSettings"),
         excludes: ctx.use("app-dir-exclude"),
+        onQuit: ctx.use("platform").ui.onQuit,
       }),
     dispose: (sync) => sync.dispose(),
   },

@@ -587,6 +587,14 @@ export interface PlatformUiSurface {
   publishAppStatus(status: AppStatus): void;
 
   /**
+   * Run `prepare` before the app quits (a goodbye to the network). The quit
+   * waits for it, but never more than a few seconds. A platform that can't
+   * hold a quit never calls it.
+   * @returns Cleanup function: no longer run on quit
+   */
+  onQuit(prepare: () => Promise<void>): () => void;
+
+  /**
    * Adds a platform event listener.
    * @returns Cleanup function to remove the listener
    */

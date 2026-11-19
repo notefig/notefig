@@ -216,6 +216,8 @@ export abstract class BaseBrowserAdapter implements IPlatformAdapter {
     openExternal: this.openExternal.bind(this),
     toggleFullscreen: this.toggleFullscreen.bind(this),
     publishAppStatus: this.publishAppStatus.bind(this),
+    // A tab closes without waiting.
+    onQuit: () => () => {},
     addEventListener: this.addEventListener.bind(this),
     removeEventListener: this.removeEventListener.bind(this),
   };

@@ -226,3 +226,21 @@ describe("TauriPlatformAdapter app status", () => {
     expect(fresh).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("TauriPlatformAdapter quit", () => {
+  it("holds the quit while a goodbye is registered, and exits once each is said", async () => {
+    const tauri = withMockedTauri({ hold_quit: () => null, "plugin:process|exit": () => null });
+    const adapter = new TauriPlatformAdapter();
+    const said: string[] = [];
+    const release = adapter.ui.onQuit(async () => void said.push("a"));
+    adapter.ui.onQuit(async () => void said.push("b"))();
+    adapter.ui.onQuit(async () => void said.push("c"));
+    release();
+    await Promise.resolve();
+    expect(tauri.calls("hold_quit")).toEqual([{ hold: true }]);
+
+    tauri.emit("quit-requested", null);
+    await vi.waitFor(() => expect(tauri.calls("plugin:process|exit")).toHaveLength(1));
+    expect(said).toEqual(["c"]);
+  });
+});

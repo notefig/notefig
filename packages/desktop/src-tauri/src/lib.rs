@@ -1,7 +1,7 @@
 //! Library crate for the Notefig desktop backend.
 //!
 //! Holds the Tauri command modules and the single `register_handlers`
-//! registration shared by three consumers so the 27-command handler list has
+//! registration shared by three consumers so the command handler list has
 //! exactly one source of truth (MET-73):
 //!   - the app binary (`main.rs`) on the real `Wry` runtime,
 //!   - the `MockRuntime` dispatch tests (`test_support`),
@@ -17,6 +17,7 @@ pub mod git_http;
 mod git_ssh;
 pub mod line_stream;
 pub mod mcp_bridge;
+pub mod quit;
 pub mod search;
 pub mod traffic_lights;
 pub mod walkdir_utils;
@@ -78,5 +79,7 @@ pub fn register_handlers<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         traffic_lights::place_traffic_lights,
         // The menu-bar item, drawn from the frontend's status
         app_status::publish_app_status,
+        // A quit that waits for sync's goodbye
+        quit::hold_quit,
     ])
 }

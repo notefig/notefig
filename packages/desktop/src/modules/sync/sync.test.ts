@@ -65,6 +65,9 @@ async function setup(mode: "synced" | "asked" | "plain" = "synced", extra: Recor
   const editors = createEditors();
   const gitWorker = inProcessGitWorker(fs, remote.http);
   const created = vi.spyOn(gitWorker, "register");
+  const goodbyes = new Set<() => Promise<void>>();
+  const onQuit = (prepare: () => Promise<void>) => (goodbyes.add(prepare), () => void goodbyes.delete(prepare));
+  const quit = () => Promise.all([...goodbyes].map((run) => run()));
   const core = createTestCore({
     modules: [
       defineModule({
@@ -93,7 +96,7 @@ async function setup(mode: "synced" | "asked" | "plain" = "synced", extra: Recor
       projectSettingsModule,
       syncModule,
     ],
-    platform: { fs, gitHttp: { supported: true, request: remote.http.request } },
+    platform: { fs, gitHttp: { supported: true, request: remote.http.request }, ui: { onQuit } as never },
   });
   cores.push(core);
   await core.boot();
@@ -105,7 +108,7 @@ async function setup(mode: "synced" | "asked" | "plain" = "synced", extra: Recor
     return sync;
   };
   const sync = await open(ws);
-  return { remote, ws, fs, files: filesByPath.get(ws)!, editors, core, sync, open, created };
+  return { remote, ws, fs, files: filesByPath.get(ws)!, editors, core, sync, open, created, quit, goodbyes };
 }
 
 const read = (path: string) => fsp.readFile(path, "utf8");
@@ -624,6 +627,21 @@ describe("sync: solo", () => {
     await files.file(join(ws, "note.md")).write("# Note\n\nLast words.\n");
     await core.workspace(ws).close();
     expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nLast words.");
+  });
+
+  it("pushes what is left and deletes its presence ref when the app quits, and holds no quit once closed", async () => {
+    const { files, remote, ws, core, quit, goodbyes, open } = await setup();
+    await files.collections.content.preload();
+    await files.file(join(ws, "note.md")).write("# Note\n\nLast words.\n");
+    await quit();
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nLast words.");
+    expect(await presence(remote.bare)).toBe("");
+
+    await core.workspace(ws).close();
+    await open(ws);
+    expect(goodbyes.size).toBe(1);
+    await core.workspace(ws).close();
+    expect(goodbyes.size).toBe(0);
   });
 
   it("commits what changed while the app was closed, deletions included", async () => {

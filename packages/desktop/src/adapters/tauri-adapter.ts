@@ -129,6 +129,8 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
   private appStatusActivations = new Map<string, () => void>();
   private lastAppStatusWire: string | null = null;
   private appStatusUnlisten: Promise<UnlistenFn> | null = null;
+  private quitPreparations = new Set<() => Promise<void>>();
+  private quitUnlisten: Promise<UnlistenFn> | null = null;
 
   // Two listener registries, one native subscription. Splitting the bus
   // across the fs and ui surfaces must not change *when* Tauri's `listen()`
@@ -178,6 +180,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     openExternal: this.openExternal.bind(this),
     toggleFullscreen: this.toggleFullscreen.bind(this),
     publishAppStatus: this.publishAppStatus.bind(this),
+    onQuit: this.onQuit.bind(this),
     addEventListener: this.addEventListener.bind(this),
     removeEventListener: this.removeEventListener.bind(this),
   };
@@ -716,6 +719,22 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     invoke("publish_app_status", { status: wire }).catch((error) => {
       console.error("Failed to publish app status:", error);
     });
+  }
+
+  /** Rust holds a quit only while something here has a goodbye to say
+   *  (quit.rs); this exits once every one is said. */
+  private onQuit(prepare: () => Promise<void>): () => void {
+    this.quitUnlisten ??= listen("quit-requested", async () => {
+      await Promise.allSettled([...this.quitPreparations].map((run) => run()));
+      const { exit } = await import("@tauri-apps/plugin-process");
+      await exit(0);
+    });
+    const hold = (on: boolean) => void invoke("hold_quit", { hold: on }).catch(() => {});
+    this.quitPreparations.add(prepare);
+    if (this.quitPreparations.size === 1) hold(true);
+    return () => {
+      if (this.quitPreparations.delete(prepare) && this.quitPreparations.size === 0) hold(false);
+    };
   }
 
   private async toggleFullscreen(): Promise<void> {
