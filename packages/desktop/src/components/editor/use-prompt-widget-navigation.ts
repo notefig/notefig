@@ -88,16 +88,18 @@ function focusAndScrollToWidget(editor: Editor, pos: number): void {
   const draftVisible = draftEl && draftEl.getClientRects().length > 0;
 
   let tr = editor.state.tr;
+  let caretPos: number | null = null;
   if (range && draftVisible) {
+    caretPos = range.to;
     tr = tr.setSelection(TextSelection.create(tr.doc, range.to));
   } else {
     tr = selectWidget(tr, pos);
   }
   // Not the transaction's `scrollIntoView`: its minimal scroll drops the
   // caret on a viewport edge and hides the card the input belongs to
-  // (MET-286). The jump centers the input in the viewport instead — the
-  // widget card when the composer is hidden — after the selection and focus
-  // land, so the browser's own scroll for the new caret can't undo it.
+  // (MET-286). The jump centers its landing point in the viewport instead —
+  // after the selection and focus land, so the browser's own scroll for the
+  // new caret can't undo it.
   editor.view.dispatch(tr);
   editor.view.focus();
   const target =
@@ -106,7 +108,99 @@ function focusAndScrollToWidget(editor: Editor, pos: number): void {
       : widgetEl instanceof HTMLElement
         ? widgetEl
         : null;
-  target?.scrollIntoView({ block: "center" });
+  if (target) centerScrollTarget(editor, target, caretPos);
+}
+
+/** The nearest ancestor that scrolls vertically — the document's scroller
+ *  for anything inside the editor. */
+function scrollParentOf(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const overflowY = getComputedStyle(node).overflowY;
+    if (overflowY === "auto" || overflowY === "scroll") return node;
+  }
+  return null;
+}
+
+/**
+ * Center the jump's landing point in the scroll container's viewport: the
+ * draft the caret moved into, or the widget card when the composer is
+ * hidden. A draft taller than the viewport centers the caret's line
+ * instead — centering the draft itself would leave the caret (at the
+ * draft's end) below the fold.
+ *
+ * The widget card animates its height (AnimatedHeight's measured-height
+ * transition), and a jump can land before that transition has even started
+ * (the ResizeObserver → React → style pipeline runs a few frames behind the
+ * edit) or while it is moving under the landing point. So the aim repeats
+ * on the following frames while the landing point moves in document space,
+ * and stops once it has held still past the transition's reach — re-aiming
+ * only on layout change, so a scroll the user makes after landing is
+ * theirs. A newer jump takes the watch over.
+ */
+let scrollWatch = 0;
+const SCROLL_SETTLE_GRACE_MS = 350;
+const SCROLL_WATCH_CAP_MS = 1000;
+function centerScrollTarget(
+  editor: Editor,
+  target: HTMLElement,
+  caretPos: number | null,
+): void {
+  const scroller = scrollParentOf(target);
+  if (!scroller) return;
+
+  /** Scroll the landing point to the viewport's middle. */
+  const aim = (frame: DOMRect, mid: number): void => {
+    const wanted = scroller.scrollTop + (mid - frame.top - frame.height / 2);
+    scroller.scrollTop = Math.max(
+      0,
+      Math.min(wanted, scroller.scrollHeight - scroller.clientHeight),
+    );
+  };
+
+  /** One frame: re-aim while the landing point moves in document space.
+   *  True to keep watching. */
+  const token = ++scrollWatch;
+  const startedAt = performance.now();
+  let lastMidDoc: number | null = null;
+  const step = (): boolean => {
+    if (
+      token !== scrollWatch ||
+      editor.isDestroyed ||
+      !scroller.isConnected ||
+      performance.now() - startedAt >= SCROLL_WATCH_CAP_MS
+    ) {
+      return false;
+    }
+    const frame = scroller.getBoundingClientRect();
+    const rect = target.getBoundingClientRect();
+    let mid = (rect.top + rect.bottom) / 2;
+    if (caretPos !== null && rect.height > frame.height) {
+      try {
+        const caret = editor.view.coordsAtPos(caretPos);
+        mid = (caret.top + caret.bottom) / 2;
+      } catch {
+        // The caret no longer resolves to a point (the view moved
+        // underneath): center the target as it is.
+      }
+    }
+    const midDoc = mid + scroller.scrollTop;
+    const moved = lastMidDoc === null || Math.abs(midDoc - lastMidDoc) >= 1;
+    lastMidDoc = midDoc;
+    if (!moved) {
+      // Hold still — but the card's height transition may not have started
+      // yet; only trust the stillness once it had its chance.
+      return performance.now() - startedAt < SCROLL_SETTLE_GRACE_MS;
+    }
+    aim(frame, mid);
+    return true;
+  };
+
+  step();
+  const watch = () => {
+    if (!step()) return;
+    requestAnimationFrame(watch);
+  };
+  requestAnimationFrame(watch);
 }
 
 /**
