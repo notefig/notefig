@@ -42,11 +42,25 @@ export interface SyncReturnSummary {
   people: string[];
 }
 
+/** Where someone's caret is: a unit of the document (a paragraph, a list
+ *  item's paragraph, a table row, a code block; `sync-editor.ts`) by its
+ *  place among the document's units, and a character in it. */
+export interface SyncCursor {
+  /** `/`-separated path. */
+  path: string;
+  unit: number;
+  offset: number;
+}
+
 /** Another device syncing the branch now (`sync-presence.ts`). */
 export interface SyncPeer {
   deviceId: string;
   /** Its user's git name; null until read. */
   name: string | null;
+  /** The colour it picked, from its heartbeat; null until read. */
+  colour: string | null;
+  /** Where it last typed or clicked; null until read, or if nowhere. */
+  cursor: SyncCursor | null;
 }
 
 /** Our text a merge replaced with the branch's. */

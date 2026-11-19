@@ -195,9 +195,15 @@ describe("the Remote tool", () => {
     expect(sync.dismissOverwritten).toHaveBeenCalled();
   });
 
-  it("names who else syncs the branch now, and nobody when solo", async () => {
-    const { text, show } = await render({ setup: "on", peers: [{ deviceId: "b", name: "Bob" }, { deviceId: "c", name: null }] });
-    expect(text()).toContain("Bob, Someone");
+  it("names who else syncs the branch now, and where they are, and nobody when solo", async () => {
+    const { text, show } = await render({
+      setup: "on",
+      peers: [
+        { deviceId: "b", name: "Bob", colour: "#000", cursor: { path: "docs/plan.md", unit: 0, offset: 0 } },
+        { deviceId: "c", name: null, colour: "#fff", cursor: null },
+      ],
+    });
+    expect(text()).toContain("Bob (plan.md), Someone");
     await show({ setup: "on" });
     expect(text()).not.toContain("Bob");
   });

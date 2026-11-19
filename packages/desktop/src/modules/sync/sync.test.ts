@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { defineModule, type Core } from "@notefig/core";
+import type { Editor } from "@tiptap/core";
 import { createTestCore } from "@/testing/test-core";
 import { createTestRemote, inProcessGitWorker, nodeFs, runGit, type TestRemote } from "@/testing/test-sync";
 import { createDocuments } from "@/modules/documents";
@@ -21,6 +22,7 @@ import { getDocumentSync, whenDocumentSyncClean } from "@/utils/markdown-convers
 import { IDLE_COMMIT_MS, POLL_MS, SHARED_COMMIT_MS, SHARED_POLL_MS, pollInterval, syncModule } from "@/modules/sync";
 import { OFFLINE_RETURN_MS } from "./sync-engine";
 import { HEARTBEAT_MS, PRESENCE_STALE_MS } from "./sync-presence";
+import { docUnits } from "./sync-editor";
 import * as merging from "./sync-merge";
 import * as telemetry from "@/telemetry/telemetry";
 
@@ -86,6 +88,7 @@ async function setup(mode: "synced" | "asked" | "plain" = "synced", extra: Recor
         register: (ctx) =>
           createDocuments({ fs, openFiles: () => [...filesByPath.values()], editors, hooks: ctx.hooks }),
       }),
+      defineModule({ name: "editors", register: () => editors }),
       gitWorker,
       projectSettingsModule,
       syncModule,
@@ -1118,8 +1121,8 @@ describe("sync: shared, while another device syncs the branch", () => {
   }
   it("goes shared while another device syncs the branch, and solo once it leaves", async () => {
     const { a, b, remote, core, wsB } = await meet();
-    expect(a.state().peers).toEqual([{ deviceId: "b", name: "User device-b" }]);
-    expect(b.state().peers).toEqual([{ deviceId: "dev", name: "User device-a" }]);
+    expect(a.state().peers).toMatchObject([{ deviceId: "b", name: "User device-b", cursor: null }]);
+    expect(b.state().peers).toMatchObject([{ deviceId: "dev", name: "User device-a", cursor: null }]);
     expect(pollInterval(a.state())).toBe(SHARED_POLL_MS);
     expect(await presence(remote.bare)).toBe("refs/notefig/v1/presence/main/b\nrefs/notefig/v1/presence/main/dev");
 
@@ -1198,6 +1201,49 @@ describe("sync: shared, while another device syncs the branch", () => {
     expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nStill syncs.");
     expect(await presence(remote.bare)).toBe("refs/notefig/v1/presence/main/b");
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows each device where the other's caret is, through a plugin only while shared", async () => {
+    const { a, b, editors, core, ws, wsB } = await meet();
+    const open = async (path: string) => {
+      getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
+      return editors.markdownEditor(path)!;
+    };
+    const carets = (editor: Editor) => editor.state.plugins.some((plugin) => (plugin as unknown as { key: string }).key === "syncCarets$");
+    const [mine, theirs] = [await open(join(ws, "note.md")), await open(join(wsB, "note.md"))];
+    vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
+    const [, , second] = docUnits(mine.state.doc);
+    mine.commands.setTextSelection(second.from + 1 + 6);
+
+    await a.syncNow();
+    expect(carets(mine)).toBe(true);
+    await vi.waitFor(
+      async () => {
+        await a.syncNow();
+        await b.syncNow();
+        expect(b.state().peers[0].cursor).toEqual({ path: "note.md", unit: 2, offset: 6 });
+      },
+      { timeout: 10_000 },
+    );
+    expect(theirs.view.dom.querySelector('[data-sync-peer="dev"]')?.parentElement?.textContent).toBe("Second paragraph.");
+    // Its colour came in the same heartbeat commit.
+    expect(b.state().peers[0].colour).toMatch(/^#[0-9a-f]{6}$/);
+
+    await core.workspace(wsB).close();
+    await a.syncNow();
+    expect(carets(mine)).toBe(false);
+    disposeEditor(editors, join(ws, "note.md"));
+    disposeEditor(editors, join(wsB, "note.md"));
+  });
+
+  it("shows a device whose presence commit is malformed, but nothing it claims", async () => {
+    const { sync, remote } = await setup();
+    const tree = await runGit(remote.bare, ["rev-parse", "main^{tree}"]);
+    const forged = JSON.stringify({ name: 42, colour: "red;background:url(x)", cursor: { path: 42, unit: -1, offset: "0" } });
+    const oid = await runGit(remote.bare, ["commit-tree", tree, "-p", "main", "-m", forged]);
+    await runGit(remote.bare, ["update-ref", "refs/notefig/v1/presence/main/x", oid]);
+    await sync.syncNow();
+    expect(sync.state().peers).toEqual([{ deviceId: "x", name: null, colour: null, cursor: null }]);
   });
 
   it("keeps its presence after a passing failure to push it", async () => {

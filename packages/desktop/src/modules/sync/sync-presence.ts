@@ -2,8 +2,10 @@
  * Who else syncs the branch (MET-293), read in the engine's poll with no
  * channel of its own. Each device owns
  * `refs/notefig/v1/presence/<branch>/<deviceId>`: a commit on the branch tip
- * whose message names its user, replaced every `HEARTBEAT_MS` and deleted
- * when the workspace closes. Replaced, never stacked: it takes no history.
+ * whose message names its user, its colour and where its caret is (all
+ * of it in that one commit, checked before it's shown), replaced every
+ * `HEARTBEAT_MS` (and when the caret moves) and deleted when the workspace
+ * closes. Replaced, never stacked: it takes no history.
  *
  * Liveness is what this client observes: a device is live while its ref
  * moved within `PRESENCE_STALE_MS` by the local clock, so no clock but ours
@@ -13,7 +15,7 @@
  */
 import { GitError, type GitRemote, type GitRemoteRef, type GitService } from "@notefig/git";
 import type { SyncAuthor } from "./sync-engine";
-import type { SyncEvent, SyncPeer, SyncState } from "./sync-machine";
+import type { SyncCursor, SyncEvent, SyncPeer, SyncState } from "./sync-machine";
 
 /** Where the devices syncing `branch` keep their presence. */
 export const presencePrefix = (branch: string) => `refs/notefig/v1/presence/${branch}/`;
@@ -36,12 +38,14 @@ export interface PresenceDeps {
 export interface Presence {
   /** One poll's refs: note what moved, and announce who's here. */
   observe(refs: GitRemoteRef[]): void;
-  /** Read the names of devices that came, in one fetch: after the cycle's
-   *  branch work, which never waits on it. */
-  readNames(): Promise<void>;
-  /** Replace this device's ref when a heartbeat is due, or someone new
-   *  needs to see it. */
+  /** Read who moved, and where their caret is now, in one fetch: after the
+   *  cycle's branch work, which never waits on it. */
+  read(): Promise<void>;
+  /** Replace this device's ref when a heartbeat is due, someone new needs
+   *  to see it, or its caret moved. */
   heartbeat(): Promise<void>;
+  /** Where this device's caret is, for the next heartbeat. */
+  setCursor(cursor: SyncCursor | null): void;
   /** Delete this device's ref, so the others see it go at once. */
   leave(): Promise<void>;
 }
@@ -50,7 +54,43 @@ interface Seen {
   oid: string;
   /** When this client saw it move; null: there on the first poll. */
   movedAt: number | null;
+  /** The commit the rest was read from. */
+  read: string | null;
   name: string | null;
+  colour: string | null;
+  cursor: SyncCursor | null;
+}
+
+const COLOURS = ["#2f7ed8", "#c0562f", "#2f9e6e", "#9256c9", "#c79a2c", "#c24580"];
+
+/** The colour a device picks for itself, and sends in its heartbeat. */
+function colourOf(deviceId: string): string {
+  let hash = 0;
+  for (const char of deviceId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return COLOURS[hash % COLOURS.length];
+}
+
+const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+
+/** What another device's commit says, keeping only what's well formed:
+ *  anyone who can push to the remote can write it. */
+function payloadOf(message: string): Pick<Seen, "name" | "colour" | "cursor"> {
+  let raw: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(message);
+    if (parsed && typeof parsed === "object") raw = parsed as Record<string, unknown>;
+  } catch {
+    // Not ours: nothing to show.
+  }
+  const cursor = (raw.cursor ?? null) as Record<string, unknown> | null;
+  return {
+    name: typeof raw.name === "string" ? raw.name : null,
+    colour: typeof raw.colour === "string" && /^#[0-9a-f]{6}$/i.test(raw.colour) ? raw.colour : null,
+    cursor:
+      cursor && typeof cursor.path === "string" && count(cursor.unit) && count(cursor.offset)
+        ? { path: cursor.path, unit: cursor.unit, offset: cursor.offset }
+        : null,
+  };
 }
 
 /** A host's lasting answer to this device's ref. */
@@ -69,13 +109,10 @@ export function createPresence(deps: PresenceDeps): Presence {
   let beat = 0;
   /** The host won't take this device's ref: this session stays solo. */
   let refused = false;
+  let cursor: SyncCursor | null = null;
 
-  /** A device's user, from its ref's commit. */
-  const nameIn = async (oid: string): Promise<string | null> => {
-    const [tip] = await git.log({ ref: oid, depth: 1 });
-    const name = (JSON.parse(tip?.commit.message ?? "null") as { name?: unknown } | null)?.name;
-    return typeof name === "string" ? name : null;
-  };
+  /** What a device's ref's commit says. */
+  const payloadIn = async (oid: string) => payloadOf((await git.log({ ref: oid, depth: 1 }))[0]?.commit.message ?? "");
 
   /** Note when each ref moved; true when a device came since the last poll. */
   const stamp = (present: Map<string, string>, at: number): boolean => {
@@ -85,7 +122,7 @@ export function createPresence(deps: PresenceDeps): Presence {
       const entry = seen.get(ref);
       if (entry?.oid === oid) continue;
       arrived ||= !entry && !first;
-      seen.set(ref, { oid, movedAt: first ? null : at, name: entry?.name ?? null });
+      seen.set(ref, { read: null, name: null, colour: null, cursor: null, ...entry, oid, movedAt: first ? null : at });
     }
     first = false;
     return arrived;
@@ -100,7 +137,7 @@ export function createPresence(deps: PresenceDeps): Presence {
     const peers: SyncPeer[] = refused
       ? []
       : live(now())
-          .map(([ref, entry]) => ({ deviceId: ref.slice(prefix.length), name: entry.name }))
+          .map(([ref, { name, colour, cursor }]) => ({ deviceId: ref.slice(prefix.length), name, colour, cursor }))
           .sort((a, b) => a.deviceId.localeCompare(b.deviceId));
     if (JSON.stringify(peers) !== JSON.stringify(deps.state().peers)) deps.dispatch({ type: "peers", peers });
   };
@@ -113,27 +150,36 @@ export function createPresence(deps: PresenceDeps): Presence {
       announce();
     },
 
-    async readNames() {
-      const unnamed = live(now()).filter(([, entry]) => entry.name === null);
-      if (refused || unnamed.length === 0) return;
+    async read() {
+      const moved = live(now()).filter(([, entry]) => entry.read !== entry.oid);
+      if (refused || moved.length === 0) return;
       try {
-        const fetched = await git.fetchRefs(remote, unnamed.map(([ref]) => ref));
+        const fetched = await git.fetchRefs(remote, moved.map(([ref]) => ref));
         for (const { ref, oid } of fetched) {
           const entry = seen.get(ref);
-          if (entry && oid) entry.name = await nameIn(oid);
+          if (!entry || !oid) continue;
+          Object.assign(entry, { read: oid, ...(await payloadIn(oid)) });
         }
       } catch {
-        // Unread names wait for the next cycle; the devices count already.
+        // What's unread waits for the next cycle; the devices count already.
       }
       announce();
+    },
+
+    setCursor(next) {
+      if (JSON.stringify(next) === JSON.stringify(cursor)) return;
+      cursor = next;
+      nextBeatAt = 0;
     },
 
     async heartbeat() {
       if (refused || now() < nextBeatAt) return;
       const [tip] = await git.log({ ref: `refs/heads/${deps.branch}`, depth: 1 }).catch(() => []);
       if (!tip) return;
+      // A caret that moves while this goes out is sent by the next cycle.
+      const sent = cursor;
       const oid = await git.commit({
-        message: JSON.stringify({ name: deps.author.name, beat: ++beat }),
+        message: JSON.stringify({ name: deps.author.name, colour: colourOf(deps.deviceId), beat: ++beat, cursor: sent }),
         author: deps.author,
         tree: tip.commit.tree,
         parent: [tip.oid],
@@ -142,7 +188,7 @@ export function createPresence(deps: PresenceDeps): Presence {
       try {
         await git.pushRef(remote, { ref: own, oid, force: true });
         published = true;
-        nextBeatAt = now() + HEARTBEAT_MS;
+        nextBeatAt = sent === cursor ? now() + HEARTBEAT_MS : 0;
       } catch (error) {
         // The host turned the ref down (a hook, a token for branches only):
         // never again this session. Anything else, the next cycle retries.

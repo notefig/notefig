@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@notefig/ui/utils";
 import { useWorkspaceModule } from "@notefig/core/react";
 import { useSyncState } from "@/modules/sync/react";
+import { PeerAvatars } from "./peer-avatars";
 import { lookOf, statusOf } from "./sync-look";
 
 export function SyncStatusCell({ workspacePath, onOpen }: { workspacePath: string | null; onOpen: () => void }) {
@@ -35,6 +36,7 @@ export function SyncStatusCell({ workspacePath, onOpen }: { workspacePath: strin
       <Icon className={cn("h-3.5 w-3.5", look.tone, look.spin && "animate-spin")} />
       <span>{t(look.label)}</span>
       <OverwrittenDot count={state.overwritten.length} />
+      <PeerAvatars peers={state.peers} />
     </button>
   );
 }

@@ -17,7 +17,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { GitBranch, Loader2, MoreHorizontal, RefreshCw, Users } from "lucide-react";
+import { GitBranch, Loader2, MoreHorizontal, RefreshCw } from "lucide-react";
 import { Button } from "@notefig/ui/button";
 import { Input } from "@notefig/ui/input";
 import {
@@ -44,6 +44,7 @@ import { SidebarSeparator, ToolBar } from "@/components/editor/tool-bar";
 import type { CredentialStatus } from "@/adapters/platform-adapter.interface";
 import type { SyncOverwrite, SyncState, WorkspaceSync } from "@/modules/sync";
 import { useSyncState } from "@/modules/sync/react";
+import { PeerAvatars } from "./peer-avatars";
 import { lookOf, statusOf } from "./sync-look";
 
 /** The focused workspace's Remote tool. */
@@ -282,8 +283,12 @@ function RemoteRows({
             className="flex min-w-0 items-center gap-1 text-muted-foreground"
             aria-label={t("syncPeers")}
           >
-            <Users className="size-3 shrink-0" />
-            <span className="truncate">{state.peers.map((peer) => peer.name ?? t("syncUnnamedPeer")).join(", ")}</span>
+            <PeerAvatars peers={state.peers} />
+            <span className="truncate">
+              {state.peers
+                .map((peer) => `${peer.name ?? t("syncUnnamedPeer")}${peer.cursor ? ` (${peer.cursor.path.split("/").pop()})` : ""}`)
+                .join(", ")}
+            </span>
           </div>
         )}
       </div>
