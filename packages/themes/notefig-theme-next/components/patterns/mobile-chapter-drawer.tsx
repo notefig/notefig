@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ListIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerTrigger } from "@/components/ui/drawer";
-import type { Chapter } from ".contentlayer/generated";
+import type { Chapter } from "content-collections";
 import type { ChapterLike } from "@/lib/utils";
 import { Inter as FontSans } from "next/font/google";
 

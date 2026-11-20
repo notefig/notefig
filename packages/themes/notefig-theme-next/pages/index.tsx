@@ -1,7 +1,7 @@
 import Head from "next/head";
 import { Header } from "@/components/patterns/header";
 import { Sidebar } from "@/components/patterns/sidebar";
-import { allMeta, allChapters } from "contentlayer/generated";
+import { meta as allMeta, allChapters } from "content-collections";
 import {
   getChapterNavigation,
   getCoverPath,
@@ -21,11 +21,11 @@ export async function getStaticProps() {
 
   return {
     props: {
-      meta: allMeta[0],
+      meta: allMeta,
       chapters: allChapters,
       navigation,
       coverPath: await getCoverPath(),
-      metadata: getGeneralMetadata(allMeta[0]),
+      metadata: getGeneralMetadata(allMeta),
       epubDownloadLink,
       audiobookDownloadLink,
     },
