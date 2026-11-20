@@ -75,6 +75,10 @@ export interface WorkspaceSync {
   takeRemote(): void;
   /** Clear the flags on text a merge replaced. */
   dismissOverwritten(): void;
+  /** Before an agent writes `path` (`write` gets the file as it is now):
+   *  claim the units it changes while shared, or say why it may not, in a
+   *  sentence for the agent. Null: go ahead. */
+  claimWrite(path: string, write: (current: string) => string): Promise<string | null>;
   syncNow(): Promise<void>;
   /** Resolves once the open-time read is done and the engine started. */
   whenReady(): Promise<void>;
@@ -99,7 +103,7 @@ export interface WorkspaceSyncDeps {
   gitWorker: GitWorker;
   /** The platform can sync (desktop). */
   supported: boolean;
-  documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
+  documents: Pick<DocumentsApi, "write" | "read" | "hasUnsavedEdits">;
   editors: Pick<EditorsApi, "markdownEditor" | "paths">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
   projectSettings: Pick<ProjectSettingsApi, "read" | "update">;
@@ -214,7 +218,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
   const startEngine = async (remote: SyncRemote) => {
     if (engine || disposed || !device) return;
     const git = service();
-    const [{ createSyncEngine }, { mergeMarkdownOffThread }, name, email] = await Promise.all([
+    const [{ createSyncEngine }, { mergeMarkdownOffThread, unitKeysOffThread }, name, email] = await Promise.all([
       import("./sync-engine"),
       import("@/utils/markdown-conversion"),
       git.getConfig("user.name"),
@@ -242,6 +246,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
         if (device?.on) await writeDevice({ ...device, lastSyncedAt: at });
       },
       merge: mergeMarkdownOffThread,
+      unitKeys: unitKeysOffThread,
       reportError: (error) => captureError(error, { boundary: "sync-merge" }),
       held: device.held ?? {},
       recordHeld: async (held) => {
@@ -397,6 +402,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       if (engine) void engine.takeRemote();
     },
     dismissOverwritten: () => dispatch({ type: "dismiss-overwritten" }),
+    claimWrite: async (path, write) => (engine ? engine.claimWrite(pathutil.normalize(path), write) : null),
     syncNow: async () => {
       await chain;
       await engine?.syncNow();

@@ -244,3 +244,73 @@ ul[data-type="taskList"] > li > div p {
 .dark .ProseMirror pre code span[style] {
   color: var(--shiki-dark) !important;
 }
+
+/* Sync claims (modules/sync/sync-editor.ts): a unit someone else is
+   editing is a shade paler, with a faint line in their colour down its
+   start, and a not-allowed cursor. The line inherits the paleness, so it
+   reads as a tint, not a border. Your own claims show nothing. */
+.ProseMirror .sync-held {
+  position: relative;
+  opacity: 0.55;
+  cursor: not-allowed;
+  animation: sync-held-in 200ms ease-out;
+}
+.ProseMirror .sync-held::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: -0.7rem;
+  top: 0.2em;
+  bottom: 0.2em;
+  width: 2px;
+  border-radius: 1px;
+  background-color: var(--sync-holder);
+  pointer-events: none;
+}
+/* In a list the line sits outside the bullet, in the same gutter as a
+   paragraph's. */
+.ProseMirror li > .sync-held::before {
+  inset-inline-start: -2.45rem;
+}
+@keyframes sync-held-in {
+  from {
+    opacity: 1;
+  }
+}
+
+/* "Ada is editing this", by the caret, when a keystroke there is turned
+   down; it fades on its own. */
+.sync-held-tip {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  font-size: 0.75rem;
+  line-height: 1rem;
+  box-shadow: 0 2px 8px hsl(var(--foreground) / 0.08);
+  transform: translateY(-100%);
+  animation: sync-held-tip 1.6s ease forwards;
+}
+@keyframes sync-held-tip {
+  0% {
+    opacity: 0;
+    transform: translateY(calc(-100% + 2px));
+  }
+  12%,
+  70% {
+    opacity: 1;
+    transform: translateY(-100%);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ProseMirror .sync-held,
+  .sync-held-tip {
+    animation: none;
+  }
+}

@@ -33,6 +33,11 @@ const api = {
     const { mergeMarkdown } = await import("@/modules/sync/sync-merge");
     return mergeMarkdown(base, ours, theirs);
   },
+  /** Sync's unit keys for a file (`modules/sync/sync-units.ts`). */
+  async unitKeys(markdown: string): Promise<string[]> {
+    const { unitKeysOf } = await import("@/modules/sync/sync-units");
+    return unitKeysOf(codec.parseDoc(markdown));
+  },
 };
 
 export type MarkdownWorkerApi = typeof api;

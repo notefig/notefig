@@ -45,6 +45,10 @@ async function createInlineConverter(): Promise<Converter> {
       const { mergeMarkdown } = await import("@/modules/sync/sync-merge");
       return mergeMarkdown(base, ours, theirs);
     },
+    unitKeys: async (markdown: string) => {
+      const { unitKeysOf } = await import("@/modules/sync/sync-units");
+      return unitKeysOf(codec.parseDoc(markdown));
+    },
   };
 }
 
@@ -126,6 +130,12 @@ export function mergeMarkdownOffThread(base: string, ours: string, theirs: strin
 }
 
 /** Test hook: force a fresh boot (e.g. after stubbing Worker). */
+/** Sync's unit keys for a markdown file (`modules/sync/sync-units.ts`),
+ *  off the main thread. */
+export function unitKeysOffThread(markdown: string): Promise<string[]> {
+  return withConverter((c) => c.unitKeys(markdown));
+}
+
 export function resetConverterForTests(): void {
   converterPromise = null;
 }

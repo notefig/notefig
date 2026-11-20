@@ -22,7 +22,7 @@ import { getDocumentSync, whenDocumentSyncClean } from "@/utils/markdown-convers
 import { IDLE_COMMIT_MS, POLL_MS, SHARED_COMMIT_MS, SHARED_POLL_MS, pollInterval, syncModule } from "@/modules/sync";
 import { OFFLINE_RETURN_MS } from "./sync-engine";
 import { HEARTBEAT_MS, PRESENCE_STALE_MS, SWEEP_STALE_MS } from "./sync-presence";
-import { docUnits } from "./sync-editor";
+import { docUnits } from "./sync-units";
 import * as merging from "./sync-merge";
 import * as telemetry from "@/telemetry/telemetry";
 
@@ -1304,6 +1304,98 @@ describe("sync: shared, while another device syncs the branch", () => {
     disposeEditor(editors, join(wsB, "note.md"));
   });
 
+  it("keeps a unit one device is editing off the other's editor and agents, until it's done", async () => {
+    const { a, b, editors, core, ws, wsB } = await meet();
+    const open = async (path: string) => {
+      getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
+      return editors.markdownEditor(path)!;
+    };
+    const [mine, theirs] = [await open(join(ws, "note.md")), await open(join(wsB, "note.md"))];
+    vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
+    vi.spyOn(theirs.view, "hasFocus").mockReturnValue(true);
+    await a.syncNow();
+    await b.syncNow();
+    const second = (editor: Editor) => docUnits(editor.state.doc)[2]!;
+    // B's caret sits in the paragraph A is about to take.
+    theirs.commands.setTextSelection(second(theirs).from + 3);
+    mine.commands.insertContentAt(second(mine).from + 1, "Typed ");
+    expect(mine.state.doc.textBetween(second(mine).from, second(mine).to)).toBe("Typed Second paragraph.");
+
+    await vi.waitFor(
+      async () => {
+        await a.syncNow();
+        await b.syncNow();
+        expect(theirs.view.dom.querySelector(".sync-held")?.textContent).toBe("Second paragraph.");
+      },
+      { timeout: 10_000 },
+    );
+    const held = theirs.view.dom.querySelector<HTMLElement>(".sync-held")!;
+    expect(held.title).toBe("User device-a is editing this");
+    expect(held.style.getPropertyValue("--sync-holder")).toMatch(/^#[0-9a-f]{6}$/);
+    // Your own claims show nothing.
+    expect(mine.view.dom.querySelector(".sync-held")).toBeNull();
+    // B's caret moved on to just after it, and typing there is refused.
+    await vi.waitFor(() => expect(theirs.state.selection.head).toBeGreaterThan(second(theirs).to));
+    const before = theirs.state.doc;
+    theirs.commands.insertContentAt(second(theirs).from + 1, "Bob was here ");
+    expect(theirs.state.doc).toBe(before);
+    expect(document.body.querySelector(".sync-held-tip")?.textContent).toBe("User device-a is editing this");
+    // B's agents: refused on A's unit, before anything is written; free elsewhere.
+    const refused = await b.claimWrite(join(wsB, "note.md"), (text) => text.replace("Second paragraph.", "Rewritten."));
+    expect(refused).toMatch(/^Refused: User device-a is editing paragraphs of note\.md this edit touches\. Nothing was written\./);
+    expect(await b.claimWrite(join(wsB, "note.md"), (text) => text.replace("First paragraph.", "Agent's."))).toBeNull();
+    expect(b.state().peers[0]!.claims).toEqual([{ path: "note.md", keys: expect.any(Array), agent: false }]);
+
+    // A's caret leaves, and its edit is on the branch: B may edit it again.
+    mine.commands.setTextSelection(1);
+    await vi.waitFor(
+      async () => {
+        await a.syncNow();
+        await b.syncNow();
+        expect(theirs.view.dom.querySelector(".sync-held")).toBeNull();
+      },
+      { timeout: 10_000, interval: 200 },
+    );
+    await core.workspace(wsB).close();
+    disposeEditor(editors, join(ws, "note.md"));
+    disposeEditor(editors, join(wsB, "note.md"));
+  });
+
+  it("settles two devices taking one unit at once: the lower id holds it, the other moves on", async () => {
+    const { a, b, editors, ws, wsB } = await meet();
+    const open = async (path: string) => {
+      getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
+      return editors.markdownEditor(path)!;
+    };
+    const [mine, theirs] = [await open(join(ws, "note.md")), await open(join(wsB, "note.md"))];
+    vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
+    vi.spyOn(theirs.view, "hasFocus").mockReturnValue(true);
+    await a.syncNow();
+    await b.syncNow();
+    const second = (editor: Editor) => docUnits(editor.state.doc)[2]!;
+    mine.commands.insertContentAt(second(mine).from + 1, "A: ");
+    theirs.commands.insertContentAt(second(theirs).from + 1, "B: ");
+    await vi.waitFor(
+      async () => {
+        await a.syncNow();
+        await b.syncNow();
+        // "b" < "dev": B holds it, and A's text waits for the merge.
+        expect(mine.view.dom.querySelector(".sync-held")?.textContent).toBe("A: Second paragraph.");
+      },
+      { timeout: 10_000 },
+    );
+    expect(theirs.view.dom.querySelector(".sync-held")).toBeNull();
+    await vi.waitFor(() => expect(mine.state.selection.head).toBeGreaterThan(second(mine).to));
+    await vi.waitFor(async () => {
+      await a.syncNow();
+      expect(a.state().peers[0]!.claims).toHaveLength(1);
+      await b.syncNow();
+      expect(b.state().peers[0]!.claims).toEqual([]);
+    });
+    disposeEditor(editors, join(ws, "note.md"));
+    disposeEditor(editors, join(wsB, "note.md"));
+  });
+
   it("shows a device whose presence commit is malformed, but nothing it claims", async () => {
     const { sync, remote } = await setup();
     const tree = await runGit(remote.bare, ["rev-parse", "main^{tree}"]);
@@ -1311,7 +1403,7 @@ describe("sync: shared, while another device syncs the branch", () => {
     const oid = await runGit(remote.bare, ["commit-tree", tree, "-p", "main", "-m", forged]);
     await runGit(remote.bare, ["update-ref", "refs/notefig/v1/presence/main/x", oid]);
     await sync.syncNow();
-    expect(sync.state().peers).toEqual([{ deviceId: "x", name: null, colour: null, cursor: null }]);
+    expect(sync.state().peers).toEqual([{ deviceId: "x", name: null, colour: null, cursor: null, claims: [] }]);
   });
 
   it("keeps its presence after a passing failure to push it", async () => {

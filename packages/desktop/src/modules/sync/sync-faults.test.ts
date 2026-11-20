@@ -35,7 +35,7 @@ describe("sync: what a failure stops on", () => {
 
 describe("sync: who it shows while stopped", () => {
   it("forgets the devices it saw once it stops for the user", () => {
-    const shared: SyncState = { ...INITIAL_SYNC_STATE, setup: "on", peers: [{ deviceId: "b", name: "Bob", colour: "#000", cursor: null }] };
+    const shared: SyncState = { ...INITIAL_SYNC_STATE, setup: "on", peers: [{ deviceId: "b", name: "Bob", colour: "#000", cursor: null, claims: [] }] };
     const summary = { since: null, localFiles: [], remoteFiles: [], people: [] };
     expect(transition(shared, { type: "diverged", detail: "rewritten" }).peers).toEqual([]);
     expect(transition(shared, { type: "paused", detail: "away", summary }).peers).toEqual([]);
