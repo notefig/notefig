@@ -682,6 +682,30 @@ describe("sync: solo", () => {
     expect(await tree(remote.bare)).not.toContain("added.md");
   });
 
+  it("deletes an open file another device deleted, but keeps one with an edit on its way", async () => {
+    const { sync, remote, ws, editors, core } = await setup("synced", { "other.md": "# Other\n" });
+    const clean = join(ws, "other.md");
+    getOrCreateEditor(editors, clean, { type: "markdown", content: codec.parse(await read(clean)), basePath: ws }, editorFs);
+    const path = join(ws, "note.md");
+    const { land } = await editUnsaved(core, editors, ws, path, "# Note\n\nStill mine.\n");
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["rm", "-q", "note.md", "other.md"]);
+    await runGit(plain, ["commit", "-q", "-m", "gone"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+    await sync.syncNow();
+    await expect(fsp.access(clean)).rejects.toThrow();
+    expect(await read(path)).toBe(SEED["note.md"]);
+    // Another round before the save lands commits nothing of the stale copy.
+    await sync.syncNow();
+    expect(await tree(remote.bare)).not.toContain("note.md");
+
+    land();
+    await whenDocumentSyncClean(path);
+    await sync.syncNow();
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nStill mine.");
+    expect(await tree(remote.bare)).not.toContain("other.md");
+  });
+
   it("brings a plain-git push into an open editor, keeping the caret", async () => {
     const { sync, remote, ws, editors, core } = await setup();
     const path = join(ws, "note.md");

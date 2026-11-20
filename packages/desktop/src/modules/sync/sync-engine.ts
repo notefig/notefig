@@ -393,6 +393,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     const path = absolute(filepath);
     alive();
     if (bytes !== null) return writeSynced(deps, path, bytes);
+    // Deleted there, typed here: the edit stays, as in a merge. Deleted
+    // under its editor, the save would bring the file back unannounced.
+    if (deps.documents.hasUnsavedEdits(path)) return "held";
     const { failed } = await deps.fs.deleteFiles([path]);
     const refused = failed.find((failure) => failure.type !== "not_found");
     if (refused) throw new Error(`Couldn't delete ${filepath}: ${refused.message}`);
