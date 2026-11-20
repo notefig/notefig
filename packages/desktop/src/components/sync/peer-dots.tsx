@@ -6,7 +6,7 @@
  */
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@notefig/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipPortal, TooltipTrigger } from "@notefig/ui/tooltip";
 import type { SyncPeer } from "@/modules/sync";
 
 function Dot({ peer }: { peer: SyncPeer }) {
@@ -50,20 +50,17 @@ function PeerNames({ peers }: { peers: SyncPeer[] }) {
 /** `children` names the peers the moment it's hovered, and stops as soon
  *  as the pointer leaves: a whole cell, as the dots alone are too small a
  *  target. With nobody else here, just `children`. */
-export function PeersTooltip({
-  peers,
-  children,
-}: {
-  peers: SyncPeer[];
-  children: ReactElement;
-}) {
+export function PeersTooltip({ peers, children }: { peers: SyncPeer[]; children: ReactElement }) {
   if (peers.length === 0) return children;
   return (
     <Tooltip delayDuration={0} disableHoverableContent>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent side="top" className="px-2 py-1 text-xs duration-100">
-        <PeerNames peers={peers} />
-      </TooltipContent>
+      {/* Out of the status bar: inside its backdrop blur, WebKit paints none of it. */}
+      <TooltipPortal>
+        <TooltipContent side="top" className="px-2 py-1 text-xs duration-100">
+          <PeerNames peers={peers} />
+        </TooltipContent>
+      </TooltipPortal>
     </Tooltip>
   );
 }
