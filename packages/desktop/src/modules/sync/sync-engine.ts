@@ -42,10 +42,11 @@ import type { WorkspaceFiles } from "@/modules/files";
 import { sshProblemOf } from "@/modules/git-remote";
 import { IGNORE_RULES } from "@/utils/ignore";
 import type { MergedMarkdown } from "./sync-merge";
-import { createOverlaps, swapsAmong, writeSynced } from "./sync-overlap";
+import { asText, createOverlaps, sameBytes, swapsAmong, writeSynced } from "./sync-overlap";
 import { path as pathutil } from "@/utils/path";
 import { createPresence, presencePrefix } from "./sync-presence";
 import { createSyncEditors } from "./sync-editor";
+import { flushDocumentSync, whenDocumentSyncClean } from "@/utils/markdown-conversion";
 import {
   IDLE_COMMIT_MS,
   SHARED_COMMIT_MS,
@@ -130,6 +131,24 @@ const SCAN_SLACK_MS = 2_000;
 const COMMIT_SCAN_SLACK_MS = 120_000;
 const METADATA_BATCH = 500;
 const SUMMARY_DEPTH = 200;
+/** Share of lines a renamed file keeps, at least, to count as moved (and
+ *  its tab to follow) rather than deleted and added, as `git diff -M`. */
+export const RENAME_SIMILARITY = 0.8;
+
+/** Lines two texts share, of the longer's. */
+function similarity(a: string, b: string): number {
+  const left = a.split("\n");
+  const right = b.split("\n");
+  const counts = new Map<string, number>();
+  for (const line of left) counts.set(line, (counts.get(line) ?? 0) + 1);
+  let shared = 0;
+  for (const line of right) {
+    const count = counts.get(line) ?? 0;
+    if (count > 0) shared++;
+    counts.set(line, count - 1);
+  }
+  return shared / Math.max(left.length, right.length);
+}
 /** A held file was saved: settle it about this soon, not a sitting later. */
 const HELD_SETTLE_MS = 500;
 /** Files listed as replaced when the remote's version is taken whole. */
@@ -451,6 +470,63 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     return removed;
   };
 
+  /** The branch moved `oldPath` to `newPath` (MET-277) while it's open
+   *  here: the editor is saved and frozen, the new path takes what was
+   *  saved here since (held, to merge with the branch's version), the tab
+   *  follows (`sync:file-moved`), then the old path goes. */
+  const follow = async (oldPath: string, newPath: string, { from, to, done }: Move) => {
+    const [oldFile, newFile] = [absolute(oldPath), absolute(newPath)];
+    deps.editors.markdownEditor(oldFile)?.setEditable(false);
+    flushDocumentSync(oldFile);
+    await whenDocumentSyncClean(oldFile);
+    const [disk] = (await deps.fs.readBinaryFiles([oldFile])).succeeded;
+    const base = await git.readFile({ ref: from, filepath: oldPath });
+    const edited = disk && base && !sameBytes(disk.data, base);
+    alive();
+    const written = edited
+      ? await deps.fs.writeBinaryFiles([{ path: newFile, data: disk.data }])
+      : null;
+    if (written?.failed[0]) throw new Error(`Couldn't write ${newPath}: ${written.failed[0].message}`);
+    if (edited) await overlaps.hold(newPath, from, oldPath);
+    else await writeSynced(deps, newFile, (await git.readFile({ ref: to, filepath: newPath }))!);
+    await deps.files.recordDiskChanges({ created: [newFile], deleted: [] });
+    await deps.hooks.emitSerial("sync:file-moved", { workspacePath: root, from: oldFile, to: newFile });
+    await deps.fs.deleteFiles([oldFile]);
+    await deps.files.recordDiskChanges({ created: [], deleted: [oldFile] });
+    for (const filepath of [oldPath, newPath]) {
+      await git.unstage({ filepath, ref: to });
+      done.add(filepath);
+    }
+  };
+
+  /** Each of `candidates` that `to` deletes, paired with the file among
+   *  `changed` that `to` adds and is most like it, when that's close
+   *  enough: a rename. */
+  const renamesIn = async (from: string, to: string, candidates: string[], changed: string[]) => {
+    const textAt = async (ref: string, filepath: string) => {
+      const bytes = await git.readFile({ ref, filepath });
+      return bytes && asText(bytes);
+    };
+    const gone: [string, string][] = [];
+    for (const path of candidates) {
+      const text = (await git.readFile({ ref: to, filepath: path })) === null ? await textAt(from, path) : null;
+      if (text !== null) gone.push([path, text]);
+    }
+    if (gone.length === 0) return [];
+    const added: [string, string][] = [];
+    for (const path of changed) {
+      const text = (await git.readFile({ ref: from, filepath: path })) === null ? await textAt(to, path) : null;
+      if (text !== null) added.push([path, text]);
+    }
+    return gone.flatMap(([oldPath, text]) => {
+      const scored = added.map(([newPath, other]) => [newPath, similarity(text, other)] as const);
+      const [best] = scored.filter(([, score]) => score >= RENAME_SIMILARITY).sort(([, a], [, b]) => b - a);
+      if (!best) return [];
+      added.splice(added.findIndex(([path]) => path === best[0]), 1);
+      return [[oldPath, best[0]] as const];
+    });
+  };
+
   /** Bring index and worktree from `from` to `to` for the files that
    *  differ; text is written through the documents write path, which holds
    *  back a file with unsaved edits. A held file, or one saved here during
@@ -465,6 +541,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     const cleared = await clearSwaps(move, changed);
     if (!cleared) return;
     deleted.push(...cleared);
+    const left = changed.filter((path) => !done.has(path));
+    const open = left.filter((path) => deps.editors.markdownEditor(absolute(path)));
+    for (const [oldPath, newPath] of await renamesIn(from, to, open, left)) await follow(oldPath, newPath, move);
     const remaining = changed.filter((path) => !done.has(path));
     const edited = new Set(retry ? await editedSince(remaining) : []);
     for (const filepath of remaining) {
@@ -549,11 +628,15 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     const localFiles = await git.changedFiles(base, ours);
     const local = new Set(localFiles);
     const lost: Awaited<ReturnType<typeof overlaps.mergeCommitted>> = [];
+    // Edited here, moved there: the edit goes where the file went.
+    const moved = await renamesIn(base, theirs, remoteFiles.filter((path) => local.has(path)), remoteFiles);
+    const movedFrom = new Set(moved.map(([oldPath]) => oldPath));
     try {
       for (const filepath of remoteFiles) {
         if (!local.has(filepath)) await git.unstage({ filepath, ref: theirs });
-        else lost.push(...(await overlaps.mergeCommitted(filepath, base, ours, theirs)));
+        else if (!movedFrom.has(filepath)) lost.push(...(await overlaps.mergeCommitted(filepath, base, ours, theirs)));
       }
+      for (const [oldPath, newPath] of moved) lost.push(...(await overlaps.mergeMoved(oldPath, newPath, base, ours, theirs)));
       lost.push(...(await overlaps.yieldSwapped(swapsAmong(remoteFiles), localFiles, ours, theirs)));
     } catch (error) {
       // Nothing is committed yet: the index goes back to ours, as on disk.

@@ -706,6 +706,64 @@ describe("sync: solo", () => {
     expect(await tree(remote.bare)).not.toContain("other.md");
   });
 
+  it("moves an open file's tab to where another device renamed it, carrying an edit committed here", async () => {
+    const { sync, remote, ws, editors, core } = await setup();
+    const moved = vi.fn();
+    core.hooks.on("sync:file-moved", moved);
+    const path = join(ws, "note.md");
+    getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
+    const editor = editors.markdownEditor(path)!;
+    const docSync = getDocumentSync(path);
+    docSync.ensureBaseline(await read(path));
+    docSync.writer = async (markdown) => {
+      await fsp.writeFile(path, markdown);
+      written(core, path);
+    };
+    // Still in the autosave when the rename comes in.
+    editor.commands.setContent(codec.parse("# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n"));
+    docSync.pushUpdate(() => editor.getJSON());
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["mv", "note.md", "renamed.md"]);
+    await runGit(plain, ["commit", "-q", "-m", "rename"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+    await sync.syncNow();
+
+    expect(moved).toHaveBeenCalledWith({ workspacePath: ws, from: path, to: join(ws, "renamed.md") });
+    await expect(fsp.access(path)).rejects.toThrow();
+    await sync.syncNow();
+    expect(await runGit(remote.bare, ["show", "main:renamed.md"])).toBe("# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.");
+    expect(await tree(remote.bare)).not.toContain("note.md");
+  });
+
+  it("carries a save that lands during the move to the renamed file", async () => {
+    const { sync, remote, ws, editors, core } = await setup();
+    const path = join(ws, "note.md");
+    const { land } = await editUnsaved(core, editors, ws, path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["mv", "note.md", "renamed.md"]);
+    await runGit(plain, ["commit", "-q", "-m", "rename"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+    setTimeout(land, 50);
+    await sync.syncNow();
+    await sync.syncNow();
+    expect(await runGit(remote.bare, ["show", "main:renamed.md"])).toBe("# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.");
+    expect(await tree(remote.bare)).not.toContain("note.md");
+  });
+
+  it("deletes and adds rather than moves a file whose rename changed most of it", async () => {
+    const { sync, remote, ws, editors, core } = await setup();
+    const moved = vi.fn();
+    core.hooks.on("sync:file-moved", moved);
+    const path = join(ws, "note.md");
+    getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["rm", "-q", "note.md"]);
+    await remote.pushFromPlainGit(plain, { "other.md": "# Other\n\nNothing alike.\n" }, "replace");
+    await sync.syncNow();
+    expect(moved).not.toHaveBeenCalled();
+    await expect(fsp.access(path)).rejects.toThrow();
+  });
+
   it("brings a plain-git push into an open editor, keeping the caret", async () => {
     const { sync, remote, ws, editors, core } = await setup();
     const path = join(ws, "note.md");

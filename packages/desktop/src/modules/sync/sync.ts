@@ -44,6 +44,9 @@ declare module "@notefig/core" {
   interface CoreHookMap {
     /** Remote changes reached the worktree (absolute `paths`). */
     "sync:remote-applied": { workspacePath: string; commit: string; paths: string[] };
+    /** The branch moved a file open here (absolute paths): its tab follows.
+     *  Both files are on disk, and the editor is saved and read-only. */
+    "sync:file-moved": { workspacePath: string; from: string; to: string };
   }
   interface WorkspaceModules {
     sync: WorkspaceSync;

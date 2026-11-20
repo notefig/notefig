@@ -264,6 +264,10 @@ export interface TabsApi {
   ): Promise<boolean>;
   /** Swap a tab id in place, without disposing (rename-open-tab flow). */
   rename(oldId: string, newId: string): void;
+  /** Another writer moved an open file (sync): its tab follows in place,
+   *  the editor remounting at the new path. The caller saved the editor
+   *  and has both files on disk. */
+  follow(oldPath: string, newPath: string): void;
   /**
    * Rename/move an OPEN file tab by closing and reopening it in place: the
    * editor is disposed, the file moved once the save pipeline drains, and
@@ -546,6 +550,11 @@ export function createTabs({
     rename(oldId, newId) {
       layout.update((current) => renameTabInLayout(current, oldId, newId));
     },
+    follow(oldPath, newPath) {
+      if (!layout.openTabIds().includes(oldPath)) return;
+      disposeTab(oldPath);
+      tabs.rename(oldPath, newPath);
+    },
     async renameOpenFile({ files, oldPath, newPath }) {
       // One rename per source path at a time: the coordination entries are
       // keyed by oldPath, so a second overlapping call would overwrite the
@@ -710,8 +719,14 @@ export const tabsModule = defineModule({
       editors: ctx.use("editors"),
       documents: ctx.use("documents"),
     }),
-  boot: (tabs, ctx) =>
-    followActiveTab(tabs, ctx.use("workspaceRegistry"), ctx.use("agentStore").tasks, (workspacePath) =>
+  boot: (tabs, ctx) => {
+    const stopFollowing = followActiveTab(tabs, ctx.use("workspaceRegistry"), ctx.use("agentStore").tasks, (workspacePath) =>
       ctx.workspaceHandle(workspacePath).focus(),
-    ),
+    );
+    const stopMoves = ctx.hooks.on("sync:file-moved", ({ from, to }) => tabs.follow(from, to));
+    return () => {
+      stopFollowing();
+      stopMoves();
+    };
+  },
 });

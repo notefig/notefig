@@ -218,6 +218,17 @@ describe("tabs.renameOpenFile", () => {
   });
 });
 
+describe("tabs.follow", () => {
+  it("moves an open tab to where another writer moved its file, and leaves a closed one be", () => {
+    tabs.open(OLD);
+    calls.length = 0;
+    tabs.follow(OLD, NEW);
+    tabs.follow("/ws/not-open.md", "/ws/elsewhere.md");
+    expect(calls).toEqual(["dispose", "layout"]);
+    expect(layoutWrites).toEqual([[OLD, NEW]]);
+  });
+});
+
 describe("the window in front", () => {
   /** Two windows side by side: a document left, a session's chat split off
    *  right — the user last focused the left one. */

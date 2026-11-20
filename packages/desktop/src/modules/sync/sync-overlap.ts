@@ -64,7 +64,7 @@ export function asText(bytes: Uint8Array): string | null {
   }
 }
 
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+export function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
@@ -213,6 +213,21 @@ export function createOverlaps(deps: OverlapDeps) {
       return lost;
     },
 
+    /** A file edited here that the branch moved: ours merged into its new
+     *  path, and the old path gone from the index. */
+    async mergeMoved(oldPath: string, newPath: string, base: string, ours: string, theirs: string): Promise<Lost[]> {
+      const [b, o, t] = await Promise.all([
+        git.readFile({ ref: base, filepath: oldPath }),
+        git.readFile({ ref: ours, filepath: oldPath }),
+        git.readFile({ ref: theirs, filepath: newPath }),
+      ]);
+      await git.unstage({ filepath: oldPath, ref: theirs });
+      if (!o || !t) return [];
+      const { bytes, lost } = await combine(newPath, b, o, t);
+      if (bytes) await stage(newPath, bytes, theirs);
+      return lost;
+    },
+
     /** A replay's paths that became a folder on the branch where ours
      *  has a file, or a file where ours has files in a folder: the
      *  branch's stand in the index, and ours come back, for
@@ -258,9 +273,9 @@ export function createOverlaps(deps: OverlapDeps) {
 
     /** The branch moved `filepath` to a version its editor's unsaved edits
      *  don't have: keep what they started from, as it is at `from`. */
-    async hold(filepath: string, from: string) {
+    async hold(filepath: string, from: string, basePath = filepath) {
       if (held.has(filepath)) return;
-      const bytes = await git.readFile({ ref: from, filepath });
+      const bytes = await git.readFile({ ref: from, filepath: basePath });
       held.set(filepath, await git.writeBlob(bytes ?? new Uint8Array()));
       await deps.recordHeld(Object.fromEntries(held));
     },
