@@ -42,6 +42,7 @@ const context = (overrides: Partial<HarnessInvokeContext> = {}) => {
     joinPath: (...parts) => parts.join("/"),
     appDir: APP_DIR,
     harnessEnv: {},
+    gateWrites: false,
     mcpServer: relay(),
     writeFiles: async (files) => {
       written.push(...files);
@@ -480,5 +481,26 @@ describe("placeCommands", () => {
       text: "> quote\n\nfix it\n\nAlso use the `deploy` skill.",
     });
     expect(placed[placed.length - 1]).toEqual({ type: "text", text: "/review" });
+  });
+});
+
+describe("claude-code's writes in a sync workspace", () => {
+  it("asks before every Edit and Write only where sync gates writes", async () => {
+    const gated = await invoke("claude-code", { gateWrites: true });
+    expect(gated.prep.sessionParams).toEqual({
+      _meta: { claudeCode: { options: { settings: { permissions: { ask: ["Edit", "Write"] } } } } },
+    });
+    expect((await invoke("claude-code")).prep.sessionParams).toEqual({});
+  });
+
+  it("names the text an Edit or a Write would leave", () => {
+    const adapter = adapterFor(harness("claude-code"));
+    expect(adapter.pendingWrite!({ file_path: "/ws/a.md", content: "new" })?.text("old")).toBe("new");
+    const edit = adapter.pendingWrite!({ file_path: "/ws/a.md", old_string: "b", new_string: "$&c" });
+    expect(edit).toMatchObject({ path: "/ws/a.md" });
+    expect(edit!.text("abdb")).toBe("a$&cdb");
+    const all = adapter.pendingWrite!({ file_path: "/ws/a.md", old_string: "b", new_string: "x", replace_all: true });
+    expect(all!.text("abdb")).toBe("axdx");
+    expect(adapter.pendingWrite!({ command: "ls" })).toBeNull();
   });
 });

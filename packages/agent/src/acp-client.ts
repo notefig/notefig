@@ -207,6 +207,9 @@ export type AcpClientDeps = {
   /** Vendor capabilities advertised in `initialize` (the harness adapter's
    *  `clientMeta`). */
   clientMeta?: Record<string, unknown>;
+  /** A request the host turns down itself, before granting or asking
+   *  anyone (a write to what someone else is editing). */
+  refusePermission?: (request: RequestPermissionRequest) => Promise<boolean>;
   /** False: grant nothing on our own — every permission request goes to
    *  the broker, allow options or not (a catalog probe, which asks for
    *  nothing). Default true: a request offering an allow option is
@@ -517,6 +520,15 @@ export class NotefigAcpClient implements Client {
   async requestPermission(
     request: RequestPermissionRequest,
   ): Promise<RequestPermissionResponse> {
+    if (await this.deps.refusePermission?.(request)) {
+      const reject =
+        request.options.find((o) => o.kind === "reject_once") ??
+        request.options.find((o) => o.kind === "reject_always");
+      if (reject) {
+        return { outcome: { outcome: "selected", optionId: reject.optionId } };
+      }
+      return { outcome: { outcome: "cancelled" } };
+    }
     const grant =
       request.options.find((o) => o.kind === "allow_always") ??
       request.options.find((o) => o.kind === "allow_once");

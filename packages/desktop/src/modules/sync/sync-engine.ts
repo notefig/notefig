@@ -27,15 +27,17 @@
  * The same poll reads who else syncs the branch (`sync-presence.ts`), and a
  * settled cycle keeps this device's own presence fresh. While anyone else
  * does, sync is shared (MET-293): a poll a second, a commit two seconds
- * after the saves settle instead of once per sitting, and each other's
- * carets in the open editors (`sync-editor.ts`).
+ * after the saves settle instead of once per sitting, each other's carets
+ * in the open editors (`sync-editor.ts`), and claims on the units each one
+ * is editing (`sync-claims.ts`), its user's and its agents' alike, which
+ * travel in the same presence commit.
  *
  * Back after more than an hour away with local changes, or far apart from
  * the remote, it pauses before taking anything in until the user says go.
  */
 import type { Hooks } from "@notefig/core";
 import { GitError, isSshRemote, type GitRemote, type GitService } from "@notefig/git";
-import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
+import { FsError, type FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import type { DocumentsApi } from "@/modules/documents";
 import type { EditorsApi } from "@/modules/editors";
 import type { WorkspaceFiles } from "@/modules/files";
@@ -46,6 +48,8 @@ import { createOverlaps, swapsAmong, writeSynced } from "./sync-overlap";
 import { path as pathutil } from "@/utils/path";
 import { createPresence, presencePrefix } from "./sync-presence";
 import { createSyncEditors } from "./sync-editor";
+import { createClaims, editBetween, refusalMessage } from "./sync-claims";
+import { unitIndex, type FileUnit } from "./sync-units";
 import {
   IDLE_COMMIT_MS,
   SHARED_COMMIT_MS,
@@ -75,7 +79,7 @@ export interface SyncEngineDeps {
   /** Sync was just turned on: commit everything, not a scan. */
   fullScan: boolean;
   hooks: Hooks;
-  documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
+  documents: Pick<DocumentsApi, "write" | "read" | "hasUnsavedEdits">;
   /** Where the others' carets are drawn, while shared. */
   editors: Pick<EditorsApi, "markdownEditor" | "paths">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
@@ -85,6 +89,9 @@ export interface SyncEngineDeps {
   >;
   /** The markdown three-way merge (`sync-merge.ts`), off the main thread. */
   merge(base: string, ours: string, theirs: string): Promise<MergedMarkdown>;
+  /** A markdown file's units as claims see them (`sync-units.ts`), off the
+   *  main thread. */
+  fileUnits(markdown: string): Promise<FileUnit[]>;
   /** A merge that threw: the remote's version stood in for it. */
   reportError(error: unknown): void;
   state(): SyncState;
@@ -113,6 +120,10 @@ export interface SyncEngine {
   takeRemote(): Promise<void>;
   /** Commit and push what's left (briefly), then stop. */
   stop(): Promise<void>;
+  /** Claim what an agent's write to `path` touches, as this device's
+   *  (`write` gets the file as it is now); a sentence saying why not, and
+   *  that nothing was written, when another device holds any of it. */
+  claimWrite(path: string, write: (current: string) => string): Promise<string | null>;
 }
 
 const MAX_PUSH_RETRIES = 3;
@@ -134,6 +145,7 @@ const SUMMARY_DEPTH = 200;
 const HELD_SETTLE_MS = 500;
 /** Files listed as replaced when the remote's version is taken whole. */
 const MAX_REPLACED_LISTED = 50;
+const MARKDOWN = /\.(md|markdown)$/i;
 /** git's folder and the app's never sync, but for the project's config. */
 const NEVER = /^(\.git(\/|$)|\.notefig(\/(?!config\.json$)|$))/;
 
@@ -272,7 +284,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     alive,
     now,
   });
+  const claims = createClaims({ deviceId: deps.deviceId, now, peers: () => deps.state().peers });
   const presence = createPresence({
+    claims: claims.published,
     deviceId: deps.deviceId,
     author,
     git,
@@ -282,7 +296,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     state: deps.state,
     dispatch: deps.dispatch,
   });
-  const editors = createSyncEditors({ editors: deps.editors, tree, onCursor: presence.setCursor, setTimer });
+  const editors = createSyncEditors({ editors: deps.editors, tree, onCursor: presence.setCursor, claims, setTimer });
   const markDirty = (paths: string[]) => {
     if (typeof dirty !== "string") for (const path of paths) dirty.add(path);
   };
@@ -670,8 +684,17 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     void deps.recordSynced(lastSynced).catch(() => {});
   };
 
+  /** Claims while shared, after a cycle that began at `at`: what landed
+   *  and what's done ends. Solo, nobody needs to see them. */
+  const settleClaims = (at: number) => {
+    if (!isShared(deps.state())) return claims.clear();
+    if (!pending()) claims.landed(at, (path) => deps.documents.hasUnsavedEdits(absolute(path)));
+    claims.expire();
+  };
+
   const cycle = async () => {
     if (!isRunning(deps.state())) return;
+    const startedAt = now();
     try {
       if ((await git.currentBranch()) !== branch) {
         // Its delete is sent before git closes; nothing waits for it.
@@ -694,6 +717,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
         deps.dispatch({ type: "failed", fault: "offline", detail: "The remote keeps moving; trying again soon." });
         return;
       }
+      settleClaims(startedAt);
       await presence.heartbeat();
       await presence.read();
       await presence.sweep();
@@ -778,6 +802,23 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       void syncNow();
     },
     syncNow: () => syncNow(),
+    async claimWrite(absolutePath, write) {
+      const path = tree(absolutePath);
+      if (!path || !MARKDOWN.test(path) || stopped || !isShared(deps.state())) return null;
+      // A file that isn't there yet is empty; any other failure to read it
+      // can't be checked, so it isn't let through.
+      const current = await deps.documents.read(absolutePath).catch((error: unknown) => {
+        if (error instanceof FsError && error.type === "not_found") return "";
+        throw error;
+      });
+      const [before, after] = await Promise.all([deps.fileUnits(current), deps.fileUnits(write(current))]);
+      const index = unitIndex(before.map((unit) => unit.key));
+      const refusal = claims.take(path, editBetween(before, after), true, index);
+      if (refusal) return refusalMessage(path, refusal);
+      // Others see it on the next poll, not a sitting later.
+      void syncNow(false);
+      return null;
+    },
     async resume() {
       returnApproved = true;
       deps.dispatch({ type: "resume" });

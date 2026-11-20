@@ -15,8 +15,8 @@
  * - `overwritten`: our text a merge replaced with the branch's, flagged
  *   until dismissed, whatever the state.
  * - `peers`: the other devices syncing the branch now. Sync is shared
- *   while there are any (a fast poll, a commit soon after each save), solo
- *   otherwise.
+ *   while there are any (a fast poll, a commit soon after each save, and
+ *   each other's claims on what they're editing), solo otherwise.
  */
 
 export type SyncSetup = "unavailable" | "off" | "ask" | "declined" | "on";
@@ -61,6 +61,19 @@ export interface SyncPeer {
   colour: string | null;
   /** Where it last typed or clicked; null until read, or if nowhere. */
   cursor: SyncCursor | null;
+  /** The units it's editing now (`sync-claims.ts`); empty until read. */
+  claims: SyncClaim[];
+}
+
+/** A unit a device is editing: nobody else's edit lands on it. */
+export interface SyncClaim {
+  /** `/`-separated path. */
+  path: string;
+  /** What names the unit (`sync-units.ts`): as it was before the edit, as
+   *  the edit last reached the branch, and now. */
+  keys: string[];
+  /** One of the device's agents is the one editing it. */
+  agent: boolean;
 }
 
 /** Our text a merge replaced with the branch's. */

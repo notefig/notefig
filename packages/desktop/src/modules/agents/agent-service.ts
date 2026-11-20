@@ -2,6 +2,7 @@ import "./agent-events";
 import type { EditorsApi } from "@/modules/editors";
 import type { CoreHookMap, Hooks } from "@notefig/core";
 import type { WorkspaceFiles } from "@/modules/files";
+import type { WorkspaceSync } from "@/modules/sync";
 import type { DocumentsApi } from "@/modules/documents";
 import type { LayoutApi } from "@/modules/layout";
 import {
@@ -545,6 +546,10 @@ export class AgentTask {
       const prep = await invokeHarness(this.adapter, {
         workspacePath: this.workspacePath,
         harnessEnv: this.harness.env,
+        // Always, not only while the workspace syncs: sync can be turned on
+        // (or someone can arrive) mid-session, and the gate answers at once
+        // while nobody else is here.
+        gateWrites: true,
         mcpServer: mcpEndpoint.mcpServer,
         writeFiles: (files) => this.deps.fs.writeFiles(files),
         warn: (label, detail) => this.warn(label, detail),
@@ -617,11 +622,32 @@ export class AgentTask {
     }
   }
 
+  /** A permission request for a write the harness makes itself, to units
+   *  someone else is editing: refused before anyone is asked. A write the
+   *  tool would fail anyway (an old string that isn't there) is the
+   *  tool's to fail. */
+  private async refusesWrite(rawInput: unknown): Promise<boolean> {
+    const write = this.adapter.pendingWrite?.(rawInput);
+    if (!write) return false;
+    const resolved = resolveWorkspacePath(this.workspacePath, write.path);
+    if (!resolved.ok) return false;
+    try {
+      const refusal = await this.deps.services(this.workspacePath).sync.claimWrite(resolved.absolute, write.text);
+      if (refusal) this.warn("write refused", refusal);
+      return refusal !== null;
+    } catch (error) {
+      // What can't be checked isn't let through.
+      this.warn("write refused: couldn't check it against sync's claims", errorMessage(error));
+      return true;
+    }
+  }
+
   private createClient(transport: AgentTransport): NotefigAcpClient {
     return new NotefigAcpClient({
       taskId: this.taskId,
       transport,
       permissionBroker: this.permissionBroker,
+      refusePermission: (request) => this.refusesWrite(request.toolCall.rawInput),
       clientMeta: this.adapter.clientMeta,
       // A subagent's own reasoning and replies (Devin streams them, tagged,
       // once told the client supports subagents) aren't the session agent's
@@ -644,9 +670,10 @@ export class AgentTask {
               .services(this.workspacePath)
               .documents.read(path, options),
           writeTextFile: async (path, content) => {
-            await this.deps
-              .services(this.workspacePath)
-              .documents.write(path, content, { source: "agent" });
+            const services = this.deps.services(this.workspacePath);
+            const refusal = await services.sync.claimWrite(path, () => content);
+            if (refusal) throw new Error(refusal);
+            await services.documents.write(path, content, { source: "agent" });
           },
         },
         { workspacePath: this.workspacePath, path: pathutil },
@@ -2006,6 +2033,7 @@ export async function probeHarnessSession({
     const prep = await invokeHarness(adapter, {
       workspacePath: cwd,
       harnessEnv: harness.env,
+      gateWrites: false,
       mcpServer: undefined,
       writeFiles: refuse,
       warn: (label, detail) =>
@@ -2089,6 +2117,9 @@ declare module "@notefig/agent" {
     layout: Pick<LayoutApi, "read">;
     /** The live editors (`core.editors`): a document as the user sees it. */
     editors: Pick<EditorsApi, "markdownEditor" | "selectedText" | "get">;
+    /** The workspace's sync (`core.workspace(ws).sync`): its claims gate
+     *  every agent write while someone else is here. */
+    sync: Pick<WorkspaceSync, "state" | "claimWrite">;
   }
 }
 

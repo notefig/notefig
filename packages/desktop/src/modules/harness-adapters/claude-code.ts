@@ -145,6 +145,26 @@ export function claudeUpdateModel(update: UsageUpdate): string | null {
   return typeof model === "string" ? model : null;
 }
 
+const GATED_WRITES = {
+  _meta: { claudeCode: { options: { settings: { permissions: { ask: ["Edit", "Write"] } } } } },
+};
+
+/** The text an Edit or Write tool call would leave: Write's content, or
+ *  Edit's replacement (every occurrence with `replace_all`, as the tool
+ *  does). An edit whose old string isn't there changes nothing here; the
+ *  tool fails it. */
+export function claudePendingWrite(rawInput: unknown): { path: string; text: (current: string) => string } | null {
+  const input = (rawInput ?? {}) as Record<string, unknown>;
+  const { file_path: path, content, old_string: from, new_string: to, replace_all: all } = input;
+  if (typeof path !== "string") return null;
+  if (typeof content === "string") return { path, text: () => content };
+  if (typeof from !== "string" || typeof to !== "string") return null;
+  return {
+    path,
+    text: (current) => (all === true ? current.split(from).join(to) : current.replace(from, () => to)),
+  };
+}
+
 /**
  * Claude Code, through the bundled claude-agent-acp sidecar.
  *
@@ -160,10 +180,16 @@ export const claudeCodeAdapter: HarnessAdapter = {
   // text starting with "/" — anywhere else it is prose (MET-222 spike, on
   // 0.81.2). The blocks before it still reach the model.
   placeCommand: (blocks, name) => [...blocks, { type: "text", text: `/${name}` }],
-  onInvoke: async ({ mcpServer }) => ({
+  onInvoke: async ({ mcpServer, gateWrites }) => ({
     ...NO_PREP,
     passThroughSessionNew: mcpServer !== undefined,
+    // Claude's Edit and Write go straight to disk. An ask rule holds in
+    // every mode, auto-accept and bypass included, so each one reaches
+    // `session/request_permission` first, where sync answers it (at once,
+    // granted, while nobody else is editing).
+    sessionParams: gateWrites ? GATED_WRITES : {},
   }),
+  pendingWrite: claudePendingWrite,
   // Cost on `usage_update`; rate-limit windows in its `_meta`.
   reporting: { cost: true, limits: true },
   toolNamePrefixes: [CLAUDE_TOOL_PREFIX],

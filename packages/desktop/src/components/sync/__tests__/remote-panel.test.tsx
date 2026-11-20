@@ -199,8 +199,8 @@ describe("the Remote tool", () => {
     const { text, show } = await render({
       setup: "on",
       peers: [
-        { deviceId: "b", name: "Bob", colour: "#000", cursor: { path: "docs/plan.md", unit: 0, offset: 0 } },
-        { deviceId: "c", name: null, colour: "#fff", cursor: null },
+        { deviceId: "b", name: "Bob", colour: "#000", cursor: { path: "docs/plan.md", unit: 0, offset: 0 }, claims: [] },
+        { deviceId: "c", name: null, colour: "#fff", cursor: null, claims: [] },
       ],
     });
     expect(text()).toContain("Bob (plan.md), Someone");

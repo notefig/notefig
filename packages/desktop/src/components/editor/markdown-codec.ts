@@ -27,6 +27,8 @@ import { calculateContentHash } from "@/utils/hash";
 export interface MarkdownCodec {
   /** markdown string → ProseMirror doc JSON (same result as editor setContent) */
   parse(markdown: string): JSONContent;
+  /** The same, as a ProseMirror node. */
+  parseDoc(markdown: string): PMNode;
   /** ProseMirror doc JSON → markdown (same result as getMarkdown()) */
   serialize(doc: JSONContent): string;
   /** MD5 content hash, matching hash.ts / the Rust watcher */
@@ -78,14 +80,14 @@ export function createMarkdownCodec(): MarkdownCodec {
   // `render` uses the same instance, so make sure they're in.
   parser.parse("");
 
+  // parser.parse returns an HTML string; createNodeFromContent with
+  // slice:false is exactly what the editor's setContent does with it.
+  const parseDoc = (markdown: string) =>
+    createNodeFromContent(parser.parse(markdown ?? ""), schema, { slice: false }) as PMNode;
+
   return {
-    parse(markdown: string): JSONContent {
-      // parser.parse returns an HTML string; createNodeFromContent with
-      // slice:false is exactly what the editor's setContent does with it.
-      const html = parser.parse(markdown ?? "");
-      const doc = createNodeFromContent(html, schema, { slice: false });
-      return (doc as PMNode).toJSON() as JSONContent;
-    },
+    parse: (markdown) => parseDoc(markdown).toJSON() as JSONContent,
+    parseDoc,
 
     serialize(doc: JSONContent): string {
       return serializer.serialize(PMNode.fromJSON(schema, doc));

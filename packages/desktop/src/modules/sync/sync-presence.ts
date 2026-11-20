@@ -2,10 +2,11 @@
  * Who else syncs the branch (MET-293), read in the engine's poll with no
  * channel of its own. Each device owns
  * `refs/notefig/v1/presence/<branch>/<deviceId>`: a commit on the branch tip
- * whose message names its user, its colour and where its caret is (all
- * of it in that one commit, checked before it's shown), replaced every
- * `HEARTBEAT_MS` (and when the caret moves) and deleted when the workspace
- * closes or the app quits. Replaced, never stacked: it takes no history.
+ * whose message names its user, its colour, where its caret is and the
+ * units it's editing (`sync-claims.ts`; all of it in that one commit,
+ * checked before it's shown), replaced every `HEARTBEAT_MS` (and when the
+ * caret moves or a claim changes) and deleted when the workspace closes or
+ * the app quits. Replaced, never stacked: it takes no history.
  *
  * Liveness is what this client observes: a device is live while its ref
  * moved within `PRESENCE_STALE_MS` by the local clock, so no clock but ours
@@ -20,7 +21,8 @@
  */
 import { GitError, type GitRemote, type GitRemoteRef, type GitService } from "@notefig/git";
 import type { SyncAuthor } from "./sync-engine";
-import type { SyncCursor, SyncEvent, SyncPeer, SyncState } from "./sync-machine";
+import { MAX_CLAIM_KEYS } from "./sync-claims";
+import type { SyncClaim, SyncCursor, SyncEvent, SyncPeer, SyncState } from "./sync-machine";
 
 /** Where the devices syncing `branch` keep their presence. */
 export const presencePrefix = (branch: string) => `refs/notefig/v1/presence/${branch}/`;
@@ -43,6 +45,8 @@ export interface PresenceDeps {
   now(): number;
   state(): SyncState;
   dispatch(event: SyncEvent): void;
+  /** What this device is editing, for each heartbeat. */
+  claims(): SyncClaim[];
 }
 
 export interface Presence {
@@ -73,6 +77,7 @@ interface Seen {
   name: string | null;
   colour: string | null;
   cursor: SyncCursor | null;
+  claims: SyncClaim[];
 }
 
 const COLOURS = ["#2f7ed8", "#c0562f", "#2f9e6e", "#9256c9", "#c79a2c", "#c24580"];
@@ -85,10 +90,27 @@ function colourOf(deviceId: string): string {
 }
 
 const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+/** More than any build sends: a device holds four units, by a few keys. */
+const MAX_READ_CLAIMS = 16;
+const MAX_READ_KEYS = MAX_CLAIM_KEYS;
+/** Its text's hash, the ones before and after it, and which repeat it is
+ *  (`sync-units.ts`). */
+const KEY = /^[0-9a-z]{1,8}\.[0-9a-z]{1,8}\.[0-9a-z]{1,8}\.\d{1,5}$/;
+
+/** The well-formed claims among what a commit says. */
+function claimsOf(raw: unknown): SyncClaim[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, MAX_READ_CLAIMS).flatMap((claim: unknown) => {
+    const { path, keys, agent } = (claim ?? {}) as Record<string, unknown>;
+    if (typeof path !== "string" || !Array.isArray(keys)) return [];
+    const valid = keys.slice(0, MAX_READ_KEYS).filter((key): key is string => typeof key === "string" && KEY.test(key));
+    return valid.length > 0 ? [{ path, keys: valid, agent: agent === true }] : [];
+  });
+}
 
 /** What another device's commit says, keeping only what's well formed:
  *  anyone who can push to the remote can write it. */
-function payloadOf(message: string): Pick<Seen, "name" | "colour" | "cursor"> {
+function payloadOf(message: string): Pick<Seen, "name" | "colour" | "cursor" | "claims"> {
   let raw: Record<string, unknown> = {};
   try {
     const parsed: unknown = JSON.parse(message);
@@ -104,6 +126,7 @@ function payloadOf(message: string): Pick<Seen, "name" | "colour" | "cursor"> {
       cursor && typeof cursor.path === "string" && count(cursor.unit) && count(cursor.offset)
         ? { path: cursor.path, unit: cursor.unit, offset: cursor.offset }
         : null,
+    claims: claimsOf(raw.claims),
   };
 }
 
@@ -127,6 +150,8 @@ export function createPresence(deps: PresenceDeps): Presence {
   /** The host won't take this device's ref: this session stays solo. */
   let refused = false;
   let cursor: SyncCursor | null = null;
+  /** The claims the last heartbeat sent. */
+  let sentClaims = "[]";
 
   /** What a device's ref's commit says. */
   const payloadIn = async (oid: string) => payloadOf((await git.log({ ref: oid, depth: 1 }))[0]?.commit.message ?? "");
@@ -139,7 +164,7 @@ export function createPresence(deps: PresenceDeps): Presence {
       const entry = seen.get(ref);
       if (entry?.oid === oid) continue;
       arrived ||= !entry && !first;
-      seen.set(ref, { read: null, name: null, colour: null, cursor: null, ...entry, oid, since: at, movedAt: first ? null : at });
+      seen.set(ref, { read: null, name: null, colour: null, cursor: null, claims: [], ...entry, oid, since: at, movedAt: first ? null : at });
     }
     first = false;
     return arrived;
@@ -154,7 +179,7 @@ export function createPresence(deps: PresenceDeps): Presence {
     const peers: SyncPeer[] = refused
       ? []
       : live(now())
-          .map(([ref, { name, colour, cursor }]) => ({ deviceId: ref.slice(prefix.length), name, colour, cursor }))
+          .map(([ref, { name, colour, cursor, claims }]) => ({ deviceId: ref.slice(prefix.length), name, colour, cursor, claims }))
           .sort((a, b) => a.deviceId.localeCompare(b.deviceId));
     if (JSON.stringify(peers) !== JSON.stringify(deps.state().peers)) deps.dispatch({ type: "peers", peers });
   };
@@ -190,13 +215,16 @@ export function createPresence(deps: PresenceDeps): Presence {
     },
 
     async heartbeat() {
-      if (refused || now() < nextBeatAt) return;
+      // A claim goes out at once: it's what keeps others' edits off the unit.
+      const claims = deps.claims();
+      const claimed = JSON.stringify(claims);
+      if (refused || (now() < nextBeatAt && claimed === sentClaims)) return;
       const [tip] = await git.log({ ref: `refs/heads/${deps.branch}`, depth: 1 }).catch(() => []);
       if (!tip) return;
       // A caret that moves while this goes out is sent by the next cycle.
       const sent = cursor;
       const oid = await git.commit({
-        message: JSON.stringify({ name: deps.author.name, colour: colourOf(deps.deviceId), beat: ++beat, cursor: sent }),
+        message: JSON.stringify({ name: deps.author.name, colour: colourOf(deps.deviceId), beat: ++beat, cursor: sent, claims }),
         author: deps.author,
         tree: tip.commit.tree,
         parent: [tip.oid],
@@ -206,6 +234,7 @@ export function createPresence(deps: PresenceDeps): Presence {
         await git.pushRef(remote, { ref: own, oid, force: true });
         if (published) replaced.push(published);
         published = oid;
+        sentClaims = claimed;
         nextBeatAt = sent === cursor ? now() + HEARTBEAT_MS : 0;
       } catch (error) {
         // The host turned the ref down (a hook, a token for branches only):
