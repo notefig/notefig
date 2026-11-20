@@ -116,7 +116,9 @@ export function unitIndex(keys: string[]): UnitIndex {
   const byText = new Map<string, string[]>();
   for (const key of keys) {
     const { text } = partsOf(key);
-    byText.set(text, [...(byText.get(text) ?? []), key]);
+    const same = byText.get(text);
+    if (same) same.push(key);
+    else byText.set(text, [key]);
   }
   return {
     resolve(key) {
@@ -151,6 +153,15 @@ function keyed(doc: PMNode): Keyed {
   known = { units, byFrom: new Map(units.map((unit) => [unit.from, unit.key])), index: unitIndex(keys) };
   keyedDocs.set(doc, known);
   return known;
+}
+
+/** Two keys for one unit, from copies that may differ around it: the same
+ *  text, and either the same neighbour before it or the same repeat. An
+ *  edit to the unit above changes one, not both. */
+export function sameUnit(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [x, y] = [partsOf(a), partsOf(b)];
+  return x.text === y.text && (x.before === y.before || x.nth === y.nth);
 }
 
 /** The index of `doc`'s units, for finding what others' keys name. */

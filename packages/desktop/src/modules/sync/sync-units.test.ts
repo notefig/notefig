@@ -3,7 +3,7 @@ import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getSchema } from "@tiptap/core";
 import { Node as PMNode } from "@tiptap/pm/model";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
-import { cursorAt, docUnits, fileUnitsOf, keyedUnits, unitIndex, unitsIn } from "./sync-units";
+import { cursorAt, docUnits, fileUnitsOf, keyedUnits, sameUnit, unitIndex, unitsIn } from "./sync-units";
 
 const keysOf = (markdown: string) => fileUnitsOf(doc(markdown)).map((unit) => unit.key);
 import { editBetween, refusalMessage } from "./sync-claims";
@@ -52,6 +52,15 @@ describe("sync claims' units", () => {
     // Text said once is found whatever its neighbour became.
     expect(unitIndex(keysOf("New first.\n\nUnique.\n")).resolve(mine[4]!)).toBe(keysOf("New first.\n\nUnique.\n")[1]);
     expect(index.resolve("zzz.0.0")).toBeNull();
+  });
+
+  it("knows one unit by two keys when only the unit above it changed", () => {
+    const [, before] = keysOf("Above.\n\nTarget.\n");
+    const [, after] = keysOf("Above, edited.\n\nTarget.\n");
+    expect(after).not.toBe(before);
+    expect(sameUnit(before!, after!)).toBe(true);
+    const [, other] = keysOf("Above.\n\nNot the target.\n");
+    expect(sameUnit(before!, other!)).toBe(false);
   });
 
   it("tells a unit's whole content apart from its key: marks and links count", () => {

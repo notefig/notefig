@@ -28,7 +28,7 @@
  */
 import { diffArrays } from "diff";
 import type { SyncClaim, SyncPeer } from "./sync-machine";
-import type { FileUnit, UnitIndex } from "./sync-units";
+import { sameUnit, type FileUnit, type UnitIndex } from "./sync-units";
 
 /** Units one device holds at most, its user's and its agents' together. */
 export const MAX_CLAIMS = 4;
@@ -107,7 +107,9 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
   /** Units this device was editing when another device won them. */
   let yielded: { path: string; keys: string[]; peerId: string }[] = [];
 
-  const isHere = (entry: Own) => caret?.path === entry.path && caret.key !== null && caret.key === entry.current;
+  /** The caret is in this claim's unit, though the text around it moved. */
+  const isHere = (entry: Own) =>
+    caret?.path === entry.path && caret.key !== null && entry.current !== null && sameUnit(caret.key, entry.current);
 
   /** Of two devices claiming one unit, the lower id holds it. */
   const beats = (peerId: string) => peerId < deps.deviceId;
@@ -117,11 +119,11 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
   const here = (keys: string[], index?: UnitIndex) =>
     index ? keys.flatMap((key) => index.resolve(key) ?? []) : keys;
 
-  /** Two claims on one unit: the same key in both (what the unit said
-   *  before either edit, whichever copy has it now), or the same unit of
-   *  this copy. */
+  /** Two claims on one unit: one key in both naming the same unit (what it
+   *  said before either edit, though the unit above changed on one side), or
+   *  the same unit of this copy. */
   const overlap = (a: string[], b: string[], index?: UnitIndex) => {
-    if (a.some((key) => b.includes(key))) return true;
+    if (a.some((key) => b.some((other) => sameUnit(key, other)))) return true;
     const units = new Set(here(a, index));
     return index !== undefined && here(b, index).some((key) => units.has(key));
   };
