@@ -103,15 +103,36 @@ interface Keyed {
 }
 
 const partsOf = (key: string) => {
-  const [text = "", before = "", nth = "0"] = key.split(".");
-  return { text, before, nth: Number(nth) };
+  const [text = "", before = "", after = "", nth = "0"] = key.split(".");
+  return { text, before, after, nth: Number(nth) };
 };
 
-/** An index over a file's keys. A key names its unit by its text, the text
- *  of the unit before it, and which repeat of its text it is. Text said
- *  once is found by the text alone, wherever it sits and whatever is next
- *  to it. Repeated text is told apart by its neighbour, then by which
- *  repeat it is: one unit, never every copy. */
+/** How much of two keys' context agrees, for two units saying the same:
+ *  the text before, the text after, and which repeat each is. A neighbour
+ *  that says what the unit says (a run of one item) tells nothing apart, so
+ *  it doesn't count. */
+function agreement(a: string, b: string): number {
+  const [x, y] = [partsOf(a), partsOf(b)];
+  if (x.text !== y.text) return -1;
+  let score = x.nth === y.nth ? 1 : 0;
+  if (x.before === y.before && x.before !== x.text) score++;
+  if (x.after === y.after && x.after !== x.text) score++;
+  return score;
+}
+
+/** Two keys for one unit, from copies that may differ around it: the same
+ *  text, and two of its three marks of place (the text before, the text
+ *  after, which repeat). An edit beside it, or a copy of its text added
+ *  further up, changes one; separate repeats of one text, even a run of
+ *  them, differ in two. */
+export function sameUnit(a: string, b: string): boolean {
+  return a === b || agreement(a, b) >= 2;
+}
+
+/** An index over a file's keys, to find the one unit another copy's key
+ *  names. Text said once is that unit, wherever it sits and whatever is
+ *  next to it. Repeated text is the copy whose place agrees most, the
+ *  repeat breaking a tie: one unit, never every copy. */
 export function unitIndex(keys: string[]): UnitIndex {
   const byText = new Map<string, string[]>();
   for (const key of keys) {
@@ -122,47 +143,34 @@ export function unitIndex(keys: string[]): UnitIndex {
   }
   return {
     resolve(key) {
-      const want = partsOf(key);
-      const same = byText.get(want.text) ?? [];
+      const same = byText.get(partsOf(key).text) ?? [];
       if (same.length <= 1) return same[0] ?? null;
-      const beside = same.filter((candidate) => partsOf(candidate).before === want.before);
-      if (beside.length === 1) return beside[0]!;
-      const pool = beside.length > 0 ? beside : same;
-      return pool.find((candidate) => partsOf(candidate).nth === want.nth) ?? pool[Math.min(want.nth, pool.length - 1)]!;
+      let best = same[0]!;
+      for (const candidate of same) if (agreement(key, candidate) > agreement(key, best)) best = candidate;
+      return best;
     },
   };
 }
 const keyedDocs = new WeakMap<PMNode, Keyed>();
 
-/** Every unit of `doc`, keyed `<text>.<text before it>.<repeat>` (see
- *  `unitIndex`). */
+/** Every unit of `doc`, keyed `<text>.<text before>.<text after>.<repeat>`
+ *  (see `unitIndex`); the first unit's before and the last's after are `0`. */
 function keyed(doc: PMNode): Keyed {
   let known = keyedDocs.get(doc);
   if (known) return known;
+  const found: (DocUnit & { text: string; content: string })[] = [];
+  eachUnit(doc, (node, unit) => found.push({ ...unit, text: textHash(node), content: contentHash(node) }));
   const seen = new Map<string, number>();
-  const units: (DocUnit & FileUnit)[] = [];
-  let before = "0";
-  eachUnit(doc, (node, unit) => {
-    const text = textHash(node);
+  const units = found.map(({ text, content, ...unit }, i) => {
     const nth = seen.get(text) ?? 0;
     seen.set(text, nth + 1);
-    units.push({ ...unit, key: `${text}.${before}.${nth}`, content: contentHash(node) });
-    before = text;
+    const key = `${text}.${found[i - 1]?.text ?? "0"}.${found[i + 1]?.text ?? "0"}.${nth}`;
+    return { ...unit, key, content };
   });
   const keys = units.map((unit) => unit.key);
   known = { units, byFrom: new Map(units.map((unit) => [unit.from, unit.key])), index: unitIndex(keys) };
   keyedDocs.set(doc, known);
   return known;
-}
-
-/** Two keys for one unit, from copies whose neighbours may differ: the same
- *  text, and the same repeat of it. An edit to the unit above changes the
- *  neighbour, never these; separate repeats of one text stay apart, even in
- *  a run of them that share their neighbour. */
-export function sameUnit(a: string, b: string): boolean {
-  if (a === b) return true;
-  const [x, y] = [partsOf(a), partsOf(b)];
-  return x.text === y.text && x.nth === y.nth;
 }
 
 /** The index of `doc`'s units, for finding what others' keys name. */

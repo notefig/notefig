@@ -93,8 +93,9 @@ const count = (value: unknown): value is number => Number.isSafeInteger(value) &
 /** More than any build sends: a device holds four units, by a few keys. */
 const MAX_READ_CLAIMS = 16;
 const MAX_READ_KEYS = MAX_CLAIM_KEYS;
-/** Its text's hash, the one before it, and which repeat it is (`sync-units.ts`). */
-const KEY = /^[0-9a-z]{1,8}\.[0-9a-z]{1,8}\.\d{1,5}$/;
+/** Its text's hash, the ones before and after it, and which repeat it is
+ *  (`sync-units.ts`). */
+const KEY = /^[0-9a-z]{1,8}\.[0-9a-z]{1,8}\.[0-9a-z]{1,8}\.\d{1,5}$/;
 
 /** The well-formed claims among what a commit says. */
 function claimsOf(raw: unknown): SyncClaim[] {

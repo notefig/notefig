@@ -51,7 +51,7 @@ describe("sync claims' units", () => {
     expect(index.resolve(mine[4]!)).toBe(theirs[5]);
     // Text said once is found whatever its neighbour became.
     expect(unitIndex(keysOf("New first.\n\nUnique.\n")).resolve(mine[4]!)).toBe(keysOf("New first.\n\nUnique.\n")[1]);
-    expect(index.resolve("zzz.0.0")).toBeNull();
+    expect(index.resolve("zzz.0.0.0")).toBeNull();
   });
 
   it("knows one unit by two keys when only the unit above it changed", () => {
@@ -64,6 +64,17 @@ describe("sync claims' units", () => {
     // A run of one text: each repeat is its own unit, though they share a neighbour.
     const [, second, third] = keysOf("- TODO\n- TODO\n- TODO\n");
     expect(sameUnit(second!, third!)).toBe(false);
+    // Repeats with matching neighbours, elsewhere in the file: two units.
+    const [, first, , last] = keysOf("A\n\nT\n\nA\n\nT\n");
+    expect(sameUnit(first!, last!)).toBe(false);
+  });
+
+  it("knows one unit when a copy of its text, added further up, shifts its repeat", () => {
+    const [, target] = keysOf("Above.\n\nTarget.\n\nBelow.\n");
+    const shifted = keysOf("Target.\n\nMore.\n\nAbove.\n\nTarget.\n\nBelow.\n");
+    expect(sameUnit(target!, shifted[3]!)).toBe(true);
+    expect(sameUnit(target!, shifted[0]!)).toBe(false);
+    expect(unitIndex(shifted).resolve(target!)).toBe(shifted[3]);
   });
 
   it("tells a unit's whole content apart from its key: marks and links count", () => {

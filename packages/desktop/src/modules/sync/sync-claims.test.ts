@@ -107,10 +107,10 @@ describe("sync claims", () => {
   it("sees a race on a unit whose neighbour one side changed first, and keeps the caret's claim when the text above moves", () => {
     const { claims, list } = claimsWith();
     // Its key before its edit, here and at Ada's: the unit above differs.
-    claims.take("a.md", edit(["t1.mine.0"], ["t2.mine.0"]), false, same);
-    claims.setCaret({ path: "a.md", key: "t2.changed.0" });
+    claims.take("a.md", edit(["t1.up.down.0"], ["t2.up.down.0"]), false, same);
+    claims.setCaret({ path: "a.md", key: "t2.changed.down.0" });
     expect(claims.expire()).toBe(false);
-    list.peers = [peer("a", [{ path: "a.md", keys: ["t1.ada.0", "t3.ada.0"], agent: false }])];
+    list.peers = [peer("a", [{ path: "a.md", keys: ["t1.ada.down.0", "t3.ada.down.0"], agent: false }])];
     expect(claims.expire()).toBe(true);
     expect(claims.published()).toEqual([]);
   });
