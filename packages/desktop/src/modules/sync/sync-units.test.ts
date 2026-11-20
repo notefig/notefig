@@ -61,6 +61,9 @@ describe("sync claims' units", () => {
     expect(sameUnit(before!, after!)).toBe(true);
     const [, other] = keysOf("Above.\n\nNot the target.\n");
     expect(sameUnit(before!, other!)).toBe(false);
+    // A run of one text: each repeat is its own unit, though they share a neighbour.
+    const [, second, third] = keysOf("- TODO\n- TODO\n- TODO\n");
+    expect(sameUnit(second!, third!)).toBe(false);
   });
 
   it("tells a unit's whole content apart from its key: marks and links count", () => {

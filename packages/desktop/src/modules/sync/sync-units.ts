@@ -155,13 +155,14 @@ function keyed(doc: PMNode): Keyed {
   return known;
 }
 
-/** Two keys for one unit, from copies that may differ around it: the same
- *  text, and either the same neighbour before it or the same repeat. An
- *  edit to the unit above changes one, not both. */
+/** Two keys for one unit, from copies whose neighbours may differ: the same
+ *  text, and the same repeat of it. An edit to the unit above changes the
+ *  neighbour, never these; separate repeats of one text stay apart, even in
+ *  a run of them that share their neighbour. */
 export function sameUnit(a: string, b: string): boolean {
   if (a === b) return true;
   const [x, y] = [partsOf(a), partsOf(b)];
-  return x.text === y.text && (x.before === y.before || x.nth === y.nth);
+  return x.text === y.text && x.nth === y.nth;
 }
 
 /** The index of `doc`'s units, for finding what others' keys name. */
