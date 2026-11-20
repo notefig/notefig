@@ -44,7 +44,7 @@ import { SidebarSeparator, ToolBar } from "@/components/editor/tool-bar";
 import type { CredentialStatus } from "@/adapters/platform-adapter.interface";
 import type { SyncOverwrite, SyncState, WorkspaceSync } from "@/modules/sync";
 import { useSyncState } from "@/modules/sync/react";
-import { PeerAvatars } from "./peer-avatars";
+import { PeerDots } from "./peer-dots";
 import { lookOf, statusOf } from "./sync-look";
 
 /** The focused workspace's Remote tool. */
@@ -283,7 +283,7 @@ function RemoteRows({
             className="flex min-w-0 items-center gap-1 text-muted-foreground"
             aria-label={t("syncPeers")}
           >
-            <PeerAvatars peers={state.peers} />
+            <PeerDots peers={state.peers} />
             <span className="truncate">
               {state.peers
                 .map((peer) => `${peer.name ?? t("syncUnnamedPeer")}${peer.cursor ? ` (${peer.cursor.path.split("/").pop()})` : ""}`)
