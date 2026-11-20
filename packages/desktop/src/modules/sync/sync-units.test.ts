@@ -77,6 +77,13 @@ describe("sync claims' units", () => {
     expect(unitIndex(shifted).resolve(target!)).toBe(shifted[3]);
   });
 
+  it("finds the original over a copy inserted just above it that shares its repeat and next neighbour", () => {
+    const [, target] = keysOf("Above.\n\nTarget.\n\nBelow.\n");
+    const inserted = keysOf("Target.\n\nBelow.\n\nAbove.\n\nTarget.\n\nBelow.\n");
+    expect(unitIndex(inserted).resolve(target!)).toBe(inserted[3]);
+    expect(sameUnit(target!, inserted[3]!)).toBe(true);
+  });
+
   it("tells a unit's whole content apart from its key: marks and links count", () => {
     const [plain] = fileUnitsOf(doc("A [link](a.md).\n"));
     const [moved] = fileUnitsOf(doc("A [link](b.md).\n"));

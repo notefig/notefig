@@ -107,16 +107,21 @@ const partsOf = (key: string) => {
   return { text, before, after, nth: Number(nth) };
 };
 
-/** How much of two keys' context agrees, for two units saying the same:
- *  the text before, the text after, and which repeat each is. A neighbour
- *  that says what the unit says (a run of one item) tells nothing apart, so
- *  it doesn't count. */
+/** A neighbour that agrees says more than the repeat count: a copy of the
+ *  text added further up shifts every repeat after it. */
+const NEIGHBOUR = 2;
+const REPEAT = 1;
+
+/** How much of two keys' place agrees, for two units saying the same: the
+ *  text before, the text after (each `NEIGHBOUR`), and which repeat each is
+ *  (`REPEAT`). A neighbour that says what the unit says (a run of one item)
+ *  tells nothing apart, so it doesn't count. */
 function agreement(a: string, b: string): number {
   const [x, y] = [partsOf(a), partsOf(b)];
   if (x.text !== y.text) return -1;
-  let score = x.nth === y.nth ? 1 : 0;
-  if (x.before === y.before && x.before !== x.text) score++;
-  if (x.after === y.after && x.after !== x.text) score++;
+  let score = x.nth === y.nth ? REPEAT : 0;
+  if (x.before === y.before && x.before !== x.text) score += NEIGHBOUR;
+  if (x.after === y.after && x.after !== x.text) score += NEIGHBOUR;
   return score;
 }
 
@@ -126,13 +131,13 @@ function agreement(a: string, b: string): number {
  *  further up, changes one; separate repeats of one text, even a run of
  *  them, differ in two. */
 export function sameUnit(a: string, b: string): boolean {
-  return a === b || agreement(a, b) >= 2;
+  return a === b || agreement(a, b) >= NEIGHBOUR + REPEAT;
 }
 
 /** An index over a file's keys, to find the one unit another copy's key
  *  names. Text said once is that unit, wherever it sits and whatever is
- *  next to it. Repeated text is the copy whose place agrees most, the
- *  repeat breaking a tie: one unit, never every copy. */
+ *  next to it. Repeated text is the copy whose place agrees most, both
+ *  neighbours over one and the repeat: one unit, never every copy. */
 export function unitIndex(keys: string[]): UnitIndex {
   const byText = new Map<string, string[]>();
   for (const key of keys) {
