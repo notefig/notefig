@@ -75,11 +75,6 @@ export interface WorkspaceSync {
   takeRemote(): void;
   /** Clear the flags on text a merge replaced. */
   dismissOverwritten(): void;
-  /** A file another device deleted while it was open here
-   *  (`state().deleted`): sync it again as it is here… */
-  restoreDeleted(path: string): Promise<void>;
-  /** …or delete it here too, once its editor's edits are saved. */
-  discardDeleted(path: string): Promise<void>;
   syncNow(): Promise<void>;
   /** Resolves once the open-time read is done and the engine started. */
   whenReady(): Promise<void>;
@@ -124,8 +119,6 @@ interface SyncDevice {
   /** Files whose unsaved edits held a remote change back, and the blob
    *  their edits started from: merged once the edits land. */
   held?: Record<string, string>;
-  /** Files deleted on the branch while open here, and who deleted them. */
-  deleted?: Record<string, string | null>;
 }
 
 /** Kept out of every synced project, on top of its `.gitignore`: agent
@@ -255,12 +248,6 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
         if (!device?.on) return;
         const { held: _, ...rest } = device;
         await writeDevice(Object.keys(held).length > 0 ? { ...rest, held } : rest);
-      },
-      deleted: device.deleted ?? {},
-      recordDeleted: async (deleted) => {
-        if (!device?.on) return;
-        const { deleted: _, ...rest } = device;
-        await writeDevice(Object.keys(deleted).length > 0 ? { ...rest, deleted } : rest);
       },
       // The engine syncs the branch it started on; the new one is read
       // again, with its own remote.
@@ -410,16 +397,6 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
       if (engine) void engine.takeRemote();
     },
     dismissOverwritten: () => dispatch({ type: "dismiss-overwritten" }),
-    restoreDeleted: async (path) => {
-      await engine?.restoreDeleted(path);
-    },
-    async discardDeleted(path) {
-      // Its last edits land first, so the delete isn't undone by a save.
-      const file = pathutil.join(root, pathutil.fromTreePath(path));
-      flushDocumentSync(file);
-      await whenDocumentSyncClean(file);
-      await engine?.discardDeleted(path);
-    },
     syncNow: async () => {
       await chain;
       await engine?.syncNow();

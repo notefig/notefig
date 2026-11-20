@@ -11,7 +11,6 @@ import { useEditorViewportMemory } from "./use-editor-viewport-memory";
 import { useLinkPrompt } from "./use-link-prompt";
 import { usePromptWidgetNavigation } from "./use-prompt-widget-navigation";
 import { TiptapToolbar } from "./tiptap-toolbar";
-import { DeletedElsewhereBar } from "@/components/sync/deleted-elsewhere-bar";
 import { PromptMentionMenu, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
 import { LinkBubbleMenu } from "./tiptap-link-menu";
 import { TableMenu } from "./tiptap-table-menu";
@@ -139,7 +138,6 @@ export function TextEditor({
   return (
     <div className="flex flex-col flex-1 min-h-0 w-full z-0">
       <TiptapToolbar editor={editor} onLinkToggle={handleLinkToggle} />
-      <DeletedElsewhereBar workspacePath={basePath} path={file.path} />
       <div
         className={cn(
           "flex-1 min-h-0 overflow-auto tiptap-editor-wrapper",
