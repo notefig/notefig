@@ -695,6 +695,9 @@ describe("sync: solo", () => {
     await sync.syncNow();
     await expect(fsp.access(clean)).rejects.toThrow();
     expect(await read(path)).toBe(SEED["note.md"]);
+    // Another round before the save lands commits nothing of the stale copy.
+    await sync.syncNow();
+    expect(await tree(remote.bare)).not.toContain("note.md");
 
     land();
     await whenDocumentSyncClean(path);

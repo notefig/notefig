@@ -29,7 +29,7 @@ import type { SyncEvent } from "./sync-machine";
 
 export interface OverlapDeps {
   git: GitService;
-  documents: Pick<DocumentsApi, "write">;
+  documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
   fs: Pick<FileSystemSurface, "readBinaryFiles" | "writeBinaryFiles">;
   absolute(path: string): string;
   merge(base: string, ours: string, theirs: string): Promise<MergedMarkdown>;
@@ -164,6 +164,8 @@ export function createOverlaps(deps: OverlapDeps) {
     // on disk is the last word (an edit against a delete keeps the edit; a
     // delete here is the user's).
     const theirs = await git.readFile({ ref: head, filepath });
+    // Deleted there, its edit still saving here: what's on disk is stale.
+    if (theirs === null && deps.documents.hasUnsavedEdits(deps.absolute(filepath))) return false;
     const [disk, base] = theirs ? await Promise.all([readDisk(filepath), git.readFile({ ref: baseOid, filepath: "" })]) : [null, null];
     if (theirs === null || disk === null) {
       held.delete(filepath);
