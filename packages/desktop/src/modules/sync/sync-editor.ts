@@ -3,17 +3,18 @@
  * syncs the branch, each of the workspace's open markdown editors carries
  * two plugins. Solo, none does.
  *
- * - Carets: the others' carets drawn, and this device's reported. A caret
+ * - Carets: the others' carets drawn, each with a small name tag on hover,
+ *   and this device's reported. A caret
  *   move only arms a timer, so nothing runs per keystroke. A caret is a
  *   unit of the document and a character in it (`SyncCursor`), so it lands
  *   in the same paragraph on a device whose text above differs.
  * - Claims (`sync-claims.ts`): an edit claims the units it touches, or is
  *   refused before it changes anything when another device holds one (or
  *   this one holds its four). A unit someone else holds is a shade paler,
- *   with a faint line in their colour down its start and a not-allowed
- *   cursor; their name shows on hover, or in a tooltip that fades when a
- *   keystroke there is refused. A caret in a unit someone else just took
- *   moves to just after it. Your own claims show nothing.
+ *   with a faint line in their colour in the editor's start gutter (clear
+ *   of bullets, checkboxes and the drag handle) and a not-allowed
+ *   cursor; their name shows on hover. A caret in a unit someone else
+ *   just took moves to just after it. Your own claims show nothing.
  *
  * Writes that aren't the user's typing pass: sync's and agents' adopted
  * writes (agents' are gated where they're made), and changes kept out of
@@ -25,13 +26,11 @@ import { Plugin, PluginKey, Selection, TextSelection, type Transaction } from "@
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { ADOPTION_TRANSACTION_META } from "@/components/editor/adopt-external-content";
 import type { EditorsApi } from "@/modules/editors";
-import type { ClaimHolder, ClaimRefusal, Claims } from "./sync-claims";
-import { MAX_CLAIMS } from "./sync-claims";
+import type { ClaimHolder, Claims } from "./sync-claims";
 import { isShared, type SyncCursor, type SyncPeer, type SyncState } from "./sync-machine";
 import { cursorAt, docUnits, indexOf, keyedUnits, unitsIn } from "./sync-units";
 
 const REPORT_MS = 300;
-const TIP_MS = 1_600;
 const carets = new PluginKey<DecorationSet>("syncCarets");
 const held = new PluginKey<DecorationSet>("syncClaims");
 
@@ -41,8 +40,9 @@ function caret(peer: SyncPeer): HTMLElement {
   const el = document.createElement("span");
   el.className = "sync-caret";
   el.dataset.syncPeer = peer.deviceId;
-  if (peer.name) el.title = peer.name;
-  el.style.cssText = `border-left:2px solid ${peer.colour ?? "currentColor"};margin:0 -1px;`;
+  // Their name, on hover, from the stylesheet: no text in the document's DOM.
+  if (peer.name) el.dataset.name = peer.name;
+  el.style.setProperty("--sync-peer", peer.colour ?? "currentColor");
   return el;
 }
 
@@ -69,24 +69,31 @@ export function holderLabel({ peer, agent }: ClaimHolder): string {
   return agent ? `${name}'s agent is editing this` : `${name} is editing this`;
 }
 
-function refusalLabel(refusal: ClaimRefusal): string {
-  if (refusal.kind === "held") return holderLabel(refusal.holders[0]!);
-  return `You can edit ${MAX_CLAIMS} places at a time while others are here`;
-}
-
-/** The units others hold in `doc`, drawn. */
-export function heldDecorations(doc: PMNode, holders: Map<string, ClaimHolder>): DecorationSet {
+/** The units others hold in `doc`, drawn; `indents` is how far each
+ *  unit's start sits from the text's, as laid out, so its line can sit in
+ *  the gutter whatever the unit is nested in. */
+export function heldDecorations(
+  doc: PMNode,
+  holders: Map<string, ClaimHolder>,
+  indents: ReadonlyMap<string, number> = new Map(),
+): DecorationSet {
   if (holders.size === 0) return DecorationSet.empty;
   const decorations = keyedUnits(doc).flatMap(({ from, to, key }) => {
     const holder = holders.get(key);
     if (!holder) return [];
+    const indent = indents.get(key);
     return [
-      Decoration.node(from, to, {
-        class: "sync-held",
-        style: `--sync-holder:${holder.peer.colour ?? "currentColor"}`,
-        title: holderLabel(holder),
-        "data-sync-holder": holder.peer.deviceId,
-      }),
+      Decoration.node(
+        from,
+        to,
+        {
+          class: "sync-held",
+          style: `--sync-holder:${holder.peer.colour ?? "currentColor"}${indent === undefined ? "" : `;--sync-indent:${indent}px`}`,
+          title: holderLabel(holder),
+          "data-sync-holder": holder.peer.deviceId,
+        },
+        { key },
+      ),
     ];
   });
   return DecorationSet.create(doc, decorations);
@@ -138,20 +145,20 @@ export function editOf(tr: Transaction) {
 const isTyping = (tr: Transaction) =>
   tr.docChanged && tr.getMeta(ADOPTION_TRANSACTION_META) !== true && tr.getMeta("addToHistory") !== false;
 
-/** Show `text` just above the start of the unit at `pos`, fading on its
- *  own. */
-function showTip(view: EditorView, pos: number, text: string, setTimer: SetTimer) {
-  const at = view.coordsAtPos(Math.min(pos, view.state.doc.content.size));
-  const tip = document.createElement("div");
-  tip.className = "sync-held-tip";
-  tip.setAttribute("role", "status");
-  tip.textContent = text;
-  tip.style.left = `${at.left}px`;
-  tip.style.top = `${at.top - 6}px`;
-  document.body.querySelector(".sync-held-tip")?.remove();
-  document.body.append(tip);
-  setTimer(() => tip.remove(), TIP_MS);
+/** How far each held unit's start sits from the text's, as laid out:
+ *  the indent its lists and quotes give it. */
+function indentsOf(view: EditorView, decorations: DecorationSet): Map<string, number> {
+  const start = (view.dom.firstElementChild ?? view.dom).getBoundingClientRect().left;
+  const indents = new Map<string, number>();
+  for (const { from, spec } of decorations.find()) {
+    const dom = view.nodeDOM(from);
+    if (dom instanceof HTMLElement) indents.set(spec.key as string, Math.round(dom.getBoundingClientRect().left - start));
+  }
+  return indents;
 }
+
+const sameIndents = (a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>) =>
+  a.size === b.size && [...a].every(([key, indent]) => b.get(key) === indent);
 
 /** Where a caret goes when someone takes the unit it's in: the first
  *  place to type after the unit; at the end of the doc, a new paragraph. */
@@ -175,42 +182,42 @@ interface ClaimView {
 }
 
 function claimsPlugin({ path, claims, setTimer }: ClaimView) {
-  let view: EditorView | null = null;
+  // Measured after a redraw, never per keystroke: an indent changes only
+  // with the units held, or their text arriving.
+  let indents: ReadonlyMap<string, number> = new Map();
+  let redrawn = false;
   return new Plugin<DecorationSet>({
     key: held,
     state: {
       init: () => DecorationSet.empty,
-      apply: (tr, value) =>
+      apply: (tr, value) => {
         // Others' claims changed, or their text arrived: drawn again.
-        tr.getMeta(held) || (tr.docChanged && !isTyping(tr))
-          ? heldDecorations(tr.doc, claims.heldIn(path, indexOf(tr.doc)))
-          : value.map(tr.mapping, tr.doc),
+        if (!tr.getMeta(held) && !(tr.docChanged && !isTyping(tr))) return value.map(tr.mapping, tr.doc);
+        redrawn = true;
+        return heldDecorations(tr.doc, claims.heldIn(path, indexOf(tr.doc)), indents);
+      },
     },
     props: {
       decorations: (state) => held.getState(state),
     },
-    filterTransaction(tr) {
-      if (!isTyping(tr)) return true;
-      const refusal = claims.take(path, editOf(tr), false, indexOf(tr.before));
-      if (!refusal) return true;
-      const [first] = editedRanges(tr);
-      const [unit] = first ? unitsIn(tr.before, ...first.before) : [];
-      if (view) showTip(view, unit ? unit.from + 1 : tr.selection.head, refusalLabel(refusal), setTimer);
-      return false;
-    },
-    view(editorView) {
-      view = editorView;
+    filterTransaction: (tr) => !isTyping(tr) || !claims.take(path, editOf(tr), false, indexOf(tr.before)),
+    view() {
       return {
         update(current, previous) {
           const decorations = held.getState(current.state);
-          if (decorations === held.getState(previous) || !current.hasFocus()) return;
-          // Someone took the unit this caret is in: on to just after it.
-          const head = current.state.selection.head;
-          const [taken] = decorations?.find(head, head) ?? [];
-          if (taken) setTimer(() => moveOut(current, taken), 0);
-        },
-        destroy: () => {
-          view = null;
+          if (!decorations || decorations === held.getState(previous)) return;
+          if (current.hasFocus()) {
+            // Someone took the unit this caret is in: on to just after it.
+            const head = current.state.selection.head;
+            const [taken] = decorations.find(head, head);
+            if (taken) setTimer(() => moveOut(current, taken), 0);
+          }
+          if (!redrawn) return;
+          redrawn = false;
+          const measured = indentsOf(current, decorations);
+          if (sameIndents(measured, indents)) return;
+          indents = measured;
+          setTimer(() => current.dispatch(current.state.tr.setMeta(held, true).setMeta("addToHistory", false)), 0);
         },
       };
     },

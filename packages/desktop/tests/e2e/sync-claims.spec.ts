@@ -48,7 +48,7 @@ async function adaHoldsAParagraph(page: Page) {
     );
     const units = keyedUnits(core.editors.markdownEditor(file).state.doc);
     const peers = [
-      { deviceId: "ada", name: "Ada", colour: "#c0562f", cursor: null, claims: [{ path: "plan.md", keys: [units[2].key], agent: false }] },
+      { deviceId: "ada", name: "Ada", colour: "#c0562f", cursor: { path: "plan.md", unit: 1, offset: 5 }, claims: [{ path: "plan.md", keys: [units[2].key], agent: false }] },
     ];
     const claims = createClaims({ deviceId: "me", now: Date.now, peers: () => peers });
     createSyncEditors({
@@ -81,9 +81,19 @@ test("a paragraph someone else is editing is paler, marked in their colour, and 
   await expect(held).toHaveCSS("opacity", "0.55");
   expect(await held.evaluate((el) => getComputedStyle(el, "::before").backgroundColor)).toBe("rgb(192, 86, 47)");
 
+  // The line sits in the gutter, left of the text, whatever the indent.
+  const lineLeft = await held.evaluate((el) => el.getBoundingClientRect().left + parseFloat(getComputedStyle(el, "::before").left));
+  const textLeft = await editor.locator("h1").evaluate((el) => el.getBoundingClientRect().left);
+  expect(lineLeft).toBeLessThan(textLeft);
+
+  // Ada's caret carries her name, shown the moment it's hovered.
+  const caret = editor.locator('.sync-caret[data-sync-peer="ada"]');
+  expect(await caret.evaluate((el) => getComputedStyle(el, "::after").content)).toBe('"Ada"');
+  await caret.hover({ force: true });
+  await expect.poll(() => caret.evaluate((el) => getComputedStyle(el, "::after").opacity)).toBe("1");
+
   await held.click();
   await page.keyboard.type("x");
-  await expect(page.locator(".sync-held-tip")).toHaveText("Ada is editing this");
   await expect(held).toHaveText("Ada is editing this paragraph.");
 
   // Everywhere else types as ever.

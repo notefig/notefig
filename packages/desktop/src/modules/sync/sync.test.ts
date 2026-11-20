@@ -1339,7 +1339,6 @@ describe("sync: shared, while another device syncs the branch", () => {
     const before = theirs.state.doc;
     theirs.commands.insertContentAt(second(theirs).from + 1, "Bob was here ");
     expect(theirs.state.doc).toBe(before);
-    expect(document.body.querySelector(".sync-held-tip")?.textContent).toBe("User device-a is editing this");
     // B's agents: refused on A's unit, before anything is written; free elsewhere.
     const refused = await b.claimWrite(join(wsB, "note.md"), (text) => text.replace("Second paragraph.", "Rewritten."));
     expect(refused).toMatch(/^Refused: User device-a is editing paragraphs of note\.md this edit touches\. Nothing was written\./);
