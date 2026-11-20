@@ -28,7 +28,7 @@
  */
 import { diffArrays } from "diff";
 import type { SyncClaim, SyncPeer } from "./sync-machine";
-import type { FileUnit } from "./sync-units";
+import type { FileUnit, UnitIndex } from "./sync-units";
 
 /** Units one device holds at most, its user's and its agents' together. */
 export const MAX_CLAIMS = 4;
@@ -78,12 +78,12 @@ interface Own {
 
 export interface Claims {
   /** Claim what an edit to `path` touches, or say why not; nothing is
-   *  claimed on a refusal. */
-  take(path: string, edit: ClaimEdit, agent: boolean): ClaimRefusal | null;
-  /** Would `take` refuse? Claims nothing. */
-  check(path: string, edit: ClaimEdit): ClaimRefusal | null;
-  /** Other devices' claims in force on `path`, by unit key. */
-  heldIn(path: string): Map<string, ClaimHolder>;
+   *  claimed on a refusal. `index` is the file as the edit found it, where
+   *  every claim's keys are looked up. */
+  take(path: string, edit: ClaimEdit, agent: boolean, index: UnitIndex): ClaimRefusal | null;
+  /** Other devices' claims in force on `path`, by the key of the unit each
+   *  names in the copy `index` indexes. */
+  heldIn(path: string, index: UnitIndex): Map<string, ClaimHolder>;
   /** Where this device's caret is: a file and its unit's key. */
   setCaret(caret: { path: string; key: string | null } | null): void;
   /** A cycle that began at `at` put everything saved by then on the
@@ -112,11 +112,25 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
   /** Of two devices claiming one unit, the lower id holds it. */
   const beats = (peerId: string) => peerId < deps.deviceId;
 
+  /** Keys as units of one copy of the file: each looked up in `index`
+   *  (`sync-units.ts`); without one, as they are. */
+  const here = (keys: string[], index?: UnitIndex) =>
+    index ? keys.flatMap((key) => index.resolve(key) ?? []) : keys;
+
+  /** Two claims on one unit: the same key in both (what the unit said
+   *  before either edit, whichever copy has it now), or the same unit of
+   *  this copy. */
+  const overlap = (a: string[], b: string[], index?: UnitIndex) => {
+    if (a.some((key) => b.includes(key))) return true;
+    const units = new Set(here(a, index));
+    return index !== undefined && here(b, index).some((key) => units.has(key));
+  };
+
   /** The device that won a unit from this one, and its claim on it. */
-  const winnerOf = (path: string, keys: string[], peerId?: string): ClaimHolder | null => {
+  const winnerOf = (path: string, keys: string[], peerId?: string, index?: UnitIndex): ClaimHolder | null => {
     for (const peer of deps.peers()) {
       if (peerId ? peer.deviceId !== peerId : !beats(peer.deviceId)) continue;
-      const claim = peer.claims.find((c) => c.path === path && c.keys.some((key) => keys.includes(key)));
+      const claim = peer.claims.find((c) => c.path === path && overlap(c.keys, keys, index));
       if (claim) return { peer, agent: claim.agent };
     }
     return null;
@@ -124,41 +138,41 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
 
   /** Others' claims on `path` in force: all but the races this device won,
    *  where it holds the unit and the other merges. */
-  const othersIn = (path: string, held: Map<string, ClaimHolder>) => {
-    const mine = new Set(own.filter((entry) => entry.path === path).flatMap(keysOf));
+  const othersIn = (path: string, index: UnitIndex, held: Map<string, ClaimHolder>) => {
+    const mine = own.filter((entry) => entry.path === path).flatMap(keysOf);
     for (const peer of deps.peers()) {
       for (const claim of peer.claims) {
-        const won = !beats(peer.deviceId) && claim.keys.some((key) => mine.has(key));
-        if (claim.path !== path || won) continue;
-        for (const key of claim.keys) held.set(key, { peer, agent: claim.agent });
+        if (claim.path !== path) continue;
+        if (!beats(peer.deviceId) && overlap(claim.keys, mine, index)) continue;
+        for (const key of here(claim.keys, index)) held.set(key, { peer, agent: claim.agent });
       }
     }
   };
 
   /** The races this device lost on `path`: its own text of each unit is
    *  the winner's too, whatever the winner's copy says, until it lets go. */
-  const lostIn = (path: string, held: Map<string, ClaimHolder>) => {
+  const lostIn = (path: string, index: UnitIndex, held: Map<string, ClaimHolder>) => {
     const lost = [
       ...own.filter((entry) => entry.path === path).map((entry) => ({ keys: keysOf(entry), peerId: undefined })),
       ...yielded.filter((entry) => entry.path === path),
     ];
     for (const { keys, peerId } of lost) {
-      const winner = winnerOf(path, keys, peerId);
-      if (winner) for (const key of keys) held.set(key, winner);
+      const winner = winnerOf(path, keys, peerId, index);
+      if (winner) for (const key of here(keys, index)) held.set(key, winner);
     }
   };
 
-  const heldIn = (path: string) => {
+  const heldIn = (path: string, index: UnitIndex) => {
     const held = new Map<string, ClaimHolder>();
-    othersIn(path, held);
-    lostIn(path, held);
+    othersIn(path, index, held);
+    lostIn(path, index, held);
     return held;
   };
 
   /** The claims an edit leaves, or why it can't go on. */
-  const plan = (path: string, edit: ClaimEdit, agent: boolean): ClaimRefusal | Own[] => {
+  const plan = (path: string, edit: ClaimEdit, agent: boolean, index: UnitIndex): ClaimRefusal | Own[] => {
     const before = edit.before.filter((key): key is string => key !== null);
-    const held = heldIn(path);
+    const held = heldIn(path, index);
     const holders = new Map<string, ClaimHolder>();
     for (const key of before) {
       const holder = held.get(key);
@@ -166,10 +180,11 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
     }
     if (holders.size > 0) return { kind: "held", holders: [...holders.values()] };
     const at = deps.now();
-    const touched = own.filter((entry) => entry.path === path && before.some((key) => keysOf(entry).includes(key)));
+    const names = (entry: Own) => here(keysOf(entry), index);
+    const touched = own.filter((entry) => entry.path === path && before.some((key) => names(entry).includes(key)));
     const rest = own.filter((entry) => !touched.includes(entry));
     // Each unit touched, with the claim it already had.
-    const groups = before.map((key) => touched.find((entry) => keysOf(entry).includes(key)) ?? key);
+    const groups = before.map((key) => touched.find((entry) => names(entry).includes(key)) ?? key);
     const distinct = [...new Set(groups)];
     const after = edit.after.filter((key): key is string => key !== null);
     const claimed: Own[] = distinct.map((group, i) => {
@@ -205,15 +220,11 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
   };
 
   return {
-    take(path, edit, agent) {
-      const next = plan(path, edit, agent);
+    take(path, edit, agent, index) {
+      const next = plan(path, edit, agent, index);
       if (!Array.isArray(next)) return next;
       own = next;
       return null;
-    },
-    check(path, edit) {
-      const next = plan(path, edit, false);
-      return Array.isArray(next) ? null : next;
     },
     heldIn,
     setCaret(next) {

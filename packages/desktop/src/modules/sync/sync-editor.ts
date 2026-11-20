@@ -28,7 +28,7 @@ import type { EditorsApi } from "@/modules/editors";
 import type { ClaimHolder, ClaimRefusal, Claims } from "./sync-claims";
 import { MAX_CLAIMS } from "./sync-claims";
 import { isShared, type SyncCursor, type SyncPeer, type SyncState } from "./sync-machine";
-import { cursorAt, docUnits, keyedUnits, unitsIn } from "./sync-units";
+import { cursorAt, docUnits, indexOf, keyedUnits, unitsIn } from "./sync-units";
 
 const REPORT_MS = 300;
 const TIP_MS = 1_600;
@@ -183,7 +183,7 @@ function claimsPlugin({ path, claims, setTimer }: ClaimView) {
       apply: (tr, value) =>
         // Others' claims changed, or their text arrived: drawn again.
         tr.getMeta(held) || (tr.docChanged && !isTyping(tr))
-          ? heldDecorations(tr.doc, claims.heldIn(path))
+          ? heldDecorations(tr.doc, claims.heldIn(path, indexOf(tr.doc)))
           : value.map(tr.mapping, tr.doc),
     },
     props: {
@@ -191,7 +191,7 @@ function claimsPlugin({ path, claims, setTimer }: ClaimView) {
     },
     filterTransaction(tr) {
       if (!isTyping(tr)) return true;
-      const refusal = claims.take(path, editOf(tr), false);
+      const refusal = claims.take(path, editOf(tr), false, indexOf(tr.before));
       if (!refusal) return true;
       const [first] = editedRanges(tr);
       const [unit] = first ? unitsIn(tr.before, ...first.before) : [];

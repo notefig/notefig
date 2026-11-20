@@ -3,7 +3,7 @@ import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getSchema } from "@tiptap/core";
 import { Node as PMNode } from "@tiptap/pm/model";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
-import { cursorAt, docUnits, fileUnitsOf, keyedUnits, unitsIn } from "./sync-units";
+import { cursorAt, docUnits, fileUnitsOf, keyedUnits, unitIndex, unitsIn } from "./sync-units";
 
 const keysOf = (markdown: string) => fileUnitsOf(doc(markdown)).map((unit) => unit.key);
 import { editBetween, refusalMessage } from "./sync-claims";
@@ -34,17 +34,24 @@ describe("sync claims' units", () => {
   it("names a unit by its kind and text, the same whatever its marks or the text above", () => {
     const plain = keysOf("# Title\n\nA paragraph.\n");
     expect(keysOf("# Title\n\nA **paragraph**.\n")).toEqual(plain);
-    expect(keysOf("# Title\n\nSomething new above.\n\nA paragraph.\n")[2]).toBe(plain[1]);
+    const moved = keysOf("# Title\n\nSomething new above.\n\nA paragraph.\n");
+    expect(unitIndex(moved).resolve(plain[1]!)).toBe(moved[2]);
     // A heading and a paragraph that say the same are two units.
     const [heading, paragraph] = keysOf("# Same\n\nSame\n");
     expect(heading).not.toBe(paragraph);
   });
 
-  it("names repeated text apart, by which repeat it is, whatever comes between", () => {
-    const [todo, , again, , last] = keysOf("- TODO\n- other\n- TODO\n\nText.\n\nTODO\n");
-    expect(again).toBe(`${todo}.1`);
-    expect(last).not.toBe(todo);
-    expect(keysOf("- TODO\n- inserted\n- other\n- TODO\n")[3]).toBe(again);
+  it("finds the one unit a key names in another copy: by its text, then its neighbour, then which repeat", () => {
+    const mine = keysOf("- TODO\n- ship it\n- TODO\n- docs\n\nUnique.\n");
+    // Another copy: a TODO added at the top, the unique paragraph moved up.
+    const theirs = keysOf("- TODO\n- TODO\n- ship it\n- TODO\n- docs\n\nUnique.\n");
+    const index = unitIndex(theirs);
+    // The TODO after "ship it" is that one there too, not every TODO.
+    expect(index.resolve(mine[2]!)).toBe(theirs[3]);
+    expect(index.resolve(mine[4]!)).toBe(theirs[5]);
+    // Text said once is found whatever its neighbour became.
+    expect(unitIndex(keysOf("New first.\n\nUnique.\n")).resolve(mine[4]!)).toBe(keysOf("New first.\n\nUnique.\n")[1]);
+    expect(index.resolve("zzz.0.0")).toBeNull();
   });
 
   it("tells a unit's whole content apart from its key: marks and links count", () => {

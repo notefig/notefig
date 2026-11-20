@@ -90,30 +90,71 @@ export interface FileUnit {
   content: string;
 }
 
+/** Finds, in one copy of a file, the unit another device's key names. */
+export interface UnitIndex {
+  /** The key of the unit `key` names here; null when there's none. */
+  resolve(key: string): string | null;
+}
+
 interface Keyed {
   units: (DocUnit & FileUnit)[];
   byFrom: Map<number, string>;
+  index: UnitIndex;
+}
+
+const partsOf = (key: string) => {
+  const [text = "", before = "", nth = "0"] = key.split(".");
+  return { text, before, nth: Number(nth) };
+};
+
+/** An index over a file's keys. A key names its unit by its text, the text
+ *  of the unit before it, and which repeat of its text it is. Text said
+ *  once is found by the text alone, wherever it sits and whatever is next
+ *  to it. Repeated text is told apart by its neighbour, then by which
+ *  repeat it is: one unit, never every copy. */
+export function unitIndex(keys: string[]): UnitIndex {
+  const byText = new Map<string, string[]>();
+  for (const key of keys) {
+    const { text } = partsOf(key);
+    byText.set(text, [...(byText.get(text) ?? []), key]);
+  }
+  return {
+    resolve(key) {
+      const want = partsOf(key);
+      const same = byText.get(want.text) ?? [];
+      if (same.length <= 1) return same[0] ?? null;
+      const beside = same.filter((candidate) => partsOf(candidate).before === want.before);
+      if (beside.length === 1) return beside[0]!;
+      const pool = beside.length > 0 ? beside : same;
+      return pool.find((candidate) => partsOf(candidate).nth === want.nth) ?? pool[Math.min(want.nth, pool.length - 1)]!;
+    },
+  };
 }
 const keyedDocs = new WeakMap<PMNode, Keyed>();
 
-/** Every unit of `doc`, keyed: its text's hash, and for a unit saying what
- *  an earlier one says, which of them it is (`.1` the second), so repeated
- *  text names each copy apart without counting on where it sits. */
+/** Every unit of `doc`, keyed `<text>.<text before it>.<repeat>` (see
+ *  `unitIndex`). */
 function keyed(doc: PMNode): Keyed {
   let known = keyedDocs.get(doc);
   if (known) return known;
   const seen = new Map<string, number>();
   const units: (DocUnit & FileUnit)[] = [];
+  let before = "0";
   eachUnit(doc, (node, unit) => {
     const text = textHash(node);
     const nth = seen.get(text) ?? 0;
     seen.set(text, nth + 1);
-    units.push({ ...unit, key: nth === 0 ? text : `${text}.${nth}`, content: contentHash(node) });
+    units.push({ ...unit, key: `${text}.${before}.${nth}`, content: contentHash(node) });
+    before = text;
   });
-  known = { units, byFrom: new Map(units.map((unit) => [unit.from, unit.key])) };
+  const keys = units.map((unit) => unit.key);
+  known = { units, byFrom: new Map(units.map((unit) => [unit.from, unit.key])), index: unitIndex(keys) };
   keyedDocs.set(doc, known);
   return known;
 }
+
+/** The index of `doc`'s units, for finding what others' keys name. */
+export const indexOf = (doc: PMNode): UnitIndex => keyed(doc).index;
 
 /** Every unit of `doc`, keyed. */
 export const keyedUnits = (doc: PMNode): (DocUnit & FileUnit)[] => keyed(doc).units;

@@ -49,7 +49,7 @@ import { path as pathutil } from "@/utils/path";
 import { createPresence, presencePrefix } from "./sync-presence";
 import { createSyncEditors } from "./sync-editor";
 import { createClaims, editBetween, refusalMessage } from "./sync-claims";
-import type { FileUnit } from "./sync-units";
+import { unitIndex, type FileUnit } from "./sync-units";
 import {
   IDLE_COMMIT_MS,
   SHARED_COMMIT_MS,
@@ -812,7 +812,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
         throw error;
       });
       const [before, after] = await Promise.all([deps.fileUnits(current), deps.fileUnits(write(current))]);
-      const refusal = claims.take(path, editBetween(before, after), true);
+      const index = unitIndex(before.map((unit) => unit.key));
+      const refusal = claims.take(path, editBetween(before, after), true, index);
       if (refusal) return refusalMessage(path, refusal);
       // Others see it on the next poll, not a sitting later.
       void syncNow(false);
