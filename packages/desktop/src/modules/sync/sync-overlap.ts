@@ -48,6 +48,8 @@ export interface OverlapDeps {
 interface Lost {
   path: string;
   text: string | null;
+  /** Its path in `ours`, when that's not `path` (a file the branch moved). */
+  from?: string;
 }
 
 const MARKDOWN = /\.(md|markdown)$/i;
@@ -225,7 +227,17 @@ export function createOverlaps(deps: OverlapDeps) {
       if (!o || !t) return [];
       const { bytes, lost } = await combine(newPath, b, o, t);
       if (bytes) await stage(newPath, bytes, theirs);
-      return lost;
+      // What it replaced is in `ours` at the old path.
+      return lost.map((item) => ({ ...item, from: oldPath }));
+    },
+
+    /** A held file the branch moved: its base goes with it. */
+    async move(oldPath: string, newPath: string) {
+      const base = held.get(oldPath);
+      if (!base) return;
+      held.delete(oldPath);
+      held.set(newPath, base);
+      await deps.recordHeld(Object.fromEntries(held));
     },
 
     /** A replay's paths that became a folder on the branch where ours
@@ -250,7 +262,8 @@ export function createOverlaps(deps: OverlapDeps) {
     async flagReplaced(lost: Lost[], ours: string) {
       if (lost.length === 0) return;
       const ref = await keep(ours);
-      deps.dispatch({ type: "overwritten", items: lost.map((item) => ({ ...item, recovery: `${ref}:${item.path}` })) });
+      const items = lost.map(({ path, text, from }) => ({ path, text, recovery: `${ref}:${from ?? path}` }));
+      deps.dispatch({ type: "overwritten", items });
     },
 
     /** Our whole side, before something replaces it outright; the ref. */

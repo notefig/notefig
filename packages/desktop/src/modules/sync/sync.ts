@@ -102,7 +102,7 @@ export interface WorkspaceSyncDeps {
   gitWorker: GitWorker;
   /** The platform can sync (desktop). */
   supported: boolean;
-  documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
+  documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits" | "beginMove" | "whenWritesSettled">;
   editors: Pick<EditorsApi, "markdownEditor" | "paths">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
   projectSettings: Pick<ProjectSettingsApi, "read" | "update">;

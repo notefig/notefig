@@ -76,7 +76,7 @@ export interface SyncEngineDeps {
   /** Sync was just turned on: commit everything, not a scan. */
   fullScan: boolean;
   hooks: Hooks;
-  documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
+  documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits" | "beginMove" | "whenWritesSettled">;
   /** Where the others' carets are drawn, while shared. */
   editors: Pick<EditorsApi, "markdownEditor" | "paths">;
   files: Pick<WorkspaceFiles, "recordDiskChanges">;
@@ -474,24 +474,50 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
    *  here: the editor is saved and frozen, the new path takes what was
    *  saved here since (held, to merge with the branch's version), the tab
    *  follows (`sync:file-moved`), then the old path goes. */
+  /** `newPath` takes what was saved at `oldPath` since `from`, or what
+   *  was held there, to merge with the branch's version; or, with nothing
+   *  of ours, the branch's version. */
+  const carry = async (oldPath: string, newPath: string, from: string, to: string) => {
+    const { succeeded, failed } = await deps.fs.readBinaryFiles([absolute(oldPath)]);
+    if (failed[0] && failed[0].type !== "not_found") throw new Error(`Couldn't read ${oldPath}: ${failed[0].message}`);
+    const base = await git.readFile({ ref: from, filepath: oldPath });
+    // Held already: its base goes with it. Saved since: `from` is its base.
+    const held = overlaps.isHeld(oldPath);
+    const disk = succeeded[0]?.data;
+    alive();
+    if (!disk || (!held && (!base || sameBytes(disk, base)))) {
+      await writeSynced(deps, absolute(newPath), (await git.readFile({ ref: to, filepath: newPath }))!);
+      return;
+    }
+    const written = await deps.fs.writeBinaryFiles([{ path: absolute(newPath), data: disk }]);
+    if (written.failed[0]) throw new Error(`Couldn't write ${newPath}: ${written.failed[0].message}`);
+    if (held) await overlaps.move(oldPath, newPath);
+    else await overlaps.hold(newPath, from, oldPath);
+  };
+
   const follow = async (oldPath: string, newPath: string, { from, to, done }: Move) => {
     const [oldFile, newFile] = [absolute(oldPath), absolute(newPath)];
-    deps.editors.markdownEditor(oldFile)?.setEditable(false);
-    flushDocumentSync(oldFile);
-    await whenDocumentSyncClean(oldFile);
-    const [disk] = (await deps.fs.readBinaryFiles([oldFile])).succeeded;
-    const base = await git.readFile({ ref: from, filepath: oldPath });
-    const edited = disk && base && !sameBytes(disk.data, base);
-    alive();
-    const written = edited
-      ? await deps.fs.writeBinaryFiles([{ path: newFile, data: disk.data }])
-      : null;
-    if (written?.failed[0]) throw new Error(`Couldn't write ${newPath}: ${written.failed[0].message}`);
-    if (edited) await overlaps.hold(newPath, from, oldPath);
-    else await writeSynced(deps, newFile, (await git.readFile({ ref: to, filepath: newPath }))!);
-    await deps.files.recordDiskChanges({ created: [newFile], deleted: [] });
+    // As a rename in the app: a write that overlaps it lands where the
+    // file ends up, and the editor takes no typing until its tab moves.
+    const move = deps.documents.beginMove(oldFile);
+    const editor = deps.editors.markdownEditor(oldFile);
+    editor?.setEditable(false);
+    try {
+      flushDocumentSync(oldFile);
+      await whenDocumentSyncClean(oldFile);
+      await deps.documents.whenWritesSettled(oldFile);
+      await carry(oldPath, newPath, from, to);
+      await deps.files.recordDiskChanges({ created: [newFile], deleted: [] });
+    } catch (error) {
+      if (editor && !editor.isDestroyed) editor.setEditable(true);
+      move.settle(oldFile);
+      throw error;
+    }
+    move.settle(newFile);
     await deps.hooks.emitSerial("sync:file-moved", { workspacePath: root, from: oldFile, to: newFile });
-    await deps.fs.deleteFiles([oldFile]);
+    const { failed } = await deps.fs.deleteFiles([oldFile]);
+    const refused = failed.find((failure) => failure.type !== "not_found");
+    if (refused) throw new Error(`Couldn't delete ${oldPath}: ${refused.message}`);
     await deps.files.recordDiskChanges({ created: [], deleted: [oldFile] });
     for (const filepath of [oldPath, newPath]) {
       await git.unstage({ filepath, ref: to });
@@ -542,7 +568,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     if (!cleared) return;
     deleted.push(...cleared);
     const left = changed.filter((path) => !done.has(path));
-    const open = left.filter((path) => deps.editors.markdownEditor(absolute(path)));
+    const editing = new Set(deps.editors.paths());
+    const open = left.filter((path) => editing.has(absolute(path)));
     for (const [oldPath, newPath] of await renamesIn(from, to, open, left)) await follow(oldPath, newPath, move);
     const remaining = changed.filter((path) => !done.has(path));
     const edited = new Set(retry ? await editedSince(remaining) : []);
@@ -629,7 +656,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     const local = new Set(localFiles);
     const lost: Awaited<ReturnType<typeof overlaps.mergeCommitted>> = [];
     // Edited here, moved there: the edit goes where the file went.
-    const moved = await renamesIn(base, theirs, remoteFiles.filter((path) => local.has(path)), remoteFiles);
+    // A path both sides created stays as the merge leaves it.
+    const moved = (await renamesIn(base, theirs, remoteFiles.filter((path) => local.has(path)), remoteFiles)).filter(
+      ([, newPath]) => !local.has(newPath),
+    );
     const movedFrom = new Set(moved.map(([oldPath]) => oldPath));
     try {
       for (const filepath of remoteFiles) {

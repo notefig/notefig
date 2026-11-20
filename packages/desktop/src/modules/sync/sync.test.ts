@@ -750,6 +750,36 @@ describe("sync: solo", () => {
     expect(await tree(remote.bare)).not.toContain("note.md");
   });
 
+  it("keeps a held file's base when another device renames it, so the earlier remote edit stays", async () => {
+    const { sync, remote, ws, editors, core } = await setup();
+    const path = join(ws, "note.md");
+    const { land } = await editUnsaved(core, editors, ws, path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+    const plain = await remote.clone("plain");
+    await remote.pushFromPlainGit(plain, { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" }, "edit");
+    await sync.syncNow();
+    await runGit(plain, ["mv", "note.md", "renamed.md"]);
+    await runGit(plain, ["commit", "-q", "-m", "rename"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+    setTimeout(land, 50);
+    await sync.syncNow();
+    await sync.syncNow();
+    expect(await runGit(remote.bare, ["show", "main:renamed.md"])).toBe("# Note\n\nFirst paragraph, mine.\n\nSecond paragraph, theirs.");
+  });
+
+  it("leaves a rename to the merge when this device also created the new path", async () => {
+    const { sync, remote, ws, core } = await setup();
+    await fsp.writeFile(join(ws, "note.md"), "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
+    await fsp.writeFile(join(ws, "renamed.md"), "Mine too.\n");
+    written(core, join(ws, "note.md"), join(ws, "renamed.md"));
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["mv", "note.md", "renamed.md"]);
+    await runGit(plain, ["commit", "-q", "-m", "rename"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+    await sync.syncNow();
+    expect(await runGit(remote.bare, ["show", "main:renamed.md"])).toContain("Mine too.");
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toContain("First paragraph, mine.");
+  });
+
   it("deletes and adds rather than moves a file whose rename changed most of it", async () => {
     const { sync, remote, ws, editors, core } = await setup();
     const moved = vi.fn();
