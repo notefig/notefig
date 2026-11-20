@@ -64,6 +64,10 @@ export interface HarnessInvokeContext {
   harnessEnv: Record<string, string>;
   /** This task's app-tools endpoint; undefined when the app offers none. */
   mcpServer: McpServer | undefined;
+  /** The workspace syncs: every file write the harness makes must reach
+   *  the app first (ACP `fs/write_text_file`, or a permission request the
+   *  adapter's `pendingWrite` reads), where sync's claims answer it. */
+  gateWrites: boolean;
   /** Write files, creating parents; failures come back, never throw. */
   writeFiles: (
     files: { path: string; content: string }[],
@@ -225,6 +229,10 @@ export interface HarnessAdapter {
   /** Put a command's `/name` where this harness runs it from. None: at the
    *  start of the prompt's first text block, where most harnesses look. */
   placeCommand?(blocks: ContentBlock[], name: string): ContentBlock[];
+  /** The file write a permission request's `rawInput` asks to make, for a
+   *  harness that writes to disk itself: its path, and the text it would
+   *  leave given the file's. Null when the request isn't a file write. */
+  pendingWrite?(rawInput: unknown): { path: string; text: (current: string) => string } | null;
 }
 
 /**

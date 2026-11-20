@@ -68,6 +68,9 @@ export const workspaceAgentsModule = defineModule({
           get files() {
             return workspace.files;
           },
+          get sync() {
+            return workspace.sync;
+          },
           documents,
           layout,
           editors,

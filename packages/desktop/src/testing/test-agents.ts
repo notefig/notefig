@@ -21,6 +21,7 @@ import { testKv } from "./test-kv";
 import type { KvApi } from "@/modules/kv";
 import { createHarnessAdapters } from "@/modules/harness-adapters";
 import { testHarnesses } from "./test-harnesses";
+import { INITIAL_SYNC_STATE } from "@/modules/sync";
 
 /** A fresh, empty agent store. */
 export function testAgentStore(): AgentStore {
@@ -95,6 +96,8 @@ export function testAgents(
       documents,
       layout,
       editors,
+      // Not syncing: nothing is claimed, nothing refused.
+      sync: { state: () => INITIAL_SYNC_STATE, claimWrite: async () => null },
     }),
     agents: () => agents!,
     hooks,

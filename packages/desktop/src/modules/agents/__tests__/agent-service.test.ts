@@ -12,6 +12,7 @@ import { BUILT_IN_HARNESSES } from "@notefig/shared/agent";
 import { APP_DIR_NAME } from "@/utils/app-dir";
 import type { AgentTask } from "../agent-service";
 import { testAgents } from "@/testing/test-agents";
+import { INITIAL_SYNC_STATE } from "@/modules/sync";
 import type { AgentsApi } from "../agents";
 import type { Hooks } from "@notefig/core";
 
@@ -82,6 +83,7 @@ let runtime: AgentRuntime;
 let agents: AgentsApi;
 
 const harness = BUILT_IN_HARNESSES[0];
+const claudeCode = BUILT_IN_HARNESSES.find((h) => h.id === "claude-code")!;
 
 /** Entries for a task in chronological (id) order. */
 function entriesFor(taskId: string) {
@@ -353,6 +355,68 @@ describe("AgentTask vertical slice", () => {
     expect(writeFiles).toHaveBeenCalledWith([
       { path: "/ws/README.md", content: "# New title\n" },
     ]);
+  });
+
+  describe("in a sync workspace someone else is editing", () => {
+    /** Sync's answer for each write: refused when it touches "held". */
+    const claimWrite = vi.fn(async (_path: string, write: (current: string) => string) =>
+      write("held text\n").includes("held") ? null : "Refused: Ada is editing paragraphs of README.md this edit touches. Nothing was written.",
+    );
+    const gated = () => ({
+      ...deps,
+      // The rest as the defaults have them, getters unread.
+      services: (ws: string) =>
+        Object.assign(Object.create(deps.services(ws)) as ReturnType<typeof deps.services>, {
+          sync: { state: () => ({ ...INITIAL_SYNC_STATE, setup: "on" as const }), claimWrite },
+        }),
+    });
+
+    it("turns down a Claude edit to what someone else holds before granting it, and lets others through", async () => {
+      const [client, agentSide] = createLoopbackPair();
+      const agent = new FakeAgent(agentSide);
+      const outcomes: unknown[] = [];
+      type Side = Parameters<NonNullable<typeof agent.onPrompt>>[1];
+      const ask = (a: Side, rawInput: unknown) =>
+        a.request("session/request_permission", {
+          sessionId: "sess_test",
+          toolCall: { toolCallId: "call_1", title: "Edit README.md", rawInput },
+          options: [
+            { optionId: "allow", name: "Allow", kind: "allow_once" },
+            { optionId: "deny", name: "Deny", kind: "reject_once" },
+          ],
+        });
+      agent.onPrompt = async (_params, a) => {
+        outcomes.push((await ask(a, { file_path: "README.md", old_string: "held", new_string: "mine" })).outcome);
+        outcomes.push((await ask(a, { file_path: "README.md", old_string: "text", new_string: "words" })).outcome);
+        outcomes.push((await ask(a, { command: "ls" })).outcome);
+        return { stopReason: "end_turn" };
+      };
+      const task = new TaskManager(gated(), "/ws").createTask(claudeCode);
+      await task.start(() => client);
+      await runPrompt(task, "edit");
+      expect(outcomes).toEqual([
+        { outcome: "selected", optionId: "deny" },
+        { outcome: "selected", optionId: "allow" },
+        { outcome: "selected", optionId: "allow" },
+      ]);
+      expect(claimWrite).toHaveBeenCalledWith("/ws/README.md", expect.any(Function));
+    });
+
+    it("refuses an ACP write to what someone else holds, writing nothing", async () => {
+      const [client, agentSide] = createLoopbackPair();
+      const agent = new FakeAgent(agentSide);
+      agent.onPrompt = async (_params, a) => {
+        await a.request("fs/write_text_file", { sessionId: "sess_test", path: "/ws/README.md", content: "rewritten\n" });
+        return { stopReason: "end_turn" };
+      };
+      claimWrite.mockClear();
+      const task = new TaskManager(gated(), "/ws").createTask(harness);
+      await task.start(() => client);
+      await runPrompt(task, "edit");
+      expect(claimWrite).toHaveBeenCalledWith("/ws/README.md", expect.any(Function));
+      await expect(claimWrite.mock.results[0]!.value).resolves.toMatch(/^Refused: Ada is editing/);
+      expect(writeFiles).not.toHaveBeenCalled();
+    });
   });
 
   it("auto-approves any permission request that offers an allow option (beta blanket grant)", async () => {
