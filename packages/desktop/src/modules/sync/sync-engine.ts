@@ -95,6 +95,9 @@ export interface SyncEngineDeps {
   held: Readonly<Record<string, string>>;
   /** Keep them (this device's file), so a restart merges them too. */
   recordHeld(held: Record<string, string>): Promise<void>;
+  /** Files deleted on the branch while open here, and who deleted them. */
+  deleted: Readonly<Record<string, string | null>>;
+  recordDeleted(deleted: Record<string, string | null>): Promise<void>;
   /** Another branch was checked out (a terminal, another app): this
    *  engine syncs `branch` only, so it hands back to be restarted. */
   branchChanged(): void;
@@ -113,6 +116,11 @@ export interface SyncEngine {
   takeRemote(): Promise<void>;
   /** Commit and push what's left (briefly), then stop. */
   stop(): Promise<void>;
+  /** A file another device deleted while it was open here: commit it
+   *  again, as it is on disk. */
+  restoreDeleted(path: string): Promise<void>;
+  /** …or delete it here too. */
+  discardDeleted(path: string): Promise<void>;
 }
 
 const MAX_PUSH_RETRIES = 3;
@@ -287,6 +295,27 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     if (typeof dirty !== "string") for (const path of paths) dirty.add(path);
   };
 
+  /** Files the branch deleted while they were open here (MET-277): kept
+   *  on disk and out of every commit until the user restores or closes
+   *  them, so a save never brings one back unasked. */
+  const deletedHere = new Map(Object.entries(deps.deleted));
+  const recordDeleted = async () => {
+    deps.dispatch({ type: "deleted", deleted: [...deletedHere].map(([path, by]) => ({ path, by })) });
+    await deps.recordDeleted(Object.fromEntries(deletedHere));
+  };
+  /** Never staged: a held file's copy is stale, a deleted one's unasked. */
+  const kept = (path: string) => overlaps.isHeld(path) || deletedHere.has(path);
+  /** Who deleted `filepath` on the way to `to`: the newest commit whose
+   *  parent still had it. */
+  const deleterOf = async (filepath: string, to: string) => {
+    for (const { oid, commit } of await git.log({ ref: to, depth: SUMMARY_DEPTH }).catch(() => [])) {
+      const [parent] = commit.parent;
+      if (!parent || (await git.readFile({ ref: parent, filepath })) === null) continue;
+      return (await git.readFile({ ref: oid, filepath })) === null ? commit.author.name : null;
+    }
+    return null;
+  };
+
   // --- Commit -------------------------------------------------------------
 
   /** Files that may have changed while the app was closed: written since
@@ -356,8 +385,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       const listed = taken === "all" ? null : taken === "scan" ? await scan() : [...taken];
       if (listed?.length === 0) return;
       // A held file's disk copy is stale until its edits land (`overlaps`).
-      if (listed) await stageByHash(listed.filter((path) => !overlaps.isHeld(path)));
-      const all = await stageChanges(git, listed, overlaps.isHeld);
+      if (listed) await stageByHash(listed.filter((path) => !kept(path)));
+      const all = await stageChanges(git, listed, kept);
       if (all.length === 0) return;
       await git.commit({ message: commitMessage(author.name, all), author });
     } catch (error) {
@@ -383,16 +412,23 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     if (paths.length === 0) return [];
     const status = await git.status({ filepaths: paths });
     const edited = new Set([...status.staged, ...status.unstaged].map((c) => c.path).concat(status.untracked));
-    return paths.filter((path) => edited.has(path) && !overlaps.isHeld(path));
+    return paths.filter((path) => edited.has(path) && !kept(path));
   };
 
   /** Write one file as it is at `to`; `held` when its editor keeps unsaved
-   *  edits. Throws on a write the fs refused. */
-  const applyFile = async (filepath: string, to: string): Promise<"written" | "deleted" | "held"> => {
+   *  edits, `kept` when it's deleted there but open here. Throws on a
+   *  write the fs refused. */
+  const applyFile = async (filepath: string, to: string): Promise<"written" | "deleted" | "held" | "kept"> => {
     const bytes = await git.readFile({ ref: to, filepath });
     const path = absolute(filepath);
     alive();
     if (bytes !== null) return writeSynced(deps, path, bytes);
+    const editor = deps.editors.markdownEditor(path);
+    if (editor && !editor.isDestroyed) {
+      deletedHere.set(filepath, await deleterOf(filepath, to));
+      await recordDeleted();
+      return "kept";
+    }
     const { failed } = await deps.fs.deleteFiles([path]);
     const refused = failed.find((failure) => failure.type !== "not_found");
     if (refused) throw new Error(`Couldn't delete ${filepath}: ${refused.message}`);
@@ -448,6 +484,18 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     return removed;
   };
 
+  /** One file of a move, as it is at `to`. Held already, or saved here
+   *  during a retried move: its save may have landed since, so it's merged
+   *  with this version rather than written over. Kept after a delete and
+   *  back on the branch: what was saved here since is merged the same way. */
+  const moveFile = async (filepath: string, { from, to }: Move, edited: boolean) => {
+    const back = deletedHere.delete(filepath);
+    if (back) await recordDeleted();
+    const outcome = edited || overlaps.isHeld(filepath) || back ? "held" : await applyFile(filepath, to);
+    if (outcome === "held") await overlaps.hold(filepath, from);
+    return outcome;
+  };
+
   /** Bring index and worktree from `from` to `to` for the files that
    *  differ; text is written through the documents write path, which holds
    *  back a file with unsaved edits. A held file, or one saved here during
@@ -466,11 +514,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     const edited = new Set(retry ? await editedSince(remaining) : []);
     for (const filepath of remaining) {
       alive();
-      // Held already: its save may have landed since it was settled, so
-      // it's merged with this version too rather than written over.
-      const outcome = edited.has(filepath) || overlaps.isHeld(filepath) ? "held" : await applyFile(filepath, to);
-      if (outcome === "held") await overlaps.hold(filepath, from);
-      else (outcome === "written" ? created : deleted).push(absolute(filepath));
+      const outcome = await moveFile(filepath, move, edited.has(filepath));
+      if (outcome === "written") created.push(absolute(filepath));
+      else if (outcome === "deleted") deleted.push(absolute(filepath));
       // Only once the file is on disk (or held): a failed write leaves the
       // index at the old version, and the cycle finishes the move
       // (`unfinished`) before it commits anything.
@@ -772,9 +818,25 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
           if (pending()) void syncNow();
         }),
       );
+      if (deletedHere.size > 0) void recordDeleted();
       void syncNow();
     },
     syncNow: () => syncNow(),
+    async restoreDeleted(path) {
+      if (!deletedHere.delete(path)) return;
+      await recordDeleted();
+      markDirty([path]);
+      await syncNow();
+    },
+    async discardDeleted(path) {
+      if (!deletedHere.has(path)) return;
+      const { failed } = await deps.fs.deleteFiles([absolute(path)]);
+      const refused = failed.find((failure) => failure.type !== "not_found");
+      if (refused) throw new Error(`Couldn't delete ${path}: ${refused.message}`);
+      deletedHere.delete(path);
+      await recordDeleted();
+      await deps.files.recordDiskChanges({ created: [], deleted: [absolute(path)] });
+    },
     async resume() {
       returnApproved = true;
       deps.dispatch({ type: "resume" });

@@ -682,6 +682,57 @@ describe("sync: solo", () => {
     expect(await tree(remote.bare)).not.toContain("added.md");
   });
 
+  /** Another device deletes `note.md`, with plain git. */
+  async function deleteElsewhere(remote: TestRemote) {
+    const plain = await remote.clone("plain");
+    await runGit(plain, ["rm", "-q", "note.md"]);
+    await runGit(plain, ["commit", "-q", "-m", "gone"]);
+    await runGit(plain, ["push", "-q", remote.bare, "HEAD:main"]);
+  }
+
+  const openEditor = async (editors: ReturnType<typeof createEditors>, ws: string, path: string) =>
+    getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
+
+  it("keeps an open file another device deleted out of every commit, across a restart, until it's restored", async () => {
+    const { sync, remote, ws, editors, core, open } = await setup();
+    const path = join(ws, "note.md");
+    await openEditor(editors, ws, path);
+    await deleteElsewhere(remote);
+    await sync.syncNow();
+    expect(sync.state().deleted).toEqual([{ path: "note.md", by: "Plain Git" }]);
+    expect(await read(path)).toBe(SEED["note.md"]);
+
+    // A save doesn't bring it back.
+    await fsp.writeFile(path, "# Note\n\nStill here.\n");
+    written(core, path);
+    await sync.syncNow();
+    expect(await tree(remote.bare)).not.toContain("note.md");
+
+    await core.workspace(ws).close();
+    const again = await open(ws);
+    expect(again.state().deleted).toEqual([{ path: "note.md", by: "Plain Git" }]);
+    expect(await tree(remote.bare)).not.toContain("note.md");
+
+    await again.restoreDeleted("note.md");
+    expect(again.state().deleted).toEqual([]);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nStill here.");
+  });
+
+  it("deletes an open file another device deleted once it's closed here, after its last save", async () => {
+    const { sync, remote, ws, editors } = await setup();
+    const path = join(ws, "note.md");
+    await openEditor(editors, ws, path);
+    await deleteElsewhere(remote);
+    await sync.syncNow();
+
+    await sync.discardDeleted("note.md");
+    expect(sync.state().deleted).toEqual([]);
+    await expect(fsp.access(path)).rejects.toThrow();
+    await sync.syncNow();
+    expect(await tree(remote.bare)).not.toContain("note.md");
+    expect(JSON.parse(await read(join(ws, ".git", "notefig-sync.json")))).not.toHaveProperty("deleted");
+  });
+
   it("brings a plain-git push into an open editor, keeping the caret", async () => {
     const { sync, remote, ws, editors, core } = await setup();
     const path = join(ws, "note.md");

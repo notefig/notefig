@@ -759,6 +759,9 @@ i18n
           syncOverwrittenKept: "Kept on this device: git show {{recovery}}",
           syncOverwrittenDot: "Some of your text was replaced",
           syncDismiss: "Dismiss",
+          syncDeletedBy: "{{name}} deleted this file. It stays here until you choose.",
+          syncDeletedElsewhere: "This file was deleted on another device. It stays here until you choose.",
+          syncRestore: "Restore",
           syncRetry: "Try again",
           syncPausedSummary:
             "You have {{local}} local changes since {{when}}; the remote has {{remote}} from {{people}}. Sync when you're ready.",

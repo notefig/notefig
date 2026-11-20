@@ -74,6 +74,15 @@ export interface SyncOverwrite {
   recovery: string;
 }
 
+/** A file another device deleted while it was open here: kept on this
+ *  device until the user restores or closes it. */
+export interface SyncDeletion {
+  /** `/`-separated, in the workspace. */
+  path: string;
+  /** Who deleted it; null when the history doesn't say. */
+  by: string | null;
+}
+
 export interface SyncState {
   setup: SyncSetup;
   /** Why sync can't run here (`setup: "unavailable"`). */
@@ -90,6 +99,7 @@ export interface SyncState {
   /** Newest last, at most `MAX_OVERWRITTEN`. */
   overwritten: SyncOverwrite[];
   peers: SyncPeer[];
+  deleted: SyncDeletion[];
 }
 
 export type SyncEvent =
@@ -102,6 +112,7 @@ export type SyncEvent =
   | { type: "resume" }
   | { type: "overwritten"; items: SyncOverwrite[] }
   | { type: "peers"; peers: SyncPeer[] }
+  | { type: "deleted"; deleted: SyncDeletion[] }
   | { type: "dismiss-overwritten" };
 
 export const INITIAL_SYNC_STATE: SyncState = {
@@ -115,6 +126,7 @@ export const INITIAL_SYNC_STATE: SyncState = {
   summary: null,
   overwritten: [],
   peers: [],
+  deleted: [],
 };
 
 const RUNNING_CLEAR = { activity: "idle", fault: null, failures: 0, detail: null, summary: null } as const;
@@ -156,6 +168,7 @@ const WHILE_ON: Handlers = {
     items.length === 0 ? state : { ...state, overwritten: [...state.overwritten, ...items].slice(-MAX_OVERWRITTEN) },
   "dismiss-overwritten": (state) => (state.overwritten.length === 0 ? state : { ...state, overwritten: [] }),
   peers: (state, { peers }) => ({ ...state, peers }),
+  deleted: (state, { deleted }) => ({ ...state, deleted }),
 };
 
 export function sameRemote(a: SyncRemote | null, b: SyncRemote | null): boolean {
