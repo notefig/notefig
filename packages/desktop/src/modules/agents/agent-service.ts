@@ -546,7 +546,10 @@ export class AgentTask {
       const prep = await invokeHarness(this.adapter, {
         workspacePath: this.workspacePath,
         harnessEnv: this.harness.env,
-        gateWrites: this.deps.services(this.workspacePath).sync.state().setup === "on",
+        // Always, not only while the workspace syncs: sync can be turned on
+        // (or someone can arrive) mid-session, and the gate answers at once
+        // while nobody else is here.
+        gateWrites: true,
         mcpServer: mcpEndpoint.mcpServer,
         writeFiles: (files) => this.deps.fs.writeFiles(files),
         warn: (label, detail) => this.warn(label, detail),
@@ -628,9 +631,15 @@ export class AgentTask {
     if (!write) return false;
     const resolved = resolveWorkspacePath(this.workspacePath, write.path);
     if (!resolved.ok) return false;
-    const refusal = await this.deps.services(this.workspacePath).sync.claimWrite(resolved.absolute, write.text);
-    if (refusal) this.warn("write refused", refusal);
-    return refusal !== null;
+    try {
+      const refusal = await this.deps.services(this.workspacePath).sync.claimWrite(resolved.absolute, write.text);
+      if (refusal) this.warn("write refused", refusal);
+      return refusal !== null;
+    } catch (error) {
+      // What can't be checked isn't let through.
+      this.warn("write refused: couldn't check it against sync's claims", errorMessage(error));
+      return true;
+    }
   }
 
   private createClient(transport: AgentTransport): NotefigAcpClient {

@@ -21,6 +21,7 @@
  */
 import { GitError, type GitRemote, type GitRemoteRef, type GitService } from "@notefig/git";
 import type { SyncAuthor } from "./sync-engine";
+import { MAX_CLAIM_KEYS } from "./sync-claims";
 import type { SyncClaim, SyncCursor, SyncEvent, SyncPeer, SyncState } from "./sync-machine";
 
 /** Where the devices syncing `branch` keep their presence. */
@@ -91,8 +92,9 @@ function colourOf(deviceId: string): string {
 const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 /** More than any build sends: a device holds four units, by a few keys. */
 const MAX_READ_CLAIMS = 16;
-const MAX_READ_KEYS = 8;
-const KEY = /^[0-9a-z]{1,8}$/;
+const MAX_READ_KEYS = MAX_CLAIM_KEYS;
+/** A text hash, and which repeat of that text it is (`sync-units.ts`). */
+const KEY = /^[0-9a-z]{1,8}(\.\d{1,5})?$/;
 
 /** The well-formed claims among what a commit says. */
 function claimsOf(raw: unknown): SyncClaim[] {

@@ -402,6 +402,29 @@ describe("AgentTask vertical slice", () => {
       expect(claimWrite).toHaveBeenCalledWith("/ws/README.md", expect.any(Function));
     });
 
+    it("turns down a Claude edit it can't check against the claims", async () => {
+      const [client, agentSide] = createLoopbackPair();
+      const agent = new FakeAgent(agentSide);
+      let outcome: unknown;
+      agent.onPrompt = async (_params, a) => {
+        const response = await a.request("session/request_permission", {
+          sessionId: "sess_test",
+          toolCall: { toolCallId: "call_1", title: "Write README.md", rawInput: { file_path: "README.md", content: "x" } },
+          options: [
+            { optionId: "allow", name: "Allow", kind: "allow_once" },
+            { optionId: "deny", name: "Deny", kind: "reject_once" },
+          ],
+        });
+        outcome = response.outcome;
+        return { stopReason: "end_turn" };
+      };
+      claimWrite.mockRejectedValueOnce(new Error("permission denied reading README.md"));
+      const task = new TaskManager(gated(), "/ws").createTask(claudeCode);
+      await task.start(() => client);
+      await runPrompt(task, "edit");
+      expect(outcome).toEqual({ outcome: "selected", optionId: "deny" });
+    });
+
     it("refuses an ACP write to what someone else holds, writing nothing", async () => {
       const [client, agentSide] = createLoopbackPair();
       const agent = new FakeAgent(agentSide);

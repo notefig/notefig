@@ -75,6 +75,15 @@ describe("sync claims", () => {
     ]);
   });
 
+  it("names every unit a join changed, so none of them goes unclaimed elsewhere", () => {
+    const { claims } = claimsWith();
+    expect(claims.take("a.md", edit(["k1", "k2", "k3"], ["k123"]), false)).toBeNull();
+    expect(claims.published()).toEqual([{ path: "a.md", keys: ["k1", "k2", "k3", "k123"], agent: false }]);
+    // One claim can't name more than MAX_CLAIM_KEYS units: refused, not dropped.
+    const many = Array.from({ length: 13 }, (_, i) => `j${i}`);
+    expect(claims.take("b.md", edit(many, ["joined"]), true)).toMatchObject({ kind: "cap" });
+  });
+
   it("of two devices claiming one unit, the lower id holds it; the other lets go", () => {
     const { claims, list } = claimsWith();
     claims.take("a.md", edit(["k1"], ["mine"]), false);

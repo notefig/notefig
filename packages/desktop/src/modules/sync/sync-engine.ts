@@ -37,7 +37,7 @@
  */
 import type { Hooks } from "@notefig/core";
 import { GitError, isSshRemote, type GitRemote, type GitService } from "@notefig/git";
-import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
+import { FsError, type FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import type { DocumentsApi } from "@/modules/documents";
 import type { EditorsApi } from "@/modules/editors";
 import type { WorkspaceFiles } from "@/modules/files";
@@ -49,6 +49,7 @@ import { path as pathutil } from "@/utils/path";
 import { createPresence, presencePrefix } from "./sync-presence";
 import { createSyncEditors } from "./sync-editor";
 import { createClaims, editBetween, refusalMessage } from "./sync-claims";
+import type { FileUnit } from "./sync-units";
 import {
   IDLE_COMMIT_MS,
   SHARED_COMMIT_MS,
@@ -88,8 +89,9 @@ export interface SyncEngineDeps {
   >;
   /** The markdown three-way merge (`sync-merge.ts`), off the main thread. */
   merge(base: string, ours: string, theirs: string): Promise<MergedMarkdown>;
-  /** A markdown file's unit keys (`sync-units.ts`), off the main thread. */
-  unitKeys(markdown: string): Promise<string[]>;
+  /** A markdown file's units as claims see them (`sync-units.ts`), off the
+   *  main thread. */
+  fileUnits(markdown: string): Promise<FileUnit[]>;
   /** A merge that threw: the remote's version stood in for it. */
   reportError(error: unknown): void;
   state(): SyncState;
@@ -803,8 +805,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     async claimWrite(absolutePath, write) {
       const path = tree(absolutePath);
       if (!path || !MARKDOWN.test(path) || stopped || !isShared(deps.state())) return null;
-      const current = await deps.documents.read(absolutePath).catch(() => "");
-      const [before, after] = await Promise.all([deps.unitKeys(current), deps.unitKeys(write(current))]);
+      // A file that isn't there yet is empty; any other failure to read it
+      // can't be checked, so it isn't let through.
+      const current = await deps.documents.read(absolutePath).catch((error: unknown) => {
+        if (error instanceof FsError && error.type === "not_found") return "";
+        throw error;
+      });
+      const [before, after] = await Promise.all([deps.fileUnits(current), deps.fileUnits(write(current))]);
       const refusal = claims.take(path, editBetween(before, after), true);
       if (refusal) return refusalMessage(path, refusal);
       // Others see it on the next poll, not a sitting later.

@@ -64,9 +64,10 @@ export interface HarnessInvokeContext {
   harnessEnv: Record<string, string>;
   /** This task's app-tools endpoint; undefined when the app offers none. */
   mcpServer: McpServer | undefined;
-  /** The workspace syncs: every file write the harness makes must reach
-   *  the app first (ACP `fs/write_text_file`, or a permission request the
-   *  adapter's `pendingWrite` reads), where sync's claims answer it. */
+  /** A task session: every file write the harness makes must reach the
+   *  app first (ACP `fs/write_text_file`, or a permission request the
+   *  adapter's `pendingWrite` reads), where sync's claims answer it. False
+   *  for a probe, which writes nothing. */
   gateWrites: boolean;
   /** Write files, creating parents; failures come back, never throw. */
   writeFiles: (

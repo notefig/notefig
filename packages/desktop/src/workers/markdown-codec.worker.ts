@@ -11,6 +11,7 @@ import { renderMarkdownHtml } from "@/utils/markdown-html";
 import { exposeWorkerApi } from "@notefig/worker";
 import type { JSONContent } from "@tiptap/core";
 import type { MergedMarkdown } from "@/modules/sync/sync-merge";
+import type { FileUnit } from "@/modules/sync/sync-units";
 import { serializeKeeping, type SavedFile } from "@/utils/markdown-units";
 
 installWorkerDomShim();
@@ -33,10 +34,10 @@ const api = {
     const { mergeMarkdown } = await import("@/modules/sync/sync-merge");
     return mergeMarkdown(base, ours, theirs);
   },
-  /** Sync's unit keys for a file (`modules/sync/sync-units.ts`). */
-  async unitKeys(markdown: string): Promise<string[]> {
-    const { unitKeysOf } = await import("@/modules/sync/sync-units");
-    return unitKeysOf(codec.parseDoc(markdown));
+  /** A file's units as sync's claims see them (`modules/sync/sync-units.ts`). */
+  async fileUnits(markdown: string): Promise<FileUnit[]> {
+    const { fileUnitsOf } = await import("@/modules/sync/sync-units");
+    return fileUnitsOf(codec.parseDoc(markdown));
   },
 };
 

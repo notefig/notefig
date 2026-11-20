@@ -3,7 +3,9 @@ import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getSchema } from "@tiptap/core";
 import { Node as PMNode } from "@tiptap/pm/model";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
-import { cursorAt, docUnits, keyedUnits, unitKeysOf, unitsIn } from "./sync-units";
+import { cursorAt, docUnits, fileUnitsOf, keyedUnits, unitsIn } from "./sync-units";
+
+const keysOf = (markdown: string) => fileUnitsOf(doc(markdown)).map((unit) => unit.key);
 import { editBetween, refusalMessage } from "./sync-claims";
 
 const codec = createMarkdownCodec();
@@ -30,13 +32,26 @@ describe("sync carets' units", () => {
 
 describe("sync claims' units", () => {
   it("names a unit by its kind and text, the same whatever its marks or the text above", () => {
-    const plain = doc("# Title\n\nA paragraph.\n");
-    const bold = doc("# Title\n\nA **paragraph**.\n");
-    const moved = doc("# Title\n\nSomething new above.\n\nA paragraph.\n");
-    expect(unitKeysOf(bold)).toEqual(unitKeysOf(plain));
-    expect(unitKeysOf(moved)[2]).toBe(unitKeysOf(plain)[1]);
+    const plain = keysOf("# Title\n\nA paragraph.\n");
+    expect(keysOf("# Title\n\nA **paragraph**.\n")).toEqual(plain);
+    expect(keysOf("# Title\n\nSomething new above.\n\nA paragraph.\n")[2]).toBe(plain[1]);
     // A heading and a paragraph that say the same are two units.
-    expect(unitKeysOf(doc("# Same\n\nSame\n"))[0]).not.toBe(unitKeysOf(doc("# Same\n\nSame\n"))[1]);
+    const [heading, paragraph] = keysOf("# Same\n\nSame\n");
+    expect(heading).not.toBe(paragraph);
+  });
+
+  it("names repeated text apart, by which repeat it is, whatever comes between", () => {
+    const [todo, , again, , last] = keysOf("- TODO\n- other\n- TODO\n\nText.\n\nTODO\n");
+    expect(again).toBe(`${todo}.1`);
+    expect(last).not.toBe(todo);
+    expect(keysOf("- TODO\n- inserted\n- other\n- TODO\n")[3]).toBe(again);
+  });
+
+  it("tells a unit's whole content apart from its key: marks and links count", () => {
+    const [plain] = fileUnitsOf(doc("A [link](a.md).\n"));
+    const [moved] = fileUnitsOf(doc("A [link](b.md).\n"));
+    expect(moved!.key).toBe(plain!.key);
+    expect(moved!.content).not.toBe(plain!.content);
   });
 
   it("finds the units an edit touches: the one around a caret, an empty one, a list item's", () => {
@@ -52,10 +67,18 @@ describe("sync claims' units", () => {
 });
 
 describe("sync claims of a write", () => {
+  const units = (...keys: string[]) => keys.map((key) => ({ key, content: key }));
+
   it("pairs what a write changed with what replaced it, and lists what it created last", () => {
-    expect(editBetween(["a", "b", "c"], ["a", "B", "new", "c", "end"])).toEqual({ before: ["b"], after: ["B", "new", "end"] });
-    expect(editBetween(["a", "b"], ["a"])).toEqual({ before: ["b"], after: [] });
-    expect(editBetween(["a"], ["a"])).toEqual({ before: [], after: [] });
+    expect(editBetween(units("a", "b", "c"), units("a", "B", "new", "c", "end"))).toEqual({ before: ["b"], after: ["B", "new", "end"] });
+    expect(editBetween(units("a", "b"), units("a"))).toEqual({ before: ["b"], after: [] });
+    expect(editBetween(units("a"), units("a"))).toEqual({ before: [], after: [] });
+  });
+
+  it("counts a write that only changes a unit's marks or links as touching it", () => {
+    const before = fileUnitsOf(doc("Hello there.\n\nOther.\n"));
+    const after = fileUnitsOf(doc("**Hello** there.\n\nOther.\n"));
+    expect(editBetween(before, after)).toEqual({ before: [before[0]!.key], after: [before[0]!.key] });
   });
 
   it("tells an agent who to wait for, or to make smaller edits, and that nothing was written", () => {

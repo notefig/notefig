@@ -58,23 +58,68 @@ function hash(text: string): string {
   return h.toString(36);
 }
 
+/** A node's hashes, kept with it: a doc shares every node an edit didn't
+ *  touch with the doc before it, so a keystroke hashes one unit. */
+const textHashes = new WeakMap<PMNode, string>();
+const contentHashes = new WeakMap<PMNode, string>();
+
 /** What names a unit: its kind and its text. Marks don't count, so making
  *  a word bold keeps the key. */
-export function unitKey(node: PMNode): string {
-  if (node.type.name === PROMPT_NODE_NAME) return hash(`prompt\u0000${serializePromptMarker(node.attrs)}`);
-  if (node.isAtom) return hash(`${node.type.name}\u0000${JSON.stringify(node.attrs)}`);
-  return hash(`${node.type.name}\u0000${node.textContent}`);
+function textHash(node: PMNode): string {
+  let known = textHashes.get(node);
+  if (known === undefined) {
+    if (node.type.name === PROMPT_NODE_NAME) known = hash(`prompt\u0000${serializePromptMarker(node.attrs)}`);
+    else if (node.isAtom) known = hash(`${node.type.name}\u0000${JSON.stringify(node.attrs)}`);
+    else known = hash(`${node.type.name}\u0000${node.textContent}`);
+    textHashes.set(node, known);
+  }
+  return known;
+}
+
+/** Everything a unit says, marks and links included: what tells whether a
+ *  write changed it. */
+function contentHash(node: PMNode): string {
+  let known = contentHashes.get(node);
+  if (known === undefined) contentHashes.set(node, (known = hash(JSON.stringify(node.toJSON()))));
+  return known;
+}
+
+/** A unit as a whole file sees it: its key, and its whole content. */
+export interface FileUnit {
+  key: string;
+  content: string;
+}
+
+interface Keyed {
+  units: (DocUnit & FileUnit)[];
+  byFrom: Map<number, string>;
+}
+const keyedDocs = new WeakMap<PMNode, Keyed>();
+
+/** Every unit of `doc`, keyed: its text's hash, and for a unit saying what
+ *  an earlier one says, which of them it is (`.1` the second), so repeated
+ *  text names each copy apart without counting on where it sits. */
+function keyed(doc: PMNode): Keyed {
+  let known = keyedDocs.get(doc);
+  if (known) return known;
+  const seen = new Map<string, number>();
+  const units: (DocUnit & FileUnit)[] = [];
+  eachUnit(doc, (node, unit) => {
+    const text = textHash(node);
+    const nth = seen.get(text) ?? 0;
+    seen.set(text, nth + 1);
+    units.push({ ...unit, key: nth === 0 ? text : `${text}.${nth}`, content: contentHash(node) });
+  });
+  known = { units, byFrom: new Map(units.map((unit) => [unit.from, unit.key])) };
+  keyedDocs.set(doc, known);
+  return known;
 }
 
 /** Every unit of `doc`, keyed. */
-export function keyedUnits(doc: PMNode): (DocUnit & { key: string })[] {
-  const units: (DocUnit & { key: string })[] = [];
-  eachUnit(doc, (node, unit) => units.push({ ...unit, key: unitKey(node) }));
-  return units;
-}
+export const keyedUnits = (doc: PMNode): (DocUnit & FileUnit)[] => keyed(doc).units;
 
-/** The keys of `doc`'s units, in order: a file as claims see it. */
-export const unitKeysOf = (doc: PMNode): string[] => keyedUnits(doc).map((unit) => unit.key);
+/** A file's units in order, as claims see them. */
+export const fileUnitsOf = (doc: PMNode): FileUnit[] => keyed(doc).units.map(({ key, content }) => ({ key, content }));
 
 /** The units `[from, to)` touches, empty textblocks included: what an edit
  *  there changes. Prompt widgets are left out: their drafts are this
@@ -84,9 +129,8 @@ export function unitsIn(doc: PMNode, from: number, to: number): KeyedUnit[] {
   const visit = (node: PMNode, pos: number) => {
     const kind = node.type.name === PROMPT_NODE_NAME ? "skip" : kindOf(node);
     if (kind === "into") return true;
-    if (kind === "unit" || kind === "empty") {
-      units.push({ from: pos, to: pos + node.nodeSize, key: kind === "unit" ? unitKey(node) : null });
-    }
+    if (kind === "unit") units.push({ from: pos, to: pos + node.nodeSize, key: keyed(doc).byFrom.get(pos) ?? null });
+    if (kind === "empty") units.push({ from: pos, to: pos + node.nodeSize, key: null });
     return false;
   };
   if (from < to) {

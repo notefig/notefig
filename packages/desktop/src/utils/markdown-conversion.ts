@@ -13,6 +13,7 @@
 import type { JSONContent } from "@tiptap/core";
 import type { MarkdownWorkerApi } from "@/workers/markdown-codec.worker";
 import type { MergedMarkdown } from "@/modules/sync/sync-merge";
+import type { FileUnit } from "@/modules/sync/sync-units";
 import type { SavedFile } from "@/utils/markdown-units";
 import {
   createWorkerClient,
@@ -45,9 +46,9 @@ async function createInlineConverter(): Promise<Converter> {
       const { mergeMarkdown } = await import("@/modules/sync/sync-merge");
       return mergeMarkdown(base, ours, theirs);
     },
-    unitKeys: async (markdown: string) => {
-      const { unitKeysOf } = await import("@/modules/sync/sync-units");
-      return unitKeysOf(codec.parseDoc(markdown));
+    fileUnits: async (markdown: string) => {
+      const { fileUnitsOf } = await import("@/modules/sync/sync-units");
+      return fileUnitsOf(codec.parseDoc(markdown));
     },
   };
 }
@@ -130,10 +131,10 @@ export function mergeMarkdownOffThread(base: string, ours: string, theirs: strin
 }
 
 /** Test hook: force a fresh boot (e.g. after stubbing Worker). */
-/** Sync's unit keys for a markdown file (`modules/sync/sync-units.ts`),
- *  off the main thread. */
-export function unitKeysOffThread(markdown: string): Promise<string[]> {
-  return withConverter((c) => c.unitKeys(markdown));
+/** A markdown file's units as sync's claims see them
+ *  (`modules/sync/sync-units.ts`), off the main thread. */
+export function fileUnitsOffThread(markdown: string): Promise<FileUnit[]> {
+  return withConverter((c) => c.fileUnits(markdown));
 }
 
 export function resetConverterForTests(): void {

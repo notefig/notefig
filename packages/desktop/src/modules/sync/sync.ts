@@ -218,7 +218,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
   const startEngine = async (remote: SyncRemote) => {
     if (engine || disposed || !device) return;
     const git = service();
-    const [{ createSyncEngine }, { mergeMarkdownOffThread, unitKeysOffThread }, name, email] = await Promise.all([
+    const [{ createSyncEngine }, { mergeMarkdownOffThread, fileUnitsOffThread }, name, email] = await Promise.all([
       import("./sync-engine"),
       import("@/utils/markdown-conversion"),
       git.getConfig("user.name"),
@@ -246,7 +246,7 @@ export function createWorkspaceSync(deps: WorkspaceSyncDeps): WorkspaceSync {
         if (device?.on) await writeDevice({ ...device, lastSyncedAt: at });
       },
       merge: mergeMarkdownOffThread,
-      unitKeys: unitKeysOffThread,
+      fileUnits: fileUnitsOffThread,
       reportError: (error) => captureError(error, { boundary: "sync-merge" }),
       held: device.held ?? {},
       recordHeld: async (held) => {

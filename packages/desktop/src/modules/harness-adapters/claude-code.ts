@@ -185,7 +185,8 @@ export const claudeCodeAdapter: HarnessAdapter = {
     passThroughSessionNew: mcpServer !== undefined,
     // Claude's Edit and Write go straight to disk. An ask rule holds in
     // every mode, auto-accept and bypass included, so each one reaches
-    // `session/request_permission` first, where sync answers it.
+    // `session/request_permission` first, where sync answers it (at once,
+    // granted, while nobody else is editing).
     sessionParams: gateWrites ? GATED_WRITES : {},
   }),
   pendingWrite: claudePendingWrite,

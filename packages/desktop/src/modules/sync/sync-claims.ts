@@ -28,14 +28,18 @@
  */
 import { diffArrays } from "diff";
 import type { SyncClaim, SyncPeer } from "./sync-machine";
+import type { FileUnit } from "./sync-units";
 
 /** Units one device holds at most, its user's and its agents' together. */
 export const MAX_CLAIMS = 4;
 /** A claim with no edit this long ends. */
 export const CLAIM_IDLE_MS = 10_000;
-/** Keys a claim names its unit by, at most: as it was, as it landed, now. */
-const MAX_ORIGIN_KEYS = 2;
+/** What it said as it landed, kept at most. */
 const MAX_LANDED_KEYS = 2;
+/** Keys one claim names its unit by, at most: every unit joined into it as
+ *  it was, as it landed, and now. A join that needs more is refused, so no
+ *  unit it changed goes unnamed. */
+export const MAX_CLAIM_KEYS = 12;
 /** An edit this recent may still be in the editor's autosave. */
 const SAVE_SLACK_MS = 1_500;
 
@@ -184,11 +188,13 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
     if (claimed.length > after.length && after.length > 0) {
       const into = claimed[after.length - 1]!;
       for (const joined of claimed.splice(after.length)) {
-        into.origin = [...new Set([...into.origin, ...joined.origin])].slice(-MAX_ORIGIN_KEYS);
+        into.origin = [...new Set([...into.origin, ...joined.origin])];
       }
     }
     const next = [...rest, ...claimed];
-    if (next.length > MAX_CLAIMS) return { kind: "cap", needed: next.length };
+    if (next.length > MAX_CLAIMS || claimed.some((entry) => keysOf(entry).length > MAX_CLAIM_KEYS)) {
+      return { kind: "cap", needed: Math.max(next.length, MAX_CLAIMS + 1) };
+    }
     // Units the edit created: nobody else has them yet, so they're held
     // while there's room, and never refused.
     for (const key of after.slice(distinct.length)) {
@@ -248,20 +254,22 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
   };
 }
 
-/** What turns one file's unit keys into the other's: the units changed or
- *  deleted, and what's there instead (paired first, created last). */
-export function editBetween(before: string[], after: string[]): ClaimEdit {
+/** What turns one file into the other: the units changed or deleted, and
+ *  what's there instead (paired first, created last), by key. Compared by
+ *  whole content, so a write that only bolds a word or changes a link
+ *  touches its unit. */
+export function editBetween(before: FileUnit[], after: FileUnit[]): ClaimEdit {
   const touched: string[] = [];
   const paired: string[] = [];
   const created: string[] = [];
-  const parts = diffArrays(before, after);
+  const parts = diffArrays(before, after, { comparator: (a, b) => a.content === b.content });
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i]!;
     if (!part.removed && !part.added) continue;
     const next = parts[i + 1];
     const partner = next && (part.removed ? next.added : next.removed) ? (i++, next) : null;
-    const removed = part.removed ? part.value : (partner?.value ?? []);
-    const added = part.added ? part.value : (partner?.value ?? []);
+    const removed = (part.removed ? part.value : (partner?.value ?? [])).map((unit) => unit.key);
+    const added = (part.added ? part.value : (partner?.value ?? [])).map((unit) => unit.key);
     touched.push(...removed);
     paired.push(...added.slice(0, removed.length));
     created.push(...added.slice(removed.length));
