@@ -1,6 +1,7 @@
 //! A quit that waits for the frontend's goodbye: sync deletes this device's
 //! presence refs, so the others see it go at once, not minutes later. Held
 //! only while the frontend asks (`hold_quit`), and never past `QUIT_GRACE`.
+//! SIGTERM and SIGINT (a `kill`, Ctrl-C, a logout) quit the same way.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -13,6 +14,25 @@ const QUIT_GRACE: Duration = Duration::from_secs(6);
 #[tauri::command]
 pub fn hold_quit(hold: bool) {
     HOLD.store(hold, Ordering::SeqCst);
+}
+
+/// SIGTERM or SIGINT: an exit request like ⌘Q's, so the goodbye runs. A
+/// second signal while it waits quits at once.
+#[cfg(unix)]
+pub fn on_signals<R: Runtime>(app: tauri::AppHandle<R>) {
+    use tokio::signal::unix::{signal, SignalKind};
+    tauri::async_runtime::spawn(async move {
+        let (Ok(mut term), Ok(mut int)) = (
+            signal(SignalKind::terminate()),
+            signal(SignalKind::interrupt()),
+        ) else {
+            return;
+        };
+        tokio::select! { _ = term.recv() => {}, _ = int.recv() => {} }
+        app.exit(0);
+        tokio::select! { _ = term.recv() => {}, _ = int.recv() => {} }
+        std::process::exit(130);
+    });
 }
 
 /// On `ExitRequested`: hold it once and tell the frontend, which exits when

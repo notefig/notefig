@@ -26,7 +26,7 @@ tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 walkdir = "2"
-tokio = { version = "1", features = ["fs", "io-util", "process", "sync", "time", "macros", "rt", "net"] }
+tokio = { version = "1", features = ["fs", "io-util", "process", "sync", "time", "macros", "rt", "net", "signal"] }
 futures = "0.3"
 notify = "6.1"
 notify-debouncer-full = "0.3"
