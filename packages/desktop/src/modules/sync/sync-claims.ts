@@ -100,6 +100,8 @@ export interface Claims {
   expire(): boolean;
   /** What this device holds, as it's sent. */
   published(): SyncClaim[];
+  /** The user is typing in a unit they hold: their caret is in it. */
+  typing(): boolean;
   /** Nobody else is here: nothing to hold. */
   clear(): void;
 }
@@ -271,6 +273,7 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
       return own.length !== ownBefore || yielded.length !== yieldedBefore;
     },
     published: () => own.map((entry) => ({ path: entry.path, keys: keysOf(entry), agent: entry.agent })),
+    typing: () => own.some((entry) => !entry.agent && isHere(entry)),
     clear() {
       own = [];
       yielded = [];

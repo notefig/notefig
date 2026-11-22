@@ -1232,6 +1232,41 @@ describe("sync: shared, while another device syncs the branch", () => {
     expect(await read(join(wsB, "note.md"))).toBe("# Note\n\nShared edit.\n");
   });
 
+  it("folds a sitting into one commit while shared: none while typing in a held paragraph, one once the caret leaves", async () => {
+    const { a, b, editors, core, ws, wsB, remote } = await meet();
+    getOrCreateEditor(editors, join(ws, "note.md"), { type: "markdown", content: codec.parse(await read(join(ws, "note.md"))), basePath: ws }, editorFs);
+    const mine = editors.markdownEditor(join(ws, "note.md"))!;
+    vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
+    await a.syncNow();
+    await b.syncNow();
+    const before = await remote.tip();
+    const second = () => docUnits(mine.state.doc)[2]!;
+    // Typing in the second paragraph in bursts, each save announced as the
+    // editor's autosave does, with pauses longer than a save takes to
+    // settle; the caret stays in the paragraph. A's own polls run its cycles.
+    const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
+    let typed = 0;
+    for (let burst = 0; burst < 3; burst++) {
+      for (let key = 0; key < 3; key++) {
+        typed++;
+        mine.commands.insertContentAt(second().from + 1, "x");
+        mine.commands.setTextSelection(second().from + 2);
+        await fsp.writeFile(join(ws, "note.md"), `# Note\n\nFirst paragraph.\n\n${"x".repeat(typed)}Second paragraph.\n`);
+        written(core, join(ws, "note.md"));
+        await pause(300);
+      }
+      await pause(SHARED_COMMIT_MS + 600);
+      expect(await remote.tip()).toBe(before);
+    }
+
+    // The caret leaves what A holds: the sitting folds into one commit.
+    mine.commands.setTextSelection(docUnits(mine.state.doc)[1]!.from + 1);
+    await vi.waitFor(async () => expect(await remote.tip()).not.toBe(before), { timeout: 10_000, interval: 200 });
+    expect(await runGit(remote.bare, ["rev-list", "--count", `${before}..main`])).toBe("1");
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nFirst paragraph.\n\nxxxxxxxxxSecond paragraph.");
+    disposeEditor(editors, join(ws, "note.md"));
+  });
+
   it("sends what waited for the sitting's end as soon as a poll finds someone", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { sync: a, files, ws, remote, open } = await setup();

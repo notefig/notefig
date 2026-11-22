@@ -26,12 +26,13 @@
  *
  * The same poll reads who else syncs the branch (`sync-presence.ts`), and a
  * settled cycle keeps this device's own presence fresh. While anyone else
- * does, sync is shared (MET-293): a poll a second, a commit two seconds
- * after the saves settle instead of once per sitting, each other's carets
- * in the open editors (`sync-editor.ts`), and claims on the units each one
+ * does, sync is shared (MET-293): a poll a second, each other's place in
+ * the open editors (`sync-editor.ts`), and claims on the units each one
  * is editing (`sync-claims.ts`), its user's and its agents' alike, which
  * travel in the same presence commit, with the text it's typing in them,
- * drawn in the others' open editors within a cycle (`sync-wip.ts`).
+ * drawn in the others' open editors within a cycle (`sync-wip.ts`). So
+ * shared commits fold too: one when the user is done with what they hold
+ * (`foldDue`), not one per pause.
  *
  * Back after more than an hour away with local changes, or far apart from
  * the remote, it pauses before taking anything in until the user says go.
@@ -149,6 +150,8 @@ const SCAN_SLACK_MS = 2_000;
 const COMMIT_SCAN_SLACK_MS = 120_000;
 const METADATA_BATCH = 500;
 const SUMMARY_DEPTH = 200;
+/** While shared, a sitting folds into a commit at least this often. */
+export const FOLD_MAX_MS = 3 * 60_000;
 /** A held file was saved: settle it about this soon, not a sitting later. */
 const HELD_SETTLE_MS = 500;
 /** Files listed as replaced when the remote's version is taken whole. */
@@ -254,6 +257,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
    *  history: the next pull takes it. */
   let takeRemoteOnce = false;
   let returnApproved = false;
+  /** While shared: when this sitting's first uncommitted save came, and its
+   *  last (`foldDue`). */
+  let sittingSince: number | null = null;
+  let lastWrite = 0;
   let stopped = false;
   let running: Promise<void> | null = null;
   let again = false;
@@ -407,6 +414,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
 
   const commitStep = async () => {
     commitDue = false;
+    sittingSince = null;
     if (typeof dirty !== "string" && dirty.size === 0) return;
     const taken = dirty;
     dirty = new Set();
@@ -422,6 +430,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     } catch (error) {
       // Keep what wasn't committed for the next try.
       commitDue = true;
+      sittingSince ??= now();
       dirty = typeof taken === "string" ? taken : new Set([...taken, ...(dirty as Set<string>)]);
       throw error;
     }
@@ -729,6 +738,16 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     void deps.recordSynced(lastSynced).catch(() => {});
   };
 
+  /** While shared, a sitting's saves fold into one commit: once the user's
+   *  caret has left the units they hold (or their claim went idle) and
+   *  saves have settled, or `FOLD_MAX_MS` into the sitting. Until then the
+   *  others see the text in this device's presence (`sync-wip.ts`). */
+  const foldDue = () => {
+    if (sittingSince === null || !isShared(deps.state()) || !pending()) return false;
+    const at = now();
+    return at - sittingSince >= FOLD_MAX_MS || (!claims.typing() && at - lastWrite >= SHARED_COMMIT_MS);
+  };
+
   /** Claims while shared, after a cycle that began at `at`: what landed
    *  and what's done ends. Solo, nobody needs to see them. */
   const settleClaims = (at: number) => {
@@ -746,6 +765,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     await presence.sweep();
   };
 
+  /** What's local first: held files whose edits landed, then the commit,
+   *  when a sitting ended or folds. */
+  const localStep = async () => {
+    await settleHeld();
+    if (commitDue || foldDue()) await commitStep();
+  };
+
   const cycle = async () => {
     if (!isRunning(deps.state())) return;
     const startedAt = now();
@@ -760,8 +786,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       if (unfinished) await moveWorktree(unfinished);
       // Still waiting on a save: nothing is committed over a stale worktree.
       if (unfinished) return;
-      await settleHeld();
-      if (commitDue) await commitStep();
+      await localStep();
       let refused = await reconcile();
       for (let retry = 0; refused && retry < MAX_PUSH_RETRIES && !stopped; retry++) {
         await new Promise<void>((resume) => setTimer(resume, 200 + random() * 800));
@@ -827,8 +852,15 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     cancelIdle?.();
     // A held file's save is what its merge waits for.
     const settle = trees.some(overlaps.isHeld);
-    const delay = settle ? HELD_SETTLE_MS : isShared(deps.state()) ? SHARED_COMMIT_MS : IDLE_COMMIT_MS;
-    cancelIdle = setTimer(() => void syncNow(), delay);
+    if (settle || !isShared(deps.state())) {
+      cancelIdle = setTimer(() => void syncNow(), settle ? HELD_SETTLE_MS : IDLE_COMMIT_MS);
+      return;
+    }
+    // Shared: the others see it in this device's presence already, so the
+    // commit waits for the sitting to fold (`foldDue`); a cycle soon looks.
+    lastWrite = now();
+    sittingSince ??= lastWrite;
+    cancelIdle = setTimer(() => void syncNow(false), SHARED_COMMIT_MS);
   };
   const pending = () => typeof dirty === "string" || dirty.size > 0 || overlaps.size > 0;
   const onBlur =

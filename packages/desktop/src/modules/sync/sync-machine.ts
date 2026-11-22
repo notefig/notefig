@@ -202,7 +202,8 @@ export const POLL_MS = 12_000;
 export const IDLE_COMMIT_MS = 180_000;
 /** Shared: someone may be reading along, so look every second… */
 export const SHARED_POLL_MS = 1_000;
-/** …and commit this soon after the saves settle. */
+/** …and once the user is done with what they hold, commit this soon after
+ *  the saves settle: what they type reaches the others in presence first. */
 export const SHARED_COMMIT_MS = 2_000;
 const OFFLINE_MAX_MS = 120_000;
 const THROTTLED_BASE_MS = 60_000;
