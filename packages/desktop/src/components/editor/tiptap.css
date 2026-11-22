@@ -295,6 +295,12 @@ ul[data-type="taskList"] > li > div p {
    start, and a not-allowed cursor. The line inherits the paleness, so it
    reads as a tint, not a border. Your own claims show nothing. */
 .ProseMirror .sync-held,
+.ProseMirror .sync-wip-new {
+  position: relative;
+  opacity: 0.55;
+  cursor: not-allowed;
+  animation: sync-held-in 200ms ease-out;
+}
 .ProseMirror .sync-held::before {
   content: "";
   position: absolute;

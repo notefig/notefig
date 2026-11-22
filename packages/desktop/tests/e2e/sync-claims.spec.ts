@@ -36,9 +36,10 @@ async function seed(page: Page) {
   );
 }
 
-/** Attach the sync editor plugin with Ada holding the third unit. */
-async function adaHoldsAParagraph(page: Page) {
-  await page.evaluate(async (file) => {
+/** Attach the sync editor plugin with Ada holding the third unit; with
+ *  `typed`, what she's typed in it so far, as her presence carries it. */
+async function adaHoldsAParagraph(page: Page, typed?: string) {
+  await page.evaluate(async ({ file, typed }) => {
     type Core = { editors: { markdownEditor(path: string): { state: { doc: unknown } } } };
     const core = (window as unknown as { __notefigCore: Core }).__notefigCore;
     // The dev server's modules, the app's own instances of them.
@@ -51,17 +52,31 @@ async function adaHoldsAParagraph(page: Page) {
       { deviceId: "ada", name: "Ada", colour: "#c0562f", cursor: { path: "plan.md", unit: 1, offset: 5 }, claims: [{ path: "plan.md", keys: [units[2].key], agent: false }] },
     ];
     const claims = createClaims({ deviceId: "me", now: Date.now, peers: () => peers });
+    const wip = typed
+      ? [
+          {
+            named: "typed",
+            key: "typed",
+            node: { type: "paragraph", content: [{ type: "text", text: typed }] },
+            at: 2,
+            previous: units[1].key,
+            holder: { peer: peers[0], agent: false },
+            keys: [units[2].key, "typed"],
+          },
+        ]
+      : [];
     createSyncEditors({
       editors: core.editors,
       tree: (path: string) => path.split("/").pop(),
       onCursor() {},
       claims,
+      wip: { in: () => wip },
       setTimer: (run: () => void, ms: number) => {
         const handle = setTimeout(run, ms);
         return () => clearTimeout(handle);
       },
     }).reconcile({ peers });
-  }, FILE);
+  }, { file: FILE, typed });
 }
 
 test("a paragraph someone else is editing is paler, marked in their colour, and refuses typing", async ({ page }) => {
@@ -101,4 +116,22 @@ test("a paragraph someone else is editing is paler, marked in their colour, and 
   await page.keyboard.press("End");
   await page.keyboard.type(" Typed.");
   await expect(editor.getByText("First paragraph, free to edit. Typed.")).toBeVisible();
+});
+
+test("what someone else is typing is drawn over their paragraph, in its place", async ({ page }) => {
+  await seed(page);
+  await openWorkspace(page, WORKSPACE);
+  await page.getByRole("treeitem", { name: "plan.md" }).click();
+  const editor = page.locator(".ProseMirror");
+  await expect(editor.locator("h1", { hasText: "Plan" })).toBeVisible({ timeout: 15_000 });
+  await adaHoldsAParagraph(page, "Ada is editing this paragraph, and typing more.");
+  const held = editor.locator(".sync-held");
+  await expect(held.locator(".sync-wip")).toHaveText("Ada is editing this paragraph, and typing more.");
+  await page.screenshot({ path: "test-results/sync-wip.png" });
+  // One line, as wide as the paragraph: never a letter per line.
+  const [wip, paragraph] = await Promise.all([held.locator(".sync-wip").boundingBox(), held.boundingBox()]);
+  expect(wip!.height).toBeLessThan(40);
+  expect(wip!.width).toBeGreaterThan(paragraph!.width / 2);
+  // This copy's own text is hidden under it.
+  await expect(held.locator(".sync-wip-hidden")).toBeHidden();
 });
