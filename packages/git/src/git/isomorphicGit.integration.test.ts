@@ -447,6 +447,38 @@ describe("createIsomorphicGitFs + IsomorphicGitService", () => {
     expect(new TextDecoder().decode(await host.readFile(join(repoDir, "run.md")))).toBe("one\n");
   });
 
+  it("builds a tree with files written into it, touching neither index nor worktree", async () => {
+    const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
+    await service.init({ defaultBranch: "main" });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    const decode = (bytes: Uint8Array | null) => new TextDecoder().decode(bytes!);
+    const author = { name: "T", email: "t@x" };
+    await host.writeFileAtomic(join(repoDir, "run.md"), encode("one\n"));
+    await host.chmod(join(repoDir, "run.md"), 0o755);
+    await host.writeFileAtomic(join(repoDir, "sub", "note.md"), encode("one\n"));
+    await host.writeFileAtomic(join(repoDir, "keep.md"), encode("kept\n"));
+    const first = (await service.addAllAndCommit({ message: "one", author }))!;
+    const [{ commit }] = await service.log({ ref: first, depth: 1 });
+
+    const tree = await service.treeWith({
+      tree: commit.tree,
+      files: ["run.md", "sub/note.md", "new/deep/a.md"].map((filepath) => ({ filepath, bytes: encode(`wip ${filepath}\n`) })),
+    });
+    const wip = await service.commit({ message: "wip", author, tree, parent: [first], noUpdateBranch: true });
+
+    for (const filepath of ["run.md", "sub/note.md", "new/deep/a.md"]) {
+      expect(decode(await service.readFile({ ref: wip, filepath }))).toBe(`wip ${filepath}\n`);
+    }
+    expect(decode(await service.readFile({ ref: wip, filepath: "keep.md" }))).toBe("kept\n");
+    await expect(service.changedFiles(first, wip)).resolves.toEqual(["new/deep/a.md", "run.md", "sub/note.md"]);
+    // Same files, same tree: a heartbeat with nothing new changes nothing.
+    await expect(service.treeWith({ tree: commit.tree, files: [] })).resolves.toBe(commit.tree);
+    // The branch, the index and the worktree are where they were.
+    expect((await service.log({ depth: 1 }))[0]?.oid).toBe(first);
+    await expect(service.status()).resolves.toMatchObject({ staged: [], unstaged: [], untracked: [] });
+    expect(decode(await host.readFile(join(repoDir, "run.md")))).toBe("one\n");
+  });
+
   it("writes, lists and deletes local refs under a prefix", async () => {
     const service = new IsomorphicGitService(host, { repoPath: repoDir, gitDir: join(repoDir, ".git") });
     await service.init({ defaultBranch: "main" });

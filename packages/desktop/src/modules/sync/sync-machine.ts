@@ -63,6 +63,9 @@ export interface SyncPeer {
   cursor: SyncCursor | null;
   /** The units it's editing now (`sync-claims.ts`); empty until read. */
   claims: SyncClaim[];
+  /** The presence commit holding what it's typing in them, read here;
+   *  null while it holds nothing. */
+  wip: string | null;
 }
 
 /** A unit a device is editing: nobody else's edit lands on it. */

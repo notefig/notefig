@@ -6,6 +6,7 @@ const peer = (deviceId: string, claims: SyncClaim[] = []): SyncPeer => ({
   deviceId,
   name: deviceId === "a" ? "Ada" : "Bob",
   colour: "#2f7ed8",
+  wip: null,
   cursor: null,
   claims,
 });

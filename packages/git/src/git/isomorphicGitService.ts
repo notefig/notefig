@@ -1112,6 +1112,37 @@ export class IsomorphicGitService implements GitService {
     }
   }
 
+  async treeWith(input: { tree: string; files: { filepath: string; bytes: Uint8Array }[] }): Promise<string> {
+    const at = { fs: this.fsClient, dir: this.dir, gitdir: this.gitdir };
+    /** `oid` (a tree, or none) with `files` (paths relative to it) in it. */
+    const write = async (oid: string | null, files: { parts: string[]; bytes: Uint8Array }[]): Promise<string> => {
+      const entries = oid ? (await git.readTree({ ...at, cache: this.cache, oid })).tree : [];
+      const byName = new Map(entries.map((entry) => [entry.path, entry]));
+      const into = new Map<string, { parts: string[]; bytes: Uint8Array }[]>();
+      for (const { parts, bytes } of files) {
+        const [name, ...rest] = parts as [string, ...string[]];
+        if (rest.length > 0) {
+          into.set(name, [...(into.get(name) ?? []), { parts: rest, bytes }]);
+          continue;
+        }
+        const prior = byName.get(name);
+        const mode = prior?.type === "blob" ? prior.mode : "100644";
+        byName.set(name, { path: name, mode, type: "blob", oid: await git.writeBlob({ ...at, blob: bytes }) });
+      }
+      for (const [name, nested] of into) {
+        const prior = byName.get(name);
+        const tree = await write(prior?.type === "tree" ? prior.oid : null, nested);
+        byName.set(name, { path: name, mode: "040000", type: "tree", oid: tree });
+      }
+      return git.writeTree({ ...at, tree: [...byName.values()] });
+    };
+    try {
+      return await write(input.tree, input.files.map(({ filepath, bytes }) => ({ parts: filepath.split("/"), bytes })));
+    } catch (error) {
+      throw this.fail(error);
+    }
+  }
+
   async stageBlob(input: { filepath: string; oid: string; modeFrom: string }): Promise<void> {
     try {
       const mode = (await this.entryOf(input.modeFrom, input.filepath))?.mode ?? PLAIN_FILE_MODE;

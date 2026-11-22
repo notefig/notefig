@@ -294,12 +294,7 @@ ul[data-type="taskList"] > li > div p {
    editing is a shade paler, with a faint line in their colour down its
    start, and a not-allowed cursor. The line inherits the paleness, so it
    reads as a tint, not a border. Your own claims show nothing. */
-.ProseMirror .sync-held {
-  position: relative;
-  opacity: 0.55;
-  cursor: not-allowed;
-  animation: sync-held-in 200ms ease-out;
-}
+.ProseMirror .sync-held,
 .ProseMirror .sync-held::before {
   content: "";
   position: absolute;
@@ -328,6 +323,12 @@ ul[data-type="taskList"] > li > div p {
 .ProseMirror pre.sync-held {
   box-shadow: inset 2px 0 0 var(--sync-holder);
 }
+/* Their work in progress (modules/sync/sync-editor.ts): what they've typed
+   in a unit they hold, drawn over this copy's text, which is hidden; a
+   unit they've just made, under the one before it, styled as held above. */
+.ProseMirror .sync-wip-hidden {
+  display: none;
+}
 @keyframes sync-held-in {
   from {
     opacity: 1;
@@ -335,7 +336,8 @@ ul[data-type="taskList"] > li > div p {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ProseMirror .sync-held {
+  .ProseMirror .sync-held,
+  .ProseMirror .sync-wip-new {
     animation: none;
   }
   .ProseMirror .sync-caret::after {

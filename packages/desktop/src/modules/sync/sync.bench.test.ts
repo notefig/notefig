@@ -2,7 +2,8 @@
  * What sync costs in a large workspace, step by step: opening a project
  * that doesn't sync, starting sync (the scan for edits made while closed),
  * an idle poll, committing and pushing one edit, and taking in one remote
- * change. In-process, over Node's fs and a local `git http-backend`, so the
+ * change; and, with a second device, what one types reaching the other's
+ * editor (presence carrying it, the other drawing it). In-process, over Node's fs and a local `git http-backend`, so the
  * numbers are sync's own work (git and fs calls), without the network or
  * the worker hop.
  *
@@ -11,7 +12,7 @@
 import { promises as fsp } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { defineModule, type Core } from "@notefig/core";
 import { createTestCore } from "@/testing/test-core";
@@ -21,6 +22,9 @@ import { createWorkspaceFiles, type WorkspaceFiles } from "@/modules/files";
 import { createEditors } from "@/modules/editors";
 import { projectSettingsModule } from "@/modules/project-settings";
 import { syncModule } from "@/modules/sync";
+import { createMarkdownCodec } from "@/components/editor/markdown-codec";
+import { disposeEditor, getOrCreateEditor, type EditorFs } from "@/components/editor/editor-store";
+import { docUnits } from "./sync-units";
 
 const FILES = Number(process.env.SYNC_BENCH_FILES ?? 20_000);
 const RUNS = 7;
@@ -75,6 +79,7 @@ async function workspace(synced: boolean) {
         name: "documents",
         register: (ctx) => createDocuments({ fs, openFiles: () => [...filesByPath.values()], editors, hooks: ctx.hooks }),
       }),
+      defineModule({ name: "editors", register: () => editors }),
       inProcessGitWorker(fs, remote.http),
       projectSettingsModule,
       syncModule,
@@ -83,8 +88,14 @@ async function workspace(synced: boolean) {
   });
   cores.push(core);
   await core.boot();
-  return { remote, ws, core };
+  return { remote, ws, core, editors };
 }
+
+const editorFs: EditorFs = {
+  searchContent: async () => [],
+  exists: async () => [],
+  writeBinaryFiles: async () => ({ succeeded: [], failed: [] }),
+};
 
 describe.skipIf(!process.env.SYNC_BENCH)(`sync in a ${FILES}-file workspace`, () => {
   afterAll(async () => {
@@ -138,5 +149,50 @@ describe.skipIf(!process.env.SYNC_BENCH)(`sync in a ${FILES}-file workspace`, ()
       async () => void (await remote.pushFromPlainGit(plain, { "notes/1/note-200.md": `From elsewhere ${change++}.\n` }, "elsewhere")),
     );
     expect(await fsp.readFile(join(ws, "notes", "1", "note-200.md"), "utf8")).toBe(`From elsewhere ${change - 1}.\n`);
+  }, 900_000);
+
+  it("draws what one device types in the other's editor", async () => {
+    const { ws, core, remote, editors } = await workspace(true);
+    const wsB = await remote.clone("bench-b");
+    await fsp.writeFile(join(wsB, ".git", "notefig-sync.json"), JSON.stringify({ deviceId: "b", on: true, lastSyncedAt: Date.now() + 5_000 }));
+    for (const path of [ws, wsB]) {
+      await core.workspace(path).open();
+      await core.workspace(path).sync.whenReady();
+    }
+    const [a, b] = [core.workspace(ws).sync, core.workspace(wsB).sync];
+    for (let i = 0; i < 2; i++) for (const sync of [a, b]) await sync.syncNow();
+    expect(a.state().peers).toHaveLength(1);
+    const codec = createMarkdownCodec();
+    const file = join("notes", "0", "note-7.md");
+    const open = async (root: string) => {
+      const path = join(root, file);
+      getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await fsp.readFile(path, "utf8")), basePath: root }, editorFs);
+      return editors.markdownEditor(path)!;
+    };
+    const [mine, theirs] = [await open(ws), await open(wsB)];
+    vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
+    // The sync plugins go on the editors in a cycle.
+    for (const sync of [a, b]) await sync.syncNow();
+    let typed = 0;
+    await time(
+      "typed on A, drawn on B (A's cycle, then B's)",
+      RUNS,
+      async () => {
+        await vi.waitFor(async () => {
+          await a.syncNow();
+          await b.syncNow();
+          expect(theirs.view.dom.querySelector(".sync-wip")?.textContent).toBe(`${typed}Some text for note 7.`);
+        }, { timeout: 30_000, interval: 0 });
+      },
+      async () => {
+        const [, unit] = docUnits(mine.state.doc);
+        mine.commands.insertContentAt(unit!.from + 1, String(++typed).slice(-1));
+        if (typed > 1) mine.commands.deleteRange({ from: unit!.from + 2, to: unit!.from + 3 });
+        // Saved, as the autosave would, but not announced: nothing commits it.
+        await fsp.writeFile(join(ws, file), `# Note 7\n\n${typed}Some text for note 7.\n`);
+      },
+    );
+    disposeEditor(editors, join(ws, file));
+    disposeEditor(editors, join(wsB, file));
   }, 900_000);
 });

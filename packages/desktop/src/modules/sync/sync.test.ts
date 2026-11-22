@@ -1360,6 +1360,71 @@ describe("sync: shared, while another device syncs the branch", () => {
     disposeEditor(editors, join(wsB, "note.md"));
   });
 
+  it("shows what one device is typing in the other's editor before it's committed, and drops it once it is", async () => {
+    const { a, b, editors, core, ws, wsB, remote } = await meet();
+    const open = async (path: string) => {
+      getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
+      return editors.markdownEditor(path)!;
+    };
+    const [mine, theirs] = [await open(join(ws, "note.md")), await open(join(wsB, "note.md"))];
+    vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
+    await a.syncNow();
+    await b.syncNow();
+    const second = (editor: Editor) => docUnits(editor.state.doc)[2]!;
+    mine.commands.insertContentAt(second(mine).from + 1, "Typed ");
+    mine.commands.setTextSelection(second(mine).from + 1 + 3);
+    // Saved, as the autosave would, but not announced: nothing commits it.
+    await fsp.writeFile(join(ws, "note.md"), "# Note\n\nFirst paragraph.\n\nTyped Second paragraph.\n");
+
+    await vi.waitFor(
+      async () => {
+        await a.syncNow();
+        await b.syncNow();
+        expect(theirs.view.dom.querySelector(".sync-wip")?.textContent).toBe("Typed Second paragraph.");
+      },
+      { timeout: 10_000 },
+    );
+    // Drawn, never written: B's doc, its file and the branch have the old text.
+    expect(theirs.state.doc.textBetween(second(theirs).from, second(theirs).to)).toBe("Second paragraph.");
+    expect(await read(join(wsB, "note.md"))).toBe(SEED["note.md"]);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(SEED["note.md"].trimEnd());
+    expect(theirs.view.dom.querySelector(".sync-wip-hidden")?.textContent).toBe("Second paragraph.");
+    // A's caret is drawn in what A typed, where A has it.
+    await vi.waitFor(async () => {
+      await a.syncNow();
+      await b.syncNow();
+      const caret = theirs.view.dom.querySelector('.sync-wip [data-sync-peer="dev"]');
+      expect(caret?.previousSibling?.textContent).toBe("Typ");
+    });
+    expect(theirs.view.dom.querySelectorAll('[data-sync-peer="dev"]')).toHaveLength(1);
+
+    // A unit A makes shows under the one before it.
+    mine.commands.insertContentAt(second(mine).to, { type: "paragraph", content: [{ type: "text", text: "A new one." }] });
+    await fsp.writeFile(join(ws, "note.md"), "# Note\n\nFirst paragraph.\n\nTyped Second paragraph.\n\nA new one.\n");
+    await vi.waitFor(
+      async () => {
+        await a.syncNow();
+        await b.syncNow();
+        expect(theirs.view.dom.querySelector(".sync-wip-new")?.textContent).toBe("A new one.");
+      },
+      { timeout: 10_000 },
+    );
+
+    // Committed and taken in: the text is B's own, and nothing is drawn over it.
+    written(core, join(ws, "note.md"));
+    await vi.waitFor(
+      async () => {
+        await a.syncNow();
+        await b.syncNow();
+        expect(theirs.state.doc.textContent).toContain("Typed Second paragraph.A new one.");
+        expect(theirs.view.dom.querySelector(".sync-wip, .sync-wip-hidden")).toBeNull();
+      },
+      { timeout: 10_000 },
+    );
+    disposeEditor(editors, join(ws, "note.md"));
+    disposeEditor(editors, join(wsB, "note.md"));
+  });
+
   it("settles two devices taking one unit at once: the lower id holds it, the other moves on", async () => {
     const { a, b, editors, ws, wsB } = await meet();
     const open = async (path: string) => {
@@ -1374,6 +1439,8 @@ describe("sync: shared, while another device syncs the branch", () => {
     const second = (editor: Editor) => docUnits(editor.state.doc)[2]!;
     mine.commands.insertContentAt(second(mine).from + 1, "A: ");
     theirs.commands.insertContentAt(second(theirs).from + 1, "B: ");
+    // A's typing is saved, as the autosave would, so its presence carries it.
+    await fsp.writeFile(join(ws, "note.md"), "# Note\n\nFirst paragraph.\n\nA: Second paragraph.\n");
     await vi.waitFor(
       async () => {
         await a.syncNow();
@@ -1384,6 +1451,8 @@ describe("sync: shared, while another device syncs the branch", () => {
       { timeout: 10_000 },
     );
     expect(theirs.view.dom.querySelector(".sync-held")).toBeNull();
+    // The winner sees its own text, never the other's drawn over it.
+    expect(theirs.view.dom.querySelector(".sync-wip, .sync-wip-hidden")).toBeNull();
     await vi.waitFor(() => expect(mine.state.selection.head).toBeGreaterThan(second(mine).to));
     await vi.waitFor(async () => {
       await a.syncNow();
@@ -1402,7 +1471,7 @@ describe("sync: shared, while another device syncs the branch", () => {
     const oid = await runGit(remote.bare, ["commit-tree", tree, "-p", "main", "-m", forged]);
     await runGit(remote.bare, ["update-ref", "refs/notefig/v1/presence/main/x", oid]);
     await sync.syncNow();
-    expect(sync.state().peers).toEqual([{ deviceId: "x", name: null, colour: null, cursor: null, claims: [] }]);
+    expect(sync.state().peers).toEqual([{ deviceId: "x", name: null, colour: null, cursor: null, claims: [], wip: null }]);
   });
 
   it("keeps its presence after a passing failure to push it", async () => {

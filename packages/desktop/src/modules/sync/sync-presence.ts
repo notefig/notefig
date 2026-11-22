@@ -8,6 +8,11 @@
  * caret moves or a claim changes) and deleted when the workspace closes or
  * the app quits. Replaced, never stacked: it takes no history.
  *
+ * Its tree is the branch tip's, with this device's work in progress: the
+ * text of each file it holds claims in, as saved, so the others see it
+ * typed within a cycle, long before it's committed. They show it only over
+ * the units it holds (`sync-editor.ts`), and never write it anywhere.
+ *
  * Liveness is what this client observes: a device is live while its ref
  * moved within `PRESENCE_STALE_MS` by the local clock, so no clock but ours
  * counts. A ref already there on the first poll may be a crash's leftover:
@@ -47,6 +52,9 @@ export interface PresenceDeps {
   dispatch(event: SyncEvent): void;
   /** What this device is editing, for each heartbeat. */
   claims(): SyncClaim[];
+  /** The files among `paths` as saved now, edits still in an editor saved
+   *  first: the work in progress the heartbeat carries. */
+  wip(paths: string[]): Promise<{ filepath: string; bytes: Uint8Array }[]>;
 }
 
 export interface Presence {
@@ -150,11 +158,21 @@ export function createPresence(deps: PresenceDeps): Presence {
   /** The host won't take this device's ref: this session stays solo. */
   let refused = false;
   let cursor: SyncCursor | null = null;
-  /** The claims the last heartbeat sent. */
+  /** The claims the last heartbeat sent, and its tree. */
   let sentClaims = "[]";
+  let sentTree: string | null = null;
 
   /** What a device's ref's commit says. */
   const payloadIn = async (oid: string) => payloadOf((await git.log({ ref: oid, depth: 1 }))[0]?.commit.message ?? "");
+
+  /** The tip's tree with what this device is typing in it. Its edits are
+   *  saved first, so each claim's key names the unit as the file has it. */
+  const treeOf = async (tip: string, claims: () => SyncClaim[]) => {
+    const paths = [...new Set(claims().map((claim) => claim.path))];
+    if (paths.length === 0) return { tree: tip, claims: claims() };
+    const files = await deps.wip(paths);
+    return { tree: await git.treeWith({ tree: tip, files }), claims: claims() };
+  };
 
   /** Note when each ref moved; true when a device came since the last poll. */
   const stamp = (present: Map<string, string>, at: number): boolean => {
@@ -179,9 +197,35 @@ export function createPresence(deps: PresenceDeps): Presence {
     const peers: SyncPeer[] = refused
       ? []
       : live(now())
-          .map(([ref, { name, colour, cursor, claims }]) => ({ deviceId: ref.slice(prefix.length), name, colour, cursor, claims }))
+          .map(([ref, { name, colour, cursor, claims, read }]) => ({
+            deviceId: ref.slice(prefix.length),
+            name,
+            colour,
+            cursor,
+            claims,
+            // What it's typing is in the commit its claims were read from.
+            wip: claims.length > 0 ? read : null,
+          }))
           .sort((a, b) => a.deviceId.localeCompare(b.deviceId));
     if (JSON.stringify(peers) !== JSON.stringify(deps.state().peers)) deps.dispatch({ type: "peers", peers });
+  };
+
+  /** Point this device's ref at `oid`; false when it didn't go. */
+  const publish = async (oid: string) => {
+    try {
+      await git.pushRef(remote, { ref: own, oid, force: true });
+    } catch (error) {
+      // The host turned the ref down (a hook, a token for branches only):
+      // never again this session. Anything else, the next cycle retries.
+      if (!(error instanceof GitError && REFUSALS.has(error.code))) return false;
+      refused = true;
+      announce();
+      console.warn("[sync] The remote refused this device's presence ref; syncing solo.", error);
+      return false;
+    }
+    if (published) replaced.push(published);
+    published = oid;
+    return true;
   };
 
   return {
@@ -215,35 +259,28 @@ export function createPresence(deps: PresenceDeps): Presence {
     },
 
     async heartbeat() {
-      // A claim goes out at once: it's what keeps others' edits off the unit.
-      const claims = deps.claims();
-      const claimed = JSON.stringify(claims);
-      if (refused || (now() < nextBeatAt && claimed === sentClaims)) return;
+      // Nothing held, nothing due: no git at all.
+      if (refused || (now() < nextBeatAt && sentClaims === "[]" && deps.claims().length === 0)) return;
       const [tip] = await git.log({ ref: `refs/heads/${deps.branch}`, depth: 1 }).catch(() => []);
       if (!tip) return;
+      const { tree, claims } = await treeOf(tip.commit.tree, deps.claims);
+      const claimed = JSON.stringify(claims);
+      // A claim, or what's typed in it, goes out at once: it keeps others'
+      // edits off the unit, and shows them what's coming.
+      if (now() < nextBeatAt && claimed === sentClaims && tree === sentTree) return;
       // A caret that moves while this goes out is sent by the next cycle.
       const sent = cursor;
       const oid = await git.commit({
         message: JSON.stringify({ name: deps.author.name, colour: colourOf(deps.deviceId), beat: ++beat, cursor: sent, claims }),
         author: deps.author,
-        tree: tip.commit.tree,
+        tree,
         parent: [tip.oid],
         noUpdateBranch: true,
       });
-      try {
-        await git.pushRef(remote, { ref: own, oid, force: true });
-        if (published) replaced.push(published);
-        published = oid;
-        sentClaims = claimed;
-        nextBeatAt = sent === cursor ? now() + HEARTBEAT_MS : 0;
-      } catch (error) {
-        // The host turned the ref down (a hook, a token for branches only):
-        // never again this session. Anything else, the next cycle retries.
-        if (!(error instanceof GitError && REFUSALS.has(error.code))) return;
-        refused = true;
-        announce();
-        console.warn("[sync] The remote refused this device's presence ref; syncing solo.", error);
-      }
+      if (!(await publish(oid))) return;
+      sentClaims = claimed;
+      sentTree = tree;
+      nextBeatAt = sent === cursor ? now() + HEARTBEAT_MS : 0;
     },
 
     async sweep() {

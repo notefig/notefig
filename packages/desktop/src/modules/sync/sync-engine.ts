@@ -30,7 +30,8 @@
  * after the saves settle instead of once per sitting, each other's carets
  * in the open editors (`sync-editor.ts`), and claims on the units each one
  * is editing (`sync-claims.ts`), its user's and its agents' alike, which
- * travel in the same presence commit.
+ * travel in the same presence commit, with the text it's typing in them,
+ * drawn in the others' open editors within a cycle (`sync-wip.ts`).
  *
  * Back after more than an hour away with local changes, or far apart from
  * the remote, it pauses before taking anything in until the user says go.
@@ -49,7 +50,8 @@ import { path as pathutil } from "@/utils/path";
 import { createPresence, presencePrefix } from "./sync-presence";
 import { createSyncEditors } from "./sync-editor";
 import { createClaims, editBetween, refusalMessage } from "./sync-claims";
-import { unitIndex, type FileUnit } from "./sync-units";
+import { unitIndex, type FileUnit, type PeerUnit } from "./sync-units";
+import { createWip } from "./sync-wip";
 import {
   IDLE_COMMIT_MS,
   SHARED_COMMIT_MS,
@@ -92,6 +94,12 @@ export interface SyncEngineDeps {
   /** A markdown file's units as claims see them (`sync-units.ts`), off the
    *  main thread. */
   fileUnits(markdown: string): Promise<FileUnit[]>;
+  /** The units of another device's copy that `keys` name, with their
+   *  nodes (`sync-units.ts`), off the main thread. */
+  peerUnits(markdown: string, keys: string[]): Promise<PeerUnit[]>;
+  /** Save what's still in `path`'s editor (absolute), if it's open: the
+   *  work in progress others see is the file as saved. */
+  flushEdits(path: string): Promise<void>;
   /** A merge that threw: the remote's version stood in for it. */
   reportError(error: unknown): void;
   state(): SyncState;
@@ -285,8 +293,21 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     now,
   });
   const claims = createClaims({ deviceId: deps.deviceId, now, peers: () => deps.state().peers });
+  /** What this device is typing in `paths`, for its presence. A file the
+   *  excludes keep out of every commit stays out of this one too. */
+  const wip = async (paths: string[]) => {
+    const synced: string[] = [];
+    for (const path of paths) if (!(await git.isIgnored(path))) synced.push(path);
+    await Promise.all(synced.map((path) => deps.flushEdits(absolute(path))));
+    const { succeeded } = await deps.fs.readBinaryFiles(synced.map(absolute));
+    return succeeded.flatMap(({ path, data }) => {
+      const filepath = tree(path);
+      return filepath ? [{ filepath, bytes: data }] : [];
+    });
+  };
   const presence = createPresence({
     claims: claims.published,
+    wip,
     deviceId: deps.deviceId,
     author,
     git,
@@ -296,7 +317,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     state: deps.state,
     dispatch: deps.dispatch,
   });
-  const editors = createSyncEditors({ editors: deps.editors, tree, onCursor: presence.setCursor, claims, setTimer });
+  const typing = createWip({ git, peerUnits: deps.peerUnits });
+  const editors = createSyncEditors({ editors: deps.editors, tree, onCursor: presence.setCursor, claims, wip: typing, setTimer });
   const markDirty = (paths: string[]) => {
     if (typeof dirty !== "string") for (const path of paths) dirty.add(path);
   };
@@ -692,6 +714,15 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     claims.expire();
   };
 
+  /** This device's presence out, the others' in, with what they're typing
+   *  in the files open here (drawn as the cycle ends), and the sweep. */
+  const presenceStep = async () => {
+    await presence.heartbeat();
+    await presence.read();
+    if (isShared(deps.state())) await typing.refresh(deps.state().peers, editors.paths());
+    await presence.sweep();
+  };
+
   const cycle = async () => {
     if (!isRunning(deps.state())) return;
     const startedAt = now();
@@ -718,9 +749,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
         return;
       }
       settleClaims(startedAt);
-      await presence.heartbeat();
-      await presence.read();
-      await presence.sweep();
+      await presenceStep();
       markSynced();
       deps.dispatch({ type: "settled" });
     } catch (error) {
