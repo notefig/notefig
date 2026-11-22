@@ -49,7 +49,7 @@ import { createOverlaps, swapsAmong, writeSynced } from "./sync-overlap";
 import { path as pathutil } from "@/utils/path";
 import { createPresence, presencePrefix } from "./sync-presence";
 import { createSyncEditors } from "./sync-editor";
-import { createClaims, editBetween, refusalMessage } from "./sync-claims";
+import { branchKeys, createClaims, editBetween, refusalMessage } from "./sync-claims";
 import { unitIndex, type FileUnit, type PeerUnit } from "./sync-units";
 import { createWip } from "./sync-wip";
 import {
@@ -259,6 +259,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   let again = false;
   let cancelIdle: (() => void) | null = null;
   let cancelPoll: (() => void) | null = null;
+  /** When the poll set is due. */
+  let pollAt = 0;
   const cleanups: (() => void)[] = [];
 
   const tree = (absolute: string): string | null => {
@@ -293,6 +295,24 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     now,
   });
   const claims = createClaims({ deviceId: deps.deviceId, now, peers: () => deps.state().peers });
+  /** The branch's copy of a file, cut into units: kept until it changes. */
+  const branchUnits = new Map<string, { text: string; units: FileUnit[] }>();
+  /** Name each unit this device holds in `path` by what it says on the
+   *  branch too, `text` being what it says here: the others' copy is the
+   *  branch, and this one may already be typing past it. */
+  const nameOnBranch = async (path: string, text: string) => {
+    const tip = await head();
+    const bytes = tip ? await git.readFile({ ref: tip, filepath: path }).catch(() => null) : null;
+    if (!bytes) return;
+    const branchText = new TextDecoder().decode(bytes);
+    let known = branchUnits.get(path);
+    if (known?.text !== branchText) branchUnits.set(path, (known = { text: branchText, units: await deps.fileUnits(branchText) }));
+    const here = await deps.fileUnits(text);
+    const keys = branchKeys(known.units, here);
+    // A claim's key may name its neighbours as they were: found as any is.
+    const index = unitIndex(here.map((unit) => unit.key));
+    claims.branchHas(path, (key) => keys.get(index.resolve(key) ?? ""));
+  };
   /** What this device is typing in `paths`, for its presence. A file the
    *  excludes keep out of every commit stays out of this one too. */
   const wip = async (paths: string[]) => {
@@ -300,10 +320,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     for (const path of paths) if (!(await git.isIgnored(path))) synced.push(path);
     await Promise.all(synced.map((path) => deps.flushEdits(absolute(path))));
     const { succeeded } = await deps.fs.readBinaryFiles(synced.map(absolute));
-    return succeeded.flatMap(({ path, data }) => {
+    const files = succeeded.flatMap(({ path, data }) => {
       const filepath = tree(path);
       return filepath ? [{ filepath, bytes: data }] : [];
     });
+    for (const { filepath, bytes } of files) await nameOnBranch(filepath, new TextDecoder().decode(bytes));
+    for (const path of [...branchUnits.keys()]) if (!synced.includes(path)) branchUnits.delete(path);
+    return files;
   };
   const presence = createPresence({
     claims: claims.published,
@@ -763,13 +786,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     cancelPoll?.();
     cancelPoll = null;
     if (stopped || !isRunning(deps.state())) return;
-    cancelPoll = setTimer(
-      () => {
-        cancelPoll = null;
-        void syncNow(false);
-      },
-      ms ?? pollInterval(deps.state()) * (0.8 + random() * 0.4),
-    );
+    const delay = ms ?? pollInterval(deps.state()) * (0.8 + random() * 0.4);
+    pollAt = now() + delay;
+    cancelPoll = setTimer(() => {
+      cancelPoll = null;
+      void syncNow(false);
+    }, delay);
   };
 
   /** Run a cycle; `commit` ends the sitting, a poll leaves it running. */
@@ -791,8 +813,9 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
       } while (again && !stopped);
     })().finally(() => {
       running = null;
-      // A short recheck set during the cycle stays.
-      if (!cancelPoll) schedulePoll();
+      // A short recheck set during the cycle stays; a solo poll is brought
+      // forward once someone comes.
+      if (!cancelPoll || pollAt > now() + pollInterval(deps.state()) * 1.2) schedulePoll();
     });
     return running;
   };

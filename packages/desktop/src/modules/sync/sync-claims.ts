@@ -90,6 +90,11 @@ export interface Claims {
    *  branch; `unsaved` says which files still hold edits. It's asked only
    *  of claims the caret has left, since asking saves at once. */
   landed(at: number, unsaved: (path: string) => boolean): void;
+  /** What the units this device holds in `path` say on the branch now:
+   *  `onBranch` gives it for a unit's key here (`branchKeys`). Each claim
+   *  names its unit by that too, so a device whose copy is the branch finds
+   *  it while this one is still typing in it. */
+  branchHas(path: string, onBranch: (key: string) => string | undefined): void;
   /** End what's idle, left and on the branch, or beaten by another device;
    *  true when anything ended. */
   expire(): boolean;
@@ -244,6 +249,12 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
         if (!entry.onBranch && (entry.agent || !isHere(entry)) && !unsaved(entry.path)) entry.onBranch = true;
       }
     },
+    branchHas(path, onBranch) {
+      for (const entry of own) {
+        const there = entry.path === path && entry.current ? onBranch(entry.current) : undefined;
+        if (there && !entry.landed.includes(there)) entry.landed = [...entry.landed, there].slice(-MAX_LANDED_KEYS);
+      }
+    },
     expire() {
       const at = deps.now();
       const [ownBefore, yieldedBefore] = [own.length, yielded.length];
@@ -288,6 +299,33 @@ export function editBetween(before: FileUnit[], after: FileUnit[]): ClaimEdit {
     created.push(...added.slice(removed.length));
   }
   return { before: touched, after: [...paired, ...created] };
+}
+
+/** For each unit of `here` that one of `branch` turned into, the key that
+ *  one has there: the same unit, as the branch has it. Units alike in both
+ *  pair up, and so do those an edit changed, in order (`editBetween`). */
+export function branchKeys(branch: FileUnit[], here: FileUnit[]): Map<string, string> {
+  const keys = new Map<string, string>();
+  const pair = (h: number, b: number, count: number) => {
+    for (let k = 0; k < count; k++) keys.set(here[h + k]!.key, branch[b + k]!.key);
+  };
+  let [b, h] = [0, 0];
+  // The last run the edit removed: the run added right after it replaced
+  // it (jsdiff puts removals first).
+  let removed = { at: 0, count: 0 };
+  for (const part of diffArrays(branch, here, { comparator: (x, y) => x.content === y.content })) {
+    const count = part.value.length;
+    if (part.removed) {
+      removed = { at: b, count };
+      b += count;
+      continue;
+    }
+    pair(h, part.added ? removed.at : b, part.added ? Math.min(count, removed.count) : count);
+    h += count;
+    if (!part.added) b += count;
+    removed = { at: b, count: 0 };
+  }
+  return keys;
 }
 
 /** Why an agent's write was refused, for the agent: who to wait for, and

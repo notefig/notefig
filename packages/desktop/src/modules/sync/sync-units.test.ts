@@ -25,7 +25,7 @@ describe("sync carets' units", () => {
     for (const shown of [plain, drafted]) {
       const [, after] = docUnits(shown);
       expect(shown.textBetween(after.from, after.to)).toBe("After the widget.");
-      expect(cursorAt(shown, after.from + 3)).toEqual({ unit: 1, offset: 2 });
+      expect(cursorAt(shown, after.from + 3)).toEqual({ unit: 1 });
     }
   });
 });

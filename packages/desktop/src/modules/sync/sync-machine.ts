@@ -42,14 +42,14 @@ export interface SyncReturnSummary {
   people: string[];
 }
 
-/** Where someone's caret is: a unit of the document (a paragraph, a list
- *  item's paragraph, a table row, a code block; `sync-editor.ts`) by its
- *  place among the document's units, and a character in it. */
+/** Which unit someone is in: a paragraph, a list item's paragraph, a
+ *  table row, a code block (`sync-editor.ts`), by its place among the
+ *  document's units. A block, not a character: their text reaches others a
+ *  cycle late, so a caret in it would only mislead. */
 export interface SyncCursor {
   /** `/`-separated path. */
   path: string;
   unit: number;
-  offset: number;
 }
 
 /** Another device syncing the branch now (`sync-presence.ts`). */

@@ -245,95 +245,67 @@ ul[data-type="taskList"] > li > div p {
   color: var(--shiki-dark) !important;
 }
 
-/* Another writer's caret (modules/sync/sync-editor.ts), and their name
-   in a small tag above it the moment it's hovered. */
-.ProseMirror .sync-caret {
-  position: relative;
-  margin: 0 -1px;
-  border-left: 2px solid var(--sync-peer);
-}
-/* A wider target than the 2px line. */
-.ProseMirror .sync-caret::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -5px;
-  width: 8px;
-}
-.ProseMirror .sync-caret[data-name]::after {
-  content: attr(data-name);
-  position: absolute;
-  z-index: 10;
-  bottom: 100%;
-  left: -2px;
-  padding: 0 4px;
-  border-radius: 3px 3px 3px 0;
+/* Where another writer is (modules/sync/sync-editor.ts): the block they're
+   in, with their name in a small tag after its last word. A block, not a
+   caret: their text arrives a beat late. */
+.ProseMirror .sync-here::after {
+  content: attr(data-sync-names);
+  display: inline-block;
+  vertical-align: 0.1em;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
   background-color: var(--sync-peer);
   color: #fff;
   font-size: 11px;
   font-style: normal;
   font-weight: 500;
-  line-height: 15px;
+  line-height: 16px;
   letter-spacing: normal;
   white-space: nowrap;
   pointer-events: none;
   user-select: none;
-  opacity: 0;
-  transform: translateY(2px);
-  transition:
-    opacity 80ms ease-out,
-    transform 80ms ease-out;
+  animation: sync-here-in 200ms ease-out;
 }
-.ProseMirror .sync-caret:hover::after {
-  opacity: 1;
-  transform: none;
+@keyframes sync-here-in {
+  from {
+    opacity: 0;
+  }
+}
+/* A table row's ::after would be a cell. */
+.ProseMirror tr.sync-here::after {
+  content: none;
 }
 
 /* Sync claims (modules/sync/sync-editor.ts): a unit someone else is
-   editing is a shade paler, with a faint line in their colour down its
-   start, and a not-allowed cursor. The line inherits the paleness, so it
-   reads as a tint, not a border. Your own claims show nothing. */
+   editing is a shade paler, with a not-allowed cursor; the name beside it
+   says whose. Your own claims show nothing. */
 .ProseMirror .sync-held,
 .ProseMirror .sync-wip-new {
-  position: relative;
   opacity: 0.55;
   cursor: not-allowed;
   animation: sync-held-in 200ms ease-out;
-}
-.ProseMirror .sync-held::before {
-  content: "";
-  position: absolute;
-  /* One column left of the text, whatever the unit's indent (set by the
-     sync editor plugin): clear of bullets, checkboxes, a quote's border,
-     and the drag handle's grip. */
-  left: calc(-8px - var(--sync-indent, 0px));
-  top: 0.2em;
-  bottom: 0.2em;
-  width: 2px;
-  border-radius: 1px;
-  background-color: var(--sync-holder);
-  pointer-events: none;
-}
-/* A table row or code block can't hold a line outside it (a row's
-   ::before would be a cell; a code block clips): theirs runs down their
-   own start edge. */
-.ProseMirror tr.sync-held {
-  position: static;
-}
-.ProseMirror tr.sync-held::before,
-.ProseMirror pre.sync-held::before {
-  content: none;
-}
-.ProseMirror tr.sync-held > :first-child,
-.ProseMirror pre.sync-held {
-  box-shadow: inset 2px 0 0 var(--sync-holder);
 }
 /* Their work in progress (modules/sync/sync-editor.ts): what they've typed
    in a unit they hold, drawn over this copy's text, which is hidden; a
    unit they've just made, under the one before it, styled as held above. */
 .ProseMirror .sync-wip-hidden {
   display: none;
+}
+/* What just arrived, tinted in their colour; the tint fades. */
+.ProseMirror .sync-wash {
+  border-radius: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  animation: sync-wash 1600ms ease-out forwards;
+}
+@keyframes sync-wash {
+  from {
+    background-color: color-mix(in srgb, var(--sync-holder) 28%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
 }
 @keyframes sync-held-in {
   from {
@@ -343,10 +315,9 @@ ul[data-type="taskList"] > li > div p {
 
 @media (prefers-reduced-motion: reduce) {
   .ProseMirror .sync-held,
-  .ProseMirror .sync-wip-new {
+  .ProseMirror .sync-wip-new,
+  .ProseMirror .sync-here::after,
+  .ProseMirror .sync-wash {
     animation: none;
-  }
-  .ProseMirror .sync-caret::after {
-    transition: none;
   }
 }

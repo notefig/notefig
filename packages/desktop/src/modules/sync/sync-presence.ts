@@ -2,11 +2,12 @@
  * Who else syncs the branch (MET-293), read in the engine's poll with no
  * channel of its own. Each device owns
  * `refs/notefig/v1/presence/<branch>/<deviceId>`: a commit on the branch tip
- * whose message names its user, its colour, where its caret is and the
- * units it's editing (`sync-claims.ts`; all of it in that one commit,
- * checked before it's shown), replaced every `HEARTBEAT_MS` (and when the
- * caret moves or a claim changes) and deleted when the workspace closes or
- * the app quits. Replaced, never stacked: it takes no history.
+ * whose message names its user, its colour, the block its cursor is in
+ * and the units it's editing (`sync-claims.ts`; all of it in that one
+ * commit, checked before it's shown), replaced every `HEARTBEAT_MS` (and
+ * when the cursor moves to another block or a claim changes) and deleted
+ * when the workspace closes or the app quits. Replaced, never stacked: it
+ * takes no history.
  *
  * Its tree is the branch tip's, with this device's work in progress: the
  * text of each file it holds claims in, as saved, so the others see it
@@ -60,13 +61,13 @@ export interface PresenceDeps {
 export interface Presence {
   /** One poll's refs: note what moved, and announce who's here. */
   observe(refs: GitRemoteRef[]): void;
-  /** Read who moved, and where their caret is now, in one fetch: after the
+  /** Read who moved, and which block each is in now, in one fetch: after the
    *  cycle's branch work, which never waits on it. */
   read(): Promise<void>;
   /** Replace this device's ref when a heartbeat is due, someone new needs
-   *  to see it, or its caret moved. */
+   *  to see it, or its cursor moved to another block. */
   heartbeat(): Promise<void>;
-  /** Where this device's caret is, for the next heartbeat. */
+  /** Which block this device's cursor is in, for the next heartbeat. */
   setCursor(cursor: SyncCursor | null): void;
   /** Delete one ref left standing, and what this device no longer reads. */
   sweep(): Promise<void>;
@@ -131,8 +132,7 @@ function payloadOf(message: string): Pick<Seen, "name" | "colour" | "cursor" | "
     name: typeof raw.name === "string" ? raw.name : null,
     colour: typeof raw.colour === "string" && /^#[0-9a-f]{6}$/i.test(raw.colour) ? raw.colour : null,
     cursor:
-      cursor && typeof cursor.path === "string" && count(cursor.unit) && count(cursor.offset)
-        ? { path: cursor.path, unit: cursor.unit, offset: cursor.offset }
+      cursor && typeof cursor.path === "string" && count(cursor.unit) ? { path: cursor.path, unit: cursor.unit }
         : null,
     claims: claimsOf(raw.claims),
   };
@@ -268,7 +268,7 @@ export function createPresence(deps: PresenceDeps): Presence {
       // A claim, or what's typed in it, goes out at once: it keeps others'
       // edits off the unit, and shows them what's coming.
       if (now() < nextBeatAt && claimed === sentClaims && tree === sentTree) return;
-      // A caret that moves while this goes out is sent by the next cycle.
+      // A cursor that moves while this goes out is sent by the next cycle.
       const sent = cursor;
       const oid = await git.commit({
         message: JSON.stringify({ name: deps.author.name, colour: colourOf(deps.deviceId), beat: ++beat, cursor: sent, claims }),

@@ -1,26 +1,24 @@
 /**
  * The shared level in the editor (MET-272, MET-273): while someone else
  * syncs the branch, each of the workspace's open markdown editors carries
- * two plugins. Solo, none does.
+ * three plugins. Solo, none does.
  *
- * - Carets: the others' carets drawn, each with a small name tag on hover,
- *   and this device's reported. A caret
- *   move only arms a timer, so nothing runs per keystroke. A caret is a
- *   unit of the document and a character in it (`SyncCursor`), so it lands
- *   in the same paragraph on a device whose text above differs.
+ * - Where the others are: a block each, not a caret. Their text reaches
+ *   this device a cycle or two late, so presence is the unit they're in,
+ *   with their name beside it, and this device's unit is reported. A caret
+ *   move only arms a timer, so nothing runs per keystroke.
  * - Claims (`sync-claims.ts`): an edit claims the units it touches, or is
  *   refused before it changes anything when another device holds one (or
  *   this one holds its four). A unit someone else holds is a shade paler,
- *   with a faint line in their colour in the editor's start gutter (clear
- *   of bullets, checkboxes and the drag handle) and a not-allowed
- *   cursor; their name shows on hover. A caret in a unit someone else
- *   just took moves to just after it. Your own claims show nothing.
- *
+ *   with a not-allowed cursor; their name shows on hover. A caret in a
+ *   unit someone else just took moves to just after it. Your own claims
+ *   show nothing.
  * - Work in progress (`sync-wip.ts`): a unit someone else holds shows what
  *   they've typed in it, drawn over this copy's text, and a unit they've
- *   just made shows under the one before it, their caret in it. Drawn,
- *   never written: the doc, its saves and its undo keep this copy's text
- *   until the branch brings theirs.
+ *   just made shows under the one before it. What arrived since it was
+ *   last drawn is washed in their colour, which fades. Drawn, never
+ *   written: the doc, its saves and its undo keep this copy's text until
+ *   the branch brings theirs.
  *
  * Writes that aren't the user's typing pass: sync's and agents' adopted
  * writes (agents' are gated where they're made), and changes kept out of
@@ -38,43 +36,70 @@ import { cursorAt, docUnits, indexOf, keyedUnits, unitsIn, type DocUnit, type Un
 import type { Wip, WipUnit } from "./sync-wip";
 
 const REPORT_MS = 300;
-const carets = new PluginKey<DecorationSet>("syncCarets");
+const here = new PluginKey<DecorationSet>("syncPeers");
 const held = new PluginKey<DecorationSet>("syncClaims");
 const typing = new PluginKey<DecorationSet>("syncWip");
 
 type SetTimer = (run: () => void, ms: number) => () => void;
 
-function caret(peer: SyncPeer): HTMLElement {
-  const el = document.createElement("span");
-  el.className = "sync-caret";
-  el.dataset.syncPeer = peer.deviceId;
-  // Their name, on hover, from the stylesheet: no text in the document's DOM.
-  if (peer.name) el.dataset.name = peer.name;
-  el.style.setProperty("--sync-peer", peer.colour ?? "currentColor");
-  return el;
+/** Who's in one block, as the block shows it: their names, and the first
+ *  one's colour. */
+function presentAttrs(peers: readonly SyncPeer[]) {
+  const names = peers.map((peer) => peer.name ?? "Someone").join(", ");
+  return { class: "sync-here", "data-sync-names": names, style: `--sync-peer:${peers[0]?.colour ?? "currentColor"}` };
 }
 
-/** The carets of the peers in `path`. */
-export function caretDecorations(doc: PMNode, path: string, peers: SyncPeer[], drawn: ReadonlySet<string> = new Set()): DecorationSet {
-  const here = peers.filter((peer) => peer.cursor?.path === path && !drawn.has(peer.deviceId));
-  if (here.length === 0) return DecorationSet.empty;
+/** Each peer in `path` on the block they're in, named; but for the ones
+ *  `drawn` on what they're typing (`wipDecorations`). */
+export function peerDecorations(doc: PMNode, path: string, peers: readonly SyncPeer[], drawn: ReadonlySet<string> = new Set()): DecorationSet {
   const units = docUnits(doc);
+  const byUnit = new Map<number, SyncPeer[]>();
+  for (const peer of peers) {
+    if (peer.cursor?.path !== path || drawn.has(peer.deviceId) || units.length === 0) continue;
+    const at = Math.min(peer.cursor.unit, units.length - 1);
+    byUnit.set(at, [...(byUnit.get(at) ?? []), peer]);
+  }
+  if (byUnit.size === 0) return DecorationSet.empty;
   return DecorationSet.create(
     doc,
-    here.flatMap((peer) => {
-      const { unit: index, offset } = peer.cursor!;
-      const unit = units[Math.min(index, units.length - 1)];
-      if (!unit) return [];
-      const at = Math.max(unit.from, Math.min(unit.from + 1 + offset, unit.to - 1));
-      return [Decoration.widget(at, () => caret(peer), { key: `${peer.deviceId}:${peer.name}:${peer.colour}`, side: 1 })];
-    }),
+    [...byUnit].map(([at, there]) => Decoration.node(units[at]!.from, units[at]!.to, presentAttrs(there))),
   );
 }
 
+/** What changed from `before` to `after`, as one stretch of `after`; null
+ *  when nothing was added. */
+export function arrived(before: string, after: string): [number, number] | null {
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start++;
+  let end = 0;
+  while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end++;
+  return after.length - end > start ? [start, after.length - end] : null;
+}
+
+/** Tint `[from, to)` of `root`'s text: what just arrived, washed in the
+ *  holder's colour, which fades. */
+function wash(root: HTMLElement, [from, to]: [number, number]) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const texts: Text[] = [];
+  for (let text = walker.nextNode(); text; text = walker.nextNode()) texts.push(text as Text);
+  let at = 0;
+  for (const text of texts) {
+    const [start, end] = [Math.max(from - at, 0), Math.min(to - at, text.length)];
+    at += text.length;
+    if (start >= end) continue;
+    const middle = text.splitText(start);
+    middle.splitText(end - start);
+    const tint = document.createElement("span");
+    tint.className = "sync-wash";
+    middle.replaceWith(tint);
+    tint.append(middle);
+  }
+}
+
 /** `json`, a node of another device's copy, as this editor draws it; its
- *  content alone for a unit drawn over one here. The holder's caret is in
- *  it at `caret`, a character into its text. */
-function renderUnit(schema: Schema, json: WipUnit["node"], inner: boolean, caretAt: { peer: SyncPeer; offset: number } | null) {
+ *  content alone for a unit drawn over one here. */
+function renderUnit(schema: Schema, json: WipUnit["node"], draw: Draw) {
+  const inner = draw.over;
   const wrap = document.createElement(inner ? "span" : "div");
   wrap.className = inner ? "sync-wip" : "sync-wip sync-wip-new";
   try {
@@ -85,30 +110,25 @@ function renderUnit(schema: Schema, json: WipUnit["node"], inner: boolean, caret
     // A node this editor can't hold: nothing drawn, its text stays.
     return wrap;
   }
-  if (caretAt) placeCaret(wrap, caretAt.offset, caret(caretAt.peer));
+  if (!inner) {
+    wrap.style.setProperty("--sync-holder", draw.colour);
+    // Named on the paragraph drawn, after its last word, as a block here is.
+    const block = wrap.firstElementChild;
+    if (draw.present && block instanceof HTMLElement) {
+      const attrs = presentAttrs(draw.present);
+      block.classList.add(attrs.class);
+      block.dataset.syncNames = attrs["data-sync-names"];
+      block.style.setProperty("--sync-peer", draw.present[0]?.colour ?? "currentColor");
+    }
+  }
+  if (draw.arrived) wash(wrap, draw.arrived);
   return wrap;
 }
 
-/** Put `mark` `offset` characters into `root`'s text, or at its end. */
-function placeCaret(root: HTMLElement, offset: number, mark: HTMLElement) {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let left = offset;
-  for (let text = walker.nextNode() as Text | null; text; text = walker.nextNode() as Text | null) {
-    if (left <= text.length) {
-      text.parentNode!.insertBefore(mark, text.splitText(left));
-      return;
-    }
-    left -= text.length;
-  }
-  (root.querySelector("p, h1, h2, h3, h4, h5, h6, li") ?? root).append(mark);
-}
-
-/** Where each peer's caret is drawn by the work in progress: their caret
- *  is in a unit of theirs drawn here. */
-const wipCaret = (unit: WipUnit, peers: readonly SyncPeer[]) => {
-  const peer = peers.find((p) => p.deviceId === unit.holder.peer.deviceId);
-  return peer?.cursor && peer.cursor.unit === unit.at ? { peer, offset: peer.cursor.offset } : null;
-};
+/** The peers whose cursor is in a unit of theirs drawn here: their name
+ *  goes on what they're typing. */
+const presentIn = (unit: WipUnit, peers: readonly SyncPeer[]) =>
+  peers.filter((p) => p.deviceId === unit.holder.peer.deviceId && p.cursor?.unit === unit.at);
 
 /** What `wipDecorations` knows of this copy while it draws. */
 interface Here {
@@ -119,57 +139,95 @@ interface Here {
   ends: Map<string, number>;
   /** Who holds each unit here, as claims settle it (`Claims.heldIn`). */
   held: ReadonlyMap<string, ClaimHolder>;
+  /** What each unit drawn last time said, by `Draw.id`; and this time's. */
+  shown: ReadonlyMap<string, string>;
+  next: Map<string, string>;
 }
 
-/** How one unit is drawn: its holder's caret in it, and the widget's key. */
+/** How one unit is drawn. */
 interface Draw {
-  caretAt: ReturnType<typeof wipCaret>;
+  /** Drawn over a unit here, or as a unit they made. */
+  over: boolean;
+  /** The text just arrived, to wash. */
+  arrived: [number, number] | null;
+  /** Who's in it, named on it. */
+  present: SyncPeer[] | null;
+  colour: string;
   key: string;
+}
+
+/** How `unit` is drawn, given what was drawn of it before (or, the first
+ *  time, `base`: what this copy says there). */
+function drawOf(here: Here, unit: WipUnit, id: string, base: string, peers: readonly SyncPeer[], over: boolean): Draw {
+  const text = here.doc.type.schema.nodeFromJSON(unit.node).textContent;
+  here.next.set(id, text);
+  const present = presentIn(unit, peers);
+  return {
+    over,
+    arrived: arrived(here.shown.get(id) ?? base, text),
+    present: present.length > 0 ? present : null,
+    colour: unit.holder.peer.colour ?? "currentColor",
+    key: `wip:${id}:${present.length}:${text}`,
+  };
 }
 
 /** A unit they hold that this copy has too: their text drawn over this
  *  copy's, which is hidden. */
-function drawOver(here: Here, unit: WipUnit, mine: DocUnit & { key: string }, draw: Draw) {
+function drawOver(here: Here, unit: WipUnit, mine: DocUnit & { key: string }, peers: readonly SyncPeer[]) {
   const node = here.doc.nodeAt(mine.from);
   // Theirs only while it's theirs here: a race this device won is its own.
   if (!node?.isTextblock || here.held.get(mine.key)?.peer.deviceId !== unit.holder.peer.deviceId) return [];
   here.ends.set(unit.key, mine.to);
+  const draw = drawOf(here, unit, `${unit.holder.peer.deviceId}:${mine.key}`, node.textContent, peers, true);
   const hidden = mine.to - mine.from > 2 ? [Decoration.inline(mine.from + 1, mine.to - 1, { class: "sync-wip-hidden" })] : [];
-  return [...hidden, Decoration.widget(mine.from + 1, (view) => renderUnit(view.state.schema, unit.node, true, draw.caretAt), { key: draw.key, side: -1 })];
+  const named = draw.present ? [Decoration.node(mine.from, mine.to, presentAttrs(draw.present))] : [];
+  return [
+    ...hidden,
+    ...named,
+    Decoration.widget(mine.from + 1, (view) => renderUnit(view.state.schema, unit.node, draw), { key: draw.key, side: -1 }),
+  ];
 }
 
 /** A unit they made: under the one before it, if that's here. */
-function drawNew(here: Here, unit: WipUnit, draw: Draw) {
+function drawNew(here: Here, unit: WipUnit, peers: readonly SyncPeer[]) {
   const after = unit.previous ? (here.ends.get(unit.previous) ?? here.byKey.get(here.index.resolve(unit.previous) ?? "")?.to) : undefined;
   if (after === undefined) return [];
   here.ends.set(unit.key, after);
-  return [Decoration.widget(after, (view) => renderUnit(view.state.schema, unit.node, false, draw.caretAt), { key: draw.key, side: unit.at + 1 })];
+  const draw = drawOf(here, unit, `${unit.holder.peer.deviceId}:new:${unit.at}`, "", peers, false);
+  return [Decoration.widget(after, (view) => renderUnit(view.state.schema, unit.node, draw), { key: draw.key, side: unit.at + 1 })];
 }
 
 /** Others' work in progress in `doc`: each unit they hold drawn over this
- *  copy's, its text hidden; each they made, under the unit before it. */
+ *  copy's, its text hidden; each they made, under the unit before it. What
+ *  arrived since it was last drawn (`shown`, by unit) is washed in the
+ *  holder's colour; what's drawn now goes in `next`. */
 export function wipDecorations(
   doc: PMNode,
   units: WipUnit[],
   peers: readonly SyncPeer[],
   held: ReadonlyMap<string, ClaimHolder>,
+  shown: ReadonlyMap<string, string>,
+  next: Map<string, string>,
 ): DecorationSet {
   if (units.length === 0) return DecorationSet.empty;
   const index = indexOf(doc);
-  const here: Here = { doc, index, byKey: new Map(keyedUnits(doc).map((unit) => [unit.key, unit])), ends: new Map(), held };
+  const byKey = new Map(keyedUnits(doc).map((unit) => [unit.key, unit]));
+  const at: Here = { doc, index, byKey, ends: new Map(), held, shown, next };
   const decorations = [...units]
     .sort((a, b) => a.at - b.at)
     .flatMap((unit) => {
-      const caretAt = wipCaret(unit, peers);
-      const draw: Draw = { caretAt, key: `wip:${unit.holder.peer.deviceId}:${unit.key}:${JSON.stringify(unit.node).length}:${caretAt?.offset ?? ""}` };
-      // This copy says it already: nothing to draw.
-      const same = here.byKey.get(index.resolve(unit.key) ?? "");
-      if (same) return here.ends.set(unit.key, same.to), [];
-      const mine = unit.keys.map((key) => here.byKey.get(index.resolve(key) ?? "")).find((found) => found !== undefined);
-      if (mine) return drawOver(here, unit, mine, draw);
+      // This copy says it already: nothing to draw but who's in it.
+      const same = byKey.get(index.resolve(unit.key) ?? "");
+      if (same) {
+        at.ends.set(unit.key, same.to);
+        const present = presentIn(unit, peers);
+        return present.length > 0 ? [Decoration.node(same.from, same.to, presentAttrs(present))] : [];
+      }
+      const mine = unit.keys.map((key) => byKey.get(index.resolve(key) ?? "")).find((found) => found !== undefined);
+      if (mine) return drawOver(at, unit, mine, peers);
       // Made by them, if its claim names nothing it said before; otherwise
       // this copy changed it too, and the merge settles it.
-      return unit.keys.length === 1 ? drawNew(here, unit, draw) : [];
+      return unit.keys.length === 1 ? drawNew(at, unit, peers) : [];
     });
   return DecorationSet.create(doc, decorations);
 }
@@ -180,26 +238,19 @@ export function holderLabel({ peer, agent }: ClaimHolder): string {
   return agent ? `${name}'s agent is editing this` : `${name} is editing this`;
 }
 
-/** The units others hold in `doc`, drawn; `indents` is how far each
- *  unit's start sits from the text's, as laid out, so its line can sit in
- *  the gutter whatever the unit is nested in. */
-export function heldDecorations(
-  doc: PMNode,
-  holders: Map<string, ClaimHolder>,
-  indents: ReadonlyMap<string, number> = new Map(),
-): DecorationSet {
+/** The units others hold in `doc`, drawn: paler, in their colour. */
+export function heldDecorations(doc: PMNode, holders: Map<string, ClaimHolder>): DecorationSet {
   if (holders.size === 0) return DecorationSet.empty;
   const decorations = keyedUnits(doc).flatMap(({ from, to, key }) => {
     const holder = holders.get(key);
     if (!holder) return [];
-    const indent = indents.get(key);
     return [
       Decoration.node(
         from,
         to,
         {
           class: "sync-held",
-          style: `--sync-holder:${holder.peer.colour ?? "currentColor"}${indent === undefined ? "" : `;--sync-indent:${indent}px`}`,
+          style: `--sync-holder:${holder.peer.colour ?? "currentColor"}`,
           title: holderLabel(holder),
           "data-sync-holder": holder.peer.deviceId,
         },
@@ -256,21 +307,6 @@ export function editOf(tr: Transaction) {
 const isTyping = (tr: Transaction) =>
   tr.docChanged && tr.getMeta(ADOPTION_TRANSACTION_META) !== true && tr.getMeta("addToHistory") !== false;
 
-/** How far each held unit's start sits from the text's, as laid out:
- *  the indent its lists and quotes give it. */
-function indentsOf(view: EditorView, decorations: DecorationSet): Map<string, number> {
-  const start = (view.dom.firstElementChild ?? view.dom).getBoundingClientRect().left;
-  const indents = new Map<string, number>();
-  for (const { from, spec } of decorations.find()) {
-    const dom = view.nodeDOM(from);
-    if (dom instanceof HTMLElement) indents.set(spec.key as string, Math.round(dom.getBoundingClientRect().left - start));
-  }
-  return indents;
-}
-
-const sameIndents = (a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>) =>
-  a.size === b.size && [...a].every(([key, indent]) => b.get(key) === indent);
-
 /** Where a caret goes when someone takes the unit it's in: the first
  *  place to type after the unit; at the end of the doc, a new paragraph. */
 function moveOut(view: EditorView, unit: { from: number; to: number }) {
@@ -293,10 +329,6 @@ interface ClaimView {
 }
 
 function claimsPlugin({ path, claims, setTimer }: ClaimView) {
-  // Measured after a redraw, never per keystroke: an indent changes only
-  // with the units held, or their text arriving.
-  let indents: ReadonlyMap<string, number> = new Map();
-  let redrawn = false;
   return new Plugin<DecorationSet>({
     key: held,
     state: {
@@ -304,8 +336,7 @@ function claimsPlugin({ path, claims, setTimer }: ClaimView) {
       apply: (tr, value) => {
         // Others' claims changed, or their text arrived: drawn again.
         if (!tr.getMeta(held) && !(tr.docChanged && !isTyping(tr))) return value.map(tr.mapping, tr.doc);
-        redrawn = true;
-        return heldDecorations(tr.doc, claims.heldIn(path, indexOf(tr.doc)), indents);
+        return heldDecorations(tr.doc, claims.heldIn(path, indexOf(tr.doc)));
       },
     },
     props: {
@@ -316,19 +347,11 @@ function claimsPlugin({ path, claims, setTimer }: ClaimView) {
       return {
         update(current, previous) {
           const decorations = held.getState(current.state);
-          if (!decorations || decorations === held.getState(previous)) return;
-          if (current.hasFocus()) {
-            // Someone took the unit this caret is in: on to just after it.
-            const head = current.state.selection.head;
-            const [taken] = decorations.find(head, head);
-            if (taken) setTimer(() => moveOut(current, taken), 0);
-          }
-          if (!redrawn) return;
-          redrawn = false;
-          const measured = indentsOf(current, decorations);
-          if (sameIndents(measured, indents)) return;
-          indents = measured;
-          setTimer(() => current.dispatch(current.state.tr.setMeta(held, true).setMeta("addToHistory", false)), 0);
+          if (!decorations || decorations === held.getState(previous) || !current.hasFocus()) return;
+          // Someone took the unit this caret is in: on to just after it.
+          const head = current.state.selection.head;
+          const [taken] = decorations.find(head, head);
+          if (taken) setTimer(() => moveOut(current, taken), 0);
         },
       };
     },
@@ -346,21 +369,28 @@ interface WipView {
 /** Others' work in progress in one editor (`wipDecorations`): redrawn when
  *  it changes, or a write that isn't typing changes what this copy says. */
 function wipPlugin(wip: WipView) {
+  // What each unit said when last drawn: the next draw washes what's new.
+  let shown = new Map<string, string>();
   return new Plugin<DecorationSet>({
     key: typing,
     state: {
       init: () => DecorationSet.empty,
       apply: (tr, value) => {
         if (!tr.getMeta(typing) && !(tr.docChanged && !isTyping(tr))) return value.map(tr.mapping, tr.doc);
-        const units = wip.units();
-        return units.length === 0 ? DecorationSet.empty : wipDecorations(tr.doc, units, wip.peers(), wip.held(tr.doc));
+        const next = new Map<string, string>();
+        const drawn = wipDecorations(tr.doc, wip.units(), wip.peers(), wip.held(tr.doc), shown, next);
+        shown = next;
+        return drawn;
       },
     },
     props: { decorations: (state) => typing.getState(state) },
   });
 }
 
-function caretPlugin(
+/** Where the others are, a block each, named; and this device's block,
+ *  reported. A caret move only arms a timer, so nothing runs per keystroke,
+ *  and a move within one block changes nothing that's sent. */
+function peersPlugin(
   path: string,
   report: (view: EditorView) => void,
   leave: () => void,
@@ -368,15 +398,15 @@ function caretPlugin(
   drawn: () => ReadonlySet<string>,
 ) {
   return new Plugin<DecorationSet>({
-    key: carets,
+    key: here,
     state: {
       init: () => DecorationSet.empty,
       apply: (tr, value) => {
-        const peers = tr.getMeta(carets) as SyncPeer[] | undefined;
-        return peers ? caretDecorations(tr.doc, path, peers, drawn()) : value.map(tr.mapping, tr.doc);
+        const peers = tr.getMeta(here) as SyncPeer[] | undefined;
+        return peers ? peerDecorations(tr.doc, path, peers, drawn()) : value.map(tr.mapping, tr.doc);
       },
     },
-    props: { decorations: (state) => carets.getState(state) },
+    props: { decorations: (state) => here.getState(state) },
     view(view) {
       let cancel: (() => void) | null = null;
       const arm = () => {
@@ -405,7 +435,7 @@ function caretPlugin(
 
 export interface SyncEditors {
   /** Put the plugins on the workspace's editors while shared, take them
-   *  off solo, and redraw the others' carets, claims and typing. */
+   *  off solo, and redraw where the others are, their claims and typing. */
   reconcile(state: SyncState): void;
   /** The files (`/`-separated) whose editors carry the plugins. */
   paths(): string[];
@@ -428,7 +458,7 @@ export function createSyncEditors(deps: {
     const editor = attached.get(path)?.editor;
     attached.delete(path);
     if (!editor || editor.isDestroyed) return;
-    editor.unregisterPlugin(carets);
+    editor.unregisterPlugin(here);
     editor.unregisterPlugin(held);
     editor.unregisterPlugin(typing);
   };
@@ -447,9 +477,9 @@ export function createSyncEditors(deps: {
       peers: () => peers,
       held: (doc) => deps.claims.heldIn(path, indexOf(doc)),
     };
-    // A caret in a unit drawn from its holder's copy is drawn there.
-    const drawn = () => new Set(wip.units().flatMap((unit) => (wipCaret(unit, peers) ? [unit.holder.peer.deviceId] : [])));
-    editor.registerPlugin(caretPlugin(path, report, leave, deps.setTimer, drawn));
+    // Someone in a unit of theirs drawn here is named on it.
+    const drawn = () => new Set(wip.units().flatMap((unit) => presentIn(unit, peers).map((peer) => peer.deviceId)));
+    editor.registerPlugin(peersPlugin(path, report, leave, deps.setTimer, drawn));
     editor.registerPlugin(claimsPlugin({ path, claims: deps.claims, setTimer: deps.setTimer }));
     editor.registerPlugin(wipPlugin(wip));
     return (next: readonly SyncPeer[]) => {
@@ -480,7 +510,7 @@ export function createSyncEditors(deps: {
         editor.view.dispatch(
           editor.state.tr
             .setMeta(typing, true)
-            .setMeta(carets, state.peers)
+            .setMeta(here, state.peers)
             .setMeta(held, true)
             .setMeta("addToHistory", false),
         );

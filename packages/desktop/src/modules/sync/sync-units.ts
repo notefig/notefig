@@ -6,7 +6,7 @@
  * paragraphs aren't in the markdown, so aren't units.
  *
  * They're the merge's units (`utils/markdown-units.ts`) seen from the
- * ProseMirror side: a caret (`SyncCursor`) points at one by its place, a
+ * ProseMirror side: a cursor (`SyncCursor`) points at one by its place, a
  * claim (`SyncClaim`) names one by its key, a hash of what it says, so
  * every device finds the same unit whatever the text above it holds.
  * Pure: the editor calls it on its doc, the markdown worker on a parse.
@@ -213,12 +213,11 @@ export function unitsIn(doc: PMNode, from: number, to: number): KeyedUnit[] {
   return units;
 }
 
-/** Where the selection's head is, as a unit and a character in it. */
-export function cursorAt(doc: PMNode, head: number): { unit: number; offset: number } {
+/** The unit the selection's head is in, by its place. */
+export function cursorAt(doc: PMNode, head: number): { unit: number } {
   const units = docUnits(doc);
   const found = units.findIndex(({ to }) => head <= to);
-  const unit = found < 0 ? Math.max(units.length - 1, 0) : found;
-  return { unit, offset: Math.max(0, head - (units[unit]?.from ?? 0) - 1) };
+  return { unit: found < 0 ? Math.max(units.length - 1, 0) : found };
 }
 
 /** A unit of another device's copy, as it has it: what draws its work in

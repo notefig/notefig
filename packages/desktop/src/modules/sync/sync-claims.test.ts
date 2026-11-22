@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLAIM_IDLE_MS, MAX_CLAIMS, createClaims } from "./sync-claims";
+import { CLAIM_IDLE_MS, MAX_CLAIMS, branchKeys, createClaims } from "./sync-claims";
 import type { SyncClaim, SyncPeer } from "./sync-machine";
 
 const peer = (deviceId: string, claims: SyncClaim[] = []): SyncPeer => ({
@@ -156,5 +156,16 @@ describe("sync claims", () => {
     claims.landed(now(), () => false);
     // An agent has no caret: done once it's on the branch.
     expect(claims.expire()).toBe(true);
+  });
+});
+
+describe("branchKeys", () => {
+  const unit = (key: string, content = key) => ({ key, content });
+  it("pairs each unit here with the one it was on the branch: alike, or changed in order", () => {
+    const keys = branchKeys(
+      [unit("title"), unit("typed", "Typed."), unit("fresh", "Fresh.")],
+      [unit("title"), unit("more", "More typed."), unit("again", "Fresh. Again."), unit("new", "New.")],
+    );
+    expect(Object.fromEntries(keys)).toEqual({ title: "title", more: "typed", again: "fresh" });
   });
 });
