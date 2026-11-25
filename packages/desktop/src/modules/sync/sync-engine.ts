@@ -50,9 +50,9 @@ import { createOverlaps, swapsAmong, writeSynced } from "./sync-overlap";
 import { path as pathutil } from "@/utils/path";
 import { createPresence, presencePrefix } from "./sync-presence";
 import { createSyncEditors } from "./sync-editor";
-import { branchKeys, createClaims, editBetween, refusalMessage } from "./sync-claims";
+import { createClaims, editBetween, refusalMessage } from "./sync-claims";
 import { unitIndex, type FileUnit, type PeerUnit } from "./sync-units";
-import { createWip } from "./sync-wip";
+import { createOwnWip, createWip } from "./sync-wip";
 import {
   IDLE_COMMIT_MS,
   SHARED_COMMIT_MS,
@@ -302,42 +302,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     now,
   });
   const claims = createClaims({ deviceId: deps.deviceId, now, peers: () => deps.state().peers });
-  /** The branch's copy of a file, cut into units: kept until it changes. */
-  const branchUnits = new Map<string, { text: string; units: FileUnit[] }>();
-  /** Name each unit this device holds in `path` by what it says on the
-   *  branch too, `text` being what it says here: the others' copy is the
-   *  branch, and this one may already be typing past it. */
-  const nameOnBranch = async (path: string, text: string) => {
-    const tip = await head();
-    const bytes = tip ? await git.readFile({ ref: tip, filepath: path }).catch(() => null) : null;
-    if (!bytes) return;
-    const branchText = new TextDecoder().decode(bytes);
-    let known = branchUnits.get(path);
-    if (known?.text !== branchText) branchUnits.set(path, (known = { text: branchText, units: await deps.fileUnits(branchText) }));
-    const here = await deps.fileUnits(text);
-    const keys = branchKeys(known.units, here);
-    // A claim's key may name its neighbours as they were: found as any is.
-    const index = unitIndex(here.map((unit) => unit.key));
-    claims.branchHas(path, (key) => keys.get(index.resolve(key) ?? ""));
-  };
-  /** What this device is typing in `paths`, for its presence. A file the
-   *  excludes keep out of every commit stays out of this one too. */
-  const wip = async (paths: string[]) => {
-    const synced: string[] = [];
-    for (const path of paths) if (!(await git.isIgnored(path))) synced.push(path);
-    await Promise.all(synced.map((path) => deps.flushEdits(absolute(path))));
-    const { succeeded } = await deps.fs.readBinaryFiles(synced.map(absolute));
-    const files = succeeded.flatMap(({ path, data }) => {
-      const filepath = tree(path);
-      return filepath ? [{ filepath, bytes: data }] : [];
-    });
-    for (const { filepath, bytes } of files) await nameOnBranch(filepath, new TextDecoder().decode(bytes));
-    for (const path of [...branchUnits.keys()]) if (!synced.includes(path)) branchUnits.delete(path);
-    return files;
-  };
+  const ownWip = createOwnWip({ git, fs: deps.fs, claims, head, tree, absolute, flushEdits: deps.flushEdits, fileUnits: deps.fileUnits });
   const presence = createPresence({
     claims: claims.published,
-    wip,
+    wip: ownWip.files,
     deviceId: deps.deviceId,
     author,
     git,
@@ -741,9 +709,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   /** While shared, a sitting's saves fold into one commit: once the user's
    *  caret has left the units they hold (or their claim went idle) and
    *  saves have settled, or `FOLD_MAX_MS` into the sitting. Until then the
-   *  others see the text in this device's presence (`sync-wip.ts`). */
+   *  others see the text in this device's presence (`sync-wip.ts`). Once
+   *  they've gone it's due at once: nobody reads that presence, and no idle
+   *  commit was set for its saves. */
   const foldDue = () => {
-    if (sittingSince === null || !isShared(deps.state()) || !pending()) return false;
+    if (sittingSince === null || !pending()) return false;
+    if (!isShared(deps.state())) return true;
     const at = now();
     return at - sittingSince >= FOLD_MAX_MS || (!claims.typing() && at - lastWrite >= SHARED_COMMIT_MS);
   };

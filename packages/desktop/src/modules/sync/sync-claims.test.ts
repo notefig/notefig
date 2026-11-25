@@ -116,13 +116,17 @@ describe("sync claims", () => {
     expect(claims.published()).toEqual([]);
   });
 
-  it(`ends a claim ${CLAIM_IDLE_MS / 1000} s after its last edit, wherever the caret is`, () => {
-    const { claims, tick } = claimsWith();
+  it(`stops typing ${CLAIM_IDLE_MS / 1000} s after its last edit, caret or not, and holds the unit until the edit is on the branch`, () => {
+    const { claims, tick, now } = claimsWith();
     claims.take("a.md", edit(["k1"], ["k2"]), false, same);
     claims.setCaret({ path: "a.md", key: "k2" });
     tick(CLAIM_IDLE_MS - 1);
-    expect(claims.expire()).toBe(false);
+    expect(claims.typing()).toBe(true);
     tick(1);
+    expect(claims.typing()).toBe(false);
+    // Idle, but the branch still has the old text: nobody else may edit it yet.
+    expect(claims.expire()).toBe(false);
+    claims.landed(now(), () => false);
     expect(claims.expire()).toBe(true);
     expect(claims.published()).toEqual([]);
   });

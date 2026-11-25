@@ -1,17 +1,89 @@
 /**
- * Others' work in progress, read here (MET-273): a device's presence commit
- * holds the text of the files it holds claims in, as saved
- * (`sync-presence.ts`). For each file open in an editor here, this reads
- * the units each peer holds from that commit, for the editor to draw over
- * its own text (`sync-editor.ts`). Nothing here is written anywhere: the
- * branch brings the text for good once the peer commits it.
+ * Work in progress (MET-273): a device's presence commit holds the text of
+ * the files it holds claims in, as saved (`sync-presence.ts`).
  *
- * A commit is read once per file: the next heartbeat is a new commit.
+ * - This device's (`createOwnWip`): those files, for its heartbeat, with
+ *   each claim also named by what its unit says on the branch, the copy
+ *   the others have.
+ * - The others' (`createWip`): for each file open in an editor here, the
+ *   units each peer holds, read from its commit, for the editor to draw
+ *   over its own text (`sync-editor.ts`). A commit is read once per file:
+ *   the next heartbeat is a new commit.
+ *
+ * Nothing here is written anywhere: the branch brings the text for good
+ * once its device commits it.
  */
 import type { GitService } from "@notefig/git";
-import type { ClaimHolder } from "./sync-claims";
+import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
+import { branchKeys, type ClaimHolder, type Claims } from "./sync-claims";
 import type { SyncPeer } from "./sync-machine";
-import type { PeerUnit } from "./sync-units";
+import { unitIndex, type FileUnit, type PeerUnit } from "./sync-units";
+
+/** A file as the heartbeat puts it in its tree. */
+export interface WipFile {
+  filepath: string;
+  bytes: Uint8Array;
+}
+
+export interface OwnWip {
+  /** The files among `paths` (`/`-separated) as saved now, edits still in
+   *  an editor saved first. A file the excludes keep out of every commit
+   *  stays out of this one too. */
+  files(paths: string[]): Promise<WipFile[]>;
+}
+
+export function createOwnWip(deps: {
+  git: Pick<GitService, "isIgnored" | "readFile">;
+  fs: Pick<FileSystemSurface, "readBinaryFiles">;
+  claims: Pick<Claims, "branchHas">;
+  /** The branch tip; null before its first commit. */
+  head(): Promise<string | null>;
+  /** An absolute path's `/`-separated path in the tree; null when sync
+   *  leaves it out. */
+  tree(absolute: string): string | null;
+  absolute(path: string): string;
+  /** Save what's still in an editor of `path` (absolute), if it's open. */
+  flushEdits(path: string): Promise<void>;
+  fileUnits(markdown: string): Promise<FileUnit[]>;
+}): OwnWip {
+  const decoder = new TextDecoder();
+  /** The branch's copy of a file, cut into units: kept until it changes. */
+  const branchUnits = new Map<string, { text: string; units: FileUnit[] }>();
+
+  /** Name each unit this device holds in `path` by what it says on the
+   *  branch too, `text` being what it says here: the others' copy is the
+   *  branch, and this one may already be typing past it. */
+  const nameOnBranch = async (path: string, text: string) => {
+    const tip = await deps.head();
+    const bytes = tip ? await deps.git.readFile({ ref: tip, filepath: path }).catch(() => null) : null;
+    if (!bytes) return;
+    const branchText = decoder.decode(bytes);
+    let known = branchUnits.get(path);
+    if (known?.text !== branchText) branchUnits.set(path, (known = { text: branchText, units: await deps.fileUnits(branchText) }));
+    const here = await deps.fileUnits(text);
+    const keys = branchKeys(known.units, here);
+    // A claim's key may name its neighbours as they were: found as any is.
+    const index = unitIndex(here.map((unit) => unit.key));
+    deps.claims.branchHas(path, (key) => keys.get(index.resolve(key) ?? ""));
+  };
+
+  return {
+    async files(paths) {
+      const synced: string[] = [];
+      for (const path of paths) if (!(await deps.git.isIgnored(path))) synced.push(path);
+      await Promise.all(synced.map((path) => deps.flushEdits(deps.absolute(path))));
+      const { succeeded } = await deps.fs.readBinaryFiles(synced.map(deps.absolute));
+      const files = succeeded.flatMap(({ path, data }) => {
+        const filepath = deps.tree(path);
+        return filepath ? [{ filepath, bytes: data }] : [];
+      });
+      for (const { filepath, bytes } of files) await nameOnBranch(filepath, decoder.decode(bytes));
+      // A file no longer held isn't kept.
+      for (const path of [...branchUnits.keys()]) if (!synced.includes(path)) branchUnits.delete(path);
+      return files;
+    },
+  };
+}
 
 /** A unit a peer holds, as it has it now. */
 export interface WipUnit extends PeerUnit {

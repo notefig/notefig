@@ -28,6 +28,7 @@
 import { GitError, type GitRemote, type GitRemoteRef, type GitService } from "@notefig/git";
 import type { SyncAuthor } from "./sync-engine";
 import { MAX_CLAIM_KEYS } from "./sync-claims";
+import type { WipFile } from "./sync-wip";
 import type { SyncClaim, SyncCursor, SyncEvent, SyncPeer, SyncState } from "./sync-machine";
 
 /** Where the devices syncing `branch` keep their presence. */
@@ -55,7 +56,7 @@ export interface PresenceDeps {
   claims(): SyncClaim[];
   /** The files among `paths` as saved now, edits still in an editor saved
    *  first: the work in progress the heartbeat carries. */
-  wip(paths: string[]): Promise<{ filepath: string; bytes: Uint8Array }[]>;
+  wip(paths: string[]): Promise<WipFile[]>;
 }
 
 export interface Presence {
@@ -166,12 +167,20 @@ export function createPresence(deps: PresenceDeps): Presence {
   const payloadIn = async (oid: string) => payloadOf((await git.log({ ref: oid, depth: 1 }))[0]?.commit.message ?? "");
 
   /** The tip's tree with what this device is typing in it. Its edits are
-   *  saved first, so each claim's key names the unit as the file has it. */
+   *  saved first, so each claim's key names the unit as the file has it.
+   *  Work in progress that can't be had (a save or a parse failed) is left
+   *  out: the claims still go, and the cycle's branch work stands. */
   const treeOf = async (tip: string, claims: () => SyncClaim[]) => {
     const paths = [...new Set(claims().map((claim) => claim.path))];
     if (paths.length === 0) return { tree: tip, claims: claims() };
-    const files = await deps.wip(paths);
-    return { tree: await git.treeWith({ tree: tip, files }), claims: claims() };
+    const tree = await deps
+      .wip(paths)
+      .then((files) => git.treeWith({ tree: tip, files }))
+      .catch((error: unknown) => {
+        console.warn("[sync] Left this device's work in progress out of its presence.", error);
+        return tip;
+      });
+    return { tree, claims: claims() };
   };
 
   /** Note when each ref moved; true when a device came since the last poll. */

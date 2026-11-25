@@ -1267,6 +1267,29 @@ describe("sync: shared, while another device syncs the branch", () => {
     disposeEditor(editors, join(ws, "note.md"));
   });
 
+  it("commits a sitting still folding once the other device leaves, at its next cycle", async () => {
+    const { a, b, editors, core, ws, wsB, remote } = await meet();
+    getOrCreateEditor(editors, join(ws, "note.md"), { type: "markdown", content: codec.parse(await read(join(ws, "note.md"))), basePath: ws }, editorFs);
+    const mine = editors.markdownEditor(join(ws, "note.md"))!;
+    vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
+    await a.syncNow();
+    await b.syncNow();
+    const before = await remote.tip();
+    // Typed and saved with the caret still in the paragraph: it waits to fold.
+    const second = () => docUnits(mine.state.doc)[2]!;
+    mine.commands.insertContentAt(second().from + 1, "Typed ");
+    mine.commands.setTextSelection(second().from + 3);
+    await fsp.writeFile(join(ws, "note.md"), "# Note\n\nFirst paragraph.\n\nTyped Second paragraph.\n");
+    written(core, join(ws, "note.md"));
+
+    // B goes; the caret never leaves, and nothing else is saved or blurred.
+    await core.workspace(wsB).close();
+    await vi.waitFor(() => expect(a.state().peers).toEqual([]), { timeout: 5_000 });
+    await vi.waitFor(async () => expect(await remote.tip()).not.toBe(before), { timeout: POLL_MS * 1.2 + 3_000, interval: 250 });
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nFirst paragraph.\n\nTyped Second paragraph.");
+    disposeEditor(editors, join(ws, "note.md"));
+  });
+
   it("sends what waited for the sitting's end as soon as a poll finds someone", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { sync: a, files, ws, remote, open } = await setup();

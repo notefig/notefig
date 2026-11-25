@@ -38,7 +38,7 @@ import type { Wip, WipUnit } from "./sync-wip";
 const REPORT_MS = 300;
 const here = new PluginKey<DecorationSet>("syncPeers");
 const held = new PluginKey<DecorationSet>("syncClaims");
-const typing = new PluginKey<DecorationSet>("syncWip");
+const typing = new PluginKey<WipDraw>("syncWip");
 
 type SetTimer = (run: () => void, ms: number) => () => void;
 
@@ -142,6 +142,15 @@ interface Here {
   /** What each unit drawn last time said, by `Draw.id`; and this time's. */
   shown: ReadonlyMap<string, string>;
   next: Map<string, string>;
+  /** The peers named on what's drawn: their block isn't named again. */
+  named: Set<string>;
+}
+
+/** The peers in `unit`, as they're named on it. */
+function nameIn(here: Here, unit: WipUnit, peers: readonly SyncPeer[]) {
+  const present = presentIn(unit, peers);
+  for (const peer of present) here.named.add(peer.deviceId);
+  return present;
 }
 
 /** How one unit is drawn. */
@@ -161,7 +170,7 @@ interface Draw {
 function drawOf(here: Here, unit: WipUnit, id: string, base: string, peers: readonly SyncPeer[], over: boolean): Draw {
   const text = here.doc.type.schema.nodeFromJSON(unit.node).textContent;
   here.next.set(id, text);
-  const present = presentIn(unit, peers);
+  const present = nameIn(here, unit, peers);
   return {
     over,
     arrived: arrived(here.shown.get(id) ?? base, text),
@@ -197,22 +206,31 @@ function drawNew(here: Here, unit: WipUnit, peers: readonly SyncPeer[]) {
   return [Decoration.widget(after, (view) => renderUnit(view.state.schema, unit.node, draw), { key: draw.key, side: unit.at + 1 })];
 }
 
+/** One draw of others' work in progress: its decorations, what each unit
+ *  said (the next draw's `shown`), and the peers it named. */
+export interface WipDraw {
+  decorations: DecorationSet;
+  shown: ReadonlyMap<string, string>;
+  named: ReadonlySet<string>;
+}
+
+const NO_WIP: WipDraw = { decorations: DecorationSet.empty, shown: new Map(), named: new Set() };
+
 /** Others' work in progress in `doc`: each unit they hold drawn over this
  *  copy's, its text hidden; each they made, under the unit before it. What
  *  arrived since it was last drawn (`shown`, by unit) is washed in the
- *  holder's colour; what's drawn now goes in `next`. */
+ *  holder's colour. */
 export function wipDecorations(
   doc: PMNode,
   units: WipUnit[],
   peers: readonly SyncPeer[],
   held: ReadonlyMap<string, ClaimHolder>,
   shown: ReadonlyMap<string, string>,
-  next: Map<string, string>,
-): DecorationSet {
-  if (units.length === 0) return DecorationSet.empty;
+): WipDraw {
+  if (units.length === 0) return NO_WIP;
   const index = indexOf(doc);
   const byKey = new Map(keyedUnits(doc).map((unit) => [unit.key, unit]));
-  const at: Here = { doc, index, byKey, ends: new Map(), held, shown, next };
+  const at: Here = { doc, index, byKey, ends: new Map(), held, shown, next: new Map(), named: new Set() };
   const decorations = [...units]
     .sort((a, b) => a.at - b.at)
     .flatMap((unit) => {
@@ -220,7 +238,7 @@ export function wipDecorations(
       const same = byKey.get(index.resolve(unit.key) ?? "");
       if (same) {
         at.ends.set(unit.key, same.to);
-        const present = presentIn(unit, peers);
+        const present = nameIn(at, unit, peers);
         return present.length > 0 ? [Decoration.node(same.from, same.to, presentAttrs(present))] : [];
       }
       const mine = unit.keys.map((key) => byKey.get(index.resolve(key) ?? "")).find((found) => found !== undefined);
@@ -229,7 +247,7 @@ export function wipDecorations(
       // this copy changed it too, and the merge settles it.
       return unit.keys.length === 1 ? drawNew(at, unit, peers) : [];
     });
-  return DecorationSet.create(doc, decorations);
+  return { decorations: DecorationSet.create(doc, decorations), shown: at.next, named: at.named };
 }
 
 /** "Ada is editing this", or her agent. */
@@ -367,43 +385,37 @@ interface WipView {
 }
 
 /** Others' work in progress in one editor (`wipDecorations`): redrawn when
- *  it changes, or a write that isn't typing changes what this copy says. */
+ *  it changes, or a write that isn't typing changes what this copy says.
+ *  Registered before `peersPlugin`, which reads who it named. */
 function wipPlugin(wip: WipView) {
-  // What each unit said when last drawn: the next draw washes what's new.
-  let shown = new Map<string, string>();
-  return new Plugin<DecorationSet>({
+  return new Plugin<WipDraw>({
     key: typing,
     state: {
-      init: () => DecorationSet.empty,
+      init: () => NO_WIP,
       apply: (tr, value) => {
-        if (!tr.getMeta(typing) && !(tr.docChanged && !isTyping(tr))) return value.map(tr.mapping, tr.doc);
-        const next = new Map<string, string>();
-        const drawn = wipDecorations(tr.doc, wip.units(), wip.peers(), wip.held(tr.doc), shown, next);
-        shown = next;
-        return drawn;
+        if (!tr.getMeta(typing) && !(tr.docChanged && !isTyping(tr))) {
+          return { ...value, decorations: value.decorations.map(tr.mapping, tr.doc) };
+        }
+        // Washed: what's new since the last draw.
+        return wipDecorations(tr.doc, wip.units(), wip.peers(), wip.held(tr.doc), value.shown);
       },
     },
-    props: { decorations: (state) => typing.getState(state) },
+    props: { decorations: (state) => typing.getState(state)?.decorations },
   });
 }
 
 /** Where the others are, a block each, named; and this device's block,
  *  reported. A caret move only arms a timer, so nothing runs per keystroke,
  *  and a move within one block changes nothing that's sent. */
-function peersPlugin(
-  path: string,
-  report: (view: EditorView) => void,
-  leave: () => void,
-  setTimer: SetTimer,
-  drawn: () => ReadonlySet<string>,
-) {
+function peersPlugin(path: string, report: (view: EditorView) => void, leave: () => void, setTimer: SetTimer) {
   return new Plugin<DecorationSet>({
     key: here,
     state: {
       init: () => DecorationSet.empty,
-      apply: (tr, value) => {
+      apply: (tr, value, _, state) => {
         const peers = tr.getMeta(here) as SyncPeer[] | undefined;
-        return peers ? peerDecorations(tr.doc, path, peers, drawn()) : value.map(tr.mapping, tr.doc);
+        // Who this transaction's draw named on what they're typing.
+        return peers ? peerDecorations(tr.doc, path, peers, typing.getState(state)?.named) : value.map(tr.mapping, tr.doc);
       },
     },
     props: { decorations: (state) => here.getState(state) },
@@ -477,11 +489,9 @@ export function createSyncEditors(deps: {
       peers: () => peers,
       held: (doc) => deps.claims.heldIn(path, indexOf(doc)),
     };
-    // Someone in a unit of theirs drawn here is named on it.
-    const drawn = () => new Set(wip.units().flatMap((unit) => presentIn(unit, peers).map((peer) => peer.deviceId)));
-    editor.registerPlugin(peersPlugin(path, report, leave, deps.setTimer, drawn));
-    editor.registerPlugin(claimsPlugin({ path, claims: deps.claims, setTimer: deps.setTimer }));
     editor.registerPlugin(wipPlugin(wip));
+    editor.registerPlugin(peersPlugin(path, report, leave, deps.setTimer));
+    editor.registerPlugin(claimsPlugin({ path, claims: deps.claims, setTimer: deps.setTimer }));
     return (next: readonly SyncPeer[]) => {
       peers = next;
     };
