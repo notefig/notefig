@@ -244,3 +244,11 @@ describe("TauriPlatformAdapter quit", () => {
     expect(said).toEqual(["c"]);
   });
 });
+
+describe("TauriPlatformAdapter ui", () => {
+  it("reveals a path in the file manager through the opener plugin", async () => {
+    const tauri = withMockedTauri({ "plugin:opener|reveal_item_in_dir": () => null });
+    await new TauriPlatformAdapter().ui.revealInFolder!("/ws/notes.md");
+    expect(tauri.calls("plugin:opener|reveal_item_in_dir")).toEqual([{ paths: ["/ws/notes.md"] }]);
+  });
+});

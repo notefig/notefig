@@ -1,4 +1,4 @@
-import { FilePlus, FolderPlus } from "lucide-react";
+import { FilePlus, FolderOpen, FolderPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -105,6 +105,14 @@ interface FileTreeComponentProps {
   onModeChange: (mode: FileTreeMode) => void;
 }
 
+/** What this system calls showing a file in its file manager. */
+const revealLabel = () =>
+  navigator.platform.startsWith("Mac")
+    ? "revealInFinder"
+    : navigator.platform.startsWith("Win")
+      ? "showInExplorer"
+      : "showInFolder";
+
 /** Row height in rem: text-sm line-height (1.25rem) + py-1 top/bottom. */
 const ROW_HEIGHT_REM = 1.75;
 
@@ -151,6 +159,7 @@ function FileTreeInner({
 }) {
   const { t } = useTranslation();
   const core = useCore();
+  const { ui } = core.platform;
   const { metadata } = files.collections;
 
   const toAbs = useCallback(
@@ -641,6 +650,22 @@ function FileTreeInner({
               {t("openInNewTab")}
             </button>
           )}
+          {ui.revealInFolder && (
+            <button
+              type="button"
+              role="menuitem"
+              className={menuButton}
+              onClick={() => {
+                context.close();
+                ui.revealInFolder?.(abs).catch((error: unknown) => {
+                  console.error(`Failed to reveal ${abs}:`, error);
+                });
+              }}
+            >
+              <FolderOpen />
+              {t(revealLabel())}
+            </button>
+          )}
           {item.kind === "directory" && (
             <>
               <button
@@ -710,7 +735,7 @@ function FileTreeInner({
         </div>
       );
     },
-    [toAbs, openFileAtPath, onModeChange, containsOpenTab, model, t],
+    [toAbs, openFileAtPath, onModeChange, containsOpenTab, model, t, ui],
   );
 
   const handleHostKeyDown = useCallback<
