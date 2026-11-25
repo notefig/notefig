@@ -251,4 +251,10 @@ describe("TauriPlatformAdapter ui", () => {
     await new TauriPlatformAdapter().ui.revealInFolder!("/ws/notes.md");
     expect(tauri.calls("plugin:opener|reveal_item_in_dir")).toEqual([{ paths: ["/ws/notes.md"] }]);
   });
+
+  it("asks the backend for one zoom step", async () => {
+    const tauri = withMockedTauri({ step_zoom: () => null });
+    await new TauriPlatformAdapter().ui.stepZoom!(-1);
+    expect(tauri.calls("step_zoom")).toEqual([{ direction: -1 }]);
+  });
 });

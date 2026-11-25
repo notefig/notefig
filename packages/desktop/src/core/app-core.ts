@@ -48,6 +48,7 @@ import {
 import { kvModule } from "@/modules/kv";
 import { projectSettingsModule } from "@/modules/project-settings";
 import { lastToolModule, sidebarViewModule } from "@/modules/sidebar-view";
+import { pinchZoomModule } from "@/modules/pinch-zoom";
 import { workspaceKey } from "@/utils/path";
 
 /** What every root that renders a workspace needs running. */
@@ -114,6 +115,8 @@ export function desktopModules(): AnyModule[] {
     // Push-to-talk into the editors, on the bundled model. The model ships
     // with this build only, so the marketing site leaves it out.
     dictationModule,
+    // A pinch steps the window's zoom, gently.
+    pinchZoomModule,
   ];
 }
 

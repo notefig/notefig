@@ -587,6 +587,13 @@ export interface PlatformUiSurface {
   toggleFullscreen(): Promise<void>;
 
   /**
+   * Zoom one level up (1) or down (-1) from where the window is, as the
+   * platform's own zoom choices go; nothing past either end. Absent where
+   * the platform doesn't own the zoom (the web: the browser does).
+   */
+  stepZoom?(direction: 1 | -1): Promise<void>;
+
+  /**
    * Show `status` outside the window (see `AppStatus`). Fire-and-forget: a
    * platform with nowhere to show it ignores the call.
    */

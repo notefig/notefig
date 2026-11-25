@@ -180,6 +180,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     openExternal: this.openExternal.bind(this),
     revealInFolder: (path) => revealItemInDir(path),
     toggleFullscreen: this.toggleFullscreen.bind(this),
+    stepZoom: (direction) => invoke("step_zoom", { direction }),
     publishAppStatus: this.publishAppStatus.bind(this),
     onQuit: this.onQuit.bind(this),
     addEventListener: this.addEventListener.bind(this),

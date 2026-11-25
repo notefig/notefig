@@ -4,10 +4,15 @@
 // Command modules + the shared handler registration live in the library crate
 // so the app binary, the mock-app dispatch tests, and the e2e shim all share
 // one command list (MET-73).
-use notefig::{agent_proc, app_status, db_ops, mcp_bridge, quit, register_handlers, traffic_lights};
+use notefig::{agent_proc, app_status, mcp_bridge, quit, register_handlers, traffic_lights, zoom};
 
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
+
+/// A zoom level as the menu names it: 1.25 is "125".
+fn zoom_percent(level: f64) -> u32 {
+    (level * 100.0).round() as u32
+}
 
 fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let open_folder = MenuItem::with_id(
@@ -31,10 +36,13 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let theme_dark = MenuItem::with_id(app, "theme_dark", "Dark", true, None::<&str>)?;
     let theme_system = MenuItem::with_id(app, "theme_system", "System", true, None::<&str>)?;
 
-    let zoom_75 = MenuItem::with_id(app, "zoom_75", "75%", true, None::<&str>)?;
-    let zoom_100 = MenuItem::with_id(app, "zoom_100", "100%", true, None::<&str>)?;
-    let zoom_125 = MenuItem::with_id(app, "zoom_125", "125%", true, None::<&str>)?;
-    let zoom_150 = MenuItem::with_id(app, "zoom_150", "150%", true, None::<&str>)?;
+    let zoom_items = zoom::ZOOM_LEVELS
+        .into_iter()
+        .map(|level| {
+            let percent = zoom_percent(level);
+            MenuItem::with_id(app, format!("zoom_{percent}"), format!("{percent}%"), true, None::<&str>)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     let file_submenu = SubmenuBuilder::new(app, "File")
         .item(&open_folder)
@@ -59,11 +67,9 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
         .item(&theme_system)
         .build()?;
 
-    let zoom_submenu = SubmenuBuilder::new(app, "Zoom Level")
-        .item(&zoom_75)
-        .item(&zoom_100)
-        .item(&zoom_125)
-        .item(&zoom_150)
+    let zoom_submenu = zoom_items
+        .iter()
+        .fold(SubmenuBuilder::new(app, "Zoom Level"), |submenu, item| submenu.item(item))
         .build()?;
 
     let view_submenu = SubmenuBuilder::new(app, "View")
@@ -78,37 +84,6 @@ fn create_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error> {
         .build()?;
 
     Ok(menu)
-}
-
-/// Reads the persisted zoom level and applies native webview zoom.
-/// Zoom lives in the frontend's `settings` KV collection (`notefig.db`, key
-/// `zoomLevel`); the frontend is the sole writer — Rust only reads it back at
-/// startup, so the zoom is right on the first painted frame instead of jumping
-/// once the collection hydrates. A missing database or key simply leaves the
-/// webview at 1.0.
-fn restore_zoom_level(app: &AppHandle) {
-    let Some(zoom) = db_ops::read_persisted_number(app, "kv:settings", "zoomLevel") else {
-        return;
-    };
-    if let Some(webview_window) = app.get_webview_window("main") {
-        if let Err(e) = webview_window.set_zoom(zoom) {
-            eprintln!("Failed to restore native webview zoom: {}", e);
-        }
-    }
-    let _ = app.emit("zoom-changed", zoom);
-}
-
-/// Applies native webview zoom; persistence happens on the frontend
-/// (the `zoom-changed` handler writes the `settings` collection).
-fn set_zoom_level(app: &AppHandle, zoom: f64) {
-    if let Some(webview_window) = app.get_webview_window("main") {
-        if let Err(e) = webview_window.set_zoom(zoom) {
-            eprintln!("Failed to set native webview zoom: {}", e);
-        }
-    }
-
-    // Emit event so frontend can persist the setting
-    let _ = app.emit("zoom-changed", zoom);
 }
 
 /// One-time app-data migration for the com.metrists.dev -> com.notefig.app
@@ -191,7 +166,7 @@ fn main() {
             let menu = create_menu(app.handle())?;
             app.set_menu(menu)?;
 
-            restore_zoom_level(app.handle());
+            zoom::restore(app.handle());
             #[cfg(unix)]
             quit::on_signals(app.handle().clone());
 
@@ -244,17 +219,13 @@ fn main() {
             "theme_system" => {
                 let _ = app.emit("theme-changed", "system");
             }
-            "zoom_75" => {
-                set_zoom_level(app, 0.75);
-            }
-            "zoom_100" => {
-                set_zoom_level(app, 1.0);
-            }
-            "zoom_125" => {
-                set_zoom_level(app, 1.25);
-            }
-            "zoom_150" => {
-                set_zoom_level(app, 1.5);
+            id if id.starts_with("zoom_") => {
+                let chosen = zoom::ZOOM_LEVELS
+                    .into_iter()
+                    .find(|level| id == format!("zoom_{}", zoom_percent(*level)));
+                if let Some(level) = chosen {
+                    zoom::apply(app, level);
+                }
             }
             _ => {}
         });

@@ -21,6 +21,7 @@ pub mod quit;
 pub mod search;
 pub mod traffic_lights;
 pub mod walkdir_utils;
+pub mod zoom;
 
 #[cfg(test)]
 mod test_support;
@@ -31,6 +32,7 @@ mod test_support;
 pub fn register_handlers<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .manage(traffic_lights::TrafficLightsPin::default())
+        .manage(zoom::Zoom::default())
         .invoke_handler(tauri::generate_handler![
         // File system commands (errors-as-values pattern)
         fs_ops::read_directory,
@@ -81,5 +83,7 @@ pub fn register_handlers<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri
         app_status::publish_app_status,
         // A quit that waits for sync's goodbye
         quit::hold_quit,
+        // A pinch: one step between the View menu's zoom levels
+        zoom::step_zoom,
     ])
 }
