@@ -11,7 +11,7 @@ function presenceWith(wip: () => Promise<never>) {
   const git = {
     log: vi.fn(async () => [{ oid: "tip", commit: { tree: "root" } }]),
     treeWith: vi.fn(async () => "with-wip"),
-    commit: vi.fn(async () => "beat"),
+    commit: vi.fn(async (_: { message: string; tree: string; parent: string[] }) => "beat"),
     pushRef: vi.fn(async () => {}),
   };
   const presence = createPresence({

@@ -31,11 +31,16 @@ describe("wipDecorations", () => {
   const [mine, typed] = [keyedUnits(here)[1]!.key, keyedUnits(theirs)[1]!.key];
   const [unit] = peerUnitsOf(theirs, [typed]);
   const bob: SyncPeer = { deviceId: "b", name: "Bob", colour: "#2f7ed8", cursor: { path: "note.md", unit: unit!.at }, claims: [], wip: "c" };
-  const units = [{ ...unit!, holder: { peer: bob, agent: false }, keys: [mine, typed] }];
+  const units = [{ ...unit!, path: "note.md", holder: { peer: bob, agent: false }, keys: [mine, typed] }];
+  const held = new Map([[mine, { peer: bob, agent: false }]]);
 
   it("names the peer whose typing it draws, so their block isn't named again", () => {
-    const held = new Map([[mine, { peer: bob, agent: false }]]);
     expect([...wipDecorations(here, units, [bob], held, new Map()).named]).toEqual(["b"]);
+  });
+
+  it("names nobody on it once their cursor is in another file, at the same place there", () => {
+    const elsewhere = { ...bob, cursor: { path: "other.md", unit: unit!.at } };
+    expect(wipDecorations(here, units, [elsewhere], held, new Map()).named.size).toBe(0);
   });
 
   it("names nobody when it draws nothing: a race this device won keeps its own text, and their block shows them", () => {

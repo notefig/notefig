@@ -126,9 +126,10 @@ function renderUnit(schema: Schema, json: WipUnit["node"], draw: Draw) {
 }
 
 /** The peers whose cursor is in a unit of theirs drawn here: their name
- *  goes on what they're typing. */
+ *  goes on what they're typing. Its file too: a claim outlives the cursor
+ *  leaving for another file, whose unit may have the same place. */
 const presentIn = (unit: WipUnit, peers: readonly SyncPeer[]) =>
-  peers.filter((p) => p.deviceId === unit.holder.peer.deviceId && p.cursor?.unit === unit.at);
+  peers.filter((p) => p.deviceId === unit.holder.peer.deviceId && p.cursor?.path === unit.path && p.cursor.unit === unit.at);
 
 /** What `wipDecorations` knows of this copy while it draws. */
 interface Here {

@@ -47,12 +47,14 @@ export function createOwnWip(deps: {
   fileUnits(markdown: string): Promise<FileUnit[]>;
 }): OwnWip {
   const decoder = new TextDecoder();
-  /** The branch's copy of a file, cut into units: kept until it changes. */
-  const branchUnits = new Map<string, { text: string; units: FileUnit[] }>();
+  /** The branch's copy of a file, cut into units, and the text here its
+   *  claims were last named against: kept until either changes. */
+  const branchUnits = new Map<string, { text: string; units: FileUnit[]; named?: string }>();
 
   /** Name each unit this device holds in `path` by what it says on the
    *  branch too, `text` being what it says here: the others' copy is the
-   *  branch, and this one may already be typing past it. */
+   *  branch, and this one may already be typing past it. Neither changed
+   *  since the last heartbeat: the names stand, and nothing is parsed. */
   const nameOnBranch = async (path: string, text: string) => {
     const tip = await deps.head();
     const bytes = tip ? await deps.git.readFile({ ref: tip, filepath: path }).catch(() => null) : null;
@@ -60,11 +62,13 @@ export function createOwnWip(deps: {
     const branchText = decoder.decode(bytes);
     let known = branchUnits.get(path);
     if (known?.text !== branchText) branchUnits.set(path, (known = { text: branchText, units: await deps.fileUnits(branchText) }));
+    if (known.named === text) return;
     const here = await deps.fileUnits(text);
     const keys = branchKeys(known.units, here);
     // A claim's key may name its neighbours as they were: found as any is.
     const index = unitIndex(here.map((unit) => unit.key));
     deps.claims.branchHas(path, (key) => keys.get(index.resolve(key) ?? ""));
+    known.named = text;
   };
 
   return {
@@ -87,6 +91,8 @@ export function createOwnWip(deps: {
 
 /** A unit a peer holds, as it has it now. */
 export interface WipUnit extends PeerUnit {
+  /** The file it's in, `/`-separated. */
+  path: string;
   holder: ClaimHolder;
   /** What its claim names it by: as it was, as it landed, and now
    *  (`key`). Where its text matches no unit here, an earlier one does. */
@@ -137,7 +143,7 @@ export function createWip(deps: {
           const unit = units.find((candidate) => candidate.named === current);
           if (!unit) continue;
           const holder = { peer, agent: claim.agent };
-          next.set(claim.path, [...(next.get(claim.path) ?? []), { ...unit, holder, keys: claim.keys }]);
+          next.set(claim.path, [...(next.get(claim.path) ?? []), { ...unit, path: claim.path, holder, keys: claim.keys }]);
         }
       }
       // What no peer holds any more is dropped.
