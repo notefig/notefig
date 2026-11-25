@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { DropdownMenuTrigger } from "@notefig/ui/dropdown-menu";
 import { OpenInNewTabContextMenu } from "@notefig/ui/open-in-new-tab-item";
+import { RevealInFolderMenuItem } from "./reveal-in-folder";
 import { openIntentOf, type OpenIntent } from "@notefig/ui/open-intent";
 import { cn } from "@notefig/ui/utils";
 import { jumpToRound, jumpToTask } from "@/components/agent/jump-to-task";
@@ -235,14 +236,22 @@ const GLYPH_SLOT_CLASS =
  * the way the file tree does — a click in place of the tab in front,
  * Mod+click in a new tab — and offers the same on its right-click menu.
  */
-function NavRow(props: NavRowProps & { onOpen?: (intent: OpenIntent) => void }) {
+function NavRow(
+  props: NavRowProps & {
+    onOpen?: (intent: OpenIntent) => void;
+    /** The file the row stands for: its menu also shows it in the file
+     *  manager. */
+    path?: string;
+  },
+) {
   const { t } = useTranslation();
-  const { onOpen, ...row } = props;
+  const { onOpen, path, ...row } = props;
   if (!onOpen) return <NavRowButton {...row} />;
   return (
     <OpenInNewTabContextMenu
       label={t("openInNewTab")}
       onOpenInNewTab={() => onOpen("new-tab")}
+      items={path && <RevealInFolderMenuItem path={path} />}
     >
       <NavRowButton {...row} onClick={(event) => onOpen(openIntentOf(event))} />
     </OpenInNewTabContextMenu>
@@ -483,6 +492,7 @@ function RecentDocumentRow({
       active={active}
       trailing={deriveProjectName(document.workspacePath)}
       onOpen={(intent) => tabs.open(document.path, { intent })}
+      path={document.path}
     />
   );
 }

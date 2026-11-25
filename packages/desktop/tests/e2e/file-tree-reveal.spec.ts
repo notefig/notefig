@@ -1,6 +1,7 @@
 /**
  * MET-291: a file's context menu shows it in the system's file manager,
- * where the platform has one. The e2e page claims Windows, so the item reads
+ * where the platform has one: in the file tree, and among the Everything
+ * view's recent documents. The e2e page claims Windows, so the item reads
  * "Show in File Explorer".
  */
 import { test, expect } from "@playwright/test";
@@ -8,7 +9,7 @@ import { openWorkspace, seedTestFiles, setupTestDatabase, waitForFileTree } from
 
 const WS = "/workspace/file-tree-reveal";
 
-test("a file's context menu reveals it in the file manager, only where there is one", async ({ page }) => {
+test("a file's context menus reveal it in the file manager, only where there is one", async ({ page }) => {
   await setupTestDatabase(page, "file-tree-reveal");
   await openWorkspace(page, WS);
   await seedTestFiles(page, [{ path: `${WS}/notes.md`, content: "Notes.\n", type: "file" }]);
@@ -32,7 +33,16 @@ test("a file's context menu reveals it in the file manager, only where there is 
     w.__revealed = [];
     w.__notefigCore.platform.ui.revealInFolder = async (path) => void w.__revealed.push(path);
   });
+  const revealed = () => page.evaluate(() => (window as unknown as { __revealed: string[] }).__revealed);
   await notes.click({ button: "right" });
   await reveal.click();
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __revealed: string[] }).__revealed)).toEqual([`${WS}/notes.md`]);
+  await expect.poll(revealed).toEqual([`${WS}/notes.md`]);
+
+  // Opened, it's a recent document in the Everything view, whose row offers
+  // the same.
+  await notes.click();
+  await page.getByRole("button", { name: "Everything", exact: true }).click();
+  await page.locator(`button[title^="${WS}/notes.md"]`).click({ button: "right" });
+  await reveal.click();
+  await expect.poll(revealed).toEqual([`${WS}/notes.md`, `${WS}/notes.md`]);
 });
