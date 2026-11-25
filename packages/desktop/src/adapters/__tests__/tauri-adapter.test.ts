@@ -245,7 +245,13 @@ describe("TauriPlatformAdapter quit", () => {
   });
 });
 
-describe("TauriPlatformAdapter zoom", () => {
+describe("TauriPlatformAdapter ui", () => {
+  it("reveals a path in the file manager through the opener plugin", async () => {
+    const tauri = withMockedTauri({ "plugin:opener|reveal_item_in_dir": () => null });
+    await new TauriPlatformAdapter().ui.revealInFolder!("/ws/notes.md");
+    expect(tauri.calls("plugin:opener|reveal_item_in_dir")).toEqual([{ paths: ["/ws/notes.md"] }]);
+  });
+
   it("asks the backend for one zoom step", async () => {
     const tauri = withMockedTauri({ step_zoom: () => null });
     await new TauriPlatformAdapter().ui.stepZoom!(-1);

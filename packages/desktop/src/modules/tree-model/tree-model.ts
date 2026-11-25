@@ -155,6 +155,21 @@ export interface WorkspaceTreeModel {
   dispose(): void;
 }
 
+/**
+ * Reset `model` to `paths` with the directories in `expanded` open. Trees
+ * finds each expanded path among its siblings as if they were in name
+ * order, so under date-modified order it misses a directory once a newer
+ * sibling with a later name sorts above it (MET-252); those are opened
+ * here.
+ */
+export function resetTree(model: FileTree, paths: string[], expanded: readonly string[]): void {
+  model.resetPaths(paths, { initialExpandedPaths: [...expanded] });
+  for (const path of expanded) {
+    const item = model.getItem(path);
+    if (item && "expand" in item && !item.isExpanded()) item.expand();
+  }
+}
+
 export function createWorkspaceTreeModel(
   workspacePath: string,
 ): WorkspaceTreeModel {
