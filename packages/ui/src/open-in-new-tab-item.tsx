@@ -30,17 +30,21 @@ export function OpenInNewTabMenuItem({
 }
 
 /**
- * The right-click menu of a link that has nothing to offer but where to
- * open it: a document chip, a diff's file, a recent row. `children` is
- * the link itself (one element, which takes the trigger's handlers).
+ * The right-click menu of a link that offers where to open it, and maybe a
+ * few items of its own after: a document chip, a diff's file, a recent row.
+ * `children` is the link itself (one element, which takes the trigger's
+ * handlers).
  */
 export function OpenInNewTabContextMenu({
   label,
   onOpenInNewTab,
+  items,
   children,
 }: {
   label: string;
   onOpenInNewTab: () => void;
+  /** The entity's own items, after "Open in New Tab". */
+  items?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -48,6 +52,7 @@ export function OpenInNewTabContextMenu({
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent>
         <OpenInNewTabMenuItem label={label} onSelect={onOpenInNewTab} />
+        {items}
       </ContextMenuContent>
     </ContextMenu>
   );
