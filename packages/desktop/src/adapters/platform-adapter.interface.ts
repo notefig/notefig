@@ -577,6 +577,12 @@ export interface PlatformUiSurface {
    */
   openExternal(url: string): Promise<void>;
 
+  /**
+   * Show `path` (absolute) selected in the system's file manager. Absent
+   * where there is no file manager to show it in (the web).
+   */
+  revealInFolder?(path: string): Promise<void>;
+
   /** Toggle application fullscreen state. */
   toggleFullscreen(): Promise<void>;
 

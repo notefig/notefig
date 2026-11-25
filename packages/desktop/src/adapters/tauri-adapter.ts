@@ -31,7 +31,7 @@ import { createTauriDb } from "./tauri-db";
 import { requestTextPrompt } from "@/utils/text-prompt";
 import { path as pathutil } from "@/utils/path";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
@@ -178,6 +178,7 @@ export class TauriPlatformAdapter implements IPlatformAdapter {
     pickDirectory: this.pickDirectory.bind(this),
     promptText: this.promptText.bind(this),
     openExternal: this.openExternal.bind(this),
+    revealInFolder: (path) => revealItemInDir(path),
     toggleFullscreen: this.toggleFullscreen.bind(this),
     publishAppStatus: this.publishAppStatus.bind(this),
     onQuit: this.onQuit.bind(this),

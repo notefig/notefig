@@ -68,6 +68,10 @@ i18n
             "This will permanently delete the folder and all its contents. This action cannot be undone.",
           deleteFileConfirm:
             "This will permanently delete the file. This action cannot be undone.",
+          // Each system's own name for showing a file in its file manager.
+          revealInFinder: "Reveal in Finder",
+          showInExplorer: "Show in File Explorer",
+          showInFolder: "Show in folder",
 
           // File Controls
           newScratchpad: "New scratchpad",
