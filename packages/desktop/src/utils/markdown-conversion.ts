@@ -13,7 +13,7 @@
 import type { JSONContent } from "@tiptap/core";
 import type { MarkdownWorkerApi } from "@/workers/markdown-codec.worker";
 import type { MergedMarkdown } from "@/modules/sync/sync-merge";
-import type { FileUnit } from "@/modules/sync/sync-units";
+import type { FileUnit, PeerUnit } from "@/modules/sync/sync-units";
 import type { SavedFile } from "@/utils/markdown-units";
 import {
   createWorkerClient,
@@ -49,6 +49,10 @@ async function createInlineConverter(): Promise<Converter> {
     fileUnits: async (markdown: string) => {
       const { fileUnitsOf } = await import("@/modules/sync/sync-units");
       return fileUnitsOf(codec.parseDoc(markdown));
+    },
+    peerUnits: async (markdown: string, keys: string[]) => {
+      const { peerUnitsOf } = await import("@/modules/sync/sync-units");
+      return peerUnitsOf(codec.parseDoc(markdown), keys);
     },
   };
 }
@@ -135,6 +139,12 @@ export function mergeMarkdownOffThread(base: string, ours: string, theirs: strin
  *  (`modules/sync/sync-units.ts`), off the main thread. */
 export function fileUnitsOffThread(markdown: string): Promise<FileUnit[]> {
   return withConverter((c) => c.fileUnits(markdown));
+}
+
+/** The units of another device's copy of a file that `keys` name, with
+ *  their nodes (`modules/sync/sync-units.ts`), off the main thread. */
+export function peerUnitsOffThread(markdown: string, keys: string[]): Promise<PeerUnit[]> {
+  return withConverter((c) => c.peerUnits(markdown, keys));
 }
 
 export function resetConverterForTests(): void {

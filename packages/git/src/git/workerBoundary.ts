@@ -168,6 +168,7 @@ const GIT_SERVICE_METHODS = [
   "changedFiles",
   "mergeBase",
   "writeBlob",
+  "treeWith",
   "stageBlob",
   "writeRef",
   "listRefs",

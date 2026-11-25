@@ -16,9 +16,11 @@
  *   soon as it exists, if there's room.
  * - A device holds at most `MAX_CLAIMS` units, its user's and its agents'
  *   together. An edit that needs more is refused.
- * - A claim ends `CLAIM_IDLE_MS` after its last edit, or once the caret
- *   has left the unit and the edit is on the branch. An agent has no caret:
- *   its claims end once its edits are on the branch.
+ * - A claim ends once its edit is on the branch and the user is done with
+ *   it: the caret has left the unit, or `CLAIM_IDLE_MS` passed with no
+ *   edit. An agent has no caret: its claims end once its edits are on the
+ *   branch. Never before: the others would see the unit free while the
+ *   branch still has its old text.
  * - Two devices that claim one unit within a poll of each other: the lower
  *   device id holds it. The other one's text is merged three ways, as any
  *   collision is (`sync-merge.ts`).
@@ -88,13 +90,21 @@ export interface Claims {
   setCaret(caret: { path: string; key: string | null } | null): void;
   /** A cycle that began at `at` put everything saved by then on the
    *  branch; `unsaved` says which files still hold edits. It's asked only
-   *  of claims the caret has left, since asking saves at once. */
+   *  of claims the user is done with, since asking saves at once. */
   landed(at: number, unsaved: (path: string) => boolean): void;
-  /** End what's idle, left and on the branch, or beaten by another device;
+  /** What the units this device holds in `path` say on the branch now:
+   *  `onBranch` gives it for a unit's key here (`branchKeys`). Each claim
+   *  names its unit by that too, so a device whose copy is the branch finds
+   *  it while this one is still typing in it. */
+  branchHas(path: string, onBranch: (key: string) => string | undefined): void;
+  /** End what's on the branch and done with, or beaten by another device;
    *  true when anything ended. */
   expire(): boolean;
   /** What this device holds, as it's sent. */
   published(): SyncClaim[];
+  /** The user is typing in a unit they hold: their caret is in it, and
+   *  their last edit to it isn't idle yet. */
+  typing(): boolean;
   /** Nobody else is here: nothing to hold. */
   clear(): void;
 }
@@ -107,8 +117,10 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
   /** Units this device was editing when another device won them. */
   let yielded: { path: string; keys: string[]; peerId: string }[] = [];
 
-  /** The caret is in this claim's unit, though the text around it moved. */
+  /** The user is at this claim's unit: the caret is in it, though the text
+   *  around it moved, and they edited it within `CLAIM_IDLE_MS`. */
   const isHere = (entry: Own) =>
+    deps.now() - entry.lastEdit < CLAIM_IDLE_MS &&
     caret?.path === entry.path && caret.key !== null && entry.current !== null && sameUnit(caret.key, entry.current);
 
   /** Of two devices claiming one unit, the lower id holds it. */
@@ -240,16 +252,20 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
         if (entry.current && !entry.landed.includes(entry.current)) {
           entry.landed = [...entry.landed, entry.current].slice(-MAX_LANDED_KEYS);
         }
-        // Asked only once the caret's gone: asking saves now.
+        // Asked only once the user's done with it: asking saves now.
         if (!entry.onBranch && (entry.agent || !isHere(entry)) && !unsaved(entry.path)) entry.onBranch = true;
       }
     },
+    branchHas(path, onBranch) {
+      for (const entry of own) {
+        const there = entry.path === path && entry.current ? onBranch(entry.current) : undefined;
+        if (there && !entry.landed.includes(there)) entry.landed = [...entry.landed, there].slice(-MAX_LANDED_KEYS);
+      }
+    },
     expire() {
-      const at = deps.now();
       const [ownBefore, yieldedBefore] = [own.length, yielded.length];
       yielded = yielded.filter(({ path, keys, peerId }) => winnerOf(path, keys, peerId) !== null);
       own = own.filter((entry) => {
-        if (at - entry.lastEdit >= CLAIM_IDLE_MS) return false;
         if (entry.onBranch && (entry.agent || !isHere(entry))) return false;
         // Lost a race: the other device holds it, and this one yields.
         const keys = keysOf(entry);
@@ -260,6 +276,7 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
       return own.length !== ownBefore || yielded.length !== yieldedBefore;
     },
     published: () => own.map((entry) => ({ path: entry.path, keys: keysOf(entry), agent: entry.agent })),
+    typing: () => own.some((entry) => !entry.agent && isHere(entry)),
     clear() {
       own = [];
       yielded = [];
@@ -288,6 +305,33 @@ export function editBetween(before: FileUnit[], after: FileUnit[]): ClaimEdit {
     created.push(...added.slice(removed.length));
   }
   return { before: touched, after: [...paired, ...created] };
+}
+
+/** For each unit of `here` that one of `branch` turned into, the key that
+ *  one has there: the same unit, as the branch has it. Units alike in both
+ *  pair up, and so do those an edit changed, in order (`editBetween`). */
+export function branchKeys(branch: FileUnit[], here: FileUnit[]): Map<string, string> {
+  const keys = new Map<string, string>();
+  const pair = (h: number, b: number, count: number) => {
+    for (let k = 0; k < count; k++) keys.set(here[h + k]!.key, branch[b + k]!.key);
+  };
+  let [b, h] = [0, 0];
+  // The last run the edit removed: the run added right after it replaced
+  // it (jsdiff puts removals first).
+  let removed = { at: 0, count: 0 };
+  for (const part of diffArrays(branch, here, { comparator: (x, y) => x.content === y.content })) {
+    const count = part.value.length;
+    if (part.removed) {
+      removed = { at: b, count };
+      b += count;
+      continue;
+    }
+    pair(h, part.added ? removed.at : b, part.added ? Math.min(count, removed.count) : count);
+    h += count;
+    if (!part.added) b += count;
+    removed = { at: b, count: 0 };
+  }
+  return keys;
 }
 
 /** Why an agent's write was refused, for the agent: who to wait for, and

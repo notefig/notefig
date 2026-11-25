@@ -25,7 +25,7 @@ describe("sync carets' units", () => {
     for (const shown of [plain, drafted]) {
       const [, after] = docUnits(shown);
       expect(shown.textBetween(after.from, after.to)).toBe("After the widget.");
-      expect(cursorAt(shown, after.from + 3)).toEqual({ unit: 1, offset: 2 });
+      expect(cursorAt(shown, after.from + 3)).toEqual({ unit: 1 });
     }
   });
 });
@@ -120,7 +120,7 @@ describe("sync claims of a write", () => {
 
   it("tells an agent who to wait for, or to make smaller edits, and that nothing was written", () => {
     const holder = (name: string, agent: boolean) => ({
-      peer: { deviceId: name, name, colour: null, cursor: null, claims: [] },
+      peer: { deviceId: name, name, colour: null, cursor: null, claims: [], wip: null },
       agent,
     });
     expect(refusalMessage("docs/ideas.md", { kind: "held", holders: [holder("Ada", false), holder("Bob", true)] })).toBe(

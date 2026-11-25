@@ -42,14 +42,14 @@ export interface SyncReturnSummary {
   people: string[];
 }
 
-/** Where someone's caret is: a unit of the document (a paragraph, a list
- *  item's paragraph, a table row, a code block; `sync-editor.ts`) by its
- *  place among the document's units, and a character in it. */
+/** Which unit someone is in: a paragraph, a list item's paragraph, a
+ *  table row, a code block (`sync-editor.ts`), by its place among the
+ *  document's units. A block, not a character: their text reaches others a
+ *  cycle late, so a caret in it would only mislead. */
 export interface SyncCursor {
   /** `/`-separated path. */
   path: string;
   unit: number;
-  offset: number;
 }
 
 /** Another device syncing the branch now (`sync-presence.ts`). */
@@ -63,6 +63,9 @@ export interface SyncPeer {
   cursor: SyncCursor | null;
   /** The units it's editing now (`sync-claims.ts`); empty until read. */
   claims: SyncClaim[];
+  /** The presence commit holding what it's typing in them, read here;
+   *  null while it holds nothing. */
+  wip: string | null;
 }
 
 /** A unit a device is editing: nobody else's edit lands on it. */
@@ -199,7 +202,8 @@ export const POLL_MS = 12_000;
 export const IDLE_COMMIT_MS = 180_000;
 /** Shared: someone may be reading along, so look every second… */
 export const SHARED_POLL_MS = 1_000;
-/** …and commit this soon after the saves settle. */
+/** …and once the user is done with what they hold, commit this soon after
+ *  the saves settle: what they type reaches the others in presence first. */
 export const SHARED_COMMIT_MS = 2_000;
 const OFFLINE_MAX_MS = 120_000;
 const THROTTLED_BASE_MS = 60_000;

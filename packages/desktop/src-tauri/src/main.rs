@@ -192,6 +192,8 @@ fn main() {
             app.set_menu(menu)?;
 
             restore_zoom_level(app.handle());
+            #[cfg(unix)]
+            quit::on_signals(app.handle().clone());
 
             #[cfg(desktop)]
             {

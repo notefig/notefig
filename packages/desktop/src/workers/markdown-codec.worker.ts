@@ -11,7 +11,7 @@ import { renderMarkdownHtml } from "@/utils/markdown-html";
 import { exposeWorkerApi } from "@notefig/worker";
 import type { JSONContent } from "@tiptap/core";
 import type { MergedMarkdown } from "@/modules/sync/sync-merge";
-import type { FileUnit } from "@/modules/sync/sync-units";
+import type { FileUnit, PeerUnit } from "@/modules/sync/sync-units";
 import { serializeKeeping, type SavedFile } from "@/utils/markdown-units";
 
 installWorkerDomShim();
@@ -38,6 +38,12 @@ const api = {
   async fileUnits(markdown: string): Promise<FileUnit[]> {
     const { fileUnitsOf } = await import("@/modules/sync/sync-units");
     return fileUnitsOf(codec.parseDoc(markdown));
+  },
+  /** The units of another device's copy that `keys` name, with their
+   *  nodes (`modules/sync/sync-units.ts`). */
+  async peerUnits(markdown: string, keys: string[]): Promise<PeerUnit[]> {
+    const { peerUnitsOf } = await import("@/modules/sync/sync-units");
+    return peerUnitsOf(codec.parseDoc(markdown), keys);
   },
 };
 

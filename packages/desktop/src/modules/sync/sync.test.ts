@@ -1232,6 +1232,64 @@ describe("sync: shared, while another device syncs the branch", () => {
     expect(await read(join(wsB, "note.md"))).toBe("# Note\n\nShared edit.\n");
   });
 
+  it("folds a sitting into one commit while shared: none while typing in a held paragraph, one once the caret leaves", async () => {
+    const { a, b, editors, core, ws, wsB, remote } = await meet();
+    getOrCreateEditor(editors, join(ws, "note.md"), { type: "markdown", content: codec.parse(await read(join(ws, "note.md"))), basePath: ws }, editorFs);
+    const mine = editors.markdownEditor(join(ws, "note.md"))!;
+    vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
+    await a.syncNow();
+    await b.syncNow();
+    const before = await remote.tip();
+    const second = () => docUnits(mine.state.doc)[2]!;
+    // Typing in the second paragraph in bursts, each save announced as the
+    // editor's autosave does, with pauses longer than a save takes to
+    // settle; the caret stays in the paragraph. A's own polls run its cycles.
+    const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
+    let typed = 0;
+    for (let burst = 0; burst < 3; burst++) {
+      for (let key = 0; key < 3; key++) {
+        typed++;
+        mine.commands.insertContentAt(second().from + 1, "x");
+        mine.commands.setTextSelection(second().from + 2);
+        await fsp.writeFile(join(ws, "note.md"), `# Note\n\nFirst paragraph.\n\n${"x".repeat(typed)}Second paragraph.\n`);
+        written(core, join(ws, "note.md"));
+        await pause(300);
+      }
+      await pause(SHARED_COMMIT_MS + 600);
+      expect(await remote.tip()).toBe(before);
+    }
+
+    // The caret leaves what A holds: the sitting folds into one commit.
+    mine.commands.setTextSelection(docUnits(mine.state.doc)[1]!.from + 1);
+    await vi.waitFor(async () => expect(await remote.tip()).not.toBe(before), { timeout: 10_000, interval: 200 });
+    expect(await runGit(remote.bare, ["rev-list", "--count", `${before}..main`])).toBe("1");
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nFirst paragraph.\n\nxxxxxxxxxSecond paragraph.");
+    disposeEditor(editors, join(ws, "note.md"));
+  });
+
+  it("commits a sitting still folding once the other device leaves, at its next cycle", async () => {
+    const { a, b, editors, core, ws, wsB, remote } = await meet();
+    getOrCreateEditor(editors, join(ws, "note.md"), { type: "markdown", content: codec.parse(await read(join(ws, "note.md"))), basePath: ws }, editorFs);
+    const mine = editors.markdownEditor(join(ws, "note.md"))!;
+    vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
+    await a.syncNow();
+    await b.syncNow();
+    const before = await remote.tip();
+    // Typed and saved with the caret still in the paragraph: it waits to fold.
+    const second = () => docUnits(mine.state.doc)[2]!;
+    mine.commands.insertContentAt(second().from + 1, "Typed ");
+    mine.commands.setTextSelection(second().from + 3);
+    await fsp.writeFile(join(ws, "note.md"), "# Note\n\nFirst paragraph.\n\nTyped Second paragraph.\n");
+    written(core, join(ws, "note.md"));
+
+    // B goes; the caret never leaves, and nothing else is saved or blurred.
+    await core.workspace(wsB).close();
+    await vi.waitFor(() => expect(a.state().peers).toEqual([]), { timeout: 5_000 });
+    await vi.waitFor(async () => expect(await remote.tip()).not.toBe(before), { timeout: POLL_MS * 1.2 + 3_000, interval: 250 });
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe("# Note\n\nFirst paragraph.\n\nTyped Second paragraph.");
+    disposeEditor(editors, join(ws, "note.md"));
+  });
+
   it("sends what waited for the sitting's end as soon as a poll finds someone", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { sync: a, files, ws, remote, open } = await setup();
@@ -1271,13 +1329,13 @@ describe("sync: shared, while another device syncs the branch", () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it("shows each device where the other's caret is, through a plugin only while shared", async () => {
+  it("shows each device which block the other is in, named, through a plugin only while shared", async () => {
     const { a, b, editors, core, ws, wsB } = await meet();
     const open = async (path: string) => {
       getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
       return editors.markdownEditor(path)!;
     };
-    const carets = (editor: Editor) => editor.state.plugins.some((plugin) => (plugin as unknown as { key: string }).key === "syncCarets$");
+    const carets = (editor: Editor) => editor.state.plugins.some((plugin) => (plugin as unknown as { key: string }).key === "syncPeers$");
     const [mine, theirs] = [await open(join(ws, "note.md")), await open(join(wsB, "note.md"))];
     vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
     const [, , second] = docUnits(mine.state.doc);
@@ -1289,11 +1347,13 @@ describe("sync: shared, while another device syncs the branch", () => {
       async () => {
         await a.syncNow();
         await b.syncNow();
-        expect(b.state().peers[0].cursor).toEqual({ path: "note.md", unit: 2, offset: 6 });
+        expect(b.state().peers[0].cursor).toEqual({ path: "note.md", unit: 2 });
       },
       { timeout: 10_000 },
     );
-    expect(theirs.view.dom.querySelector('[data-sync-peer="dev"]')?.parentElement?.textContent).toBe("Second paragraph.");
+    const there = theirs.view.dom.querySelector<HTMLElement>(".sync-here");
+    expect(there?.textContent).toBe("Second paragraph.");
+    expect(there?.dataset.syncNames).toBe("User device-a");
     // Its colour came in the same heartbeat commit.
     expect(b.state().peers[0].colour).toMatch(/^#[0-9a-f]{6}$/);
 
@@ -1360,6 +1420,132 @@ describe("sync: shared, while another device syncs the branch", () => {
     disposeEditor(editors, join(wsB, "note.md"));
   });
 
+  it("shows what one device is typing in the other's editor before it's committed, and drops it once it is", async () => {
+    const { a, b, editors, core, ws, wsB, remote } = await meet();
+    const open = async (path: string) => {
+      getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
+      return editors.markdownEditor(path)!;
+    };
+    const [mine, theirs] = [await open(join(ws, "note.md")), await open(join(wsB, "note.md"))];
+    vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
+    await a.syncNow();
+    await b.syncNow();
+    const second = (editor: Editor) => docUnits(editor.state.doc)[2]!;
+    mine.commands.insertContentAt(second(mine).from + 1, "Typed ");
+    mine.commands.setTextSelection(second(mine).from + 1 + 3);
+    // Saved, as the autosave would, but not announced: nothing commits it.
+    await fsp.writeFile(join(ws, "note.md"), "# Note\n\nFirst paragraph.\n\nTyped Second paragraph.\n");
+
+    await vi.waitFor(
+      async () => {
+        await a.syncNow();
+        await b.syncNow();
+        expect(theirs.view.dom.querySelector(".sync-wip")?.textContent).toBe("Typed Second paragraph.");
+      },
+      { timeout: 10_000 },
+    );
+    // Drawn, never written: B's doc, its file and the branch have the old text.
+    expect(theirs.state.doc.textBetween(second(theirs).from, second(theirs).to)).toBe("Second paragraph.");
+    expect(await read(join(wsB, "note.md"))).toBe(SEED["note.md"]);
+    expect(await runGit(remote.bare, ["show", "main:note.md"])).toBe(SEED["note.md"].trimEnd());
+    expect(theirs.view.dom.querySelector(".sync-wip-hidden")?.textContent).toBe("Second paragraph.");
+    // What arrived is washed in A's colour: the words A added, nothing else.
+    expect(theirs.view.dom.querySelector(".sync-wip .sync-wash")?.textContent).toBe("Typed ");
+    // A is named on the block A is in, once.
+    await vi.waitFor(async () => {
+      await a.syncNow();
+      await b.syncNow();
+      const there = theirs.view.dom.querySelectorAll<HTMLElement>("[data-sync-names]");
+      expect([...there].map((el) => [el.dataset.syncNames, el.querySelector(".sync-wip")?.textContent])).toEqual([
+        ["User device-a", "Typed Second paragraph."],
+      ]);
+    });
+
+    // A unit A makes shows under the one before it.
+    mine.commands.insertContentAt(second(mine).to, { type: "paragraph", content: [{ type: "text", text: "A new one." }] });
+    await fsp.writeFile(join(ws, "note.md"), "# Note\n\nFirst paragraph.\n\nTyped Second paragraph.\n\nA new one.\n");
+    await vi.waitFor(
+      async () => {
+        await a.syncNow();
+        await b.syncNow();
+        expect(theirs.view.dom.querySelector(".sync-wip-new")?.textContent).toBe("A new one.");
+      },
+      { timeout: 10_000 },
+    );
+    expect(theirs.view.dom.querySelector(".sync-wip-new .sync-wash")?.textContent).toBe("A new one.");
+
+    // Committed and taken in: the text is B's own, and nothing is drawn over it.
+    written(core, join(ws, "note.md"));
+    await vi.waitFor(
+      async () => {
+        await a.syncNow();
+        await b.syncNow();
+        expect(theirs.state.doc.textContent).toContain("Typed Second paragraph.A new one.");
+        expect(theirs.view.dom.querySelector(".sync-wip, .sync-wip-hidden")).toBeNull();
+      },
+      { timeout: 10_000 },
+    );
+    disposeEditor(editors, join(ws, "note.md"));
+    disposeEditor(editors, join(wsB, "note.md"));
+  });
+
+  it("keeps a paragraph held, and draws it once, while its holder types past what's on the branch", async () => {
+    const { a, b, editors, core, ws, wsB } = await meet();
+    const open = async (path: string) => {
+      getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
+      return editors.markdownEditor(path)!;
+    };
+    const [mine, theirs] = [await open(join(ws, "note.md")), await open(join(wsB, "note.md"))];
+    vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
+    await a.syncNow();
+    await b.syncNow();
+    const unit = (editor: Editor, n: number) => docUnits(editor.state.doc)[n]!;
+    const save = (text: string) => fsp.writeFile(join(ws, "note.md"), `# Note\n\nFirst paragraph.\n\n${text}\n`);
+    // A edits a paragraph and starts one, and that much is committed and taken in.
+    mine.commands.insertContentAt(unit(mine, 2).from + 1, "Typed ");
+    mine.commands.insertContentAt(unit(mine, 2).to, { type: "paragraph", content: [{ type: "text", text: "Fresh." }] });
+    await save("Typed Second paragraph.\n\nFresh.");
+    written(core, join(ws, "note.md"));
+    await vi.waitFor(
+      async () => {
+        await a.syncNow();
+        await b.syncNow();
+        expect(theirs.state.doc.textContent).toContain("Typed Second paragraph.Fresh.");
+      },
+      { timeout: 10_000 },
+    );
+    // A types on in both, past the commit. Each save is announced, as the
+    // editor's are, so none is committed while A keeps typing: A's own poll
+    // runs its cycles, and the commit waits for a pause.
+    mine.commands.insertContentAt(unit(mine, 2).from + 1, "More ");
+    mine.commands.insertContentAt(unit(mine, 3).to - 1, " Again.");
+    mine.commands.setTextSelection(unit(mine, 3).to - 1);
+    await save("More Typed Second paragraph.\n\nFresh. Again.");
+
+    await vi.waitFor(
+      async () => {
+        written(core, join(ws, "note.md"));
+        await b.syncNow();
+        const drawn = [...theirs.view.dom.querySelectorAll(".sync-wip")].map((el) => el.textContent);
+        expect(drawn).toEqual(["More Typed Second paragraph.", "Fresh. Again."]);
+      },
+      { timeout: 10_000, interval: 300 },
+    );
+    // Still typing: nothing of it is on the branch yet.
+    expect(theirs.state.doc.textContent).toContain("Typed Second paragraph.Fresh.");
+    // Each drawn over its own paragraph here, which stays held: none twice.
+    expect(theirs.view.dom.querySelectorAll(".sync-wip-new")).toHaveLength(0);
+    expect([...theirs.view.dom.querySelectorAll(".sync-held .sync-wip-hidden")].map((el) => el.textContent)).toEqual([
+      "Typed Second paragraph.",
+      "Fresh.",
+    ]);
+    const before = theirs.state.doc;
+    theirs.commands.insertContentAt(unit(theirs, 3).from + 1, "Bob ");
+    expect(theirs.state.doc).toBe(before);
+    disposeEditor(editors, join(ws, "note.md"));
+    disposeEditor(editors, join(wsB, "note.md"));
+  });
+
   it("settles two devices taking one unit at once: the lower id holds it, the other moves on", async () => {
     const { a, b, editors, ws, wsB } = await meet();
     const open = async (path: string) => {
@@ -1374,6 +1560,8 @@ describe("sync: shared, while another device syncs the branch", () => {
     const second = (editor: Editor) => docUnits(editor.state.doc)[2]!;
     mine.commands.insertContentAt(second(mine).from + 1, "A: ");
     theirs.commands.insertContentAt(second(theirs).from + 1, "B: ");
+    // A's typing is saved, as the autosave would, so its presence carries it.
+    await fsp.writeFile(join(ws, "note.md"), "# Note\n\nFirst paragraph.\n\nA: Second paragraph.\n");
     await vi.waitFor(
       async () => {
         await a.syncNow();
@@ -1384,6 +1572,8 @@ describe("sync: shared, while another device syncs the branch", () => {
       { timeout: 10_000 },
     );
     expect(theirs.view.dom.querySelector(".sync-held")).toBeNull();
+    // The winner sees its own text, never the other's drawn over it.
+    expect(theirs.view.dom.querySelector(".sync-wip, .sync-wip-hidden")).toBeNull();
     await vi.waitFor(() => expect(mine.state.selection.head).toBeGreaterThan(second(mine).to));
     await vi.waitFor(async () => {
       await a.syncNow();
@@ -1402,7 +1592,7 @@ describe("sync: shared, while another device syncs the branch", () => {
     const oid = await runGit(remote.bare, ["commit-tree", tree, "-p", "main", "-m", forged]);
     await runGit(remote.bare, ["update-ref", "refs/notefig/v1/presence/main/x", oid]);
     await sync.syncNow();
-    expect(sync.state().peers).toEqual([{ deviceId: "x", name: null, colour: null, cursor: null, claims: [] }]);
+    expect(sync.state().peers).toEqual([{ deviceId: "x", name: null, colour: null, cursor: null, claims: [], wip: null }]);
   });
 
   it("keeps its presence after a passing failure to push it", async () => {

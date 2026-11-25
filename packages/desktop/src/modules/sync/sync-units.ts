@@ -6,11 +6,12 @@
  * paragraphs aren't in the markdown, so aren't units.
  *
  * They're the merge's units (`utils/markdown-units.ts`) seen from the
- * ProseMirror side: a caret (`SyncCursor`) points at one by its place, a
+ * ProseMirror side: a cursor (`SyncCursor`) points at one by its place, a
  * claim (`SyncClaim`) names one by its key, a hash of what it says, so
  * every device finds the same unit whatever the text above it holds.
  * Pure: the editor calls it on its doc, the markdown worker on a parse.
  */
+import type { JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { PROMPT_NODE_NAME, serializePromptMarker } from "@notefig/widgets";
 
@@ -212,10 +213,37 @@ export function unitsIn(doc: PMNode, from: number, to: number): KeyedUnit[] {
   return units;
 }
 
-/** Where the selection's head is, as a unit and a character in it. */
-export function cursorAt(doc: PMNode, head: number): { unit: number; offset: number } {
+/** The unit the selection's head is in, by its place. */
+export function cursorAt(doc: PMNode, head: number): { unit: number } {
   const units = docUnits(doc);
   const found = units.findIndex(({ to }) => head <= to);
-  const unit = found < 0 ? Math.max(units.length - 1, 0) : found;
-  return { unit, offset: Math.max(0, head - (units[unit]?.from ?? 0) - 1) };
+  return { unit: found < 0 ? Math.max(units.length - 1, 0) : found };
+}
+
+/** A unit of another device's copy, as it has it: what draws its work in
+ *  progress here (`sync-editor.ts`). */
+export interface PeerUnit {
+  /** The key it was asked for by, which names it in that copy. */
+  named: string;
+  /** Its key in that copy. */
+  key: string;
+  /** The unit's node, as JSON. */
+  node: JSONContent;
+  /** Its place among the copy's units, as a caret names it. */
+  at: number;
+  /** The key of the unit before it; null at the top. */
+  previous: string | null;
+}
+
+/** The units of `doc` that `keys` name (`unitIndex`), with their nodes. */
+export function peerUnitsOf(doc: PMNode, keys: string[]): PeerUnit[] {
+  const { units, index } = keyed(doc);
+  const at = new Map(units.map((unit, i) => [unit.key, i]));
+  return keys.flatMap((named) => {
+    const key = index.resolve(named);
+    const i = key === null ? undefined : at.get(key);
+    const node = i === undefined ? null : doc.nodeAt(units[i]!.from);
+    if (!node || i === undefined) return [];
+    return [{ named, key: key!, node: node.toJSON() as JSONContent, at: i, previous: units[i - 1]?.key ?? null }];
+  });
 }

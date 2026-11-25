@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { CLAIM_IDLE_MS, MAX_CLAIMS, createClaims } from "./sync-claims";
+import { CLAIM_IDLE_MS, MAX_CLAIMS, branchKeys, createClaims } from "./sync-claims";
 import type { SyncClaim, SyncPeer } from "./sync-machine";
 
 const peer = (deviceId: string, claims: SyncClaim[] = []): SyncPeer => ({
   deviceId,
   name: deviceId === "a" ? "Ada" : "Bob",
   colour: "#2f7ed8",
+  wip: null,
   cursor: null,
   claims,
 });
@@ -115,13 +116,17 @@ describe("sync claims", () => {
     expect(claims.published()).toEqual([]);
   });
 
-  it(`ends a claim ${CLAIM_IDLE_MS / 1000} s after its last edit, wherever the caret is`, () => {
-    const { claims, tick } = claimsWith();
+  it(`stops typing ${CLAIM_IDLE_MS / 1000} s after its last edit, caret or not, and holds the unit until the edit is on the branch`, () => {
+    const { claims, tick, now } = claimsWith();
     claims.take("a.md", edit(["k1"], ["k2"]), false, same);
     claims.setCaret({ path: "a.md", key: "k2" });
     tick(CLAIM_IDLE_MS - 1);
-    expect(claims.expire()).toBe(false);
+    expect(claims.typing()).toBe(true);
     tick(1);
+    expect(claims.typing()).toBe(false);
+    // Idle, but the branch still has the old text: nobody else may edit it yet.
+    expect(claims.expire()).toBe(false);
+    claims.landed(now(), () => false);
     expect(claims.expire()).toBe(true);
     expect(claims.published()).toEqual([]);
   });
@@ -155,5 +160,16 @@ describe("sync claims", () => {
     claims.landed(now(), () => false);
     // An agent has no caret: done once it's on the branch.
     expect(claims.expire()).toBe(true);
+  });
+});
+
+describe("branchKeys", () => {
+  const unit = (key: string, content = key) => ({ key, content });
+  it("pairs each unit here with the one it was on the branch: alike, or changed in order", () => {
+    const keys = branchKeys(
+      [unit("title"), unit("typed", "Typed."), unit("fresh", "Fresh.")],
+      [unit("title"), unit("more", "More typed."), unit("again", "Fresh. Again."), unit("new", "New.")],
+    );
+    expect(Object.fromEntries(keys)).toEqual({ title: "title", more: "typed", again: "fresh" });
   });
 });

@@ -253,6 +253,10 @@ export interface GitService {
   changedFiles(from: string, to: string): Promise<string[]>;
   /** Store bytes as a blob; its oid. */
   writeBlob(bytes: Uint8Array): Promise<string>;
+  /** A stored tree: `tree` (an oid) with `files` written into it, folders
+   *  made as needed and modes kept. Neither the index nor the worktree is
+   *  touched. */
+  treeWith(input: { tree: string; files: { filepath: string; bytes: Uint8Array }[] }): Promise<string>;
   /** Point the index entry for `filepath` at a stored blob, without
    *  touching the worktree. The mode is the file's in `modeFrom` (a ref or
    *  oid), so the next commit doesn't change it. */
