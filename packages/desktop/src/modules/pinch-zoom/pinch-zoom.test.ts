@@ -18,10 +18,12 @@ function pinchOn() {
 }
 
 describe("pinch zoom", () => {
-  it("steps once per pinch, once it has travelled far enough, and the page never sees it", () => {
+  it("steps once per pinch, once it has travelled far enough, and nothing else sees it", () => {
     const { page, step, stop } = pinchOn();
     const reached = vi.fn();
     page.addEventListener("wheel", reached);
+    // Where Tauri's zoom script listens: on the window, after this module.
+    window.addEventListener("wheel", reached);
     const half = PINCH_STEP_DELTA / 2;
 
     page.dispatchEvent(wheel(half, 0));
@@ -33,6 +35,7 @@ describe("pinch zoom", () => {
     expect(step.mock.calls).toEqual([[-1]]);
     expect(far.defaultPrevented).toBe(true);
     expect(reached).not.toHaveBeenCalled();
+    window.removeEventListener("wheel", reached);
     stop();
   });
 

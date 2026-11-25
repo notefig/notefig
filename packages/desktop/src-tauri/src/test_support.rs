@@ -187,3 +187,22 @@ fn db_ops_execute_and_query_dispatch() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["v"], json!("hello"));
 }
+
+/// zoom: a pinch's `step_zoom` moves the window one View-menu level and
+/// announces it as `zoom-changed`, which is what the frontend persists.
+#[test]
+fn zoom_step_zoom_dispatches_and_announces() {
+    use std::sync::{Arc, Mutex};
+    use tauri::Listener;
+
+    let app = mock_app();
+    let webview = main_webview(&app);
+    let announced = Arc::new(Mutex::new(Vec::<String>::new()));
+    let sink = announced.clone();
+    app.listen("zoom-changed", move |event| sink.lock().unwrap().push(event.payload().to_string()));
+
+    invoke_json(&webview, "step_zoom", json!({ "direction": 1 })).expect("step_zoom should return Ok");
+    invoke_json(&webview, "step_zoom", json!({ "direction": 1 })).expect("step_zoom should return Ok");
+
+    assert_eq!(*announced.lock().unwrap(), vec!["1.25", "1.5"]);
+}
