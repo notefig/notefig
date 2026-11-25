@@ -52,6 +52,8 @@ export const TAURI_COMMANDS = [
   "place_traffic_lights",
   // app_status
   "publish_app_status",
+  // zoom
+  "step_zoom",
 ] as const;
 
 export type CommandHandler = (

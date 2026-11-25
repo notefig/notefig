@@ -244,3 +244,11 @@ describe("TauriPlatformAdapter quit", () => {
     expect(said).toEqual(["c"]);
   });
 });
+
+describe("TauriPlatformAdapter zoom", () => {
+  it("asks the backend for one zoom step", async () => {
+    const tauri = withMockedTauri({ step_zoom: () => null });
+    await new TauriPlatformAdapter().ui.stepZoom!(-1);
+    expect(tauri.calls("step_zoom")).toEqual([{ direction: -1 }]);
+  });
+});
