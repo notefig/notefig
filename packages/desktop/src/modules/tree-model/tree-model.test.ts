@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import {
   createWorkspaceTreeModel,
+  resetTree,
   type TreeModelEntry,
   type TreeSortState,
 } from "./tree-model";
@@ -115,5 +116,20 @@ describe("tree model scratchpad pinning", () => {
       (path) => path !== `${SCRATCHPADS_REL_PATH}/`,
     );
     expect(roots).toEqual(["zebra.md", "docs/", "apple.md"]);
+  });
+});
+
+describe("resetTree", () => {
+  it("keeps a directory open under date-modified order once a newer sibling with a later name sorts above it", () => {
+    const { model, sortState } = modelEntry("date-modified");
+    const paths = ["docs/", "docs/inner.md", "notes.md"];
+    // A prompt sent from notes.md saved it: it's now newer than docs.
+    sortState.modifiedByRelPath = new Map([
+      ["docs", 1],
+      ["docs/inner.md", 1],
+      ["notes.md", 2],
+    ]);
+    resetTree(model, paths, ["docs"]);
+    expect(visiblePaths(model)).toEqual(["notes.md", "docs/", "docs/inner.md"]);
   });
 });

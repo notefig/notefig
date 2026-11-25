@@ -50,7 +50,7 @@ import {
 import { moveIntoFolder } from "@/utils/drop-actions";
 import { attachTreeStatHydration } from "./tree-stat-hydration";
 import type { ExpansionMemory } from "@/modules/tree-expansion";
-import type { WorkspaceTreeModel } from "@/modules/tree-model";
+import { resetTree, type WorkspaceTreeModel } from "@/modules/tree-model";
 
 /** Discriminated union representing the file tree's inline-editing state. */
 export type FileTreeMode =
@@ -303,9 +303,7 @@ function FileTreeInner({
   useEffect(() => {
     if (entry.sortState.order === sortOrder) return;
     entry.sortState.order = sortOrder;
-    model.resetPaths(treePathsRef.current, {
-      initialExpandedPaths: expansion.paths() ?? [],
-    });
+    resetTree(model, treePathsRef.current, expansion.paths() ?? []);
     if (selectedFilePathRef.current) {
       selectOnly(toRel(selectedFilePathRef.current));
     }
@@ -475,7 +473,7 @@ function FileTreeInner({
             .map((row) => row.path.replace(/\/+$/, "")),
       );
       for (const path of extraExpanded) expanded.add(path);
-      model.resetPaths(paths, { initialExpandedPaths: [...expanded] });
+      resetTree(model, paths, [...expanded]);
       if (selectedFilePathRef.current) {
         selectOnly(toRel(selectedFilePathRef.current));
       }
