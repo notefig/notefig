@@ -49,6 +49,7 @@ import {
 } from "@/modules/scratchpads";
 import { moveIntoFolder } from "@/utils/drop-actions";
 import { attachTreeStatHydration } from "./tree-stat-hydration";
+import { reveal, revealLabel } from "./reveal-in-folder";
 import type { ExpansionMemory } from "@/modules/tree-expansion";
 import { resetTree, type WorkspaceTreeModel } from "@/modules/tree-model";
 
@@ -104,14 +105,6 @@ interface FileTreeComponentProps {
   mode: FileTreeMode;
   onModeChange: (mode: FileTreeMode) => void;
 }
-
-/** What this system calls showing a file in its file manager. */
-const revealLabel = () =>
-  navigator.platform.startsWith("Mac")
-    ? "revealInFinder"
-    : navigator.platform.startsWith("Win")
-      ? "showInExplorer"
-      : "showInFolder";
 
 /** Row height in rem: text-sm line-height (1.25rem) + py-1 top/bottom. */
 const ROW_HEIGHT_REM = 1.75;
@@ -657,9 +650,7 @@ function FileTreeInner({
               className={menuButton}
               onClick={() => {
                 context.close();
-                ui.revealInFolder?.(abs).catch((error: unknown) => {
-                  console.error(`Failed to reveal ${abs}:`, error);
-                });
+                reveal(ui, abs);
               }}
             >
               <FolderOpen />
