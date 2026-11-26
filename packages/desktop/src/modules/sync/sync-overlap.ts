@@ -33,9 +33,10 @@ export interface OverlapDeps {
   fs: Pick<FileSystemSurface, "readBinaryFiles" | "writeBinaryFiles">;
   absolute(path: string): string;
   merge(base: string, ours: string, theirs: string, holds?: string[]): Promise<MergedMarkdown>;
-  /** Of the units of ours a merge of `filepath` replaced, the ones this
-   *  device won from another that claimed them too (`Claims.won`). */
-  wonUnits(filepath: string, texts: string[]): Promise<string[]>;
+  /** Of the units of ours (`mine`, the file's text) a merge of `filepath`
+   *  replaced, the ones this device won from another that claimed them too
+   *  (`Claims.won`). */
+  wonUnits(filepath: string, mine: string, texts: string[]): Promise<string[]>;
   /** A merge that threw: a bug to hear about, not the user's to fix. */
   reportError(error: unknown): void;
   dispatch(event: SyncEvent): void;
@@ -107,7 +108,7 @@ export function createOverlaps(deps: OverlapDeps) {
       merged = await deps.merge(from, mine, incoming);
       // Races this device won: those units of ours stand, and what they
       // replace is the other device's, which stays in the branch's history.
-      const holds = merged.overwritten.length > 0 ? await deps.wonUnits(filepath, merged.overwritten) : [];
+      const holds = merged.overwritten.length > 0 ? await deps.wonUnits(filepath, mine, merged.overwritten) : [];
       if (holds.length > 0) merged = await deps.merge(from, mine, incoming, holds);
     } catch (error) {
       deps.reportError(error);

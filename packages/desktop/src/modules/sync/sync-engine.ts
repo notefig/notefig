@@ -51,7 +51,7 @@ import { path as pathutil } from "@/utils/path";
 import { createPresence, presencePrefix } from "./sync-presence";
 import { createSyncEditors } from "./sync-editor";
 import { createClaims, editBetween, refusalMessage } from "./sync-claims";
-import { unitIndex, type FileUnit, type PeerUnit } from "./sync-units";
+import { unitIndex, unitsLeftOut, type FileUnit, type PeerUnit } from "./sync-units";
 import { createOwnWip, createWip } from "./sync-wip";
 import {
   IDLE_COMMIT_MS,
@@ -295,12 +295,19 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     absolute,
     merge: deps.merge,
     // Who claims what is read after the pull; a collision needs it now.
-    wonUnits: async (filepath, texts) => {
+    wonUnits: async (filepath, mine, texts) => {
       if (!isShared(deps.state())) return [];
       await presence.read();
-      const won = unitIndex(claims.won(filepath));
+      const won = claims.won(filepath);
+      if (won.length === 0) return [];
+      const index = unitIndex(won);
+      const all = await deps.fileUnits(mine);
+      // Each text's units, keyed in the file: the ones it leaves out of it.
       const named = await Promise.all(
-        texts.map(async (text) => (await deps.fileUnits(text)).some((unit) => won.resolve(unit.key) !== null)),
+        texts.map(async (text) => {
+          const without = await deps.fileUnits(mine.replace(text, ""));
+          return unitsLeftOut(all, without).some((unit) => index.resolve(unit.key) !== null);
+        }),
       );
       return texts.filter((_, i) => named[i]);
     },

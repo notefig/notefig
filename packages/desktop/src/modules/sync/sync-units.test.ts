@@ -3,7 +3,7 @@ import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getSchema } from "@tiptap/core";
 import { Node as PMNode } from "@tiptap/pm/model";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
-import { cursorAt, docUnits, fileUnitsOf, keyedUnits, sameUnit, unitIndex, unitsIn } from "./sync-units";
+import { cursorAt, docUnits, fileUnitsOf, keyedUnits, sameUnit, unitIndex, unitsIn, unitsLeftOut } from "./sync-units";
 
 const keysOf = (markdown: string) => fileUnitsOf(doc(markdown)).map((unit) => unit.key);
 import { editBetween, refusalMessage } from "./sync-claims";
@@ -127,5 +127,24 @@ describe("sync claims of a write", () => {
       "Refused: Ada and Bob's agent are editing paragraphs of ideas.md this edit touches. Nothing was written. Edit other paragraphs, or try again in a few seconds.",
     );
     expect(refusalMessage("ideas.md", { kind: "cap", needed: 7 })).toMatch(/at most 4 paragraphs at a time, and this edit would make 7\. Nothing was written/);
+  });
+});
+
+describe("unitsLeftOut", () => {
+  const units = (markdown: string) => fileUnitsOf(doc(markdown));
+  const table = "Intro.\n\n| name | n |\n| --- | --- |\n| one | 1 |\n| two | 2 |\n";
+
+  it("keys a stretch of a file in place: a table row as a row, which alone parses as a paragraph", () => {
+    const all = units(table);
+    const row = all[2]!;
+    expect(unitsLeftOut(all, units(table.replace("| one | 1 |\n", "")))).toEqual([row]);
+    // Alone, the row is another unit: its key names nothing in the file.
+    const alone = units("| one | 1 |\n");
+    expect(alone.every((unit) => unitIndex(all.map((u) => u.key)).resolve(unit.key) !== row.key)).toBe(true);
+  });
+
+  it("takes one copy of a text the file says twice", () => {
+    const twice = "Same.\n\nOther.\n\nSame.\n";
+    expect(unitsLeftOut(units(twice), units(twice.replace("Same.", "")))).toHaveLength(1);
   });
 });
