@@ -88,6 +88,27 @@ test.describe("rendering & input rules", () => {
   });
 });
 
+test.describe("select all", () => {
+  // A selection starting at a task list's first checkbox selected no text
+  // while the global `[contenteditable="true"] *` rule made the checkbox's
+  // label contents selectable (MET-294): ⌘A in a note opening with a task
+  // list painted nothing, and elsewhere it took in the checkboxes' hidden
+  // screen-reader names. The page is Win32, so Mod is Control.
+  for (const [shape, content] of [
+    ["opening with a task list", "- [ ] Hello\n- [ ] world\n- [ ] something else\n"],
+    ["with a task list below a heading", "# Plan\n\n- [ ] Hello\n- [ ] world\n"],
+  ] as const) {
+    test(`selects the note's text and nothing else, ${shape}`, async ({ page }) => {
+      await openHarness(page, { content });
+      await page.locator(".ProseMirror p").last().click();
+      await page.keyboard.press("End");
+      await page.keyboard.press("Control+a");
+      const text = content.replace(/^# /, "").replace(/- \[ \] /g, "").replace(/\n+/g, "");
+      await expect.poll(() => page.evaluate(() => window.getSelection()?.toString().replace(/\s+/g, ""))).toBe(text.replace(/\s+/g, ""));
+    });
+  }
+});
+
 test.describe("persistence", () => {
   test("autosave writes the edited markdown through the adapter", async ({
     page,

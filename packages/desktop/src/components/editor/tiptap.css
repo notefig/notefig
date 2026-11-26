@@ -142,6 +142,16 @@ ul[data-type="taskList"] > li > label {
   height: 1.5rem;
 }
 
+/* The label holds the checkbox and the screen-reader name TipTap gives it
+   (a visually hidden span). `[contenteditable="true"] *` in styles.css makes
+   both selectable again, and a selection starting at a task list's first
+   label then selects no text at all: ⌘A in a note that opens with a task
+   list painted nothing (MET-294), and elsewhere it copied the hidden names. */
+ul[data-type="taskList"] > li > label * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 ul[data-type="taskList"] > li > div {
   flex: 1;
   min-width: 0;
