@@ -135,18 +135,12 @@ export function sameUnit(a: string, b: string): boolean {
   return a === b || agreement(a, b) >= NEIGHBOUR + REPEAT;
 }
 
-/** The units of a file (`all`) that the same file without one stretch of
- *  it (`without`) lacks, by what they say: that stretch's units, keyed in
- *  place, where a table row or list item parsed alone would be something
- *  else. */
-export function unitsLeftOut(all: FileUnit[], without: FileUnit[]): FileUnit[] {
-  const kept = new Map<string, number>();
-  for (const { key } of without) kept.set(partsOf(key).text, (kept.get(partsOf(key).text) ?? 0) + 1);
-  return all.filter(({ key }) => {
-    const left = kept.get(partsOf(key).text) ?? 0;
-    if (left > 0) kept.set(partsOf(key).text, left - 1);
-    return left === 0;
-  });
+/** Where among a file's units (`units`, as `fileUnitsOf` gives them) are
+ *  the ones `keys` name: the places a merge keeps ours at (`Holds`). */
+export function heldPlaces(units: FileUnit[], keys: string[]): { at: number[]; of: number } {
+  const index = unitIndex(keys);
+  const at = units.flatMap((unit, i) => (index.resolve(unit.key) === null ? [] : [i]));
+  return { at, of: units.length };
 }
 
 /** An index over a file's keys, to find the one unit another copy's key

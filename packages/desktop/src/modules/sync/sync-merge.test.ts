@@ -38,16 +38,19 @@ describe("mergeMarkdown", () => {
     // Both sides rewrote both paragraphs; this device won the first.
     const mine = base.replace("First paragraph here.", "First, mine.").replace("Second paragraph here.", "Second, mine.");
     const theirs = base.replace("First paragraph here.", "First, theirs.").replace("Second paragraph here.", "Second, theirs.");
-    expect(await mergeMarkdown(base, mine, theirs, ["First, mine."])).toEqual({
+    // Ours' units: the title, then the first paragraph at 1.
+    expect(await mergeMarkdown(base, mine, theirs, { at: [1], of: 3 })).toEqual({
       text: "# Title\n\nFirst, mine.\n\nSecond, theirs.\n",
       overwritten: ["Second, mine."],
     });
+    // Counted over another number of units: the places name other units.
+    expect((await mergeMarkdown(base, mine, theirs, { at: [1], of: 4 })).overwritten).toEqual(["First, mine.", "Second, mine."]);
   });
 
   it("keeps a stretch of ours it's told holds where a collision takes a stretch", async () => {
     const mine = base.replace("First paragraph here.\n\nSecond paragraph here.", "Mine replaced both.");
     const theirs = base.replace("First paragraph here.", "First, theirs.\n\nInserted.");
-    expect((await mergeMarkdown(base, mine, theirs, ["Mine replaced both."])).text).toBe("# Title\n\nMine replaced both.\n");
+    expect((await mergeMarkdown(base, mine, theirs, { at: [1], of: 2 })).text).toBe("# Title\n\nMine replaced both.\n");
   });
 
   it("returns only the units ours changed when a collision takes a stretch", async () => {

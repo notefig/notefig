@@ -51,7 +51,7 @@ import { path as pathutil } from "@/utils/path";
 import { createPresence, presencePrefix } from "./sync-presence";
 import { createSyncEditors } from "./sync-editor";
 import { createClaims, editBetween, refusalMessage } from "./sync-claims";
-import { unitIndex, unitsLeftOut, type FileUnit, type PeerUnit } from "./sync-units";
+import { unitIndex, type FileUnit, type PeerUnit } from "./sync-units";
 import { createOwnWip, createWip } from "./sync-wip";
 import {
   IDLE_COMMIT_MS,
@@ -91,7 +91,7 @@ export interface SyncEngineDeps {
     "readDirectory" | "getMetadata" | "readBinaryFiles" | "writeBinaryFiles" | "deleteFiles" | "deleteDirectories"
   >;
   /** The markdown three-way merge (`sync-merge.ts`), off the main thread. */
-  merge(base: string, ours: string, theirs: string, holds?: string[]): Promise<MergedMarkdown>;
+  merge(base: string, ours: string, theirs: string, won?: string[]): Promise<MergedMarkdown>;
   /** A markdown file's units as claims see them (`sync-units.ts`), off the
    *  main thread. */
   fileUnits(markdown: string): Promise<FileUnit[]>;
@@ -295,21 +295,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     absolute,
     merge: deps.merge,
     // Who claims what is read after the pull; a collision needs it now.
-    wonUnits: async (filepath, mine, texts) => {
+    wonKeys: async (filepath) => {
       if (!isShared(deps.state())) return [];
       await presence.read();
-      const won = claims.won(filepath);
-      if (won.length === 0) return [];
-      const index = unitIndex(won);
-      const all = await deps.fileUnits(mine);
-      // Each text's units, keyed in the file: the ones it leaves out of it.
-      const named = await Promise.all(
-        texts.map(async (text) => {
-          const without = await deps.fileUnits(mine.replace(text, ""));
-          return unitsLeftOut(all, without).some((unit) => index.resolve(unit.key) !== null);
-        }),
-      );
-      return texts.filter((_, i) => named[i]);
+      return claims.won(filepath);
     },
     reportError: deps.reportError,
     dispatch: deps.dispatch,

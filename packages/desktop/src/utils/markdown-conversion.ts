@@ -42,9 +42,9 @@ async function createInlineConverter(): Promise<Converter> {
       return serializeKeeping(codec, doc, previous);
     },
     renderHtml: async (markdown: string) => renderMarkdownHtml(markdown),
-    merge: async (base: string, ours: string, theirs: string, holds?: string[]) => {
-      const { mergeMarkdown } = await import("@/modules/sync/sync-merge");
-      return mergeMarkdown(base, ours, theirs, holds);
+    merge: async (base: string, ours: string, theirs: string, won?: string[]) => {
+      const { mergeWon } = await import("@/modules/sync/sync-merge");
+      return mergeWon(base, ours, theirs, won, codec.parseDoc);
     },
     fileUnits: async (markdown: string) => {
       const { fileUnitsOf } = await import("@/modules/sync/sync-units");
@@ -129,10 +129,10 @@ export function renderMarkdown(markdown: string): Promise<string> {
 }
 
 /** Sync's three-way merge of a markdown file, `theirs` holding but for
- *  the units of ours in `holds` (`modules/sync/sync-merge.ts`), off the
- *  main thread. */
-export function mergeMarkdownOffThread(base: string, ours: string, theirs: string, holds?: string[]): Promise<MergedMarkdown> {
-  return withConverter((c) => c.merge(base, ours, theirs, holds));
+ *  the units of ours the keys in `won` name (`modules/sync/sync-merge.ts`),
+ *  off the main thread. */
+export function mergeMarkdownOffThread(base: string, ours: string, theirs: string, won?: string[]): Promise<MergedMarkdown> {
+  return withConverter((c) => c.merge(base, ours, theirs, won));
 }
 
 /** Test hook: force a fresh boot (e.g. after stubbing Worker). */

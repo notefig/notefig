@@ -833,7 +833,7 @@ describe("sync: solo", () => {
       "cli",
     );
     const boom = new Error("boom");
-    const merge = vi.spyOn(merging, "mergeMarkdown").mockRejectedValue(boom);
+    const merge = vi.spyOn(merging, "mergeWon").mockRejectedValue(boom);
     const reported = vi.spyOn(telemetry, "captureError");
     await sync.syncNow();
     merge.mockRestore();
@@ -1006,11 +1006,11 @@ describe("sync: solo", () => {
     const { land } = await editUnsaved(core, editors, ws, path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
     await remote.pushFromPlainGit(await remote.clone("plain"), { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" }, "cli");
     await sync.syncNow();
-    const real = merging.mergeMarkdown;
-    const merge = vi.spyOn(merging, "mergeMarkdown").mockImplementationOnce(async (base, ours, theirs) => {
+    const real = merging.mergeWon;
+    const merge = vi.spyOn(merging, "mergeWon").mockImplementationOnce(async (base, ours, theirs, won, parse) => {
       // A newer save, while the worker merges the older one.
       await fsp.writeFile(path, "# Note\n\nFirst paragraph, mine, again.\n\nSecond paragraph.\n");
-      return real(base, ours, theirs);
+      return real(base, ours, theirs, won, parse);
     });
     land();
     await vi.waitFor(() => expect(merge).toHaveBeenCalled(), { timeout: 10_000 });

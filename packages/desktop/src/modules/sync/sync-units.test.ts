@@ -3,10 +3,11 @@ import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getSchema } from "@tiptap/core";
 import { Node as PMNode } from "@tiptap/pm/model";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
-import { cursorAt, docUnits, fileUnitsOf, keyedUnits, sameUnit, unitIndex, unitsIn, unitsLeftOut } from "./sync-units";
+import { cursorAt, docUnits, fileUnitsOf, keyedUnits, sameUnit, heldPlaces, unitIndex, unitsIn } from "./sync-units";
 
 const keysOf = (markdown: string) => fileUnitsOf(doc(markdown)).map((unit) => unit.key);
 import { editBetween, refusalMessage } from "./sync-claims";
+import { splitUnits } from "@/utils/markdown-units";
 
 const codec = createMarkdownCodec();
 const doc = (markdown: string) => PMNode.fromJSON(getSchema(editorExtensions), codec.parse(markdown));
@@ -130,21 +131,22 @@ describe("sync claims of a write", () => {
   });
 });
 
-describe("unitsLeftOut", () => {
-  const units = (markdown: string) => fileUnitsOf(doc(markdown));
-  const table = "Intro.\n\n| name | n |\n| --- | --- |\n| one | 1 |\n| two | 2 |\n";
-
-  it("keys a stretch of a file in place: a table row as a row, which alone parses as a paragraph", () => {
-    const all = units(table);
-    const row = all[2]!;
-    expect(unitsLeftOut(all, units(table.replace("| one | 1 |\n", "")))).toEqual([row]);
-    // Alone, the row is another unit: its key names nothing in the file.
-    const alone = units("| one | 1 |\n");
-    expect(alone.every((unit) => unitIndex(all.map((u) => u.key)).resolve(unit.key) !== row.key)).toBe(true);
+describe("heldPlaces", () => {
+  it("places the units keys name among a file's units, a table row among rows", () => {
+    const table = "Intro.\n\n| name | n |\n| --- | --- |\n| one | 1 |\n| two | 2 |\n";
+    const units = fileUnitsOf(doc(table));
+    expect(heldPlaces(units, [units[2]!.key])).toEqual({ at: [2], of: 4 });
+    expect(heldPlaces(units, [])).toEqual({ at: [], of: 4 });
   });
 
-  it("takes one copy of a text the file says twice", () => {
-    const twice = "Same.\n\nOther.\n\nSame.\n";
-    expect(unitsLeftOut(units(twice), units(twice.replace("Same.", "")))).toHaveLength(1);
+  // Not frontmatter: the merge's cut counts the blank after it as a unit,
+  // so in such a file the counts differ and a merge holds nothing.
+  it("counts a file's units as the merge cuts them, so a place names the same unit in both", async () => {
+    const markdown = [
+      "# Heading", "", "A paragraph.", "", "- tight", "- list", "", "- [ ] a task", "- [x] done", "",
+      "| a | b |", "| --- | --- |", "| 1 | 2 |", "", "```ts", "const x = 1;", "```", "",
+      '<!-- notefig:prompt id="blob_a" task="task_a" -->', "", "> A quote.", "", "---", "", "Last.", "",
+    ].join("\r\n");
+    expect(fileUnitsOf(doc(markdown))).toHaveLength((await splitUnits(markdown)).length);
   });
 });

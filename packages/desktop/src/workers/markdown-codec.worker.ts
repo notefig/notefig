@@ -30,9 +30,9 @@ const api = {
   },
   /** Sync's three-way merge (`modules/sync/sync-merge.ts`), loaded on the
    *  first call: a workspace that doesn't sync never loads it. */
-  async merge(base: string, ours: string, theirs: string, holds?: string[]): Promise<MergedMarkdown> {
-    const { mergeMarkdown } = await import("@/modules/sync/sync-merge");
-    return mergeMarkdown(base, ours, theirs, holds);
+  async merge(base: string, ours: string, theirs: string, won?: string[]): Promise<MergedMarkdown> {
+    const { mergeWon } = await import("@/modules/sync/sync-merge");
+    return mergeWon(base, ours, theirs, won, codec.parseDoc);
   },
   /** A file's units as sync's claims see them (`modules/sync/sync-units.ts`). */
   async fileUnits(markdown: string): Promise<FileUnit[]> {
