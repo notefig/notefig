@@ -1347,7 +1347,7 @@ describe("sync: shared, while another device syncs the branch", () => {
       async () => {
         await a.syncNow();
         await b.syncNow();
-        expect(b.state().peers[0].cursor).toEqual({ path: "note.md", unit: 2 });
+        expect(b.state().peers[0].cursor).toMatchObject({ path: "note.md", unit: 2, key: expect.any(String) });
       },
       { timeout: 10_000 },
     );
@@ -1593,6 +1593,16 @@ describe("sync: shared, while another device syncs the branch", () => {
     await runGit(remote.bare, ["update-ref", "refs/notefig/v1/presence/main/x", oid]);
     await sync.syncNow();
     expect(sync.state().peers).toEqual([{ deviceId: "x", name: null, colour: null, cursor: null, claims: [], wip: null }]);
+  });
+
+  it("goes by a peer's cursor's place, not a malformed key it sends", async () => {
+    const { sync, remote } = await setup();
+    const tree = await runGit(remote.bare, ["rev-parse", "main^{tree}"]);
+    const forged = JSON.stringify({ name: "Bob", cursor: { path: "note.md", unit: 1, key: "<b>.x" } });
+    const oid = await runGit(remote.bare, ["commit-tree", tree, "-p", "main", "-m", forged]);
+    await runGit(remote.bare, ["update-ref", "refs/notefig/v1/presence/main/x", oid]);
+    await sync.syncNow();
+    expect(sync.state().peers[0]?.cursor).toEqual({ path: "note.md", unit: 1 });
   });
 
   it("keeps its presence after a passing failure to push it", async () => {

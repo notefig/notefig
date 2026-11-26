@@ -118,6 +118,13 @@ function claimsOf(raw: unknown): SyncClaim[] {
   });
 }
 
+/** A well-formed cursor, its key kept only when it's one. */
+function cursorOf(raw: unknown): SyncCursor | null {
+  const { path, unit, key } = (raw ?? {}) as Record<string, unknown>;
+  if (typeof path !== "string" || !count(unit)) return null;
+  return typeof key === "string" && KEY.test(key) ? { path, unit, key } : { path, unit };
+}
+
 /** What another device's commit says, keeping only what's well formed:
  *  anyone who can push to the remote can write it. */
 function payloadOf(message: string): Pick<Seen, "name" | "colour" | "cursor" | "claims"> {
@@ -128,13 +135,10 @@ function payloadOf(message: string): Pick<Seen, "name" | "colour" | "cursor" | "
   } catch {
     // Not ours: nothing to show.
   }
-  const cursor = (raw.cursor ?? null) as Record<string, unknown> | null;
   return {
     name: typeof raw.name === "string" ? raw.name : null,
     colour: typeof raw.colour === "string" && /^#[0-9a-f]{6}$/i.test(raw.colour) ? raw.colour : null,
-    cursor:
-      cursor && typeof cursor.path === "string" && count(cursor.unit) ? { path: cursor.path, unit: cursor.unit }
-        : null,
+    cursor: cursorOf(raw.cursor),
     claims: claimsOf(raw.claims),
   };
 }

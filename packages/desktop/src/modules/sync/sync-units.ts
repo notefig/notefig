@@ -6,9 +6,9 @@
  * paragraphs aren't in the markdown, so aren't units.
  *
  * They're the merge's units (`utils/markdown-units.ts`) seen from the
- * ProseMirror side: a cursor (`SyncCursor`) points at one by its place, a
- * claim (`SyncClaim`) names one by its key, a hash of what it says, so
- * every device finds the same unit whatever the text above it holds.
+ * ProseMirror side: a cursor (`SyncCursor`) and a claim (`SyncClaim`)
+ * name one by its key, a hash of what it says, so every device finds the
+ * same unit whatever the text above it holds.
  * Pure: the editor calls it on its doc, the markdown worker on a parse.
  */
 import type { JSONContent } from "@tiptap/core";
@@ -213,11 +213,26 @@ export function unitsIn(doc: PMNode, from: number, to: number): KeyedUnit[] {
   return units;
 }
 
-/** The unit the selection's head is in, by its place. */
-export function cursorAt(doc: PMNode, head: number): { unit: number } {
-  const units = docUnits(doc);
+/** The unit the selection's head is in: its place, and its key, which
+ *  finds it in a copy whose units above it differ. */
+export function cursorAt(doc: PMNode, head: number): { unit: number; key?: string } {
+  const { units } = keyed(doc);
   const found = units.findIndex(({ to }) => head <= to);
-  return { unit: found < 0 ? Math.max(units.length - 1, 0) : found };
+  const unit = found < 0 ? Math.max(units.length - 1, 0) : found;
+  const key = units[unit]?.key;
+  return key ? { unit, key } : { unit };
+}
+
+/** Where a cursor from another copy is in `doc`: the unit its key names,
+ *  or none when this copy hasn't that unit yet. A cursor with no key (a
+ *  build before keys) goes by its place. */
+export function cursorIn(doc: PMNode, cursor: { unit: number; key?: string }): number | null {
+  const { units, index } = keyed(doc);
+  if (units.length === 0) return null;
+  if (cursor.key === undefined) return Math.min(cursor.unit, units.length - 1);
+  const key = index.resolve(cursor.key);
+  const found = key === null ? -1 : units.findIndex((unit) => unit.key === key);
+  return found < 0 ? null : found;
 }
 
 /** A unit of another device's copy, as it has it: what draws its work in

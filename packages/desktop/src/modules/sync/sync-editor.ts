@@ -32,7 +32,7 @@ import { ADOPTION_TRANSACTION_META } from "@/components/editor/adopt-external-co
 import type { EditorsApi } from "@/modules/editors";
 import type { ClaimHolder, Claims } from "./sync-claims";
 import { isShared, type SyncCursor, type SyncPeer, type SyncState } from "./sync-machine";
-import { cursorAt, docUnits, indexOf, keyedUnits, unitsIn, type DocUnit, type UnitIndex } from "./sync-units";
+import { cursorAt, cursorIn, docUnits, indexOf, keyedUnits, unitsIn, type DocUnit, type UnitIndex } from "./sync-units";
 import type { Wip, WipUnit } from "./sync-wip";
 
 const REPORT_MS = 300;
@@ -55,9 +55,10 @@ export function peerDecorations(doc: PMNode, path: string, peers: readonly SyncP
   const units = docUnits(doc);
   const byUnit = new Map<number, SyncPeer[]>();
   for (const peer of peers) {
-    if (peer.cursor?.path !== path || drawn.has(peer.deviceId) || units.length === 0) continue;
-    const at = Math.min(peer.cursor.unit, units.length - 1);
-    byUnit.set(at, [...(byUnit.get(at) ?? []), peer]);
+    if (peer.cursor?.path !== path || drawn.has(peer.deviceId)) continue;
+    // A unit this copy hasn't yet: nowhere, rather than on another one.
+    const at = cursorIn(doc, peer.cursor);
+    if (at !== null) byUnit.set(at, [...(byUnit.get(at) ?? []), peer]);
   }
   if (byUnit.size === 0) return DecorationSet.empty;
   return DecorationSet.create(

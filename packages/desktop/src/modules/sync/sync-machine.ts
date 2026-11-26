@@ -43,13 +43,17 @@ export interface SyncReturnSummary {
 }
 
 /** Which unit someone is in: a paragraph, a list item's paragraph, a
- *  table row, a code block (`sync-editor.ts`), by its place among the
- *  document's units. A block, not a character: their text reaches others a
- *  cycle late, so a caret in it would only mislead. */
+ *  table row, a code block (`sync-editor.ts`). A block, not a character:
+ *  their text reaches others a cycle late, so a caret in it would only
+ *  mislead. */
 export interface SyncCursor {
   /** `/`-separated path. */
   path: string;
+  /** Its place among the sender's units. */
   unit: number;
+  /** Its key (`sync-units.ts`), which finds it in a copy whose units above
+   *  it differ; none from a build before keys, or in an empty document. */
+  key?: string;
 }
 
 /** Another device syncing the branch now (`sync-presence.ts`). */
