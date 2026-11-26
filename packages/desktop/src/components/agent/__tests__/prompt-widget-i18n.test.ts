@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { PROMPT_WIDGET_I18N_KEYS } from "@notefig/widgets";
 import { DIFF_BLOCK_I18N_KEYS } from "@notefig/widgets/diff-block/syntax";
+import { MERMAID_BLOCK_I18N_KEYS } from "@notefig/widgets/mermaid-block/syntax";
 import i18n from "@/utils/intl";
 
 describe("prompt widget translations", () => {
@@ -22,5 +23,9 @@ describe("prompt widget translations", () => {
 
   it("defines every key the diff block's card resolves", () => {
     expect(DIFF_BLOCK_I18N_KEYS.filter((key) => !i18n.exists(key, { lng: "en" }))).toEqual([]);
+  });
+
+  it("defines every key the mermaid block's card resolves", () => {
+    expect(MERMAID_BLOCK_I18N_KEYS.filter((key) => !i18n.exists(key, { lng: "en" }))).toEqual([]);
   });
 });

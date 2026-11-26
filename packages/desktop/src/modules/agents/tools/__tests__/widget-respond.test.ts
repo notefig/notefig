@@ -109,6 +109,17 @@ describe("widget_respond and diffs", () => {
     // The unified-diff language, however spaced, is not a diff block.
     expect(WidgetRespondInputSchema.safeParse({ kind: "answer", markdown: "``` diff\n-a\n+b\n```", title: "Diff" }).success).toBe(true);
   });
+
+  it("refuses a mermaid diagram, sending it to the document", () => {
+    const parsed = WidgetRespondInputSchema.safeParse({
+      kind: "answer",
+      markdown: "The flow:\n\n```mermaid\nflowchart LR\n  A --> B\n```",
+      title: "The flow",
+    });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0].message).toContain("draw it in the document");
+    expect(WidgetRespondInputSchema.safeParse({ kind: "answer", markdown: "Use `mermaid` for diagrams.", title: "Tip" }).success).toBe(true);
+  });
 });
 
 describe("widget_respond waits for the session's name", () => {

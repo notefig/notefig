@@ -45,8 +45,8 @@ export const widgetRespond: AgentTool<WidgetResponse, { recorded: true }> = {
     `few words naming this response, the widget's one heading (a choice's ` +
     `question is its heading, so it needs none). The widget renders inline, so keep \`markdown\` to a ` +
     `few sentences or a short list, and never restate what you wrote into ` +
-    `the document. Never put a diff block in it: write the diff into the ` +
-    `document, and say here where it is.`,
+    `the document. Never put a diff block or a mermaid diagram in it: write ` +
+    `it into the document, and say here where it is.`,
   input: WidgetRespondInputSchema,
   async execute(ctx) {
     if (ctx.agents.task(ctx.taskId).get()?.titleSource !== "agent") {

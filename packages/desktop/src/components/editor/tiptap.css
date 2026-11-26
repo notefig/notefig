@@ -91,14 +91,16 @@
    is the whole look: its draft paints no text selection of its own on
    top (styles.css's draft ::selection), which would otherwise show only
    under a range, and color the text under a keyboard selection.
-   A diff block wears the same tint on its card, which its plugin marks
+   A diff or mermaid block wears the same tint on its card, which its plugin marks
    while a selection takes the block in (drawn-block/extension.ts). */
 .ProseMirror .node-aiPrompt[data-widget-selected] > [data-type="ai-prompt"],
-.ProseMirror notefig-diff-block[data-selected] [data-diff-card] {
+.ProseMirror notefig-diff-block[data-selected] [data-diff-card],
+.ProseMirror notefig-mermaid-block[data-selected] [data-mermaid-card] {
   position: relative;
 }
 .ProseMirror .node-aiPrompt[data-widget-selected] > [data-type="ai-prompt"]::after,
-.ProseMirror notefig-diff-block[data-selected] [data-diff-card]::after {
+.ProseMirror notefig-diff-block[data-selected] [data-diff-card]::after,
+.ProseMirror notefig-mermaid-block[data-selected] [data-mermaid-card]::after {
   content: "";
   position: absolute;
   inset: 0;

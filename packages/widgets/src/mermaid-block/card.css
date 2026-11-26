@@ -1,0 +1,18 @@
+/* Pele's colours and fonts (https://pele.run/theming), as the app's tokens:
+   a diagram follows the theme, light or dark, without being drawn again. */
+.notefig-mermaid .pele {
+  /* The card's, so edge labels cover the lines they sit on. */
+  --pele-bg: hsl(var(--card));
+  --pele-fg: hsl(var(--foreground));
+  --pele-muted: hsl(var(--muted-foreground));
+  --pele-line: hsl(var(--muted-foreground));
+  --pele-surface: hsl(var(--card));
+  --pele-surface-alt: hsl(var(--muted));
+  --pele-border: hsl(var(--border));
+  --pele-accent: hsl(var(--primary));
+  --pele-error: hsl(var(--destructive));
+}
+.notefig-mermaid {
+  --pele-font: var(--font-sans);
+  --pele-font-mono: var(--font-mono);
+}

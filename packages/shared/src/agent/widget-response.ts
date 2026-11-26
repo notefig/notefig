@@ -60,6 +60,10 @@ export const WIDGET_RESPONSE_LIMITS = { title: 80, question: 200, option: 60 };
  *  small to read one in, so the agent is sent to put it in the document. */
 const DIFF_FENCE_ABSENT = /^(?![\s\S]*(?:^|\n) {0,3}(?:`{3,}|~{3,})[ \t]*[^\s`]+(?:[ \t]+[^\s`]+)*?[ \t]+diff(?:[ \t][^\n]*)?(?:\n|$))/;
 
+/** No mermaid diagram (a ```mermaid fence — see @notefig/widgets'
+ *  mermaid-block/syntax.ts): as with a diff, a widget is too small for one. */
+const MERMAID_FENCE_ABSENT = /^(?![\s\S]*(?:^|\n) {0,3}(?:`{3,}|~{3,})[ \t]*mermaid[ \t]*(?:\n|$))/;
+
 const KINDS = Object.keys(WIDGET_RESPONSE_KINDS) as [
   WidgetResponseKind,
   ...WidgetResponseKind[],
@@ -95,6 +99,11 @@ export const WidgetResponseSchema = z
         message:
           "a diff block doesn't fit in a widget: write it into the document where " +
           "the change belongs, then call again saying where it is",
+      })
+      .regex(MERMAID_FENCE_ABSENT, {
+        message:
+          "a mermaid diagram doesn't fit in a widget: draw it in the document " +
+          "where it belongs, then call again saying where it is",
       }),
     // The widget's one heading: required of every kind but the choices,
     // whose question is the heading (see the refinement below). Optional

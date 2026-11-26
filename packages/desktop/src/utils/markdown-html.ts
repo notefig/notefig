@@ -6,12 +6,13 @@
 
 import MarkdownIt from "markdown-it";
 import { drawnDiffFences } from "@notefig/widgets/diff-block/markdown";
+import { drawnMermaidFences } from "@notefig/widgets/mermaid-block/markdown";
 
 // html: false keeps raw HTML in model output escaped (rendered as text), so
 // no sanitizer pass is needed; breaks matches the chat's old pre-wrap feel
-// where a single newline was a visible line break. A diff fence comes out
-// as the element that draws it.
-const md = new MarkdownIt({ html: false, linkify: true, breaks: true }).use(drawnDiffFences);
+// where a single newline was a visible line break. A diff fence, and a
+// mermaid one, comes out as the element that draws it.
+const md = new MarkdownIt({ html: false, linkify: true, breaks: true }).use(drawnDiffFences).use(drawnMermaidFences);
 
 // linkify-it with fuzzyLink enabled treats local file references such as
 // "2026-10-23.md" as .md (Moldova) domains and turns them into external
