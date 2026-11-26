@@ -43,13 +43,17 @@ export interface SyncReturnSummary {
 }
 
 /** Which unit someone is in: a paragraph, a list item's paragraph, a
- *  table row, a code block (`sync-editor.ts`), by its place among the
- *  document's units. A block, not a character: their text reaches others a
- *  cycle late, so a caret in it would only mislead. */
+ *  table row, a code block (`sync-editor.ts`). A block, not a character:
+ *  their text reaches others a cycle late, so a caret in it would only
+ *  mislead. */
 export interface SyncCursor {
   /** `/`-separated path. */
   path: string;
+  /** Its place among the sender's units. */
   unit: number;
+  /** Its key (`sync-units.ts`), which finds it in a copy whose units above
+   *  it differ; none from a build before keys, or in an empty document. */
+  key?: string;
 }
 
 /** Another device syncing the branch now (`sync-presence.ts`). */
@@ -63,6 +67,10 @@ export interface SyncPeer {
   cursor: SyncCursor | null;
   /** The units it's editing now (`sync-claims.ts`); empty until read. */
   claims: SyncClaim[];
+  /** The units it gave up to a device that claimed them too, named as its
+   *  claims were, until that one lets go: the winner knows it won though
+   *  this claim ended first. None from a build before it. */
+  yielded?: SyncClaim[];
   /** The presence commit holding what it's typing in them, read here;
    *  null while it holds nothing. */
   wip: string | null;

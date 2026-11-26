@@ -91,7 +91,7 @@ export interface SyncEngineDeps {
     "readDirectory" | "getMetadata" | "readBinaryFiles" | "writeBinaryFiles" | "deleteFiles" | "deleteDirectories"
   >;
   /** The markdown three-way merge (`sync-merge.ts`), off the main thread. */
-  merge(base: string, ours: string, theirs: string): Promise<MergedMarkdown>;
+  merge(base: string, ours: string, theirs: string, won?: string[]): Promise<MergedMarkdown>;
   /** A markdown file's units as claims see them (`sync-units.ts`), off the
    *  main thread. */
   fileUnits(markdown: string): Promise<FileUnit[]>;
@@ -294,6 +294,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     fs: deps.fs,
     absolute,
     merge: deps.merge,
+    // Who claims what is read after the pull; a collision needs it now.
+    wonKeys: async (filepath) => {
+      if (!isShared(deps.state())) return [];
+      await presence.read();
+      return claims.won(filepath);
+    },
     reportError: deps.reportError,
     dispatch: deps.dispatch,
     held: deps.held,
@@ -305,6 +311,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const ownWip = createOwnWip({ git, fs: deps.fs, claims, head, tree, absolute, flushEdits: deps.flushEdits, fileUnits: deps.fileUnits });
   const presence = createPresence({
     claims: claims.published,
+    yielded: claims.yields,
     wip: ownWip.files,
     deviceId: deps.deviceId,
     author,

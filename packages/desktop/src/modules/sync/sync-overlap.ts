@@ -32,7 +32,12 @@ export interface OverlapDeps {
   documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
   fs: Pick<FileSystemSurface, "readBinaryFiles" | "writeBinaryFiles">;
   absolute(path: string): string;
-  merge(base: string, ours: string, theirs: string): Promise<MergedMarkdown>;
+  /** The markdown merge; where it collides, the units of ours the keys in
+   *  `won` name stand. */
+  merge(base: string, ours: string, theirs: string, won?: string[]): Promise<MergedMarkdown>;
+  /** The keys of the units of `filepath` this device won from another that
+   *  claimed them too (`Claims.won`). */
+  wonKeys(filepath: string): Promise<string[]>;
   /** A merge that threw: a bug to hear about, not the user's to fix. */
   reportError(error: unknown): void;
   dispatch(event: SyncEvent): void;
@@ -98,9 +103,14 @@ export function createOverlaps(deps: OverlapDeps) {
     if (!MARKDOWN.test(filepath) || mine === null || incoming === null) {
       return { bytes: null, lost: [{ path: filepath, text: mine }] };
     }
+    const from = (base && asText(base)) ?? "";
     let merged: MergedMarkdown;
     try {
-      merged = await deps.merge((base && asText(base)) ?? "", mine, incoming);
+      merged = await deps.merge(from, mine, incoming);
+      // Races this device won: those units of ours stand, and what they
+      // replace is the other device's, which stays in the branch's history.
+      const won = merged.overwritten.length > 0 ? await deps.wonKeys(filepath) : [];
+      if (won.length > 0) merged = await deps.merge(from, mine, incoming, won);
     } catch (error) {
       deps.reportError(error);
       return { bytes: null, lost: [{ path: filepath, text: mine }] };

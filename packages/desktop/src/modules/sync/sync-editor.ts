@@ -32,11 +32,11 @@ import { ADOPTION_TRANSACTION_META } from "@/components/editor/adopt-external-co
 import type { EditorsApi } from "@/modules/editors";
 import type { ClaimHolder, Claims } from "./sync-claims";
 import { isShared, type SyncCursor, type SyncPeer, type SyncState } from "./sync-machine";
-import { cursorAt, docUnits, indexOf, keyedUnits, unitsIn, type DocUnit, type UnitIndex } from "./sync-units";
+import { cursorAt, cursorIn, docUnits, indexOf, keyedUnits, unitsIn, type DocUnit, type UnitIndex } from "./sync-units";
 import type { Wip, WipUnit } from "./sync-wip";
 
 const REPORT_MS = 300;
-const here = new PluginKey<DecorationSet>("syncPeers");
+const here = new PluginKey<PeersDraw>("syncPeers");
 const held = new PluginKey<DecorationSet>("syncClaims");
 const typing = new PluginKey<WipDraw>("syncWip");
 
@@ -55,9 +55,10 @@ export function peerDecorations(doc: PMNode, path: string, peers: readonly SyncP
   const units = docUnits(doc);
   const byUnit = new Map<number, SyncPeer[]>();
   for (const peer of peers) {
-    if (peer.cursor?.path !== path || drawn.has(peer.deviceId) || units.length === 0) continue;
-    const at = Math.min(peer.cursor.unit, units.length - 1);
-    byUnit.set(at, [...(byUnit.get(at) ?? []), peer]);
+    if (peer.cursor?.path !== path || drawn.has(peer.deviceId)) continue;
+    // A unit this copy hasn't yet: nowhere, rather than on another one.
+    const at = cursorIn(doc, peer.cursor);
+    if (at !== null) byUnit.set(at, [...(byUnit.get(at) ?? []), peer]);
   }
   if (byUnit.size === 0) return DecorationSet.empty;
   return DecorationSet.create(
@@ -405,21 +406,29 @@ function wipPlugin(wip: WipView) {
   });
 }
 
+/** Where the others are, as last drawn, and the peers drawn. */
+interface PeersDraw {
+  peers: readonly SyncPeer[];
+  decorations: DecorationSet;
+}
+
 /** Where the others are, a block each, named; and this device's block,
  *  reported. A caret move only arms a timer, so nothing runs per keystroke,
- *  and a move within one block changes nothing that's sent. */
+ *  and a move within one block changes nothing that's sent. Redrawn when
+ *  they move, or when a write that isn't typing brings the block one is in. */
 function peersPlugin(path: string, report: (view: EditorView) => void, leave: () => void, setTimer: SetTimer) {
-  return new Plugin<DecorationSet>({
+  return new Plugin<PeersDraw>({
     key: here,
     state: {
-      init: () => DecorationSet.empty,
+      init: () => ({ peers: [], decorations: DecorationSet.empty }),
       apply: (tr, value, _, state) => {
-        const peers = tr.getMeta(here) as SyncPeer[] | undefined;
+        const peers = (tr.getMeta(here) as SyncPeer[] | undefined) ?? (tr.docChanged && !isTyping(tr) ? value.peers : null);
+        if (!peers) return { ...value, decorations: value.decorations.map(tr.mapping, tr.doc) };
         // Who this transaction's draw named on what they're typing.
-        return peers ? peerDecorations(tr.doc, path, peers, typing.getState(state)?.named) : value.map(tr.mapping, tr.doc);
+        return { peers, decorations: peerDecorations(tr.doc, path, peers, typing.getState(state)?.named) };
       },
     },
-    props: { decorations: (state) => here.getState(state) },
+    props: { decorations: (state) => here.getState(state)?.decorations },
     view(view) {
       let cancel: (() => void) | null = null;
       const arm = () => {

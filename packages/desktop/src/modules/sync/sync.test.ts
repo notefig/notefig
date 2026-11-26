@@ -833,7 +833,7 @@ describe("sync: solo", () => {
       "cli",
     );
     const boom = new Error("boom");
-    const merge = vi.spyOn(merging, "mergeMarkdown").mockRejectedValue(boom);
+    const merge = vi.spyOn(merging, "mergeWon").mockRejectedValue(boom);
     const reported = vi.spyOn(telemetry, "captureError");
     await sync.syncNow();
     merge.mockRestore();
@@ -1006,11 +1006,11 @@ describe("sync: solo", () => {
     const { land } = await editUnsaved(core, editors, ws, path, "# Note\n\nFirst paragraph, mine.\n\nSecond paragraph.\n");
     await remote.pushFromPlainGit(await remote.clone("plain"), { "note.md": "# Note\n\nFirst paragraph.\n\nSecond paragraph, theirs.\n" }, "cli");
     await sync.syncNow();
-    const real = merging.mergeMarkdown;
-    const merge = vi.spyOn(merging, "mergeMarkdown").mockImplementationOnce(async (base, ours, theirs) => {
+    const real = merging.mergeWon;
+    const merge = vi.spyOn(merging, "mergeWon").mockImplementationOnce(async (base, ours, theirs, won, parse) => {
       // A newer save, while the worker merges the older one.
       await fsp.writeFile(path, "# Note\n\nFirst paragraph, mine, again.\n\nSecond paragraph.\n");
-      return real(base, ours, theirs);
+      return real(base, ours, theirs, won, parse);
     });
     land();
     await vi.waitFor(() => expect(merge).toHaveBeenCalled(), { timeout: 10_000 });
@@ -1347,7 +1347,7 @@ describe("sync: shared, while another device syncs the branch", () => {
       async () => {
         await a.syncNow();
         await b.syncNow();
-        expect(b.state().peers[0].cursor).toEqual({ path: "note.md", unit: 2 });
+        expect(b.state().peers[0].cursor).toMatchObject({ path: "note.md", unit: 2, key: expect.any(String) });
       },
       { timeout: 10_000 },
     );
@@ -1416,6 +1416,56 @@ describe("sync: shared, while another device syncs the branch", () => {
       { timeout: 10_000, interval: 200 },
     );
     await core.workspace(wsB).close();
+    disposeEditor(editors, join(ws, "note.md"));
+    disposeEditor(editors, join(wsB, "note.md"));
+  });
+
+  it("keeps the text of the device that won a unit both took at once, though the other's reached the branch first", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { a, b, editors, core, ws, wsB, remote } = await meet();
+    const open = async (path: string) => {
+      getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
+      return editors.markdownEditor(path)!;
+    };
+    const [mine, theirs] = [await open(join(ws, "note.md")), await open(join(wsB, "note.md"))];
+    vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
+    vi.spyOn(theirs.view, "hasFocus").mockReturnValue(true);
+    await a.syncNow();
+    await b.syncNow();
+    const second = (editor: Editor) => docUnits(editor.state.doc)[2]!;
+    const save = async (editor: Editor, path: string) => {
+      await fsp.writeFile(path, codec.serialize(editor.getJSON()));
+      written(core, path);
+    };
+    // Both type at the end of the second paragraph before either polls.
+    // "b" < "dev": B holds it.
+    theirs.commands.setTextSelection(second(theirs).to - 1);
+    theirs.commands.insertContentAt(second(theirs).to - 1, " Bob");
+    mine.commands.setTextSelection(second(mine).to - 1);
+    mine.commands.insertContentAt(second(mine).to - 1, " Ada");
+    await save(mine, join(ws, "note.md"));
+    await save(theirs, join(wsB, "note.md"));
+    // A's commit reaches the branch first, its claim still out.
+    await vi.waitFor(
+      async () => {
+        await a.syncNow();
+        expect(await runGit(remote.bare, ["show", "main:note.md"])).toContain("Second paragraph. Ada");
+      },
+      { timeout: 10_000, interval: 200 },
+    );
+    await vi.waitFor(
+      async () => {
+        vi.setSystemTime(Date.now() + 3_000);
+        await b.syncNow();
+        await a.syncNow();
+        expect(await runGit(remote.bare, ["show", "main:note.md"])).toContain("Second paragraph. Bob");
+        expect(mine.state.doc.textContent).toContain("Second paragraph. Bob");
+      },
+      { timeout: 10_000, interval: 200 },
+    );
+    expect(theirs.state.doc.textContent).toContain("Second paragraph. Bob");
+    // B's text was never lost, so nothing of it is flagged.
+    expect(b.state().overwritten).toEqual([]);
     disposeEditor(editors, join(ws, "note.md"));
     disposeEditor(editors, join(wsB, "note.md"));
   });
@@ -1593,6 +1643,16 @@ describe("sync: shared, while another device syncs the branch", () => {
     await runGit(remote.bare, ["update-ref", "refs/notefig/v1/presence/main/x", oid]);
     await sync.syncNow();
     expect(sync.state().peers).toEqual([{ deviceId: "x", name: null, colour: null, cursor: null, claims: [], wip: null }]);
+  });
+
+  it("goes by a peer's cursor's place, not a malformed key it sends", async () => {
+    const { sync, remote } = await setup();
+    const tree = await runGit(remote.bare, ["rev-parse", "main^{tree}"]);
+    const forged = JSON.stringify({ name: "Bob", cursor: { path: "note.md", unit: 1, key: "<b>.x" } });
+    const oid = await runGit(remote.bare, ["commit-tree", tree, "-p", "main", "-m", forged]);
+    await runGit(remote.bare, ["update-ref", "refs/notefig/v1/presence/main/x", oid]);
+    await sync.syncNow();
+    expect(sync.state().peers[0]?.cursor).toEqual({ path: "note.md", unit: 1 });
   });
 
   it("keeps its presence after a passing failure to push it", async () => {

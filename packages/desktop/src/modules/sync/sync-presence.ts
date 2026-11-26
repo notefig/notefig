@@ -54,6 +54,8 @@ export interface PresenceDeps {
   dispatch(event: SyncEvent): void;
   /** What this device is editing, for each heartbeat. */
   claims(): SyncClaim[];
+  /** What it gave up to a device that holds it now (`Claims.yields`). */
+  yielded(): SyncClaim[];
   /** The files among `paths` as saved now, edits still in an editor saved
    *  first: the work in progress the heartbeat carries. */
   wip(paths: string[]): Promise<WipFile[]>;
@@ -88,6 +90,7 @@ interface Seen {
   colour: string | null;
   cursor: SyncCursor | null;
   claims: SyncClaim[];
+  yielded: SyncClaim[];
 }
 
 const COLOURS = ["#2f7ed8", "#c0562f", "#2f9e6e", "#9256c9", "#c79a2c", "#c24580"];
@@ -118,9 +121,16 @@ function claimsOf(raw: unknown): SyncClaim[] {
   });
 }
 
+/** A well-formed cursor, its key kept only when it's one. */
+function cursorOf(raw: unknown): SyncCursor | null {
+  const { path, unit, key } = (raw ?? {}) as Record<string, unknown>;
+  if (typeof path !== "string" || !count(unit)) return null;
+  return typeof key === "string" && KEY.test(key) ? { path, unit, key } : { path, unit };
+}
+
 /** What another device's commit says, keeping only what's well formed:
  *  anyone who can push to the remote can write it. */
-function payloadOf(message: string): Pick<Seen, "name" | "colour" | "cursor" | "claims"> {
+function payloadOf(message: string): Pick<Seen, "name" | "colour" | "cursor" | "claims" | "yielded"> {
   let raw: Record<string, unknown> = {};
   try {
     const parsed: unknown = JSON.parse(message);
@@ -128,14 +138,12 @@ function payloadOf(message: string): Pick<Seen, "name" | "colour" | "cursor" | "
   } catch {
     // Not ours: nothing to show.
   }
-  const cursor = (raw.cursor ?? null) as Record<string, unknown> | null;
   return {
     name: typeof raw.name === "string" ? raw.name : null,
     colour: typeof raw.colour === "string" && /^#[0-9a-f]{6}$/i.test(raw.colour) ? raw.colour : null,
-    cursor:
-      cursor && typeof cursor.path === "string" && count(cursor.unit) ? { path: cursor.path, unit: cursor.unit }
-        : null,
+    cursor: cursorOf(raw.cursor),
     claims: claimsOf(raw.claims),
+    yielded: claimsOf(raw.yielded),
   };
 }
 
@@ -191,7 +199,7 @@ export function createPresence(deps: PresenceDeps): Presence {
       const entry = seen.get(ref);
       if (entry?.oid === oid) continue;
       arrived ||= !entry && !first;
-      seen.set(ref, { read: null, name: null, colour: null, cursor: null, claims: [], ...entry, oid, since: at, movedAt: first ? null : at });
+      seen.set(ref, { read: null, name: null, colour: null, cursor: null, claims: [], yielded: [], ...entry, oid, since: at, movedAt: first ? null : at });
     }
     first = false;
     return arrived;
@@ -206,12 +214,13 @@ export function createPresence(deps: PresenceDeps): Presence {
     const peers: SyncPeer[] = refused
       ? []
       : live(now())
-          .map(([ref, { name, colour, cursor, claims, read }]) => ({
+          .map(([ref, { name, colour, cursor, claims, yielded, read }]) => ({
             deviceId: ref.slice(prefix.length),
             name,
             colour,
             cursor,
             claims,
+            ...(yielded.length > 0 ? { yielded } : {}),
             // What it's typing is in the commit its claims were read from.
             wip: claims.length > 0 ? read : null,
           }))
@@ -280,7 +289,7 @@ export function createPresence(deps: PresenceDeps): Presence {
       // A cursor that moves while this goes out is sent by the next cycle.
       const sent = cursor;
       const oid = await git.commit({
-        message: JSON.stringify({ name: deps.author.name, colour: colourOf(deps.deviceId), beat: ++beat, cursor: sent, claims }),
+        message: JSON.stringify({ name: deps.author.name, colour: colourOf(deps.deviceId), beat: ++beat, cursor: sent, claims, yielded: deps.yielded() }),
         author: deps.author,
         tree,
         parent: [tip.oid],

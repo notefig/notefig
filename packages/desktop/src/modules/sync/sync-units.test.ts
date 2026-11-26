@@ -3,10 +3,11 @@ import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { getSchema } from "@tiptap/core";
 import { Node as PMNode } from "@tiptap/pm/model";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
-import { cursorAt, docUnits, fileUnitsOf, keyedUnits, sameUnit, unitIndex, unitsIn } from "./sync-units";
+import { cursorAt, docUnits, fileUnitsOf, keyedUnits, sameUnit, heldPlaces, unitIndex, unitsIn } from "./sync-units";
 
 const keysOf = (markdown: string) => fileUnitsOf(doc(markdown)).map((unit) => unit.key);
 import { editBetween, refusalMessage } from "./sync-claims";
+import { splitUnits } from "@/utils/markdown-units";
 
 const codec = createMarkdownCodec();
 const doc = (markdown: string) => PMNode.fromJSON(getSchema(editorExtensions), codec.parse(markdown));
@@ -25,7 +26,7 @@ describe("sync carets' units", () => {
     for (const shown of [plain, drafted]) {
       const [, after] = docUnits(shown);
       expect(shown.textBetween(after.from, after.to)).toBe("After the widget.");
-      expect(cursorAt(shown, after.from + 3)).toEqual({ unit: 1 });
+      expect(cursorAt(shown, after.from + 3).unit).toBe(1);
     }
   });
 });
@@ -127,5 +128,24 @@ describe("sync claims of a write", () => {
       "Refused: Ada and Bob's agent are editing paragraphs of ideas.md this edit touches. Nothing was written. Edit other paragraphs, or try again in a few seconds.",
     );
     expect(refusalMessage("ideas.md", { kind: "cap", needed: 7 })).toMatch(/at most 4 paragraphs at a time, and this edit would make 7\. Nothing was written/);
+  });
+});
+
+describe("heldPlaces", () => {
+  it("places the units keys name among a file's units, a table row among rows", () => {
+    const table = "Intro.\n\n| name | n |\n| --- | --- |\n| one | 1 |\n| two | 2 |\n";
+    const units = fileUnitsOf(doc(table));
+    expect(heldPlaces(units, [units[2]!.key])).toEqual({ at: [2], of: 4 });
+    expect(heldPlaces(units, [])).toEqual({ at: [], of: 4 });
+  });
+
+  it("counts a file's units as the merge cuts those with text, so a place names the same unit in both", async () => {
+    const markdown = [
+      "---", "title: Plan", "---", "", "# Heading", "", "A paragraph.", "", "- tight", "- list", "", "- [ ] a task", "- [x] done", "",
+      "| a | b |", "| --- | --- |", "| 1 | 2 |", "", "```ts", "const x = 1;", "```", "",
+      '<!-- notefig:prompt id="blob_a" task="task_a" -->', "", "> A quote.", "", "---", "", "Last.", "",
+    ].join("\r\n");
+    const said = (await splitUnits(markdown)).filter((unit) => unit.text !== "");
+    expect(fileUnitsOf(doc(markdown))).toHaveLength(said.length);
   });
 });

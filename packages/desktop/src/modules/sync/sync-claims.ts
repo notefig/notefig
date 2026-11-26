@@ -23,7 +23,8 @@
  *   branch still has its old text.
  * - Two devices that claim one unit within a poll of each other: the lower
  *   device id holds it. The other one's text is merged three ways, as any
- *   collision is (`sync-merge.ts`).
+ *   collision is (`sync-merge.ts`), with the holder's text standing where
+ *   they collide, whichever reached the branch first (`won`).
  *
  * Pure state: no I/O, no timers. The engine calls `landed` and `expire`
  * from its cycle.
@@ -34,8 +35,10 @@ import { sameUnit, type FileUnit, type UnitIndex } from "./sync-units";
 
 /** Units one device holds at most, its user's and its agents' together. */
 export const MAX_CLAIMS = 4;
-/** A claim with no edit this long ends. */
-export const CLAIM_IDLE_MS = 10_000;
+/** A claim whose caret stays in its unit outlasts its last edit this long
+ *  at most: long enough that a pause to think doesn't hand the unit over,
+ *  short enough that a caret left behind doesn't keep it. */
+export const CLAIM_IDLE_MS = 30_000;
 /** What it said as it landed, kept at most. */
 const MAX_LANDED_KEYS = 2;
 /** Keys one claim names its unit by, at most: every unit joined into it as
@@ -76,6 +79,9 @@ interface Own {
   /** Its last edit is on the branch. */
   onBranch: boolean;
   agent: boolean;
+  /** Another device claimed it too, and this one holds it: that one's
+   *  claim may end before its text comes in, so this is kept. */
+  won: boolean;
 }
 
 export interface Claims {
@@ -102,9 +108,16 @@ export interface Claims {
   expire(): boolean;
   /** What this device holds, as it's sent. */
   published(): SyncClaim[];
+  /** What this device gave up to another one that holds it now, as it's
+   *  sent (`SyncPeer.yielded`). */
+  yields(): SyncClaim[];
   /** The user is typing in a unit they hold: their caret is in it, and
    *  their last edit to it isn't idle yet. */
   typing(): boolean;
+  /** The keys of the units of `path` this device won from another device
+   *  that claimed them too, and still holds: where their edits collide,
+   *  its text stands. */
+  won(path: string): string[];
   /** Nobody else is here: nothing to hold. */
   clear(): void;
 }
@@ -176,6 +189,19 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
     }
   };
 
+  /** Note each claim of this device's that another device claims too, or
+   *  gave up, and this one holds. */
+  const contest = () => {
+    for (const entry of own) {
+      const keys = keysOf(entry);
+      entry.won ||= deps.peers().some(
+        (peer) =>
+          !beats(peer.deviceId) &&
+          [...peer.claims, ...(peer.yielded ?? [])].some((claim) => claim.path === entry.path && overlap(claim.keys, keys)),
+      );
+    }
+  };
+
   const heldIn = (path: string, index: UnitIndex) => {
     const held = new Map<string, ClaimHolder>();
     othersIn(path, index, held);
@@ -211,6 +237,7 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
         lastEdit: at,
         onBranch: false,
         agent,
+        won: prior?.won ?? false,
       };
     });
     // Units joined into one: the last that's left names them all.
@@ -218,6 +245,7 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
       const into = claimed[after.length - 1]!;
       for (const joined of claimed.splice(after.length)) {
         into.origin = [...new Set([...into.origin, ...joined.origin])];
+        into.won ||= joined.won;
       }
     }
     const next = [...rest, ...claimed];
@@ -228,7 +256,7 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
     // while there's room, and never refused.
     for (const key of after.slice(distinct.length)) {
       if (next.length >= MAX_CLAIMS) break;
-      next.push({ path, origin: [], landed: [], current: key, lastEdit: at, onBranch: false, agent });
+      next.push({ path, origin: [], landed: [], current: key, lastEdit: at, onBranch: false, agent, won: false });
     }
     return next;
   };
@@ -263,6 +291,7 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
       }
     },
     expire() {
+      contest();
       const [ownBefore, yieldedBefore] = [own.length, yielded.length];
       yielded = yielded.filter(({ path, keys, peerId }) => winnerOf(path, keys, peerId) !== null);
       own = own.filter((entry) => {
@@ -276,7 +305,12 @@ export function createClaims(deps: { deviceId: string; now(): number; peers(): r
       return own.length !== ownBefore || yielded.length !== yieldedBefore;
     },
     published: () => own.map((entry) => ({ path: entry.path, keys: keysOf(entry), agent: entry.agent })),
+    yields: () => yielded.map(({ path, keys }) => ({ path, keys, agent: false })),
     typing: () => own.some((entry) => !entry.agent && isHere(entry)),
+    won(path) {
+      contest();
+      return own.filter((entry) => entry.path === path && entry.won).flatMap(keysOf);
+    },
     clear() {
       own = [];
       yielded = [];

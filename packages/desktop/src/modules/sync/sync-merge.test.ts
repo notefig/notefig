@@ -34,6 +34,33 @@ describe("mergeMarkdown", () => {
     expect(merged.overwritten).toEqual(["Mine paragraph here."]);
   });
 
+  it("keeps the colliding units of ours it's told hold, and gives the rest to the holder", async () => {
+    // Both sides rewrote both paragraphs; this device won the first.
+    const mine = base.replace("First paragraph here.", "First, mine.").replace("Second paragraph here.", "Second, mine.");
+    const theirs = base.replace("First paragraph here.", "First, theirs.").replace("Second paragraph here.", "Second, theirs.");
+    // Ours' units: the title, then the first paragraph at 1.
+    expect(await mergeMarkdown(base, mine, theirs, { at: [1], of: 3 })).toEqual({
+      text: "# Title\n\nFirst, mine.\n\nSecond, theirs.\n",
+      overwritten: ["Second, mine."],
+    });
+    // Counted over another number of units: the places name other units.
+    expect((await mergeMarkdown(base, mine, theirs, { at: [1], of: 4 })).overwritten).toEqual(["First, mine.", "Second, mine."]);
+  });
+
+  it("finds the places it's told hold past frontmatter, whose blank the editor doesn't count", async () => {
+    const front = "---\ntitle: Plan\n---\n\nFirst.\n\nSecond.\n";
+    const mine = front.replace("First.", "First, mine.");
+    const theirs = front.replace("First.", "First, theirs.");
+    // The editor's units: the frontmatter, then the first paragraph at 1.
+    expect(await mergeMarkdown(front, mine, theirs, { at: [1], of: 3 })).toEqual({ text: mine, overwritten: [] });
+  });
+
+  it("keeps a stretch of ours it's told holds where a collision takes a stretch", async () => {
+    const mine = base.replace("First paragraph here.\n\nSecond paragraph here.", "Mine replaced both.");
+    const theirs = base.replace("First paragraph here.", "First, theirs.\n\nInserted.");
+    expect((await mergeMarkdown(base, mine, theirs, { at: [1], of: 2 })).text).toBe("# Title\n\nMine replaced both.\n");
+  });
+
   it("returns only the units ours changed when a collision takes a stretch", async () => {
     const mine = base.replace("First paragraph here.", "Mine.\n\nAlso mine.");
     const theirs = base.replace("First paragraph here.", "Theirs.");

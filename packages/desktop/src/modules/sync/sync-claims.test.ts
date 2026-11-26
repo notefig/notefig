@@ -105,6 +105,56 @@ describe("sync claims", () => {
     expect(claims.heldIn("a.md", same).size).toBe(0);
   });
 
+  it("names the units it won, so its text stands where the edits collide", () => {
+    const { claims, list } = claimsWith();
+    claims.take("a.md", edit(["k1"], ["mine"]), false, same);
+    claims.take("a.md", edit(["k3"], ["mine3"]), false, same);
+    claims.take("b.md", edit(["k2"], ["mine2"]), false, same);
+    list.peers = [
+      peer("z", [{ path: "a.md", keys: ["k1", "zed"], agent: false }]),
+      peer("a", [{ path: "b.md", keys: ["k2", "ada"], agent: false }]),
+    ];
+    // Only the unit z claimed too: not k3, which nobody else claimed.
+    expect(claims.won("a.md")).toEqual(["k1", "mine"]);
+    // Ada's id is lower: she won b.md's unit.
+    expect(claims.won("b.md")).toEqual([]);
+    expect(claims.won("c.md")).toEqual([]);
+    // z's claim ends before its text comes in: the unit is still won.
+    list.peers = [];
+    expect(claims.won("a.md")).toEqual(["k1", "mine"]);
+  });
+
+  it("knows it won a unit the other device gave up before it saw that one's claim", () => {
+    const { claims, list } = claimsWith();
+    claims.take("a.md", edit(["k1"], ["mine"]), false, same);
+    list.peers = [{ ...peer("z"), yielded: [{ path: "a.md", keys: ["k1", "zed"], agent: false }] }];
+    expect(claims.won("a.md")).toEqual(["k1", "mine"]);
+  });
+
+  it("sends what it gave up while the winner holds it, and stops once it lets go", () => {
+    const { claims, list } = claimsWith();
+    claims.take("a.md", edit(["k1"], ["mine"]), false, same);
+    list.peers = [peer("a", [{ path: "a.md", keys: ["k1", "ada"], agent: false }])];
+    claims.expire();
+    expect(claims.published()).toEqual([]);
+    expect(claims.yields()).toEqual([{ path: "a.md", keys: ["k1", "mine"], agent: false }]);
+    list.peers = [peer("a")];
+    claims.expire();
+    expect(claims.yields()).toEqual([]);
+  });
+
+  it("keeps a won unit won when it's joined into another", () => {
+    const { claims, list } = claimsWith();
+    claims.take("a.md", edit(["k1"], ["one"]), false, same);
+    claims.take("a.md", edit(["k2"], ["two"]), false, same);
+    list.peers = [peer("z", [{ path: "a.md", keys: ["k2", "zed"], agent: false }])];
+    expect(claims.won("a.md")).toEqual(["k2", "two"]);
+    list.peers = [];
+    // The won unit joined into the one above it: the join is still won.
+    claims.take("a.md", edit(["one", "two"], ["onetwo"]), false, same);
+    expect(claims.won("a.md")).toEqual(["k1", "k2", "onetwo"]);
+  });
+
   it("sees a race on a unit whose neighbour one side changed first, and keeps the caret's claim when the text above moves", () => {
     const { claims, list } = claimsWith();
     // Its key before its edit, here and at Ada's: the unit above differs.
