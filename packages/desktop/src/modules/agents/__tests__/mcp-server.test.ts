@@ -26,6 +26,7 @@ import { toolRegistry, getTool } from "../tools";
 import { serverInstructions } from "../mcp-instructions";
 import { WIDGET_RESPONSE_KINDS } from "@notefig/shared/agent";
 import { DIFF_BLOCK_GUIDE } from "@notefig/widgets/diff-block/syntax";
+import { MERMAID_GUIDE } from "@notefig/widgets/mermaid-block/syntax";
 import i18n from "@/utils/intl";
 import { createLayout } from "@/modules/layout";
 import { memoryUrlState } from "@/testing/test-core";
@@ -173,6 +174,8 @@ describe("createMcpRequestHandler", () => {
     expect(instructions).toContain("`session_rename`: name this session ONCE");
     // Changes are shown as diff blocks, which every markdown surface draws.
     expect(instructions).toContain(DIFF_BLOCK_GUIDE);
+    // And structures and flows as mermaid diagrams, drawn the same way.
+    expect(instructions).toContain(MERMAID_GUIDE);
     // Every response kind is named; the tool's description says when.
     for (const kind of Object.keys(WIDGET_RESPONSE_KINDS)) {
       expect(instructions).toContain(kind);

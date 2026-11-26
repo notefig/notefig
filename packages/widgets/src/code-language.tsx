@@ -26,7 +26,7 @@ import { eachCodeBlock, touchesCode } from "./code-blocks";
 
 const LANGUAGES = [
   "bash", "c", "cpp", "csharp", "css", "diff", "go", "html", "java",
-  "javascript", "json", "jsx", "kotlin", "markdown", "php", "python", "ruby",
+  "javascript", "json", "jsx", "kotlin", "markdown", "mermaid", "php", "python", "ruby",
   "rust", "sql", "swift", "toml", "tsx", "typescript", "yaml",
 ];
 

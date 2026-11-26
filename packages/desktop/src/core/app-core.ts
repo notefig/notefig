@@ -24,6 +24,7 @@ import { treeModelModule } from "@/modules/tree-model";
 import { telemetryModule } from "@/modules/telemetry";
 import { dictationModule } from "@/modules/dictation";
 import { diffBlocksModule } from "@/modules/diff-blocks";
+import { mermaidBlocksModule } from "@/modules/mermaid-blocks";
 import { documentsModule } from "@/modules/documents";
 import { editorsModule } from "@/modules/editors";
 import { filesModule } from "@/modules/files";
@@ -86,6 +87,8 @@ export function runtimeModules(): AnyModule[] {
     promptWidgetsModule,
     // Diff fences in rendered markdown draw as diffs.
     diffBlocksModule,
+    // Mermaid fences in rendered markdown draw as diagrams.
+    mermaidBlocksModule,
     mockAgentModule,
     workspaceAgentsModule,
     sharedSessionsModule,

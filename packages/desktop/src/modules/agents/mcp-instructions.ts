@@ -1,6 +1,7 @@
 import { toolRegistry } from "./tools";
 import { WIDGET_RESPONSE_KINDS } from "@notefig/shared/agent";
 import { DIFF_BLOCK_GUIDE } from "@notefig/widgets/diff-block/syntax";
+import { MERMAID_GUIDE } from "@notefig/widgets/mermaid-block/syntax";
 
 /**
  * MCP's `tools/list` schema is enough for the model to call a tool
@@ -18,47 +19,31 @@ import { DIFF_BLOCK_GUIDE } from "@notefig/widgets/diff-block/syntax";
  */
 export function serverInstructions(): string {
   const names = toolRegistry.map((tool) => tool.name).join(", ");
+  const kinds = Object.keys(WIDGET_RESPONSE_KINDS).join(", ");
   return (
-    `This server exposes the Notefig writing app's native tools (${names}); ` +
-    `you are running as an agent inside that app. Notefig registers it for ` +
-    `this session only, so it isn't in any config file and needs no checking. ` +
-    `Four things are PRIMARY; the rest are for when a task calls for them. ` +
-    `(1) The widget-context resource: a prompt sent from an in-document widget ` +
-    `carries a \`resource_link\` whose URI starts with ` +
-    `\`notefig://widget-context\`. Call \`resources/read\` on it as your ` +
-    `FIRST action, before any document or file read. Its payload (title, ` +
-    `heading outline, text around the prompt, the selection, the other open ` +
-    `files) is sized to be enough for most requests: treat it as your default ` +
-    `context. A widget prompt that OPENS with a blockquote (\`> …\` lines) ` +
-    `quotes the passage the user had selected: that passage is what the ` +
-    `prompt is about. Pass the payload's \`selectedRange\` \`from\`/\`to\` ` +
-    `(padded outward if you like) to \`document_read_range\` to read it, or ` +
-    `more around it, as it is now. ` +
-    `(2) \`widget_respond\`: when a prompt carries that resource_link, you ` +
-    `MUST deliver your final response by calling \`widget_respond\` with the ` +
-    `kind that fits (${Object.keys(WIDGET_RESPONSE_KINDS).join(", ")}), even ` +
-    `when the turn needed no tool actions: plain assistant text is progress ` +
-    `notes, never the deliverable. When a prompt has no such link (it came ` +
-    `from the chat panel), do NOT call \`widget_respond\`; answer in chat. ` +
-    `A prompt from either surface may also carry \`file://\` resource_links, ` +
-    `files the user referenced with @: don't \`resources/read\` those, read ` +
-    `each one with \`workspace_read_document\` before acting. ` +
-    `(3) \`session_rename\`: name this session ONCE, on your first turn, ` +
-    `before \`widget_respond\`, with a 2–4 word name for the session's ` +
-    `goal. The user tells sessions apart by it on every widget, and it ` +
-    `can't be changed later. \`widget_respond\` refuses until you have. ` +
-    `A session you already named keeps its name: never call it again. ` +
-    `(4) \`workspace_read_document\`, for when the widget context doesn't ` +
-    `cover the request (another section named in the outline, say). Do NOT ` +
-    `read the entire document by default; read part of it with ` +
-    `\`line\`/\`limit\`. ` +
-    `Prefer these tools over generic file or shell tools for this ` +
-    `workspace's documents: they see live editor state (unsaved edits, open ` +
-    `tabs). A request about "this section" or "this ` +
-    `doc" expects you to edit the document, not to describe the edit, unless ` +
-    `the user is asking a question, or the request could mean different ` +
-    `things and the document doesn't settle which: then ask with a choice ` +
-    `before editing. ` +
-    DIFF_BLOCK_GUIDE
+    `You are an agent inside the Notefig writing app; this server is its ` +
+    `native tools (${names}), registered for this session only (no config ` +
+    `to check). Prefer them to file or shell tools for the workspace's ` +
+    `documents: they see live editor state. ` +
+    `(1) A prompt from an in-document widget carries a \`resource_link\` to ` +
+    `\`notefig://widget-context\`: \`resources/read\` it as your FIRST ` +
+    `action. It is usually enough context (outline, text around the prompt, ` +
+    `selection, open files). A prompt opening with \`> …\` lines quotes the ` +
+    `user's selection; read it as it is now with \`document_read_range\` ` +
+    `and the payload's \`selectedRange\`. ` +
+    `(2) With that link, you MUST deliver your final response by calling ` +
+    `\`widget_respond\` (${kinds}), even when nothing else was needed: ` +
+    `plain text is only progress notes. ` +
+    `Without it (a chat prompt), do NOT call \`widget_respond\`; answer in ` +
+    `chat. Read \`file://\` links (files the user @-mentioned) with ` +
+    `\`workspace_read_document\`, not \`resources/read\`. ` +
+    `(3) \`session_rename\`: name this session ONCE, on your first turn, in ` +
+    `2–4 words for its goal; \`widget_respond\` refuses until you have. ` +
+    `(4) Do NOT read the entire document by default: when the context falls ` +
+    `short, read part with \`workspace_read_document\` \`line\`/\`limit\`. ` +
+    `A request about "this section" or "this doc" means edit the document; ` +
+    `ask with a choice first only when it could mean different things. ` +
+    `${DIFF_BLOCK_GUIDE} ${MERMAID_GUIDE} Both go in the document, not in ` +
+    `\`widget_respond\`; its response says where.`
   );
 }

@@ -31,6 +31,10 @@ export { WidgetRespondInputSchema, type WidgetResponse };
  * can't end without one. The refusal is the enforcement — the agent names
  * the session and calls again — and the widget skips a refused call.
  *
+ * It also refuses a diff block or a mermaid diagram (DRAWN_BLOCK_REFUSED):
+ * they belong in the document. A rule on the call, not on the schema the
+ * widget reads saved responses with, so one saved before it still shows.
+ *
  * This module stays a leaf (shared types only): the widget reads the same
  * schema from @notefig/shared/agent, and pulling anything from the
  * editor/component layer in here would open a cycle.
@@ -45,10 +49,10 @@ export const widgetRespond: AgentTool<WidgetResponse, { recorded: true }> = {
     `few words naming this response, the widget's one heading (a choice's ` +
     `question is its heading, so it needs none). The widget renders inline, so keep \`markdown\` to a ` +
     `few sentences or a short list, and never restate what you wrote into ` +
-    `the document. Never put a diff block in it: write the diff into the ` +
-    `document, and say here where it is.`,
+    `the document. Never put a diff block or a mermaid diagram in it: write ` +
+    `it into the document, and say here where it is.`,
   input: WidgetRespondInputSchema,
-  async execute(ctx) {
+  async execute(ctx, input) {
     if (ctx.agents.task(ctx.taskId).get()?.titleSource !== "agent") {
       return {
         ok: false,
@@ -58,9 +62,26 @@ export const widgetRespond: AgentTool<WidgetResponse, { recorded: true }> = {
           `\`${WIDGET_RESPOND_TOOL_NAME}\` again with the same input.`,
       };
     }
+    // Read as the widget will render it (lazily: markdown-it stays off the
+    // startup path), so a fence nested in a quote or a list counts and an
+    // indented example doesn't.
+    const { drawnBlockIn } = await import("@/utils/markdown-html");
+    const drawn = drawnBlockIn(input.markdown);
+    if (drawn) return { ok: false, error: DRAWN_BLOCK_REFUSED[drawn] };
     return { ok: true, value: { recorded: true } };
   },
 };
+
+/** Why a diff or a diagram is sent to the document: a widget is too small
+ *  to read one in. */
+const DRAWN_BLOCK_REFUSED = {
+  diff:
+    "a diff block doesn't fit in a widget: write it into the document where " +
+    "the change belongs, then call again saying where it is",
+  mermaid:
+    "a mermaid diagram doesn't fit in a widget: draw it in the document " +
+    "where it belongs, then call again saying where it is",
+} as const;
 
 /** Every response kind and when to use it. */
 function describeResponseKinds(): string {
