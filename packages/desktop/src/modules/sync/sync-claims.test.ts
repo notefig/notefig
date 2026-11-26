@@ -105,6 +105,21 @@ describe("sync claims", () => {
     expect(claims.heldIn("a.md", same).size).toBe(0);
   });
 
+  it("says which files it won a unit in, so its text stands where the edits collide", () => {
+    const { claims, list } = claimsWith();
+    claims.take("a.md", edit(["k1"], ["mine"]), false, same);
+    claims.take("b.md", edit(["k2"], ["mine2"]), false, same);
+    list.peers = [peer("z", [{ path: "a.md", keys: ["k1", "zed"], agent: false }]), peer("a", [{ path: "b.md", keys: ["k2", "ada"], agent: false }])];
+    expect(claims.won("a.md")).toBe(true);
+    // Ada's id is lower: she won b.md's unit.
+    expect(claims.won("b.md")).toBe(false);
+    // Nobody else claimed what it holds in c.md, or it holds nothing there.
+    expect(claims.won("c.md")).toBe(false);
+    // z's claim ends before its text comes in: a.md's unit is still won.
+    list.peers = [];
+    expect(claims.won("a.md")).toBe(true);
+  });
+
   it("sees a race on a unit whose neighbour one side changed first, and keeps the caret's claim when the text above moves", () => {
     const { claims, list } = claimsWith();
     // Its key before its edit, here and at Ada's: the unit above differs.

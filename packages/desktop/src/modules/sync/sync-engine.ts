@@ -294,6 +294,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     fs: deps.fs,
     absolute,
     merge: deps.merge,
+    // Who claims what is read after the pull; a collision needs it now.
+    wonRace: async (filepath) => {
+      if (!isShared(deps.state())) return false;
+      await presence.read();
+      return claims.won(filepath);
+    },
     reportError: deps.reportError,
     dispatch: deps.dispatch,
     held: deps.held,

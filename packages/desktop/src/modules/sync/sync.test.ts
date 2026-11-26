@@ -1420,6 +1420,56 @@ describe("sync: shared, while another device syncs the branch", () => {
     disposeEditor(editors, join(wsB, "note.md"));
   });
 
+  it("keeps the text of the device that won a unit both took at once, though the other's reached the branch first", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { a, b, editors, core, ws, wsB, remote } = await meet();
+    const open = async (path: string) => {
+      getOrCreateEditor(editors, path, { type: "markdown", content: codec.parse(await read(path)), basePath: ws }, editorFs);
+      return editors.markdownEditor(path)!;
+    };
+    const [mine, theirs] = [await open(join(ws, "note.md")), await open(join(wsB, "note.md"))];
+    vi.spyOn(mine.view, "hasFocus").mockReturnValue(true);
+    vi.spyOn(theirs.view, "hasFocus").mockReturnValue(true);
+    await a.syncNow();
+    await b.syncNow();
+    const second = (editor: Editor) => docUnits(editor.state.doc)[2]!;
+    const save = async (editor: Editor, path: string) => {
+      await fsp.writeFile(path, codec.serialize(editor.getJSON()));
+      written(core, path);
+    };
+    // Both type at the end of the second paragraph before either polls.
+    // "b" < "dev": B holds it.
+    theirs.commands.setTextSelection(second(theirs).to - 1);
+    theirs.commands.insertContentAt(second(theirs).to - 1, " Bob");
+    mine.commands.setTextSelection(second(mine).to - 1);
+    mine.commands.insertContentAt(second(mine).to - 1, " Ada");
+    await save(mine, join(ws, "note.md"));
+    await save(theirs, join(wsB, "note.md"));
+    // A's commit reaches the branch first, its claim still out.
+    await vi.waitFor(
+      async () => {
+        await a.syncNow();
+        expect(await runGit(remote.bare, ["show", "main:note.md"])).toContain("Second paragraph. Ada");
+      },
+      { timeout: 10_000, interval: 200 },
+    );
+    await vi.waitFor(
+      async () => {
+        vi.setSystemTime(Date.now() + 3_000);
+        await b.syncNow();
+        await a.syncNow();
+        expect(await runGit(remote.bare, ["show", "main:note.md"])).toContain("Second paragraph. Bob");
+        expect(mine.state.doc.textContent).toContain("Second paragraph. Bob");
+      },
+      { timeout: 10_000, interval: 200 },
+    );
+    expect(theirs.state.doc.textContent).toContain("Second paragraph. Bob");
+    // B's text was never lost, so nothing of it is flagged.
+    expect(b.state().overwritten).toEqual([]);
+    disposeEditor(editors, join(ws, "note.md"));
+    disposeEditor(editors, join(wsB, "note.md"));
+  });
+
   it("shows what one device is typing in the other's editor before it's committed, and drops it once it is", async () => {
     const { a, b, editors, core, ws, wsB, remote } = await meet();
     const open = async (path: string) => {
