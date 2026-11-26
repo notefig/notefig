@@ -92,7 +92,7 @@
    top (styles.css's draft ::selection), which would otherwise show only
    under a range, and color the text under a keyboard selection.
    A diff block wears the same tint on its card, which its plugin marks
-   while a selection takes the block in (diff-block/extension.ts). */
+   while a selection takes the block in (drawn-block/extension.ts). */
 .ProseMirror .node-aiPrompt[data-widget-selected] > [data-type="ai-prompt"],
 .ProseMirror notefig-diff-block[data-selected] [data-diff-card] {
   position: relative;

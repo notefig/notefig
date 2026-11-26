@@ -4,7 +4,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import { Editor, Extension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
-import { codeDiff } from "../extension";
+import { drawnCodeBlocks } from "../../drawn-block/extension";
+import { diffBlocks } from "../extension";
 import { DiffCodeBlock } from "../schema";
 import type { DiffBlockElement } from "../element";
 import { captureSelectionReference } from "../../prompt/doc-helpers";
@@ -26,7 +27,7 @@ function mount(content: string) {
     extensions: [
       StarterKit.configure({ codeBlock: false }),
       DiffCodeBlock,
-      Extension.create({ name: "codeDiff", addProseMirrorPlugins: () => [codeDiff()] }),
+      Extension.create({ name: "drawnCodeBlocks", addProseMirrorPlugins: () => [drawnCodeBlocks([diffBlocks()])] }),
     ],
     content,
   });
@@ -38,7 +39,7 @@ const diffs = () => editor!.view.dom.querySelectorAll("notefig-diff-block");
 const pres = () => [...editor!.view.dom.querySelectorAll(":scope > pre")] as HTMLElement[];
 /** The rule ../extension.css hides a drawn block's source by; the test DOM
  *  doesn't load stylesheets. */
-const HIDING = readFileSync(join(__dirname, "../extension.css"), "utf8").match(/^([^\s/*][^{]*)\{/m)![1].trim();
+const HIDING = readFileSync(join(__dirname, "../../drawn-block/extension.css"), "utf8").match(/^([^\s/*][^{]*)\{/m)![1].trim();
 const hidden = (pre: HTMLElement) => pre.matches(HIDING);
 
 /** The position of the first code block. */
@@ -67,7 +68,7 @@ const blockSelected = () => {
   return selection instanceof NodeSelection && selection.from === codeBlockAt();
 };
 
-describe("codeDiff", () => {
+describe("diff blocks", () => {
   it("draws a diff block as its card in place of its source", async () => {
     mount(`<p>Before</p>${DIFF}`);
     expect(diffs()).toHaveLength(1);
@@ -216,7 +217,7 @@ describe("codeDiff", () => {
       extensions: [
         StarterKit.configure({ codeBlock: false }),
         DiffCodeBlock,
-        Extension.create({ name: "codeDiff", addProseMirrorPlugins: () => [codeDiff({ workspacePath: "/ws" })] }),
+        Extension.create({ name: "drawnCodeBlocks", addProseMirrorPlugins: () => [drawnCodeBlocks([diffBlocks({ workspacePath: "/ws" })])] }),
       ],
       content: DIFF,
     });
@@ -233,7 +234,7 @@ describe("codeDiff", () => {
       extensions: [
         StarterKit.configure({ codeBlock: false }),
         DiffCodeBlock,
-        Extension.create({ name: "codeDiff", addProseMirrorPlugins: () => [codeDiff()] }),
+        Extension.create({ name: "drawnCodeBlocks", addProseMirrorPlugins: () => [drawnCodeBlocks([diffBlocks()])] }),
       ],
       content: `<p>Before</p>${DIFF}`,
       editable: false,

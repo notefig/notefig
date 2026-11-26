@@ -15,7 +15,8 @@ import { NodeIndex, widgetRendererNodes, PROMPT_DRAFT_NODE_NAME, PROMPT_NODE_NAM
 import { codeHighlight } from "@notefig/widgets/code-highlight";
 import { reactNodeView } from "@notefig/widgets/react-node-view";
 import { codeLanguagePicker } from "@notefig/widgets/code-language";
-import { codeDiff } from "@notefig/widgets/diff-block/extension";
+import { drawnCodeBlocks } from "@notefig/widgets/drawn-block/extension";
+import { diffBlocks } from "@notefig/widgets/diff-block/extension";
 import {
   createSchemaExtensions,
   MarkdownImageBase,
@@ -38,7 +39,8 @@ export const MarkdownImage = MarkdownImageBase.extend({
 
 /**
  * Code blocks, highlighted like the code viewer (`codeHighlight`), with a
- * language picker, and drawn as diffs when they hold one (`codeDiff`). The
+ * language picker, and drawn as cards when a kind draws them
+ * (`drawnCodeBlocks`): as diffs when they hold one (`diffBlocks`). The
  * schema, the `diff` attribute included, is the worker's (CodeBlock), so
  * this is presentation only.
  */
@@ -51,7 +53,7 @@ export const MarkdownCodeBlock = CodeBlock.extend<MarkdownCodeBlockOptions>({
       ...(this.parent?.() ?? []),
       codeHighlight(),
       codeLanguagePicker(),
-      codeDiff({ workspacePath: this.options.workspaceRoot }),
+      drawnCodeBlocks([diffBlocks({ workspacePath: this.options.workspaceRoot })]),
     ];
   },
 });
