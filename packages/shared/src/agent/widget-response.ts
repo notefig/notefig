@@ -55,14 +55,27 @@ export function isChoiceKind(kind: WidgetResponseKind): boolean {
  *  the agent is told to shorten it. */
 export const WIDGET_RESPONSE_LIMITS = { title: 80, question: 200, option: 60 };
 
+/**
+ * A check that `markdown` opens no fence whose info string matches `info`:
+ * at a line's start, after any indent, blockquote `>` and list markers (a
+ * fence nested in either still renders), and ending its line with or
+ * without a `\r`.
+ */
+const fenceAbsent = (info: string) =>
+  new RegExp(
+    "^(?![\\s\\S]*(?:^|\\n)[ \\t]*(?:(?:>|[-*+]|\\d{1,9}[.)])[ \\t]*)*(?:`{3,}|~{3,})[ \\t]*" +
+      info +
+      "[ \\t]*\\r?(?:\\n|$))",
+  );
+
 /** No diff block (a fence whose info string has `diff` after the language,
  *  ```ts diff — see @notefig/widgets' diff-block/syntax.ts): a widget is too
  *  small to read one in, so the agent is sent to put it in the document. */
-const DIFF_FENCE_ABSENT = /^(?![\s\S]*(?:^|\n) {0,3}(?:`{3,}|~{3,})[ \t]*[^\s`]+(?:[ \t]+[^\s`]+)*?[ \t]+diff(?:[ \t][^\n]*)?(?:\n|$))/;
+const DIFF_FENCE_ABSENT = fenceAbsent("[^\\s`]+(?:[ \\t]+[^\\s`]+)*?[ \\t]+diff(?:[ \\t][^\\n]*)?");
 
 /** No mermaid diagram (a ```mermaid fence — see @notefig/widgets'
  *  mermaid-block/syntax.ts): as with a diff, a widget is too small for one. */
-const MERMAID_FENCE_ABSENT = /^(?![\s\S]*(?:^|\n) {0,3}(?:`{3,}|~{3,})[ \t]*mermaid[ \t]*(?:\n|$))/;
+const MERMAID_FENCE_ABSENT = fenceAbsent("mermaid");
 
 const KINDS = Object.keys(WIDGET_RESPONSE_KINDS) as [
   WidgetResponseKind,

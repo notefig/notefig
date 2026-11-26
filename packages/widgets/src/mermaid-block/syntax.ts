@@ -31,13 +31,10 @@ export const MERMAID_BLOCK_I18N_KEYS = ["mermaidBlockEdit"] as const;
 
 /** When and how an agent draws one; its MCP instructions carry this. */
 export const MERMAID_GUIDE =
-  "When a structure or flow is easier to see than to read (a process, a state " +
-  "machine, calls between parts in sequence, an architecture, a timeline, a " +
-  "hierarchy), draw it as a Mermaid diagram, in chat or in a document: a fenced " +
-  "code block in the language `mermaid` (```mermaid). Notefig draws it as the " +
-  "diagram. Keep it small (about 15 nodes at most), label the edges, and leave " +
-  "out `style`, `classDef` and colours so it follows the theme. Use one where it " +
-  "shows something the text doesn't, not for a list or a single step. " +
-  "Answering a prompt widget, put the diagram in the document, not in " +
-  "`widget_respond`: the widget is too small for one. Its response then says " +
-  "where the diagram is.";
+  "Draw what is easier seen than read as a ```mermaid diagram: `flowchart` for " +
+  "a process or decision, `sequenceDiagram` for calls between parts, " +
+  "`stateDiagram-v2` for states, `erDiagram` or `classDiagram` for a model, " +
+  "`gantt` or `timeline` for a schedule, `mindmap` for a breakdown, " +
+  "`quadrantChart` for a trade-off, `pie` or `xychart-beta` for numbers. At " +
+  "most ~15 nodes, labelled edges, no `style`/`classDef` colours (it follows " +
+  "the theme); never for a list or a single step.";

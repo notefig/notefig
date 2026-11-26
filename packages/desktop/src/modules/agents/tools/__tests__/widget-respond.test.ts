@@ -120,6 +120,19 @@ describe("widget_respond and diffs", () => {
     expect(parsed.error?.issues[0].message).toContain("draw it in the document");
     expect(WidgetRespondInputSchema.safeParse({ kind: "answer", markdown: "Use `mermaid` for diagrams.", title: "Tip" }).success).toBe(true);
   });
+
+  it("refuses a diff or a diagram in a quote or a list, or with Windows line ends", () => {
+    const refused = (markdown: string) =>
+      !WidgetRespondInputSchema.safeParse({ kind: "answer", markdown, title: "Answer" }).success;
+    for (const fence of ["```mermaid", "```ts diff"]) {
+      expect(refused(`> ${fence}\n> A --> B\n> \`\`\``)).toBe(true);
+      expect(refused(`- Like so:\n\n  ${fence}\n  A --> B\n  \`\`\``)).toBe(true);
+      expect(refused(`1. ${fence}\n   A --> B\n   \`\`\``)).toBe(true);
+      expect(refused(`Like so:\r\n\r\n${fence}\r\nA --> B\r\n\`\`\``)).toBe(true);
+    }
+    // Prose that names one is fine.
+    expect(refused("> Write a ts diff block, or a mermaid one.")).toBe(false);
+  });
 });
 
 describe("widget_respond waits for the session's name", () => {

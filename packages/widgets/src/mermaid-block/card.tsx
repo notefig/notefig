@@ -7,7 +7,8 @@
  * variables (./card.css), which name the app's own.
  *
  * A diagram Pele can't read shows its message, and the source under it, so
- * a broken diagram still reads as what it says.
+ * a broken diagram still reads as what it says; one Pele didn't load for
+ * shows its source.
  */
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -39,17 +40,23 @@ export function MermaidCard({
     let destroy: (() => void) | null = null;
     let gone = false;
     setFailed(false);
-    void import("pele/lazy").then(async ({ mountAsync }) => {
-      if (gone) return;
-      // Zoom off: its pinch and Mod+wheel are the document's, to scroll
-      // and zoom the page.
-      const mounted = await mountAsync(element, source, { zoom: false, onError: () => setFailed(true) });
-      if (gone) mounted.destroy();
-      else {
-        destroy = () => mounted.destroy();
-        if (mounted.error !== undefined) setFailed(true);
-      }
-    });
+    const fail = () => {
+      if (!gone) setFailed(true);
+    };
+    import("pele/lazy")
+      .then(async ({ mountAsync }) => {
+        if (gone) return;
+        // Zoom off: its pinch and Mod+wheel are the document's, to scroll
+        // and zoom the page.
+        const mounted = await mountAsync(element, source, { zoom: false, onError: fail });
+        if (gone) mounted.destroy();
+        else {
+          destroy = () => mounted.destroy();
+          if (mounted.error !== undefined) fail();
+        }
+      })
+      // Pele didn't load (offline, a stale chunk): the source, not a blank card.
+      .catch(fail);
     return () => {
       gone = true;
       destroy?.();
