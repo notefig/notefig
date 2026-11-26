@@ -54,12 +54,20 @@ function mergeWords(ours: string, base: string, theirs: string): string | null {
   return merged.join("");
 }
 
-/** Units of ours that stand where they collide, by their place among
- *  ours' units (`splitUnits`), and how many units it was counted over: a
- *  count that isn't ours' says the places name other units, and none hold. */
+/** Units of ours that stand where they collide, by their place among the
+ *  units the editor keys (`fileUnitsOf`), and how many there were. */
 export interface Holds {
   at: number[];
   of: number;
+}
+
+/** `holds` as places among ours' units here: the editor's units are these
+ *  but for the ones with no text (the blank after frontmatter is one of
+ *  these, and none of the editor's). Counted otherwise, the places name
+ *  other units, and none hold. */
+function heldHere(units: Unit[], holds: Holds | undefined): Set<number> {
+  const said = units.flatMap((unit, i) => (unit.text === "" ? [] : [i]));
+  return new Set(holds?.of === said.length ? holds.at.map((at) => said[at]!) : []);
 }
 
 /** What one merge keeps of ours where it collides: the units of ours it
@@ -162,7 +170,7 @@ export async function mergeMarkdown(base: string, ours: string, theirs: string, 
   if (theirs === base) return { text: ours, overwritten: [] };
   const [o, a, b] = await Promise.all([base, ours, theirs].map(splitUnits));
   const texts = (units: Unit[]) => units.map((unit) => unit.text);
-  const collisions: Collisions = { overwritten: [], holds: new Set(holds?.of === a!.length ? holds.at : []) };
+  const collisions: Collisions = { overwritten: [], holds: heldHere(a!, holds) };
   const merged = diff3Merge(texts(a!), texts(o!), texts(b!)).flatMap((region) =>
     region.conflict
       ? resolve(region.conflict.a, region.conflict.aIndex, region.conflict.o, region.conflict.b, collisions)

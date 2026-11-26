@@ -139,14 +139,13 @@ describe("heldPlaces", () => {
     expect(heldPlaces(units, [])).toEqual({ at: [], of: 4 });
   });
 
-  // Not frontmatter: the merge's cut counts the blank after it as a unit,
-  // so in such a file the counts differ and a merge holds nothing.
-  it("counts a file's units as the merge cuts them, so a place names the same unit in both", async () => {
+  it("counts a file's units as the merge cuts those with text, so a place names the same unit in both", async () => {
     const markdown = [
-      "# Heading", "", "A paragraph.", "", "- tight", "- list", "", "- [ ] a task", "- [x] done", "",
+      "---", "title: Plan", "---", "", "# Heading", "", "A paragraph.", "", "- tight", "- list", "", "- [ ] a task", "- [x] done", "",
       "| a | b |", "| --- | --- |", "| 1 | 2 |", "", "```ts", "const x = 1;", "```", "",
       '<!-- notefig:prompt id="blob_a" task="task_a" -->', "", "> A quote.", "", "---", "", "Last.", "",
     ].join("\r\n");
-    expect(fileUnitsOf(doc(markdown))).toHaveLength((await splitUnits(markdown)).length);
+    const said = (await splitUnits(markdown)).filter((unit) => unit.text !== "");
+    expect(fileUnitsOf(doc(markdown))).toHaveLength(said.length);
   });
 });
