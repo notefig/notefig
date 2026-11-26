@@ -9,7 +9,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import CharacterCount from "@tiptap/extension-character-count";
 import { EditorImage } from "./editor-image-node";
 import { FrontmatterNode } from "./frontmatter-node";
-import { NodeIndex, widgetRendererNodes, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
+import { NodeIndex, widgetRendererNodes, PROMPT_DRAFT_NODE_NAME, PROMPT_NODE_NAME, selectWidget } from "@notefig/widgets";
 // By path, not through the barrel: @pierre/diffs registers custom elements
 // on import, and the barrel also loads in the markdown worker, which has none.
 import { codeHighlight } from "@notefig/widgets/code-highlight";
@@ -187,6 +187,8 @@ const LinkKeepingCopy = Extension.create({
  * past the selection, and WebKit can't move a selection that ends between
  * the editor's own children: the document stayed selected while the caret
  * seemed to move, so ⌘A did nothing and the next key replaced everything.
+ * A widget at that edge is selected, as the keyboard selects it: its draft
+ * may be hidden, and a caret in it would be too.
  */
 const LeaveSelectAll = Extension.create({
   name: "leaveSelectAll",
@@ -196,7 +198,12 @@ const LeaveSelectAll = Extension.create({
       const { state, view } = this.editor;
       if (!(state.selection instanceof AllSelection)) return false;
       const edge = toEnd ? Selection.atEnd(state.doc) : Selection.atStart(state.doc);
-      view.dispatch(state.tr.setSelection(edge).scrollIntoView());
+      const tr = state.tr.setSelection(edge);
+      const { $from } = edge;
+      for (let depth = $from.depth; depth > 0; depth--) {
+        if ($from.node(depth).type.name === PROMPT_NODE_NAME) selectWidget(tr, $from.before(depth));
+      }
+      view.dispatch(tr.scrollIntoView());
       return true;
     };
     return {

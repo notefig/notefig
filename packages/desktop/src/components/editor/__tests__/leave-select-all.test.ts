@@ -8,7 +8,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { Editor } from "@tiptap/core";
-import { AllSelection, TextSelection } from "@tiptap/pm/state";
+import { AllSelection, NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { editorExtensions } from "../tiptap-editor-kit";
 
 let editor: Editor | null = null;
@@ -54,6 +54,21 @@ describe("leaving a select-all", () => {
       expect(press(e, key, meta)).toBe(true);
       expect(e.state.selection.eq(TextSelection.atStart(e.state.doc))).toBe(true);
       e.destroy();
+    }
+  });
+
+  it("selects a widget at the start it collapses to, not a caret in its draft", () => {
+    // A running widget's draft is hidden: a caret in it would be too.
+    const widget = { type: "aiPrompt", content: [{ type: "promptDraft", content: [{ type: "text", text: "fix it" }] }] };
+    editor = new Editor({
+      extensions: editorExtensions,
+      content: { type: "doc", content: [widget, { type: "paragraph", content: [{ type: "text", text: "Last." }] }] },
+    });
+    for (const key of ["ArrowUp", "ArrowLeft"]) {
+      editor.view.dispatch(editor.state.tr.setSelection(new AllSelection(editor.state.doc)));
+      expect(press(editor, key)).toBe(true);
+      expect(editor.state.selection).toBeInstanceOf(NodeSelection);
+      expect(editor.state.selection.from).toBe(0);
     }
   });
 
