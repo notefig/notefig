@@ -278,7 +278,7 @@ export const MAX_REFERENCE_CHARS = 8000;
 
 /** The current selection as a reference, or null when there is nothing
  *  worth referencing (collapsed, or whitespace-only). A selected block of
- *  text counts — a diff block is selected whole (diff-block/extension.ts). */
+ *  text counts — a drawn block is selected whole (drawn-block/extension.ts). */
 export function captureSelectionReference(
   state: EditorState,
 ): PromptReference | null {

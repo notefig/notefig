@@ -6,7 +6,8 @@ import { EditorState, TextSelection, type Transaction } from "@tiptap/pm/state";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { findWrapping, liftTarget } from "@tiptap/pm/transform";
 import { codeLanguagePicker } from "../code-language";
-import { codeDiff } from "../diff-block/extension";
+import { drawnCodeBlocks } from "../drawn-block/extension";
+import { diffBlocks } from "../diff-block/extension";
 import { deriveMinimapEntries, shiftMinimapEntries } from "../minimap/contract";
 import { AiPromptNodeBase, PromptDraftNodeBase } from "../prompt/node";
 import { promptMentionNode } from "../prompt/composer/mention-node";
@@ -216,7 +217,7 @@ const widgetIds = (doc: PMNode) => {
 };
 
 const picker = codeLanguagePicker();
-const diff = codeDiff({});
+const diff = drawnCodeBlocks([diffBlocks()]);
 const index = nodeIndexPlugin(new Set([nodes.aiPrompt.name]));
 
 /** Where each plugin's mapped state after `tr` differs from a fresh one. */

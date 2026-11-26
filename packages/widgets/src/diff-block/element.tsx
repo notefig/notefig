@@ -14,6 +14,7 @@ import type { ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { FileDiffMetadata } from "@pierre/diffs";
 import { DiffCard, diffControls, type DiffFile } from "./card";
+import type { DrawnBlockElement } from "../drawn-block/extension";
 import { parseDiffBlock } from "./patch";
 import { COLLAPSED_ATTRIBUTE, DIFF_BLOCK_TAG, DIFF_DATA_ATTRIBUTE } from "./syntax";
 
@@ -28,18 +29,12 @@ export interface DiffBlockHost {
   FileIcon?: ComponentType<{ path: string; className?: string }>;
 }
 
-/** The element; the editor hands it a way into the block's source, and
- *  says when the keys are on it. */
-export interface DiffBlockElement extends HTMLElement {
-  onEdit?: () => void;
+/** The element; the editor draws a diff block with it
+ *  (../drawn-block/extension.ts). */
+export interface DiffBlockElement extends DrawnBlockElement {
   /** Its diff, where whoever made it has read it already; else it reads
    *  its code. */
   diff?: FileDiffMetadata;
-  /** The keys are on the card: its controls show their digits. */
-  keys: boolean;
-  /** Runs the card's `index`th control (diffControls); false when it has
-   *  none there, or isn't drawn. */
-  runControl(index: number): boolean;
 }
 
 function elementClass(host: DiffBlockHost | null) {
