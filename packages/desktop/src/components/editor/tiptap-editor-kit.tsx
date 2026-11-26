@@ -3,13 +3,13 @@ import type { CodeBlockOptions } from "@tiptap/extension-code-block";
 
 /** Its diff blocks' paths are in `workspaceRoot`'s workspace. */
 type MarkdownCodeBlockOptions = CodeBlockOptions & { workspaceRoot: string | null };
-import { Plugin } from "@tiptap/pm/state";
+import { AllSelection, Plugin, Selection, TextSelection } from "@tiptap/pm/state";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import Placeholder from "@tiptap/extension-placeholder";
 import CharacterCount from "@tiptap/extension-character-count";
 import { EditorImage } from "./editor-image-node";
 import { FrontmatterNode } from "./frontmatter-node";
-import { NodeIndex, widgetRendererNodes, PROMPT_DRAFT_NODE_NAME } from "@notefig/widgets";
+import { NodeIndex, widgetRendererNodes, PROMPT_DRAFT_NODE_NAME, PROMPT_NODE_NAME, selectWidget } from "@notefig/widgets";
 // By path, not through the barrel: @pierre/diffs registers custom elements
 // on import, and the barrel also loads in the markdown worker, which has none.
 import { codeHighlight } from "@notefig/widgets/code-highlight";
@@ -180,6 +180,65 @@ const LinkKeepingCopy = Extension.create({
   },
 });
 
+/**
+ * A selection of the whole document (⌘A) collapses to its end on → and ↓
+ * (⌘ too), to its start on ← and ↑, and to where a click lands (MET-294).
+ * ProseMirror leaves these to the browser when there's no cursor position
+ * past the selection, and WebKit can't move a selection that ends between
+ * the editor's own children: the document stayed selected while the caret
+ * seemed to move, so ⌘A did nothing and the next key replaced everything.
+ * A widget at that edge is selected, as the keyboard selects it: its draft
+ * may be hidden, and a caret in it would be too.
+ */
+const LeaveSelectAll = Extension.create({
+  name: "leaveSelectAll",
+
+  addKeyboardShortcuts() {
+    const collapse = (toEnd: boolean) => () => {
+      const { state, view } = this.editor;
+      if (!(state.selection instanceof AllSelection)) return false;
+      const edge = toEnd ? Selection.atEnd(state.doc) : Selection.atStart(state.doc);
+      const tr = state.tr.setSelection(edge);
+      const { $from } = edge;
+      for (let depth = $from.depth; depth > 0; depth--) {
+        if ($from.node(depth).type.name === PROMPT_NODE_NAME) selectWidget(tr, $from.before(depth));
+      }
+      view.dispatch(tr.scrollIntoView());
+      return true;
+    };
+    return {
+      ArrowRight: collapse(true),
+      ArrowDown: collapse(true),
+      "Mod-ArrowRight": collapse(true),
+      "Mod-ArrowDown": collapse(true),
+      ArrowLeft: collapse(false),
+      ArrowUp: collapse(false),
+      "Mod-ArrowLeft": collapse(false),
+      "Mod-ArrowUp": collapse(false),
+    };
+  },
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          handleDOMEvents: {
+            // A caret where the press lands, before ProseMirror handles it:
+            // the click, or a drag from there, goes on as from any caret.
+            mousedown: (view, event) => {
+              const { state } = view;
+              if (!(state.selection instanceof AllSelection) || event.button !== 0 || event.shiftKey) return false;
+              const at = view.posAtCoords({ left: event.clientX, top: event.clientY });
+              if (at) view.dispatch(state.tr.setSelection(TextSelection.near(state.doc.resolve(at.pos))));
+              return false;
+            },
+          },
+        },
+      }),
+    ];
+  },
+});
+
 /** `getTextBetween`, with each run of linked text written as a link. */
 function textWithLinks(
   doc: ProseMirrorNode,
@@ -243,4 +302,5 @@ export const editorExtensions = [
   NativeHistoryFocusGuard,
   SkipEmptyTransactions,
   LinkKeepingCopy,
+  LeaveSelectAll,
 ];
