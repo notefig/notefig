@@ -4,6 +4,7 @@ import { createPresence } from "./sync-presence";
 import type { SyncClaim } from "./sync-machine";
 
 const claim: SyncClaim = { path: "note.md", keys: ["k1"], agent: false };
+const yielded: SyncClaim = { path: "note.md", keys: ["k2"], agent: false };
 
 /** A presence over a branch whose tip is `tip` (tree `root`), with `wip`
  *  standing in for this device's work in progress. */
@@ -24,6 +25,7 @@ function presenceWith(wip: () => Promise<never>) {
     state: () => ({ peers: [] }) as never,
     dispatch: () => {},
     claims: () => [claim],
+    yielded: () => [yielded],
     wip,
   });
   return { presence, git };
@@ -36,7 +38,7 @@ describe("sync presence", () => {
     await expect(presence.heartbeat()).resolves.toBeUndefined();
     expect(git.treeWith).not.toHaveBeenCalled();
     expect(git.commit).toHaveBeenCalledWith(expect.objectContaining({ tree: "root", parent: ["tip"] }));
-    expect(JSON.parse(git.commit.mock.calls[0]![0].message).claims).toEqual([claim]);
+    expect(JSON.parse(git.commit.mock.calls[0]![0].message)).toMatchObject({ claims: [claim], yielded: [yielded] });
     expect(git.pushRef).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ oid: "beat" }));
   });
 });

@@ -32,10 +32,10 @@ export interface OverlapDeps {
   documents: Pick<DocumentsApi, "write" | "hasUnsavedEdits">;
   fs: Pick<FileSystemSurface, "readBinaryFiles" | "writeBinaryFiles">;
   absolute(path: string): string;
-  merge(base: string, ours: string, theirs: string): Promise<MergedMarkdown>;
-  /** This device won a unit of `filepath` that the branch's version edited
-   *  too (`Claims.won`): where they collide, ours stands. */
-  wonRace(filepath: string): Promise<boolean>;
+  merge(base: string, ours: string, theirs: string, holds?: string[]): Promise<MergedMarkdown>;
+  /** Of the units of ours a merge of `filepath` replaced, the ones this
+   *  device won from another that claimed them too (`Claims.won`). */
+  wonUnits(filepath: string, texts: string[]): Promise<string[]>;
   /** A merge that threw: a bug to hear about, not the user's to fix. */
   reportError(error: unknown): void;
   dispatch(event: SyncEvent): void;
@@ -105,11 +105,10 @@ export function createOverlaps(deps: OverlapDeps) {
     let merged: MergedMarkdown;
     try {
       merged = await deps.merge(from, mine, incoming);
-      // A race this device won: ours holds, and what it replaces is the
-      // other device's, which stays in the branch's history.
-      if (merged.overwritten.length > 0 && (await deps.wonRace(filepath))) {
-        merged = { text: (await deps.merge(from, incoming, mine)).text, overwritten: [] };
-      }
+      // Races this device won: those units of ours stand, and what they
+      // replace is the other device's, which stays in the branch's history.
+      const holds = merged.overwritten.length > 0 ? await deps.wonUnits(filepath, merged.overwritten) : [];
+      if (holds.length > 0) merged = await deps.merge(from, mine, incoming, holds);
     } catch (error) {
       deps.reportError(error);
       return { bytes: null, lost: [{ path: filepath, text: mine }] };

@@ -36,7 +36,7 @@ import { cursorAt, cursorIn, docUnits, indexOf, keyedUnits, unitsIn, type DocUni
 import type { Wip, WipUnit } from "./sync-wip";
 
 const REPORT_MS = 300;
-const here = new PluginKey<DecorationSet>("syncPeers");
+const here = new PluginKey<PeersDraw>("syncPeers");
 const held = new PluginKey<DecorationSet>("syncClaims");
 const typing = new PluginKey<WipDraw>("syncWip");
 
@@ -406,21 +406,29 @@ function wipPlugin(wip: WipView) {
   });
 }
 
+/** Where the others are, as last drawn, and the peers drawn. */
+interface PeersDraw {
+  peers: readonly SyncPeer[];
+  decorations: DecorationSet;
+}
+
 /** Where the others are, a block each, named; and this device's block,
  *  reported. A caret move only arms a timer, so nothing runs per keystroke,
- *  and a move within one block changes nothing that's sent. */
+ *  and a move within one block changes nothing that's sent. Redrawn when
+ *  they move, or when a write that isn't typing brings the block one is in. */
 function peersPlugin(path: string, report: (view: EditorView) => void, leave: () => void, setTimer: SetTimer) {
-  return new Plugin<DecorationSet>({
+  return new Plugin<PeersDraw>({
     key: here,
     state: {
-      init: () => DecorationSet.empty,
+      init: () => ({ peers: [], decorations: DecorationSet.empty }),
       apply: (tr, value, _, state) => {
-        const peers = tr.getMeta(here) as SyncPeer[] | undefined;
+        const peers = (tr.getMeta(here) as SyncPeer[] | undefined) ?? (tr.docChanged && !isTyping(tr) ? value.peers : null);
+        if (!peers) return { ...value, decorations: value.decorations.map(tr.mapping, tr.doc) };
         // Who this transaction's draw named on what they're typing.
-        return peers ? peerDecorations(tr.doc, path, peers, typing.getState(state)?.named) : value.map(tr.mapping, tr.doc);
+        return { peers, decorations: peerDecorations(tr.doc, path, peers, typing.getState(state)?.named) };
       },
     },
-    props: { decorations: (state) => here.getState(state) },
+    props: { decorations: (state) => here.getState(state)?.decorations },
     view(view) {
       let cancel: (() => void) | null = null;
       const arm = () => {

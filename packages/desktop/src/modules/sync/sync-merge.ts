@@ -16,7 +16,8 @@
  *   touch; otherwise the holder's text stands, and the other side's comes
  *   back in `overwritten`, to flag it.
  *
- * The holder is `theirs`: the side already on the branch.
+ * The holder is `theirs`, the side already on the branch, but for the
+ * units of ours named in `holds`: a race this device won (`Claims.won`).
  */
 import diff3Merge from "diff3";
 import { splitUnits, type Unit } from "@/utils/markdown-units";
@@ -50,12 +51,20 @@ function mergeWords(ours: string, base: string, theirs: string): string | null {
   return merged.join("");
 }
 
-function mergeUnit(ours: string, base: string, theirs: string, overwritten: string[]): string {
+/** What one merge keeps of ours where it collides: the units of ours it
+ *  replaced, and those that stand instead. */
+interface Collisions {
+  overwritten: string[];
+  holds: ReadonlySet<string>;
+}
+
+function mergeUnit(ours: string, base: string, theirs: string, collisions: Collisions): string {
   if (ours === base || ours === theirs) return theirs;
   if (theirs === base) return ours;
   const merged = mergeWords(ours, base, theirs);
   if (merged !== null) return merged;
-  overwritten.push(ours);
+  if (collisions.holds.has(ours)) return ours;
+  collisions.overwritten.push(ours);
   return theirs;
 }
 
@@ -83,7 +92,7 @@ function applyBoth(base: string[], ours: Change, theirs: Change): string[] {
 }
 
 /** A stretch both sides changed (diff3's conflict): the units to keep. */
-function resolve(ours: string[], base: string[], theirs: string[], overwritten: string[]): string[] {
+function resolve(ours: string[], base: string[], theirs: string[], collisions: Collisions): string[] {
   if (base.length === 0) return [...theirs, ...ours];
   if (ours.length === 0) return theirs;
   if (theirs.length === 0) return ours;
@@ -91,9 +100,12 @@ function resolve(ours: string[], base: string[], theirs: string[], overwritten: 
   const held = changeOf(theirs, base);
   if (mine.end <= held.start || held.end <= mine.start) return applyBoth(base, mine, held);
   if (ours.length === base.length && theirs.length === base.length) {
-    return base.map((unit, i) => mergeUnit(ours[i]!, unit, theirs[i]!, overwritten));
+    return base.map((unit, i) => mergeUnit(ours[i]!, unit, theirs[i]!, collisions));
   }
-  if (mine.units.length > 0) overwritten.push(mine.units.join(BLANK));
+  if (mine.units.length === 0) return theirs;
+  const replaced = mine.units.join(BLANK);
+  if (collisions.holds.has(replaced)) return ours;
+  collisions.overwritten.push(replaced);
   return theirs;
 }
 
@@ -131,15 +143,16 @@ function gapsOf(sides: Unit[][]) {
   };
 }
 
-/** Merge three versions of a markdown file; `theirs` holds. */
-export async function mergeMarkdown(base: string, ours: string, theirs: string): Promise<MergedMarkdown> {
+/** Merge three versions of a markdown file; `theirs` holds, but for the
+ *  units of ours in `holds`, as a first merge's `overwritten` gave them. */
+export async function mergeMarkdown(base: string, ours: string, theirs: string, holds: string[] = []): Promise<MergedMarkdown> {
   if (ours === base || ours === theirs) return { text: theirs, overwritten: [] };
   if (theirs === base) return { text: ours, overwritten: [] };
   const [o, a, b] = await Promise.all([base, ours, theirs].map(splitUnits));
   const texts = (units: Unit[]) => units.map((unit) => unit.text);
-  const overwritten: string[] = [];
+  const collisions: Collisions = { overwritten: [], holds: new Set(holds) };
   const merged = diff3Merge(texts(a!), texts(o!), texts(b!)).flatMap((region) =>
-    region.conflict ? resolve(region.conflict.a, region.conflict.o, region.conflict.b, overwritten) : region.ok,
+    region.conflict ? resolve(region.conflict.a, region.conflict.o, region.conflict.b, collisions) : region.ok,
   );
   const eol = /\r\n/.test(theirs || ours) ? "\r\n" : "\n";
   const gapBetween = gapsOf([o!, a!, b!]);
@@ -147,5 +160,5 @@ export async function mergeMarkdown(base: string, ours: string, theirs: string):
   const text = merged
     .map((unit, i) => unit + (i === merged.length - 1 ? end : gapBetween(unit, merged[i + 1]!, eol)))
     .join("");
-  return { text, overwritten };
+  return { text, overwritten: collisions.overwritten };
 }

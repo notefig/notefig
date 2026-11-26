@@ -42,9 +42,9 @@ async function createInlineConverter(): Promise<Converter> {
       return serializeKeeping(codec, doc, previous);
     },
     renderHtml: async (markdown: string) => renderMarkdownHtml(markdown),
-    merge: async (base: string, ours: string, theirs: string) => {
+    merge: async (base: string, ours: string, theirs: string, holds?: string[]) => {
       const { mergeMarkdown } = await import("@/modules/sync/sync-merge");
-      return mergeMarkdown(base, ours, theirs);
+      return mergeMarkdown(base, ours, theirs, holds);
     },
     fileUnits: async (markdown: string) => {
       const { fileUnitsOf } = await import("@/modules/sync/sync-units");
@@ -128,10 +128,11 @@ export function renderMarkdown(markdown: string): Promise<string> {
   return withConverter((c) => c.renderHtml(markdown));
 }
 
-/** Sync's three-way merge of a markdown file, `theirs` holding
- *  (`modules/sync/sync-merge.ts`), off the main thread. */
-export function mergeMarkdownOffThread(base: string, ours: string, theirs: string): Promise<MergedMarkdown> {
-  return withConverter((c) => c.merge(base, ours, theirs));
+/** Sync's three-way merge of a markdown file, `theirs` holding but for
+ *  the units of ours in `holds` (`modules/sync/sync-merge.ts`), off the
+ *  main thread. */
+export function mergeMarkdownOffThread(base: string, ours: string, theirs: string, holds?: string[]): Promise<MergedMarkdown> {
+  return withConverter((c) => c.merge(base, ours, theirs, holds));
 }
 
 /** Test hook: force a fresh boot (e.g. after stubbing Worker). */

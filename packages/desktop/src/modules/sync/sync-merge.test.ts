@@ -34,6 +34,22 @@ describe("mergeMarkdown", () => {
     expect(merged.overwritten).toEqual(["Mine paragraph here."]);
   });
 
+  it("keeps the colliding units of ours it's told hold, and gives the rest to the holder", async () => {
+    // Both sides rewrote both paragraphs; this device won the first.
+    const mine = base.replace("First paragraph here.", "First, mine.").replace("Second paragraph here.", "Second, mine.");
+    const theirs = base.replace("First paragraph here.", "First, theirs.").replace("Second paragraph here.", "Second, theirs.");
+    expect(await mergeMarkdown(base, mine, theirs, ["First, mine."])).toEqual({
+      text: "# Title\n\nFirst, mine.\n\nSecond, theirs.\n",
+      overwritten: ["Second, mine."],
+    });
+  });
+
+  it("keeps a stretch of ours it's told holds where a collision takes a stretch", async () => {
+    const mine = base.replace("First paragraph here.\n\nSecond paragraph here.", "Mine replaced both.");
+    const theirs = base.replace("First paragraph here.", "First, theirs.\n\nInserted.");
+    expect((await mergeMarkdown(base, mine, theirs, ["Mine replaced both."])).text).toBe("# Title\n\nMine replaced both.\n");
+  });
+
   it("returns only the units ours changed when a collision takes a stretch", async () => {
     const mine = base.replace("First paragraph here.", "Mine.\n\nAlso mine.");
     const theirs = base.replace("First paragraph here.", "Theirs.");

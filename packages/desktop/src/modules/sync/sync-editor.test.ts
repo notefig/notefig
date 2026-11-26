@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { getSchema } from "@tiptap/core";
+import { Editor, getSchema } from "@tiptap/core";
+import { ADOPTION_TRANSACTION_META } from "@/components/editor/adopt-external-content";
 import { Node as PMNode } from "@tiptap/pm/model";
 import { createMarkdownCodec } from "@/components/editor/markdown-codec";
 import { editorExtensions } from "@/components/editor/tiptap-editor-kit";
-import { arrived, peerDecorations, wipDecorations } from "./sync-editor";
-import type { SyncPeer } from "./sync-machine";
+import { arrived, createSyncEditors, peerDecorations, wipDecorations } from "./sync-editor";
+import { createClaims } from "./sync-claims";
+import { INITIAL_SYNC_STATE, type SyncPeer } from "./sync-machine";
 import { cursorAt, keyedUnits, peerUnitsOf } from "./sync-units";
 
 const codec = createMarkdownCodec();
@@ -75,5 +77,39 @@ describe("peerDecorations", () => {
 
   it("goes by place for a cursor with no key, as a build before keys sends", () => {
     expect(marked(adas, bob({ path: "note.md", unit: 1 }))).toEqual(["Ada just added this."]);
+  });
+});
+
+describe("sync editors", () => {
+  it("marks a peer's block once a write that isn't typing brings it", () => {
+    const editor = new Editor({ extensions: editorExtensions, content: codec.parse("First paragraph.\n\nLast paragraph.\n") });
+    // Bob is in a paragraph this copy doesn't have yet.
+    const theirs = doc("First paragraph.\n\nBob is here.\n\nLast paragraph.\n");
+    const bob: SyncPeer = {
+      deviceId: "b",
+      name: "Bob",
+      colour: "#2f7ed8",
+      cursor: { path: "note.md", ...cursorAt(theirs, keyedUnits(theirs)[1]!.from + 2) },
+      claims: [],
+      wip: null,
+    };
+    const editors = createSyncEditors({
+      editors: { markdownEditor: () => editor, paths: () => ["/ws/note.md"] },
+      tree: () => "note.md",
+      onCursor: () => {},
+      claims: createClaims({ deviceId: "m", now: () => 0, peers: () => [bob] }),
+      wip: { in: () => [] },
+      setTimer: () => () => {},
+    });
+    editors.reconcile({ ...INITIAL_SYNC_STATE, setup: "on", peers: [bob] });
+    const marked = () => [...editor.view.dom.querySelectorAll(".sync-here")].map((el) => el.textContent);
+    expect(marked()).toEqual([]);
+
+    // Sync brings it in: Bob shows there, with no new presence.
+    const paragraph = editor.schema.nodes.paragraph!.create(null, editor.schema.text("Bob is here."));
+    editor.view.dispatch(editor.state.tr.insert(editor.state.doc.child(0).nodeSize, paragraph).setMeta(ADOPTION_TRANSACTION_META, true));
+    expect(marked()).toEqual(["Bob is here."]);
+    editors.stop();
+    editor.destroy();
   });
 });

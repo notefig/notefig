@@ -91,7 +91,7 @@ export interface SyncEngineDeps {
     "readDirectory" | "getMetadata" | "readBinaryFiles" | "writeBinaryFiles" | "deleteFiles" | "deleteDirectories"
   >;
   /** The markdown three-way merge (`sync-merge.ts`), off the main thread. */
-  merge(base: string, ours: string, theirs: string): Promise<MergedMarkdown>;
+  merge(base: string, ours: string, theirs: string, holds?: string[]): Promise<MergedMarkdown>;
   /** A markdown file's units as claims see them (`sync-units.ts`), off the
    *  main thread. */
   fileUnits(markdown: string): Promise<FileUnit[]>;
@@ -295,10 +295,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
     absolute,
     merge: deps.merge,
     // Who claims what is read after the pull; a collision needs it now.
-    wonRace: async (filepath) => {
-      if (!isShared(deps.state())) return false;
+    wonUnits: async (filepath, texts) => {
+      if (!isShared(deps.state())) return [];
       await presence.read();
-      return claims.won(filepath);
+      const won = unitIndex(claims.won(filepath));
+      const named = await Promise.all(
+        texts.map(async (text) => (await deps.fileUnits(text)).some((unit) => won.resolve(unit.key) !== null)),
+      );
+      return texts.filter((_, i) => named[i]);
     },
     reportError: deps.reportError,
     dispatch: deps.dispatch,
@@ -311,6 +315,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine & { start(): 
   const ownWip = createOwnWip({ git, fs: deps.fs, claims, head, tree, absolute, flushEdits: deps.flushEdits, fileUnits: deps.fileUnits });
   const presence = createPresence({
     claims: claims.published,
+    yielded: claims.yields,
     wip: ownWip.files,
     deviceId: deps.deviceId,
     author,

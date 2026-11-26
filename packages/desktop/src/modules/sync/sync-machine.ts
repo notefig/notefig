@@ -67,6 +67,10 @@ export interface SyncPeer {
   cursor: SyncCursor | null;
   /** The units it's editing now (`sync-claims.ts`); empty until read. */
   claims: SyncClaim[];
+  /** The units it gave up to a device that claimed them too, named as its
+   *  claims were, until that one lets go: the winner knows it won though
+   *  this claim ended first. None from a build before it. */
+  yielded?: SyncClaim[];
   /** The presence commit holding what it's typing in them, read here;
    *  null while it holds nothing. */
   wip: string | null;
