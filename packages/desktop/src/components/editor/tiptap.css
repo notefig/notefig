@@ -146,8 +146,11 @@ ul[data-type="taskList"] > li > label {
    (a visually hidden span). `[contenteditable="true"] *` in styles.css makes
    both selectable again, and a selection starting at a task list's first
    label then selects no text at all: ⌘A in a note that opens with a task
-   list painted nothing (MET-294), and elsewhere it copied the hidden names. */
-ul[data-type="taskList"] > li > label * {
+   list painted nothing (MET-294), and elsewhere it copied the hidden names.
+   Each is named by tag, not as `label *`: a rule ending in `*` is matched
+   against every element in the page. */
+ul[data-type="taskList"] > li > label > span,
+ul[data-type="taskList"] > li > label > input {
   user-select: none;
   -webkit-user-select: none;
 }
