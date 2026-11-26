@@ -96,42 +96,45 @@ describe("widget_respond input schema", () => {
   });
 });
 
-describe("widget_respond and diffs", () => {
-  it("refuses a diff block, sending it to the document; plain code is fine", () => {
-    const parsed = WidgetRespondInputSchema.safeParse({
-      kind: "answer",
-      markdown: "Like so:\n\n```ts diff\n--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-a\n+b\n```",
-      title: "The change",
-    });
-    expect(parsed.success).toBe(false);
-    expect(parsed.error?.issues[0].message).toContain("write it into the document");
-    expect(WidgetRespondInputSchema.safeParse({ kind: "answer", markdown: "```ts\nconst diff = 1;\n```", title: "Code" }).success).toBe(true);
-    // The unified-diff language, however spaced, is not a diff block.
-    expect(WidgetRespondInputSchema.safeParse({ kind: "answer", markdown: "``` diff\n-a\n+b\n```", title: "Diff" }).success).toBe(true);
+describe("widget_respond sends diffs and diagrams to the document", () => {
+  const named = {
+    workspacePath: "/ws",
+    taskId: "task_1",
+    agents: { task: () => ({ get: () => ({ titleSource: "agent" }) }) },
+    services: {},
+  } as unknown as Parameters<typeof widgetRespond.execute>[0];
+  /** Why a response with `markdown` is refused, or null when it isn't. */
+  const refusal = async (markdown: string) => {
+    const result = await widgetRespond.execute(named, { kind: "answer", markdown, title: "Answer" });
+    return result.ok ? null : result.error;
+  };
+  const DIFF = "```ts diff\n--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-a\n+b\n```";
+  const DIAGRAM = "```mermaid\nflowchart LR\n  A --> B\n```";
+
+  it("refuses a diff block or a diagram, saying where it goes", async () => {
+    expect(await refusal(`Like so:\n\n${DIFF}`)).toContain("write it into the document");
+    expect(await refusal(`The flow:\n\n${DIAGRAM}`)).toContain("draw it in the document");
   });
 
-  it("refuses a mermaid diagram, sending it to the document", () => {
-    const parsed = WidgetRespondInputSchema.safeParse({
-      kind: "answer",
-      markdown: "The flow:\n\n```mermaid\nflowchart LR\n  A --> B\n```",
-      title: "The flow",
-    });
-    expect(parsed.success).toBe(false);
-    expect(parsed.error?.issues[0].message).toContain("draw it in the document");
-    expect(WidgetRespondInputSchema.safeParse({ kind: "answer", markdown: "Use `mermaid` for diagrams.", title: "Tip" }).success).toBe(true);
-  });
-
-  it("refuses a diff or a diagram in a quote or a list, or with Windows line ends", () => {
-    const refused = (markdown: string) =>
-      !WidgetRespondInputSchema.safeParse({ kind: "answer", markdown, title: "Answer" }).success;
-    for (const fence of ["```mermaid", "```ts diff"]) {
-      expect(refused(`> ${fence}\n> A --> B\n> \`\`\``)).toBe(true);
-      expect(refused(`- Like so:\n\n  ${fence}\n  A --> B\n  \`\`\``)).toBe(true);
-      expect(refused(`1. ${fence}\n   A --> B\n   \`\`\``)).toBe(true);
-      expect(refused(`Like so:\r\n\r\n${fence}\r\nA --> B\r\n\`\`\``)).toBe(true);
+  it("refuses one in a quote or a list, or with Windows line ends", async () => {
+    for (const block of [DIFF, DIAGRAM]) {
+      const lines = block.split("\n");
+      expect(await refusal(lines.map((line) => `> ${line}`).join("\n"))).not.toBeNull();
+      expect(await refusal(`- Like so:\n\n${lines.map((line) => `  ${line}`).join("\n")}`)).not.toBeNull();
+      expect(await refusal(`Like so:\r\n\r\n${lines.join("\r\n")}`)).not.toBeNull();
     }
-    // Prose that names one is fine.
-    expect(refused("> Write a ts diff block, or a mermaid one.")).toBe(false);
+  });
+
+  it("takes plain code, an indented example, and prose naming the syntax", async () => {
+    expect(await refusal("```ts\nconst diff = 1;\n```")).toBeNull();
+    // The unified-diff language, however spaced, is not a diff block.
+    expect(await refusal("``` diff\n-a\n+b\n```")).toBeNull();
+    expect(await refusal(`Write it as:\n\n${DIAGRAM.split("\n").map((line) => `    ${line}`).join("\n")}`)).toBeNull();
+    expect(await refusal("> Write a ts diff block, or a mermaid one.")).toBeNull();
+  });
+
+  it("leaves the schema saved responses are read with alone", () => {
+    expect(WidgetRespondInputSchema.safeParse({ kind: "answer", markdown: DIAGRAM, title: "Saved" }).success).toBe(true);
   });
 });
 

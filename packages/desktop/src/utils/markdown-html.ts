@@ -7,6 +7,8 @@
 import MarkdownIt from "markdown-it";
 import { drawnDiffFences } from "@notefig/widgets/diff-block/markdown";
 import { drawnMermaidFences } from "@notefig/widgets/mermaid-block/markdown";
+import { isDiffInfo } from "@notefig/widgets/diff-block/syntax";
+import { isMermaidInfo } from "@notefig/widgets/mermaid-block/syntax";
 
 // html: false keeps raw HTML in model output escaped (rendered as text), so
 // no sanitizer pass is needed; breaks matches the chat's old pre-wrap feel
@@ -31,4 +33,18 @@ export function renderMarkdownHtml(text: string): string {
  */
 export function renderMarkdownInline(text: string): string {
   return md.renderInline(text);
+}
+
+/**
+ * The first block `text` would draw as a card, a diff or a diagram: read as
+ * this renderer reads it, so a fence in a quote or a list counts, and an
+ * indented example, or prose naming the syntax, does not.
+ */
+export function drawnBlockIn(text: string): "diff" | "mermaid" | null {
+  for (const token of md.parse(text, {})) {
+    if (token.type !== "fence") continue;
+    if (isDiffInfo(token.info)) return "diff";
+    if (isMermaidInfo(token.info)) return "mermaid";
+  }
+  return null;
 }
