@@ -755,14 +755,15 @@ const MISBEHAVIOURS: Record<string, { description: string; hint?: string; play: 
 };
 
 /** The mock's commands, as a harness reports its own: what makes it
- *  misbehave, offered in the composer. */
-export const MOCK_COMMANDS: Json[] = Object.entries(MISBEHAVIOURS).map(
-  ([name, { description, hint }]) => ({
+ *  misbehave, offered in the composer. Built on first use, like every
+ *  value here: nothing runs at load, so a release build drops the file. */
+export function mockCommands(): Json[] {
+  return Object.entries(MISBEHAVIOURS).map(([name, { description, hint }]) => ({
     name,
     description,
     ...(hint ? { input: { hint } } : {}),
-  }),
-);
+  }));
+}
 
 /** `/flaky 2` → the scenario the command names, with its options; null
  *  for a prompt that names none. Anywhere it stands as a word: a harness
@@ -969,22 +970,28 @@ export type MockAgentConfig = {
   commands?: Json[];
 };
 
-const scenarioRegistry = new Map<string, MockScenarioFactory>([
-  ["echo", () => echo()],
-  ["longTranscript", (options) => longTranscript(options ?? {})],
-  ["replay", (options) => replay(options)],
-  ...Object.entries(MISBEHAVIOURS).map(
-    ([name, { play }]): [string, MockScenarioFactory] => [name, play],
-  ),
-]);
+let registry: Map<string, MockScenarioFactory> | null = null;
+
+/** Every scenario by name, built on first use. */
+function scenarioRegistry(): Map<string, MockScenarioFactory> {
+  registry ??= new Map<string, MockScenarioFactory>([
+    ["echo", () => echo()],
+    ["longTranscript", (options) => longTranscript(options ?? {})],
+    ["replay", (options) => replay(options)],
+    ...Object.entries(MISBEHAVIOURS).map(
+      ([name, { play }]): [string, MockScenarioFactory] => [name, play],
+    ),
+  ]);
+  return registry;
+}
 
 let activeConfig: MockAgentConfig = { scenario: "echo" };
 
 /** Set the scenario future `session/prompt` turns play (all mock tasks). */
 export function configureMockAgent(config: MockAgentConfig): void {
-  if (!scenarioRegistry.has(config.scenario)) {
+  if (!scenarioRegistry().has(config.scenario)) {
     throw new Error(
-      `unknown mock scenario "${config.scenario}" (have: ${[...scenarioRegistry.keys()].join(", ")})`,
+      `unknown mock scenario "${config.scenario}" (have: ${[...scenarioRegistry().keys()].join(", ")})`,
     );
   }
   activeConfig = config;
@@ -996,7 +1003,7 @@ export function registerMockScenario(
   name: string,
   factory: MockScenarioFactory,
 ): void {
-  scenarioRegistry.set(name, factory);
+  scenarioRegistry().set(name, factory);
 }
 
 /** `@@mock:{"scenario":"longTranscript","options":{...}}` prompt directive —
@@ -1007,7 +1014,7 @@ function configFromPrompt(promptText: string): MockAgentConfig | null {
     const parsed = JSON.parse(promptText.slice("@@mock:".length));
     if (
       typeof parsed?.scenario === "string" &&
-      scenarioRegistry.has(parsed.scenario)
+      scenarioRegistry().has(parsed.scenario)
     ) {
       return parsed as MockAgentConfig;
     }
@@ -1027,7 +1034,7 @@ function promptText(params: Json): string {
 
 let mockSessionCounter = 0;
 /** This page's run, in its sessions' ids. */
-const MOCK_RUN = Math.random().toString(36).slice(2, 8);
+let mockRun: string | null = null;
 /** The scenario agent most recently attached — specs read the params its
  *  `session/set_*` calls captured. */
 let lastScenarioAgent: FakeAgent | null = null;
@@ -1135,10 +1142,10 @@ function attachScenarioAgent(
       failNextNewSession = false;
       throw new Error("Couldn't start a session (mock)");
     }
-    agent.commandsAfterNewSession = activeConfig.commands ?? MOCK_COMMANDS;
+    agent.commandsAfterNewSession = activeConfig.commands ?? mockCommands();
     return {
       // Unique across reloads: the histories outlive the counter.
-      sessionId: `mock_session_${MOCK_RUN}_${++mockSessionCounter}`,
+      sessionId: `mock_session_${(mockRun ??= Math.random().toString(36).slice(2, 8))}_${++mockSessionCounter}`,
       ...(activeConfig.session ?? {}),
     };
   };
@@ -1173,7 +1180,7 @@ function attachScenarioAgent(
     mockPromptLog.push({ sessionId: params.sessionId, text });
     const config =
       configFromPrompt(text) ?? misbehaviourFromPrompt(text) ?? activeConfig;
-    const factory = scenarioRegistry.get(config.scenario)!;
+    const factory = scenarioRegistry().get(config.scenario)!;
     const scenario: MockScenario = factory(config.options);
 
     // History mirrors what a real harness persists: the prompt replays as a
@@ -1349,7 +1356,7 @@ export const mockAgentModule = defineModule({
     window.__mockAgent = {
       configure: configureMockAgent,
       register: registerMockScenario,
-      scenarios: () => [...scenarioRegistry.keys()],
+      scenarios: () => [...scenarioRegistry().keys()],
       stats: async () => {
         const turns = store.turns.toArray;
         return {

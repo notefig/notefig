@@ -82,7 +82,7 @@ import {
   type AgentTurnStatus,
 } from "./agent-collections";
 import { createMockAgentTransport, createMockMcpEndpoint } from "./mock-harness";
-import { talksToMock } from "./mock-mode";
+import { MOCK_HARNESS_OFFERED, talksToMock } from "./mock-mode";
 import type { HarnessesApi } from "./harnesses";
 import { splitLeadingQuote, type AgentsApi } from "./agents";
 
@@ -545,7 +545,9 @@ export class AgentTask {
       // construct-then-start pattern as the ACP transport below:
       // createMcpEndpoint is a dumb sync constructor, we call start()
       // ourselves, and mcpServer only exists on the instance afterward.
-      const mcpEndpoint = talksToMock(this.harness)
+      // The constant first: a release build folds the branch, and the mock
+      // with it, away.
+      const mcpEndpoint = MOCK_HARNESS_OFFERED && talksToMock(this.harness)
         ? createMockMcpEndpoint({ taskId: this.taskId })
         : this.deps.proc.createMcpEndpoint({ taskId: this.taskId });
       this.mcpEndpoint = mcpEndpoint;
@@ -2437,7 +2439,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
 
   /** The one place a task's spawn spec meets the platform transport. */
   const transportFactory = (task: AgentTask) => {
-    if (talksToMock(task.harness)) {
+    if (MOCK_HARNESS_OFFERED && talksToMock(task.harness)) {
       return () =>
         createMockAgentTransport({
           taskId: task.taskId,
