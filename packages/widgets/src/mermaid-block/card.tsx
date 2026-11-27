@@ -6,6 +6,9 @@
  * It follows the app's theme with no code: Pele colours its SVG from CSS
  * variables (./card.css), which name the app's own.
  *
+ * A wide diagram shrinks to fit, down to SMALLEST_SCALE, then scrolls
+ * sideways.
+ *
  * A diagram Pele can't read shows its message, and the source under it, so
  * a broken diagram still reads as what it says; one Pele didn't load for
  * shows its source.
@@ -15,6 +18,10 @@ import { useTranslation } from "react-i18next";
 import { Braces } from "lucide-react";
 import { cn } from "@notefig/ui/utils";
 import "./card.css";
+
+/** How far a wide diagram shrinks to fit the card before it scrolls
+ *  instead: below this its labels stop being legible. */
+const SMALLEST_SCALE = 0.75;
 
 /** What the card can do, numbered as the keys run them. */
 export function mermaidControls(onEdit: (() => void) | undefined): (() => void)[] {
@@ -32,6 +39,7 @@ export function MermaidCard({
   /** The keys are on the card: each control shows the digit that runs it. */
   keys?: boolean;
 }) {
+  const { t } = useTranslation();
   const diagram = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
 
@@ -53,6 +61,8 @@ export function MermaidCard({
         else {
           destroy = () => mounted.destroy();
           if (mounted.error !== undefined) fail();
+          const svg = element.querySelector("svg");
+          if (svg && mounted.result) svg.style.minWidth = `${Math.round(mounted.result.width * SMALLEST_SCALE)}px`;
         }
       })
       // Pele didn't load (offline, a stale chunk): the source, not a blank card.
@@ -68,7 +78,14 @@ export function MermaidCard({
       className="not-prose group relative w-full select-text overflow-hidden rounded-lg border border-border/60 bg-card/80 p-3"
       data-mermaid-card
     >
-      <div ref={diagram} className="notefig-mermaid flex justify-center" data-mermaid-diagram />
+      {/* Where it isn't edited (chat, a response) the keys scroll it; in the
+          editor they select the card, and Enter shows its source. */}
+      <div
+        ref={diagram}
+        className="notefig-mermaid overflow-x-auto rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        data-mermaid-diagram
+        {...(onEdit ? {} : { tabIndex: 0, role: "region", "aria-label": t("mermaidBlockDiagram") })}
+      />
       {failed && (
         <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-muted-foreground">{source}</pre>
       )}
