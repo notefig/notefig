@@ -311,7 +311,14 @@ describe("starting a session from the UI", () => {
     kv = testKv();
     ({ store, agents } = testAgents(
       { kv },
-      { openAgentTab: openAgent, ensureRuntime: () => runtimeReady },
+      {
+        openAgentTab: openAgent,
+        runtimeConnection: {
+          connected: () => runtimeReady,
+          subscribe: () => () => {},
+          explain: () => {},
+        },
+      },
     ));
   });
   it("starts nothing without a runtime to run on", async () => {

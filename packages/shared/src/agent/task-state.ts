@@ -224,3 +224,56 @@ export function sortEntriesChronologically(
 ): AgentEntry[] {
   return [...entries].sort((a, b) => (a.id < b.id ? -1 : 1));
 }
+
+/** One row of a session's transcript: an entry, or a failed turn's error. */
+export type TranscriptRow =
+  | {
+      kind: "entry";
+      entry: AgentEntry;
+      /** A prompt still waiting its turn. */
+      queued: boolean;
+      /** On a turn's prompt: what the turn spent, once it settled. */
+      usage?: TurnUsage | null;
+    }
+  | { kind: "error"; turn: AgentTurn };
+
+/**
+ * A session's transcript as it reads: its entries in order, and each failed
+ * turn's error right after that turn's last entry — where it happened, so
+ * the turns after it read below it. An error whose turn has no entries left
+ * (a replay dropped them) goes last.
+ */
+export function transcriptRows(
+  entries: AgentEntry[],
+  turns: AgentTurn[],
+): TranscriptRow[] {
+  const byId = new Map(turns.map((turn) => [turn.turnId, turn]));
+  const rows: TranscriptRow[] = sortEntriesChronologically(entries).map((entry) => {
+    const turn = entry.type === "user" ? byId.get(entry.turnId) : undefined;
+    return {
+      kind: "entry",
+      entry,
+      queued: turn?.status === "queued",
+      usage: turn?.usage,
+    };
+  });
+  const failed = turns.filter((turn) => turn.status === "error" && turn.error);
+  if (failed.length === 0) return rows;
+
+  const lastOfTurn = new Map<string, number>();
+  rows.forEach((row, index) => {
+    if (row.kind === "entry") lastOfTurn.set(row.entry.turnId, index);
+  });
+  const after = new Map<number, AgentTurn[]>();
+  const orphans: AgentTurn[] = [];
+  for (const turn of failed) {
+    const index = lastOfTurn.get(turn.turnId);
+    if (index === undefined) orphans.push(turn);
+    else after.set(index, [...(after.get(index) ?? []), turn]);
+  }
+  const error = (turn: AgentTurn): TranscriptRow => ({ kind: "error", turn });
+  return [
+    ...rows.flatMap((row, index) => [row, ...(after.get(index) ?? []).map(error)]),
+    ...orphans.map(error),
+  ];
+}

@@ -199,6 +199,15 @@ export interface AgentsApi {
    * Call before starting a task, not before prompting a live one.
    */
   ensureRuntime(): boolean;
+  /**
+   * Whether a session on this harness can start now, saying nothing when it
+   * can't: the mock always; any other once there is a machine to run it
+   * (always on desktop, on the web with a paired one connected).
+   */
+  canStart(harnessId: string): boolean;
+  /** Fires when `canStart` may answer differently (a machine connected or
+   *  dropped); returns the unsubscribe. */
+  onCanStartChange(listener: () => void): () => void;
   /** Resolves once persisted task rows match this session (see
    *  AgentRuntime.whenReconciled); starts that if nothing has yet. */
   whenReconciled(): Promise<void>;
@@ -216,7 +225,14 @@ export interface AgentsDeps {
   kv: Pick<KvApi, "collection" | "write">;
   openAgentTab(taskId: string): void;
   isOpen(workspacePath: string): boolean;
-  ensureRuntime(): boolean;
+  /** The machine agents run on: whether it's reachable now, when that
+   *  changes (the tunnel, on the web; always reachable on desktop), and
+   *  how to tell the user it isn't. */
+  runtimeConnection: {
+    connected(): boolean;
+    subscribe(listener: () => void): () => void;
+    explain(): void;
+  };
 }
 
 export function createAgents({
@@ -225,8 +241,16 @@ export function createAgents({
   kv,
   openAgentTab,
   isOpen,
-  ensureRuntime,
+  runtimeConnection,
 }: AgentsDeps): AgentsApi {
+  const ensureRuntime = () => {
+    if (runtimeConnection.connected()) return true;
+    runtimeConnection.explain();
+    return false;
+  };
+  const canStart = (harnessId: string) =>
+    talksToMock({ id: harnessId }) || runtimeConnection.connected();
+
   /**
    * Trust granted in this run. The KV write is durable only after it
    * lands, but the start the user just confirmed must see the answer at
@@ -383,8 +407,10 @@ export function createAgents({
     return {
       workspacePath,
       async start(harness) {
-        // The mock runs in the app: there is no machine to reach.
-        if (!talksToMock(harness) && !ensureRuntime()) return { status: "no-runtime" };
+        if (!canStart(harness.id)) {
+          runtimeConnection.explain();
+          return { status: "no-runtime" };
+        }
         // A cold start may click before the answers load; reading then would
         // ask again about a workspace the user already trusted. Once loaded
         // (boot preloads them) nothing waits.
@@ -433,6 +459,8 @@ export function createAgents({
     turn: turnHandle,
     workspace: workspaceHandle,
     ensureRuntime,
+    canStart,
+    onCanStartChange: (listener) => runtimeConnection.subscribe(listener),
     whenReconciled: () => runtime.whenReconciled(),
     disposeWorkspace: (workspacePath) =>
       runtime.disposeWorkspace(workspacePath),

@@ -16,7 +16,7 @@ import {
   type AgentsApi,
   type AgentWorkspaceHandle,
 } from "./agents";
-import { ensureAgentRuntime } from "./tunnel/require-connection";
+import { agentRuntimeConnection } from "./tunnel/require-connection";
 import { agentStoreModule } from "./agent-collections";
 import { kvModule } from "@/modules/kv";
 import { tabsModule } from "@/modules/tabs";
@@ -87,7 +87,7 @@ export const workspaceAgentsModule = defineModule({
       kv,
       openAgentTab: (taskId) => ctx.use("tabs").openAgent(taskId),
       isOpen: (workspacePath) => ctx.workspaces.isOpen(workspacePath),
-      ensureRuntime: ensureAgentRuntime,
+      runtimeConnection: agentRuntimeConnection,
     }));
   },
   boot: (agents, ctx) => {

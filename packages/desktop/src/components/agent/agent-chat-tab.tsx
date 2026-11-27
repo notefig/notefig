@@ -26,9 +26,9 @@ import type {
   ToolCallStatus,
   ToolCallUpdate,
   PlanEntry,
+  TranscriptRow,
   TurnUsage,
 } from "@notefig/shared/agent";
-import { sortEntriesChronologically } from "@notefig/shared/agent";
 import { Button } from "@notefig/ui/button";
 import {
   MessageScrollerProvider,
@@ -38,12 +38,11 @@ import { Markdown } from "@/components/ui/markdown";
 import { cn } from "@notefig/ui/utils";
 import {
   useHarnessLabels,
+  useReviveWhenShown,
   useTaskRow,
-  useTaskEntries,
-  useTaskTurns,
+  useTranscript,
   type AgentEntry,
   type AgentTaskRow,
-  type AgentTurn,
 } from "@/modules/agents/react";
 import {
   PromptEditor,
@@ -75,9 +74,6 @@ import { agentTabId } from "@/modules/tabs/tab-id";
 import { CopyTextButton, renderPromptToolCall } from "@notefig/widgets";
 import { renderDiffToolCall } from "@notefig/widgets/diff-block/transcript";
 import { splitLeadingQuote } from "@/modules/agents/agents";
-import { useTunnelConnection } from "@/hooks/use-tunnel-connection";
-import { agentRuntimeConnected } from "@/modules/agents/tunnel/require-connection";
-import { talksToMock } from "@/modules/agents/mock-mode";
 
 /**
  * One agent session as a dockable tab: streamed turn output (message chunks
@@ -123,19 +119,7 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
   const isLoadingSession =
     taskRow?.status === "starting" && taskRow.sessionId != null;
 
-  // A restored session comes back when its tab is viewed: the dock mounts
-  // only the selected tab, so this runs on open and on selection, and
-  // session/load streams the history back into the transcript (MET-54). A
-  // delete while it starts stops it (MET-288). On the web it waits for a
-  // connected machine — and comes back once one connects.
-  const status = taskRow?.status;
-  useTunnelConnection(); // re-render as a machine connects
-  const harnessId = taskRow?.harnessId;
-  const canStart =
-    harnessId !== undefined && (talksToMock({ id: harnessId }) || agentRuntimeConnected());
-  useEffect(() => {
-    if (status === "restored" && canStart) agents.task(taskId).revive();
-  }, [agents, status, taskId, canStart]);
+  useReviveWhenShown(taskRow);
 
   // The floating composer overlay's live height (it grows when permission/
   // auth cards stack above the prompt box); the transcript pads its scroll
@@ -373,19 +357,6 @@ function UnavailableCard({ taskId }: { taskId: string }) {
   );
 }
 
-/** One transcript row fed to the virtualizer — entries and turn-error
- *  banners are peers in the same windowed list, so one bottom-anchor/follow
- *  path covers both. */
-type TranscriptRow =
-  | {
-      kind: "entry";
-      entry: AgentEntry;
-      queued: boolean;
-      /** On a turn's user entry: what the turn spent, once it settled. */
-      usage?: TurnUsage | null;
-    }
-  | { kind: "error"; turn: AgentTurn };
-
 function transcriptRowKey(row: TranscriptRow): string {
   return row.kind === "entry" ? row.entry.id : `error-${row.turn.turnId}`;
 }
@@ -444,70 +415,6 @@ type TranscriptScrollHandleRef = { current: TranscriptScrollHandle };
  * useMessageScroller() keeps resolving (a no-op here); the composer reaches
  * this transcript's real scrollToEnd via `scrollHandleRef`.
  */
-/** The transcript's flat row list: entries in id order (ids are ascending,
- *  so document order = chronological — text and tool calls interleaved
- *  exactly as they streamed), each failed turn's error right after that
- *  turn's last entry — where it happened, so the turns after it read
- *  below it. */
-function useTranscriptRows(taskId: string): TranscriptRow[] {
-  const entries = useTaskEntries(taskId);
-  const turns = useTaskTurns(taskId);
-  const turnErrors = useMemo(
-    () => turns.filter((t) => t.status === "error" && t.error),
-    [turns],
-  );
-  const queuedTurnIds = useMemo(
-    () =>
-      new Set(turns.filter((t) => t.status === "queued").map((t) => t.turnId)),
-    [turns],
-  );
-  const turnUsage = useMemo(
-    () => new Map(turns.map((t) => [t.turnId, t.usage])),
-    [turns],
-  );
-  const sortedEntries = useMemo(
-    () => sortEntriesChronologically(entries),
-    [entries],
-  );
-  return useMemo<TranscriptRow[]>(
-    () => withTurnErrors(
-      sortedEntries.map((entry): TranscriptRow => ({
-        kind: "entry",
-        entry,
-        queued: entry.type === "user" && queuedTurnIds.has(entry.turnId),
-        usage: entry.type === "user" ? turnUsage.get(entry.turnId) : undefined,
-      })),
-      turnErrors,
-    ),
-    [sortedEntries, queuedTurnIds, turnUsage, turnErrors],
-  );
-}
-
-/** Each failed turn's error after its turn's last entry; one whose turn
- *  has no entries left (a replay dropped them) goes last. */
-function withTurnErrors(
-  rows: TranscriptRow[],
-  failed: AgentTurn[],
-): TranscriptRow[] {
-  if (failed.length === 0) return rows;
-  const lastOfTurn = new Map<string, number>();
-  rows.forEach((row, index) => {
-    if (row.kind === "entry") lastOfTurn.set(row.entry.turnId, index);
-  });
-  const after = new Map<number, AgentTurn[]>();
-  const orphans: AgentTurn[] = [];
-  for (const turn of failed) {
-    const index = lastOfTurn.get(turn.turnId);
-    if (index === undefined) orphans.push(turn);
-    else after.set(index, [...(after.get(index) ?? []), turn]);
-  }
-  const placed = rows.flatMap((row, index) => [
-    row,
-    ...(after.get(index) ?? []).map((turn): TranscriptRow => ({ kind: "error", turn })),
-  ]);
-  return [...placed, ...orphans.map((turn): TranscriptRow => ({ kind: "error", turn }))];
-}
-
 /**
  * Follow-mode ("pinned to the live edge") state over the row virtualizer.
  *
@@ -644,7 +551,7 @@ const Transcript = memo(function Transcript({
   scrollHandleRef: TranscriptScrollHandleRef;
 }) {
   const { t } = useTranslation();
-  const rows = useTranscriptRows(taskId);
+  const rows = useTranscript(taskId);
   const scrollElRef = useRef<HTMLDivElement | null>(null);
 
   const rowVirtualizer = useVirtualizer({

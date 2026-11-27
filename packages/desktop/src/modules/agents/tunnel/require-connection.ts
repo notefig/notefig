@@ -5,30 +5,22 @@ import { tunnelConnection } from "./tunnel-connection";
 import { openPairDialog } from "./pair-dialog-store";
 import { MOCK_AGENT_MODE } from "../mock-mode";
 
-/** Whether an agent can be started now, saying nothing when it can't:
- *  on desktop always, on the web once a machine is connected. */
-export function agentRuntimeConnected(): boolean {
-  return MOCK_AGENT_MODE || !isWeb() || tunnelConnection.getState().status === "connected";
-}
-
 /**
- * Gate agent-start actions on the web having a paired worker. On desktop
- * agents run locally, so this is always true. On web with no live tunnel it
- * shows a snackbar whose action opens the pairing dialog, and returns false
- * so the caller bails instead of letting `createAgentTransport` throw an
- * unsurfaced error. Call this before starting/spawning a task, not for
- * prompts to an already-running one.
+ * The machine agents run on, for the agents facade: on desktop this one,
+ * always reachable; on the web the paired machine, reachable while the
+ * tunnel is connected (the mock build needs none).
  */
-export function ensureAgentRuntime(): boolean {
-  // Mock harness sessions are in-memory — no worker to pair with.
-  if (MOCK_AGENT_MODE) return true;
-  if (!isWeb()) return true;
-  if (tunnelConnection.getState().status === "connected") return true;
-  toast.error(i18n.t("tunnelNoConnection"), {
-    action: {
-      label: i18n.t("tunnelConnectMachine"),
-      onClick: () => openPairDialog(),
-    },
-  });
-  return false;
-}
+export const agentRuntimeConnection = {
+  connected: (): boolean =>
+    MOCK_AGENT_MODE || !isWeb() || tunnelConnection.getState().status === "connected",
+  subscribe: (listener: () => void): (() => void) => tunnelConnection.subscribe(listener),
+  /** No machine: a snackbar whose action opens the pairing dialog. */
+  explain: (): void => {
+    toast.error(i18n.t("tunnelNoConnection"), {
+      action: {
+        label: i18n.t("tunnelConnectMachine"),
+        onClick: () => openPairDialog(),
+      },
+    });
+  },
+};

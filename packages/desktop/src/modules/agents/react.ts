@@ -7,12 +7,14 @@
  * permissions) are written once instead of per component. Components reach
  * the facade and the store straight off core (`useCore().agents`).
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useLiveQuery, eq, and, inArray } from "@tanstack/react-db";
 import {
   buildHarnessResumeCommand,
+  transcriptRows,
   type HarnessDefinition,
   type ProbedHarness,
+  type TranscriptRow,
 } from "@notefig/shared/agent";
 import { workspaceKey } from "@/utils/path";
 import { getDesktopOs } from "@/utils/platform";
@@ -106,6 +108,37 @@ export function useTaskEntries(taskId: string): AgentEntry[] {
     [taskId],
   );
   return data;
+}
+
+/**
+ * A restored session comes back when its tab is shown: the dock mounts only
+ * the selected tab, so this runs on open and on selection, and session/load
+ * streams the history back into the transcript (MET-54). It waits until
+ * the session can start (`agents.canStart`) — on the web, a machine to run
+ * it — and comes back once it can. A delete while it starts stops it
+ * (MET-288).
+ */
+export function useReviveWhenShown(task: AgentTaskRow | undefined): void {
+  const { agents } = useCore();
+  const harnessId = task?.harnessId;
+  const canStart = useSyncExternalStore(
+    (listener) => agents.onCanStartChange(listener),
+    () => harnessId !== undefined && agents.canStart(harnessId),
+  );
+  const taskId = task?.taskId;
+  const restored = task?.status === "restored";
+  useEffect(() => {
+    if (taskId && restored && canStart) agents.task(taskId).revive();
+  }, [agents, taskId, restored, canStart]);
+}
+
+/** A task's transcript as it reads: entries in order, each failed turn's
+ *  error after it, queued prompts and turn usage marked
+ *  (`transcriptRows`). */
+export function useTranscript(taskId: string): TranscriptRow[] {
+  const entries = useTaskEntries(taskId);
+  const turns = useTaskTurns(taskId);
+  return useMemo(() => transcriptRows(entries, turns), [entries, turns]);
 }
 
 /**
