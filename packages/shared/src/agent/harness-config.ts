@@ -397,8 +397,9 @@ export function describeProbedHarnesses(
   overrides: Record<string, HarnessOverride>,
   custom: CustomHarnessEntry[],
   discovery: Record<string, HarnessDiscoveryResult>,
+  builtIns: readonly HarnessDefinition[] = BUILT_IN_HARNESSES,
 ): ProbedHarness[] {
-  return resolveEffectiveHarnesses(overrides, custom).map((harness) => {
+  return resolveEffectiveHarnesses(overrides, custom, builtIns).map((harness) => {
     const result = discovery[harness.id];
     if (!result) return { harness, availability: "unknown" as const };
     return {
@@ -460,10 +461,12 @@ export function parseCustomHarnessEntries(raw: unknown): CustomHarnessEntry[] {
 export function resolveEffectiveHarnesses(
   overrides: Record<string, HarnessOverride>,
   custom: CustomHarnessEntry[],
+  /** The built-ins of this build: the desktop's dev build adds its mock. */
+  builtIns: readonly HarnessDefinition[] = BUILT_IN_HARNESSES,
 ): HarnessDefinition[] {
   const effective: HarnessDefinition[] = [];
 
-  for (const builtin of BUILT_IN_HARNESSES) {
+  for (const builtin of builtIns) {
     const override = overrides[builtin.id];
     if (!override) {
       effective.push(builtin);

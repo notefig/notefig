@@ -7,7 +7,6 @@
  * live query can't disagree.
  */
 import {
-  BUILT_IN_HARNESSES,
   describeProbedHarnesses,
   filterDiscoveredHarnesses,
   isMaterialOverride,
@@ -19,6 +18,7 @@ import {
   type ProbedHarness,
 } from "@notefig/shared/agent";
 import type { HarnessCatalog } from "@/modules/harness-adapters";
+import { APP_BUILT_IN_HARNESSES } from "./mock-mode";
 
 /**
  * What this machine records about one harness. A built-in has a row once
@@ -62,7 +62,7 @@ export function configuredHarnesses(
   rows: Iterable<HarnessRow>,
 ): HarnessDefinition[] {
   const { overrides, custom } = settingsOf(rows);
-  return resolveEffectiveHarnesses(overrides, custom);
+  return resolveEffectiveHarnesses(overrides, custom, APP_BUILT_IN_HARNESSES);
 }
 
 /** What the pickers offer: configured and enabled, minus built-ins the
@@ -73,7 +73,7 @@ export function pickableHarnesses(
 ): HarnessDefinition[] {
   const { overrides, custom, discovery } = settingsOf(rows);
   return filterDiscoveredHarnesses(
-    resolveEffectiveHarnesses(overrides, custom),
+    resolveEffectiveHarnesses(overrides, custom, APP_BUILT_IN_HARNESSES),
     overrides,
     custom,
     discovery,
@@ -84,7 +84,7 @@ export function pickableHarnesses(
  *  readiness view. */
 export function probedHarnesses(rows: Iterable<HarnessRow>): ProbedHarness[] {
   const { overrides, custom, discovery } = settingsOf(rows);
-  return describeProbedHarnesses(overrides, custom, discovery);
+  return describeProbedHarnesses(overrides, custom, discovery, APP_BUILT_IN_HARNESSES);
 }
 
 /** Every harness as the settings list shows it, the ones the pickers hide
@@ -116,7 +116,7 @@ export function harnessLabel(
 ): string {
   return (
     harnessDefinition(rows, harnessId)?.label ??
-    BUILT_IN_HARNESSES.find((harness) => harness.id === harnessId)?.label ??
+    APP_BUILT_IN_HARNESSES.find((harness) => harness.id === harnessId)?.label ??
     harnessId
   );
 }
@@ -151,7 +151,7 @@ export function deriveHarnessSettingsRows(
   const forcedCustom = custom.map((entry) => ({ ...entry, enabled: true }));
   const customIds = new Set(custom.map((entry) => entry.id));
 
-  return resolveEffectiveHarnesses(forcedOverrides, forcedCustom).map(
+  return resolveEffectiveHarnesses(forcedOverrides, forcedCustom, APP_BUILT_IN_HARNESSES).map(
     (definition) => {
       const id = definition.id;
       const explicit = customIds.has(id)

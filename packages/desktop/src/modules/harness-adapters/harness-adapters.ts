@@ -6,7 +6,6 @@
  * handed the app's MCP tools and what it reports about usage.
  */
 import {
-  BUILT_IN_HARNESSES,
   type HarnessDefinition,
   type McpRegistrationMode,
 } from "@notefig/shared/agent";
@@ -35,6 +34,7 @@ import {
 } from "./devin";
 import { geminiCliAdapter } from "./gemini-cli";
 import { openCodeAdapter } from "./opencode";
+import { APP_BUILT_IN_HARNESSES } from "@/modules/agents/mock-mode";
 
 /** Each built-in harness's own adapter, by its definition's id. */
 const BUILT_IN_ADAPTERS = new Map<string, HarnessAdapter>([
@@ -110,7 +110,7 @@ export function createHarnessAdapters({
       // sessions still chart.
       const definition =
         harnesses.configured().find((harness) => harness.id === harnessId) ??
-        BUILT_IN_HARNESSES.find((harness) => harness.id === harnessId);
+        APP_BUILT_IN_HARNESSES.find((harness) => harness.id === harnessId);
       const known = definition ? adapterFor(definition).reporting : NO_REPORTING;
       return {
         cost: known.cost || !!seen.cost,

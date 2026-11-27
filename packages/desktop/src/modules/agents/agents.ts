@@ -15,11 +15,12 @@ import {
   type RequestPermissionResponse,
   type TurnOutcome,
 } from "@notefig/shared/agent";
-import type { AgentStore, AgentTaskRow, AgentTurn } from "./agent-collections";
+import { isRevivable, type AgentStore, type AgentTaskRow, type AgentTurn } from "./agent-collections";
 import type { AgentRuntime } from "./agent-service";
 import { encodeWidgetContextUri } from "@notefig/agent";
 import type { KvApi } from "@/modules/kv";
 import { workspaceKey } from "@/utils/path";
+import { talksToMock } from "./mock-mode";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -68,6 +69,13 @@ export interface AgentTaskHandle {
   ): PromptHandle;
   /** Remove one queued (not yet running) prompt. */
   removeQueuedPrompt(turnId: string): void;
+  /**
+   * Run a failed turn again: on this session, sent as it was the first
+   * time. A session whose agent exited is restarted for it. False when the
+   * turn isn't a failed one of this session or the session is gone — the
+   * caller starts over somewhere else.
+   */
+  retryTurn(turnId: string): boolean;
   /**
    * Can this task still be prompted? True for a live runtime and for a
    * restored row that `prompt` would revive via session/load (MET-163: a
@@ -305,16 +313,20 @@ export function createAgents({
       removeQueuedPrompt(turnId) {
         runtime.removeQueuedPrompt(taskId, turnId);
       },
+      retryTurn: (turnId) => runtime.retryTurn(taskId, turnId),
       async isReachable() {
-        if (runtime.task(taskId)) return true;
+        const live = () => {
+          const task = runtime.task(taskId);
+          return task !== undefined && !task.exited;
+        };
+        if (live()) return true;
         await runtime.whenReconciled();
-        if (runtime.task(taskId)) return true;
+        if (live()) return true;
         const row = store.tasks.get(taskId);
         // Exactly the runtime's revive precondition: anything else — no row at
         // all, a row already demoted to "unavailable", or one with no session
         // to resume — is a task no prompt can reach.
-        if (!row) return false;
-        return row.status === "restored" && Boolean(row.sessionId);
+        return row !== undefined && isRevivable(row);
       },
       async cancel() {
         const task = runtime.task(taskId);
@@ -371,7 +383,8 @@ export function createAgents({
     return {
       workspacePath,
       async start(harness) {
-        if (!ensureRuntime()) return { status: "no-runtime" };
+        // The mock runs in the app: there is no machine to reach.
+        if (!talksToMock(harness) && !ensureRuntime()) return { status: "no-runtime" };
         // A cold start may click before the answers load; reading then would
         // ask again about a workspace the user already trusted. Once loaded
         // (boot preloads them) nothing waits.

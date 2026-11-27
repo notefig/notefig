@@ -382,3 +382,12 @@ export const agentStoreModule = defineModule({
   needs: [platformModule],
   register: (ctx) => createAgentStore(ctx.use("platform").db.get()),
 });
+
+/**
+ * Whether a session with no runtime can be brought back by session/load:
+ * one put to sleep ("restored", a workspace closed or the app restarted),
+ * or one whose process ended ("error") — either with a session to resume.
+ */
+export function isRevivable(row: Pick<AgentTaskRow, "status" | "sessionId">): boolean {
+  return (row.status === "restored" || row.status === "error") && Boolean(row.sessionId);
+}

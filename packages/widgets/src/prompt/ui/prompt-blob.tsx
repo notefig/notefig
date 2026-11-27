@@ -1400,12 +1400,16 @@ function usePromptBlobActions({
     restorePromptToDraft();
   }, [prompts, host, blobId, restorePromptToDraft]);
 
-  // Retry: pull the failed prompt back into the composer and immediately
-  // re-send it, no re-typing required.
+  // Retry: run the failed turn again on its own session, as it was sent —
+  // the widget stays on its round, which goes back to working. Only a
+  // session that can't take it any more (gone, or never started) starts
+  // over: the prompt goes back into the composer and out to a new one.
   const retry = useCallback(() => {
+    const { boundTaskId, boundTurnId } = prompts.get(blobId);
+    if (boundTaskId && boundTurnId && host.retryTurn(boundTaskId, boundTurnId)) return;
     editPrompt();
     void send();
-  }, [editPrompt, send]);
+  }, [prompts, blobId, host, editPrompt, send]);
 
   // Stop (the button, and Escape while the agent works): a queued turn is
   // withdrawn and its prompt comes back to the composer; a running one is

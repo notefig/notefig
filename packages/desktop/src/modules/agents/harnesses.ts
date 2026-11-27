@@ -26,7 +26,6 @@ import {
   type PersistedCollectionPersistence,
 } from "@tanstack/db-sqlite-persistence-core";
 import {
-  BUILT_IN_HARNESSES,
   CustomHarnessEntrySchema,
   HarnessOverrideSchema,
   parseCustomHarnessEntries,
@@ -53,6 +52,7 @@ import {
   toggleOverrideEnabled,
   type HarnessRow,
 } from "./harness-settings";
+import { APP_BUILT_IN_HARNESSES } from "./mock-mode";
 
 /** The collection id, and so the SQLite table the rows land in. */
 export const HARNESSES_COLLECTION_ID = "harnesses";
@@ -160,7 +160,7 @@ export function createHarnesses({
 }): HarnessesApi {
   const rows = createHarnessesCollection(persistence);
   const isBuiltIn = (harnessId: string) =>
-    BUILT_IN_HARNESSES.some((harness) => harness.id === harnessId);
+    APP_BUILT_IN_HARNESSES.some((harness) => harness.id === harnessId);
 
   /**
    * Write a harness's row, creating it if it has none. A write issued
@@ -255,7 +255,7 @@ export function createHarnesses({
       id: harnessId,
       definition: () =>
         harnessDefinition(rows.values(), harnessId) ??
-        BUILT_IN_HARNESSES.find((harness) => harness.id === harnessId),
+        APP_BUILT_IN_HARNESSES.find((harness) => harness.id === harnessId),
       async saveOverride(override) {
         if (!isBuiltIn(harnessId)) return false;
         const checked =
@@ -346,7 +346,7 @@ export function createHarnesses({
         .filter((row) => row.custom && row.custom.enabled !== false)
         .sort((a, b) => a.createdAt - b.createdAt);
       const ids = [
-        ...BUILT_IN_HARNESSES.map((builtIn) => builtIn.id),
+        ...APP_BUILT_IN_HARNESSES.map((builtIn) => builtIn.id),
         ...custom.map((row) => row.id),
       ];
       const verdicts = await Promise.all(ids.map((id) => harness(id).rescan()));

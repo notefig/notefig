@@ -1,10 +1,10 @@
 import {
-  BUILT_IN_HARNESSES,
   isMaterialOverride,
   type CustomHarnessEntry,
   type HarnessDefinition,
   type HarnessOverride,
 } from "@notefig/shared/agent";
+import { APP_BUILT_IN_HARNESSES } from "@/modules/agents/mock-mode";
 
 /**
  * Pure state/validation helpers for the harness settings section — no React.
@@ -205,9 +205,9 @@ export function newCustomHarnessId(): string {
 }
 
 export function isBuiltInHarness(id: string): boolean {
-  return BUILT_IN_HARNESSES.some((harness) => harness.id === id);
+  return APP_BUILT_IN_HARNESSES.some((harness) => harness.id === id);
 }
 
 export function builtInHarness(id: string): HarnessDefinition | undefined {
-  return BUILT_IN_HARNESSES.find((harness) => harness.id === id);
+  return APP_BUILT_IN_HARNESSES.find((harness) => harness.id === id);
 }

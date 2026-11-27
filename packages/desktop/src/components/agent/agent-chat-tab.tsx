@@ -453,7 +453,9 @@ type TranscriptScrollHandleRef = { current: TranscriptScrollHandle };
  */
 /** The transcript's flat row list: entries in id order (ids are ascending,
  *  so document order = chronological — text and tool calls interleaved
- *  exactly as they streamed), then turn-error banners. */
+ *  exactly as they streamed), each failed turn's error right after that
+ *  turn's last entry — where it happened, so the turns after it read
+ *  below it. */
 function useTranscriptRows(taskId: string): TranscriptRow[] {
   const entries = useTaskEntries(taskId);
   const turns = useTaskTurns(taskId);
@@ -475,17 +477,42 @@ function useTranscriptRows(taskId: string): TranscriptRow[] {
     [entries],
   );
   return useMemo<TranscriptRow[]>(
-    () => [
-      ...sortedEntries.map((entry): TranscriptRow => ({
+    () => withTurnErrors(
+      sortedEntries.map((entry): TranscriptRow => ({
         kind: "entry",
         entry,
         queued: entry.type === "user" && queuedTurnIds.has(entry.turnId),
         usage: entry.type === "user" ? turnUsage.get(entry.turnId) : undefined,
       })),
-      ...turnErrors.map((turn): TranscriptRow => ({ kind: "error", turn })),
-    ],
+      turnErrors,
+    ),
     [sortedEntries, queuedTurnIds, turnUsage, turnErrors],
   );
+}
+
+/** Each failed turn's error after its turn's last entry; one whose turn
+ *  has no entries left (a replay dropped them) goes last. */
+function withTurnErrors(
+  rows: TranscriptRow[],
+  failed: AgentTurn[],
+): TranscriptRow[] {
+  if (failed.length === 0) return rows;
+  const lastOfTurn = new Map<string, number>();
+  rows.forEach((row, index) => {
+    if (row.kind === "entry") lastOfTurn.set(row.entry.turnId, index);
+  });
+  const after = new Map<number, AgentTurn[]>();
+  const orphans: AgentTurn[] = [];
+  for (const turn of failed) {
+    const index = lastOfTurn.get(turn.turnId);
+    if (index === undefined) orphans.push(turn);
+    else after.set(index, [...(after.get(index) ?? []), turn]);
+  }
+  const placed = rows.flatMap((row, index) => [
+    row,
+    ...(after.get(index) ?? []).map((turn): TranscriptRow => ({ kind: "error", turn })),
+  ]);
+  return [...placed, ...orphans.map((turn): TranscriptRow => ({ kind: "error", turn }))];
 }
 
 /**

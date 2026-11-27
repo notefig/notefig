@@ -47,6 +47,7 @@ export function fakePromptWidgetHost(
     dispatchPrompt: vi.fn(({ text }) => ({ turnId: "trn_fake", sentPrompt: text })),
     cancelTask: vi.fn(),
     removeQueuedPrompt: vi.fn(),
+    retryTurn: vi.fn(() => false),
     ensureRuntime: vi.fn(() => true),
 
     useRound: vi.fn(() => EMPTY_ROUND),

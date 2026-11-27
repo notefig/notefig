@@ -681,10 +681,27 @@ describe("revival via session/load", () => {
     expect(row.configOptions?.[0].currentValue).toBe("plan");
   });
 
-  it("revive is a no-op for unknown or non-restored tasks", () => {
+  it("revive is a no-op for unknown, unavailable or sessionless tasks", () => {
     expect(runtime.revive("task_missing")).toBeNull();
-    store.tasks.insert(taskRow({ status: "error" }));
+    store.tasks.insert(taskRow({ status: "unavailable" }));
     expect(runtime.revive("task_a")).toBeNull();
+    store.tasks.update("task_a", (draft) => {
+      draft.status = "error";
+      draft.sessionId = undefined;
+    });
+    expect(runtime.revive("task_a")).toBeNull();
+  });
+
+  it("revives a session whose agent exited (an errored row with a session)", async () => {
+    store.tasks.insert(taskRow({ status: "error" }));
+    const [client, agentSide] = createLoopbackPair();
+    const agent = new FakeAgent(agentSide);
+    transportFactory = () => client;
+    const revival = runtime.revive("task_a");
+    expect(revival).not.toBeNull();
+    await revival!.started;
+    expect(store.tasks.get("task_a")?.status).toBe("idle");
+    expect(agent.loadSessionParams).toMatchObject({ sessionId: "sess_1" });
   });
 });
 

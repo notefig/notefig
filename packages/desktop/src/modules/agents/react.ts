@@ -10,7 +10,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery, eq, and, inArray } from "@tanstack/react-db";
 import {
-  BUILT_IN_HARNESSES,
   buildHarnessResumeCommand,
   type HarnessDefinition,
   type ProbedHarness,
@@ -47,6 +46,7 @@ export type {
   AgentEntryType,
   AgentPermissionRequestRow,
 } from "@/modules/agents/agent-collections";
+import { APP_BUILT_IN_HARNESSES } from "./mock-mode";
 
 /** The task's collection row; undefined until it exists (or after deletion). */
 export function useTaskRow(taskId: string): AgentTaskRow | undefined {
@@ -272,7 +272,7 @@ export function useSessionActions(task: AgentTaskRow): AgentSessionActions {
   const harness = useMemo(
     () =>
       harnessDefinition(rows, task.harnessId) ??
-      BUILT_IN_HARNESSES.find((builtIn) => builtIn.id === task.harnessId),
+      APP_BUILT_IN_HARNESSES.find((builtIn) => builtIn.id === task.harnessId),
     [rows, task.harnessId],
   );
   const sessionId = task.sessionId ?? null;
