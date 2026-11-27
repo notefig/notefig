@@ -585,7 +585,7 @@ test.describe("agent workflows", () => {
       await page.getByRole("menuitem", { name: "Copy session ID" }).click();
       await expect
         .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-        .toMatch(/^mock_session_\d+$/);
+        .toMatch(/^mock_session_[a-z0-9]+_\d+$/);
 
       // Refresh replays the harness's stored history: same transcript back.
       const before = await collectionStats(page);

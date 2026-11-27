@@ -9,11 +9,11 @@
 import { test, expect, type Page } from "@playwright/test";
 import { setupTestDatabase } from "../setup/test-helpers";
 import {
+  collectionStats,
   entries,
   openDocument,
   sendAndSettle,
   sendWidgetPrompt,
-  sessionRows,
   startMockSession,
   summonWidget,
 } from "./agent-helpers";
@@ -96,8 +96,8 @@ test.describe("agent errors", () => {
         expect(prompts).toHaveLength(2);
         expect(prompts[1].text).toBe(prompts[0].text);
         expect(prompts[1].sessionId).toBe(prompts[0].sessionId);
-        await page.goto("/?sidebarView=sessions");
-        await expect(sessionRows(page)).toHaveCount(1);
+        // No second session was started for it.
+        expect((await collectionStats(page)).tasks).toBe(1);
       });
     }
   });
