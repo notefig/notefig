@@ -27,6 +27,15 @@ export class LoopbackTransport implements AgentTransport {
     // In-memory pair is live on construction; nothing to spawn.
   }
 
+  /** Close both sides. An `error` is why — the far side "exited" — and
+   *  both sides' close listeners hear it, as they hear a process's exit. */
+  async close(error?: AgentTransportError): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    for (const listener of this.closeListeners) listener(error);
+    if (this.peer && !this.peer.closed) await this.peer.close(error);
+  }
+
   send(line: string): void {
     if (this.closed || !this.peer) return;
     for (const listener of this.peer.lineListeners) listener(line);
@@ -38,12 +47,5 @@ export class LoopbackTransport implements AgentTransport {
 
   onClose(callback: (error?: AgentTransportError) => void): Unsubscribe {
     return subscribe(this.closeListeners, callback);
-  }
-
-  async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    for (const listener of this.closeListeners) listener();
-    if (this.peer && !this.peer.closed) await this.peer.close();
   }
 }

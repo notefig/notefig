@@ -15,6 +15,7 @@ import type {
   AgentStore,
   AgentTurn,
 } from "@/modules/agents/agent-collections";
+import { newEventId, sortEntriesChronologically } from "@notefig/shared/agent";
 import { testAgentStore } from "@/testing/test-agents";
 
 function turn(
@@ -154,5 +155,52 @@ describe("@tanstack/db 0.6 indexing contract", () => {
     ]);
     expect([...byTask.equalityLookup("task_b")].map(String)).toEqual(["r2"]);
     expect([...byTask.equalityLookup("task_missing")]).toEqual([]);
+  });
+});
+
+describe("ReplayStage.commit with a retried turn", () => {
+  /** The transcript before the revival, then a replay of `history` (the
+   *  harness's copy), committed with `retried` kept and resent. */
+  function revive(
+    transcript: Array<[turnId: string, type: AgentEntry["type"], text: string]>,
+    history: Array<[type: AgentEntry["type"], text: string]>,
+    retried: string,
+  ) {
+    transcript.forEach(([turnId, type, text], at) => {
+      if (!store.turns.get(turnId)) {
+        store.turns.insert(turn({ turnId, taskId: "task_a", status: "completed" }));
+      }
+      store.entries.insert(
+        entry({ id: newEventId(), taskId: "task_a", turnId, type, text, createdAt: at }),
+      );
+    });
+    const stage = store.replayStage();
+    history.forEach(([type, text]) =>
+      stage.insert({ id: newEventId(), taskId: "task_a", turnId: "trn_replay", type, text }),
+    );
+    stage.commit(turn({ turnId: "trn_replay", taskId: "task_a" }), new Set([retried]), new Set([retried]));
+    return sortEntriesChronologically(store.entriesForTask("task_a")).map(
+      (e) => `${e.type}:${e.text}`,
+    );
+  }
+
+  it("drops the history's copy of the attempt it retries, when that was the last prompt", () => {
+    expect(
+      revive(
+        [["trn_1", "user", "earlier"], ["trn_1", "assistant", "fine"], ["trn_2", "user", "go"]],
+        [["user", "earlier"], ["assistant", "fine"], ["user", "go"], ["assistant", "Start"]],
+        "trn_2",
+      ),
+    ).toEqual(["user:earlier", "assistant:fine", "user:go"]);
+  });
+
+  it("keeps a later prompt with the same text, and its answer, when an older turn is retried", () => {
+    expect(
+      revive(
+        [["trn_1", "user", "go"], ["trn_2", "user", "go"], ["trn_2", "assistant", "done"]],
+        [["user", "go"], ["user", "go"], ["assistant", "done"]],
+        "trn_1",
+      ),
+    ).toEqual(["user:go", "user:go", "assistant:done", "user:go"]);
   });
 });

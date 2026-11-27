@@ -10,12 +10,12 @@ vi.mock("react-i18next", () => ({
   initReactI18next: { type: "3rdParty" as const, init: () => {} },
 }));
 
-// Wrap useTaskEntries with a spy: it runs on every Transcript render, so
+// Wrap useTranscript with a spy: it runs on every Transcript render, so
 // its call count IS the transcript's render count — the thing MET-139
 // pins down (keystrokes must not reconcile the transcript).
 vi.mock("@/modules/agents/react", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/modules/agents/react")>();
-  return { ...mod, useTaskEntries: vi.fn(mod.useTaskEntries) };
+  return { ...mod, useTranscript: vi.fn(mod.useTranscript) };
 });
 
 import {
@@ -27,7 +27,7 @@ import { CoreProvider } from "@notefig/core/react";
 import { createTestCore } from "@/testing/test-core";
 import { testAgents, type TestAgents } from "@/testing/test-agents";
 import { AgentChatTab } from "@/components/agent/agent-chat-tab";
-import { useTaskEntries } from "@/modules/agents/react";
+import { useTranscript } from "@/modules/agents/react";
 import { kvModule } from "@/modules/kv";
 import { harnessesModule } from "@/modules/agents/harnesses";
 import { clearComposerDraft } from "@/components/agent/composer-draft-store";
@@ -47,9 +47,22 @@ let root: Root | null = null;
  */
 let agents: TestAgents;
 let core: Core;
+/** The machine agents run on, as the tab sees it: reachable by default. */
+let connected = true;
+let notifyConnection = () => {};
 
 beforeEach(() => {
-  agents = testAgents();
+  connected = true;
+  agents = testAgents(undefined, {
+    runtimeConnection: {
+      connected: () => connected,
+      subscribe: (listener) => {
+        notifyConnection = listener;
+        return () => {};
+      },
+      explain: () => {},
+    },
+  });
   core = createTestCore({
     modules: [
       defineModule({ name: "agentStore", register: () => agents.store }),
@@ -73,6 +86,7 @@ afterEach(() => {
   container = null;
   root = null;
   clearComposerDraft(TASK_ID);
+  vi.restoreAllMocks();
 });
 
 function seedTaskWithEntries(entryCount: number) {
@@ -113,7 +127,7 @@ function typeIntoComposer(element: HTMLElement, char: string) {
 }
 
 describe("AgentChatTab composer isolation (MET-139)", () => {
-  it("keeps a restored session dormant until the user sends", async () => {
+  it("brings a restored session back when its tab is viewed, once a machine is connected", async () => {
     agents.store.tasks.insert({
       taskId: TASK_ID,
       workspacePath: "/ws",
@@ -127,6 +141,8 @@ describe("AgentChatTab composer isolation (MET-139)", () => {
     const revive = vi
       .spyOn(agents.runtime, "revive")
       .mockReturnValue({ started: Promise.resolve() });
+    // No machine to run it yet.
+    connected = false;
 
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -146,17 +162,11 @@ describe("AgentChatTab composer isolation (MET-139)", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
+    // No machine: loading would fail and leave nothing to retry.
     expect(revive).not.toHaveBeenCalled();
-    expect(
-      container.querySelector<HTMLElement>(".ProseMirror")?.getAttribute(
-        "contenteditable",
-      ),
-    ).toBe("true");
-    const load = [...container.querySelectorAll("button")].find(
-      (button) => button.textContent === "agentLoadSessionHistory",
-    );
-    expect(load).toBeDefined();
-    act(() => load?.click());
+
+    connected = true;
+    act(() => notifyConnection());
     expect(revive).toHaveBeenCalledWith(TASK_ID);
   });
 
@@ -188,7 +198,7 @@ describe("AgentChatTab composer isolation (MET-139)", () => {
     const composer = container.querySelector<HTMLElement>(".ProseMirror");
     expect(composer).not.toBeNull();
 
-    const transcriptRenders = vi.mocked(useTaskEntries).mock.calls.length;
+    const transcriptRenders = vi.mocked(useTranscript).mock.calls.length;
     expect(transcriptRenders).toBeGreaterThan(0);
 
     for (const char of "rapid typing burst") {
@@ -197,6 +207,6 @@ describe("AgentChatTab composer isolation (MET-139)", () => {
     await act(async () => {});
 
     expect(composer!.textContent).toBe("rapid typing burst");
-    expect(vi.mocked(useTaskEntries).mock.calls.length).toBe(transcriptRenders);
+    expect(vi.mocked(useTranscript).mock.calls.length).toBe(transcriptRenders);
   });
 });

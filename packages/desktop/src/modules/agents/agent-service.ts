@@ -72,6 +72,7 @@ import { settingChoices } from "./session-config";
 import i18n from "@/utils/intl";
 import { captureEvent } from "@/telemetry/telemetry";
 import {
+  isRevivable,
   ReplayStage,
   type AgentEntryWriter,
   type AgentStore,
@@ -80,11 +81,8 @@ import {
   type AgentTurn,
   type AgentTurnStatus,
 } from "./agent-collections";
-import {
-  MOCK_AGENT_MODE,
-  createMockAgentTransport,
-  createMockMcpEndpoint,
-} from "./mock-harness";
+import { createMockAgentTransport, createMockMcpEndpoint } from "./mock-harness";
+import { MOCK_HARNESS_OFFERED, talksToMock } from "./mock-mode";
 import type { HarnessesApi } from "./harnesses";
 import { splitLeadingQuote, type AgentsApi } from "./agents";
 
@@ -191,6 +189,9 @@ type TurnState = {
   planEntryId: string | null;
   /** The user prompt that started this turn (checkpoint commit message). */
   userText: string;
+  /** What the turn was sent with — kept if it fails, for its retry. Absent
+   *  on a session/load replay, which sent nothing. */
+  prompt?: QueuedPrompt;
   /**
    * Where this turn's entries land: the collections for live turns
    * (liveEntryWriter), a ReplayStage for a session/load replay. The target
@@ -291,10 +292,12 @@ function errorMessage(error: unknown): string {
 type PromptOptions = PromptExtras & {
   /** Enqueue ahead of already-queued prompts (held-prompt retry). */
   front?: boolean;
+  /** A retry: the harness may hold the failed attempt already. */
+  resent?: boolean;
 };
 
 /** A prompt waiting for its turn, with everything it was sent with. */
-type QueuedPrompt = PromptExtras & { turnId: string; text: string };
+type QueuedPrompt = PromptExtras & { turnId: string; text: string; resent?: boolean };
 
 /** A prompt sent while its task waited to revive: recorded, not queued. */
 type HeldPrompt = {
@@ -310,6 +313,27 @@ type WaitingRevival = {
   off: boolean;
   prompts: HeldPrompt[];
 };
+
+/**
+ * Put a settled turn back in the queue, under its own rows: the turn row
+ * goes back to "queued" (its error cleared, so no "Turn failed" banner
+ * stays) and its user entry stays where it is — no second copy. Whatever
+ * recorded the turn as ended reopens it (`agent:turn-requeued`).
+ */
+function reopenTurn(
+  store: AgentStore,
+  hooks: Pick<Hooks, "emit">,
+  taskId: string,
+  turnId: string,
+): void {
+  if (!store.turns.get(turnId)) return;
+  store.turns.update(turnId, (draft) => {
+    draft.status = "queued";
+    draft.error = undefined;
+    draft.stopReason = undefined;
+  });
+  hooks.emit("agent:turn-requeued", { taskId, turnId });
+}
 
 /** Queued prompts are transcript state: entry + turn row exist from the
  *  moment of send, and runTurn promotes (not re-inserts) them. */
@@ -416,6 +440,18 @@ export class AgentTask {
   >();
   /** True while `drainQueue`'s loop is actively running (reentrancy guard). */
   private draining = false;
+  /** What each of this runtime's failed turns was sent with, by turn — what
+   *  its retry sends again, extras (context parts, commands) and all. */
+  private readonly failedPrompts = new Map<string, QueuedPrompt>();
+  /** The agent's process ended under the task (not by its dispose): the
+   *  connection is gone, and only a restart reaches the session again. */
+  private exitedValue = false;
+  /** A retry queued while the drain was ending on the failure it retries:
+   *  the drain runs again once it has (`drainQueue`). */
+  private drainAgain = false;
+  /** The harness answered this task's session/load with an error: it has
+   *  no such session. */
+  private loadRejected = false;
   /** "How to sign in" hint, surfaced only when an auth error actually occurs. */
   private authHintValue?: string;
   /**
@@ -493,17 +529,25 @@ export class AgentTask {
        * row on "unavailable" (the harness no longer has the session).
        */
       resumeSessionId?: string;
+      /** The runtime this one replaces, closing: the same taskId names
+       *  both to the platform (a process, an MCP listener), so nothing of
+       *  this one starts until that one is gone. Prompts queue meanwhile. */
+      after?: Promise<unknown>;
     },
   ): Promise<void> {
     this.startCalled = true;
     this.upsertTaskRow();
 
     try {
+      await options?.after?.catch(() => {});
+      this.assertNotDisposed();
       // MCP channel first — the harness spawn may need its address. Same
       // construct-then-start pattern as the ACP transport below:
       // createMcpEndpoint is a dumb sync constructor, we call start()
       // ourselves, and mcpServer only exists on the instance afterward.
-      const mcpEndpoint = MOCK_AGENT_MODE
+      // The constant first: a release build folds the branch, and the mock
+      // with it, away.
+      const mcpEndpoint = MOCK_HARNESS_OFFERED && talksToMock(this.harness)
         ? createMockMcpEndpoint({ taskId: this.taskId })
         : this.deps.proc.createMcpEndpoint({ taskId: this.taskId });
       this.mcpEndpoint = mcpEndpoint;
@@ -596,20 +640,19 @@ export class AgentTask {
       const message = errorMessage(error);
       this.warn("start failed", message);
       // A REJECTED session/load means the harness no longer has the
-      // session — a distinct, deletable end state. A startup TIMEOUT is
-      // different: the session may be fine and the adapter just never
-      // came up, so it stays a plain (retryable-looking) error. A task
+      // session — a distinct, deletable end state. Anything else — a
+      // timeout, a spawn or connection that failed before the harness was
+      // asked (the web with no machine) — leaves the session as it was: a
+      // plain error, which the next prompt revives. A task
       // disposed mid-start (workspace close; StrictMode's remount cycle
       // when the chat tab auto-revives at boot) fails here LATE — setStatus
       // no-ops once disposed, so the demoted "restored" row is never
       // stomped, and dispose already settled the queued prompts (the
       // splice below is empty).
-      const timedOut = error instanceof StartupTimeoutError;
-      this.setStatus(
-        options?.resumeSessionId && !timedOut ? "unavailable" : "error",
-      );
-      for (const { turnId } of this.pendingPrompts.splice(0)) {
-        this.settleQueuedTurn(turnId, { status: "error", error: message });
+      this.setStatus(this.loadRejected ? "unavailable" : "error");
+      for (const queued of this.pendingPrompts.splice(0)) {
+        this.failedPrompts.set(queued.turnId, queued);
+        this.settleQueuedTurn(queued.turnId, { status: "error", error: message });
       }
       if (!this.disposed) {
         // An errored task has no reason to keep its process: a timed-out or
@@ -805,12 +848,12 @@ export class AgentTask {
           );
         });
       }
-      await this.client.loadSession(
-        sessionId,
-        this.agentCwd,
-        mcpServers,
-        this.spawnPrep?.sessionParams,
-      );
+      await this.client
+        .loadSession(sessionId, this.agentCwd, mcpServers, this.spawnPrep?.sessionParams)
+        .catch((error: unknown) => {
+          this.loadRejected = true;
+          throw error;
+        });
       // The transport can die while the load is in flight —
       // handleTransportClose drops the staged turn and marks the task
       // errored. Committing the replay past that would hand the caller an
@@ -831,6 +874,7 @@ export class AgentTask {
       stage.commit(
         replayTurn,
         new Set(this.pendingPrompts.map((p) => p.turnId)),
+        new Set(this.pendingPrompts.filter((p) => p.resent).map((p) => p.turnId)),
       );
     } finally {
       this.currentTurn = null;
@@ -988,6 +1032,10 @@ export class AgentTask {
     } finally {
       this.draining = false;
     }
+    if (this.drainAgain) {
+      this.drainAgain = false;
+      if (!this.currentTurn && !this.authBlocked) void this.drainQueue();
+    }
   }
 
   private async runTurn(queued: QueuedPrompt): Promise<AgentTurnStatus> {
@@ -1026,6 +1074,7 @@ export class AgentTask {
       run: null,
       planEntryId: null,
       userText: text,
+      prompt: queued,
       entries: this.store.liveEntryWriter,
     };
     this.turnUsageUpdates = [];
@@ -1278,17 +1327,8 @@ export class AgentTask {
       // attempt's prompt handle already resolved as error (resolveTurn
       // no-ops on the reused turnId), which is fine: programmatic callers
       // saw the auth failure; the retry is UI-driven.
-      if (this.store.turns.get(held.turnId)) {
-        this.store.turns.update(held.turnId, (draft) => {
-          draft.status = "queued";
-          draft.error = undefined;
-          draft.stopReason = undefined;
-        });
-        this.deps.hooks.emit("agent:turn-requeued", {
-          taskId: this.taskId,
-          turnId: held.turnId,
-        });
-      }
+      this.failedPrompts.delete(held.turnId);
+      reopenTurn(this.store, this.deps.hooks, this.taskId, held.turnId);
       this.pendingPrompts.unshift(held);
       if (!this.currentTurn && !this.draining) {
         void this.drainQueue();
@@ -1301,6 +1341,54 @@ export class AgentTask {
       // Nothing held, but prompts queued up behind the block — resume them.
       void this.drainQueue();
     }
+  }
+
+  /** What a failed turn of this runtime was sent with; undefined for one
+   *  it didn't send (a turn from before a restart). */
+  failedPrompt(turnId: string): QueuedPrompt | undefined {
+    return this.failedPrompts.get(turnId);
+  }
+
+  /** Whether the agent's process ended under the task: the session is
+   *  reached again only by a restart (`AgentRuntime.getOrRevive`). */
+  get exited(): boolean {
+    return this.exitedValue;
+  }
+
+  /**
+   * Run a failed turn again on this session, sent as it was the first time:
+   * its rows go back to "queued" (`reopenTurn`) and it jumps the queue, as
+   * it was sent before anything waiting behind it. The turn a sign-in
+   * interrupted is the held prompt's retry. False for a turn that hasn't
+   * failed.
+   */
+  retryTurn(prompt: QueuedPrompt): boolean {
+    if (this.store.turns.get(prompt.turnId)?.status !== "error") return false;
+    // The failure's own drain may not have stopped yet: it would leave the
+    // retry queued behind it.
+    if (this.draining) this.drainAgain = true;
+    if (this.heldPrompt?.turnId === prompt.turnId) {
+      this.retryHeldPrompt();
+      return true;
+    }
+    this.failedPrompts.delete(prompt.turnId);
+    reopenTurn(this.store, this.deps.hooks, this.taskId, prompt.turnId);
+    if (this.currentStatus === "error") this.setStatus("idle");
+    const { turnId, text, ...extras } = prompt;
+    void this.enqueuePrompt(turnId, text, { ...extras, front: true, resent: true });
+    return true;
+  }
+
+  /**
+   * Give up the prompts waiting in an exited task's queue, to the task that
+   * restarts it: each with the resolver of the handle its sender holds.
+   */
+  handOverQueue(): { prompt: QueuedPrompt; resolve: (outcome: TurnOutcome) => void }[] {
+    return this.pendingPrompts.splice(0).map((prompt) => {
+      const resolve = this.turnResolvers.get(prompt.turnId) ?? (() => {});
+      this.turnResolvers.delete(prompt.turnId);
+      return { prompt, resolve };
+    });
   }
 
   /** Auth-blocked is task-row state (Stage 4): methods + hint, held prompt. */
@@ -1348,6 +1436,9 @@ export class AgentTask {
       draft.stopReason = stopReason;
       if (error) draft.error = error;
     });
+    if (turnStatus === "error" && turn.prompt) {
+      this.failedPrompts.set(turn.turnId, turn.prompt);
+    }
     // What the user should hear about outlives the turn row on the task
     // row. A cancel was the user's own doing and says nothing.
     // One settle time for every record of this turn: the row here, the
@@ -1958,6 +2049,7 @@ export class AgentTask {
     // cancelled permissions/turns, and the row may since have been demoted
     // to "restored" — a late close event must not stomp any of that.
     if (this.disposed) return;
+    this.exitedValue = true;
     this.permissionBroker.cancelAll();
     // "agent process exited (code N)" / "terminated (signal)" from the
     // transport — the difference between a silent dead task and a real reason.
@@ -2235,6 +2327,14 @@ export interface AgentRuntime {
    */
   getOrRevive(taskId: string): AgentTask | undefined;
   /**
+   * Run a failed turn again, on its own session and with what it was sent
+   * with the first time — never a new session. A task whose process ended
+   * restarts first (session/load), and the turn rides its queue. False when
+   * the turn isn't a failed one of this task, or its session can't be
+   * reached (no session to resume, or the harness lost it).
+   */
+  retryTurn(taskId: string, turnId: string): boolean;
+  /**
    * A prompt for a task whose revival is waiting for the harness rows
    * (startup): its turn is recorded now, as any queued prompt's, and it
    * joins the task's queue once the task is live — or settles, cancelled
@@ -2339,7 +2439,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
 
   /** The one place a task's spawn spec meets the platform transport. */
   const transportFactory = (task: AgentTask) => {
-    if (MOCK_AGENT_MODE) {
+    if (MOCK_HARNESS_OFFERED && talksToMock(task.harness)) {
       return () =>
         createMockAgentTransport({
           taskId: task.taskId,
@@ -2361,7 +2461,11 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
   /** A revival asked for before the harness rows loaded: it runs once
    *  they have, unless its workspace closed first, and then hands the task
    *  the prompts sent meanwhile — or settles them, when there's no task. */
-  const waitForHarnesses = (taskId: string, row: AgentTaskRow): WaitingRevival => {
+  const waitForHarnesses = (
+    taskId: string,
+    row: AgentTaskRow,
+    after?: Promise<unknown>,
+  ): WaitingRevival => {
     const pending = waiting.get(taskId);
     if (pending) return pending;
     const entry: WaitingRevival = {
@@ -2376,7 +2480,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     };
     entry.revival.started = deps.harnesses.ready().then(
       () => {
-        const started = entry.off ? undefined : revive(taskId)?.started;
+        const started = entry.off ? undefined : revive(taskId, after)?.started;
         settle();
         return started;
       },
@@ -2433,13 +2537,17 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     });
   };
 
-  const revive: AgentRuntime["revive"] = (taskId) => {
+  const revive = (
+    taskId: string,
+    /** The runtime this replaces, closing (`AgentTask.start`). */
+    after?: Promise<unknown>,
+  ): { started: Promise<void> } | null => {
     if (live.get(taskId)) return null;
     const row = store.tasks.get(taskId);
-    if (!row || row.status !== "restored" || !row.sessionId) return null;
+    if (!row || !isRevivable(row)) return null;
     // Until the harness rows have loaded, a custom entry reads as missing
     // and an edited built-in as stock: revive once they have.
-    if (!deps.harnesses.isReady()) return waitForHarnesses(taskId, row).revival;
+    if (!deps.harnesses.isReady()) return waitForHarnesses(taskId, row, after).revival;
     // Read synchronously: revival registers the task in the same tick, so
     // a prompt can queue at once.
     const harness = deps.harnesses.harness(row.harnessId).definition();
@@ -2457,6 +2565,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     );
     const started = task.start(transportFactory(task), {
       resumeSessionId: row.sessionId,
+      after,
     });
     // Failure lands on the row as "unavailable"/"error" — callers may still
     // await.
@@ -2464,6 +2573,57 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       console.warn("Agent session revival failed:", errorMessage(error));
     });
     return { started };
+  };
+
+  /**
+   * Bring back a task whose process ended under it: a new runtime under
+   * the same taskId resumes the session (session/load), and the prompts
+   * that were waiting in the old one's queue wait in the new one's — their
+   * senders' handles settle when they run. A session that can't be resumed
+   * settles them as errors.
+   */
+  const restart = (task: AgentTask): AgentTask | undefined => {
+    const queue = task.handOverQueue();
+    // The maps drop it at once; the new runtime starts once it has closed.
+    const closing = managerFor(task.workspacePath).cancelTask(task.taskId);
+    revive(task.taskId, closing);
+    const next = live.get(task.taskId);
+    // Until the harness rows load, the revival waits, and they wait in it.
+    const waitingRevival = next ? undefined : waiting.get(task.taskId);
+    for (const { prompt, resolve } of queue) {
+      const { turnId, text, ...extras } = prompt;
+      if (next) {
+        void next.enqueuePrompt(turnId, text, extras).completed.then(resolve);
+      } else if (waitingRevival) {
+        waitingRevival.prompts.push({ turnId, text, options: extras, resolve });
+      } else {
+        settleHeldPrompt(task.taskId, { turnId, text, resolve }, {
+          status: "error",
+          error: "agent task is not started",
+        });
+      }
+    }
+    return next;
+  };
+
+  const getOrRevive: AgentRuntime["getOrRevive"] = (taskId) => {
+    const task = live.get(taskId);
+    if (task?.exited) return restart(task);
+    if (task) return task;
+    revive(taskId);
+    return live.get(taskId);
+  };
+
+  /** A failed turn's prompt as its transcript holds it — for a turn this
+   *  runtime didn't send (one from before a restart), whose extras are
+   *  gone: its text, as the user sent it. */
+  const promptOfTurn = (taskId: string, turnId: string): QueuedPrompt | undefined => {
+    const entry = store
+      .entriesForTask(taskId)
+      .find((e) => e.turnId === turnId && e.type === "user");
+    return entry?.type === "user" && entry.text !== undefined
+      ? { turnId, text: entry.text }
+      : undefined;
   };
 
   const disposeWorkspace = async (workspacePath: string) => {
@@ -2505,11 +2665,23 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
       };
     },
     revive,
-    getOrRevive(taskId) {
-      const task = live.get(taskId);
-      if (task) return task;
-      revive(taskId);
-      return live.get(taskId);
+    getOrRevive,
+    retryTurn(taskId, turnId) {
+      const turn = store.turns.get(turnId);
+      if (turn?.taskId !== taskId || turn.status !== "error") return false;
+      const prompt =
+        live.get(taskId)?.failedPrompt(turnId) ?? promptOfTurn(taskId, turnId);
+      if (!prompt) return false;
+      const task = getOrRevive(taskId);
+      if (task) return task.retryTurn(prompt);
+      // Revival is waiting for the harness rows (startup): the turn waits
+      // with it, as a prompt sent meanwhile does.
+      const entry = waiting.get(taskId);
+      if (!entry) return false;
+      reopenTurn(store, deps.hooks, taskId, turnId);
+      const { text, ...extras } = prompt;
+      entry.prompts.unshift({ turnId, text, options: { ...extras, front: true }, resolve: () => {} });
+      return true;
     },
     promptWhileReviving(taskId, text, options) {
       const entry = waiting.get(taskId);
@@ -2556,6 +2728,10 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     },
     refresh(taskId) {
       const task = live.get(taskId);
+      if (task?.exited) {
+        restart(task);
+        return;
+      }
       if (task) {
         void task.refreshFromHarness();
         return;

@@ -347,9 +347,38 @@ export class ReplayStage implements AgentEntryWriter {
    * they aren't part of the replayed history, and they come after it: their
    * entries were minted before the replay's, and entry ids are the
    * transcript's order, so they move to fresh ids behind it.
+   *
+   * A kept turn in `resentTurnIds` is a retry of an attempt the harness may
+   * have kept (it died mid-turn). When that attempt was the last prompt
+   * the session was sent, and the history ends on a prompt with its text,
+   * the history's copy goes — that prompt and what came of it — and the
+   * kept turn is the one copy. A retry of an older turn drops nothing: the
+   * history's last prompt is a later one, whatever its text.
    */
-  commit(replayTurn: AgentTurn, keepTurnIds: ReadonlySet<string>): void {
+  commit(
+    replayTurn: AgentTurn,
+    keepTurnIds: ReadonlySet<string>,
+    resentTurnIds: ReadonlySet<string> = new Set(),
+  ): void {
     const taskId = replayTurn.taskId;
+    // The last prompt the session was sent: any turn's but a queued one's,
+    // which hasn't gone yet (entry ids are the transcript's order).
+    const lastSent = sortEntriesChronologically(
+      this.store
+        .entriesForTask(taskId)
+        .filter(
+          (entry) =>
+            entry.type === "user" &&
+            (!keepTurnIds.has(entry.turnId) || resentTurnIds.has(entry.turnId)),
+        ),
+    ).at(-1);
+    const resent =
+      lastSent && resentTurnIds.has(lastSent.turnId) ? lastSent.text : undefined;
+    const replayed = [...this.rows.values()];
+    const lastPrompt = replayed.map((row) => row.type).lastIndexOf("user");
+    if (lastPrompt !== -1 && resent !== undefined && replayed[lastPrompt].text === resent) {
+      for (const row of replayed.slice(lastPrompt)) this.rows.delete(row.id);
+    }
     const kept: AgentEntry[] = [];
     for (const entry of this.store.entriesForTask(taskId)) {
       if (keepTurnIds.has(entry.turnId)) kept.push(entry);
@@ -382,3 +411,12 @@ export const agentStoreModule = defineModule({
   needs: [platformModule],
   register: (ctx) => createAgentStore(ctx.use("platform").db.get()),
 });
+
+/**
+ * Whether a session with no runtime can be brought back by session/load:
+ * one put to sleep ("restored", a workspace closed or the app restarted),
+ * or one whose process ended ("error") — either with a session to resume.
+ */
+export function isRevivable(row: Pick<AgentTaskRow, "status" | "sessionId">): boolean {
+  return (row.status === "restored" || row.status === "error") && Boolean(row.sessionId);
+}

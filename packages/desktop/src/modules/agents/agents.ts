@@ -15,11 +15,12 @@ import {
   type RequestPermissionResponse,
   type TurnOutcome,
 } from "@notefig/shared/agent";
-import type { AgentStore, AgentTaskRow, AgentTurn } from "./agent-collections";
+import { isRevivable, type AgentStore, type AgentTaskRow, type AgentTurn } from "./agent-collections";
 import type { AgentRuntime } from "./agent-service";
 import { encodeWidgetContextUri } from "@notefig/agent";
 import type { KvApi } from "@/modules/kv";
 import { workspaceKey } from "@/utils/path";
+import { talksToMock } from "./mock-mode";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -68,6 +69,13 @@ export interface AgentTaskHandle {
   ): PromptHandle;
   /** Remove one queued (not yet running) prompt. */
   removeQueuedPrompt(turnId: string): void;
+  /**
+   * Run a failed turn again: on this session, sent as it was the first
+   * time. A session whose agent exited is restarted for it. False when the
+   * turn isn't a failed one of this session or the session is gone — the
+   * caller starts over somewhere else.
+   */
+  retryTurn(turnId: string): boolean;
   /**
    * Can this task still be prompted? True for a live runtime and for a
    * restored row that `prompt` would revive via session/load (MET-163: a
@@ -191,6 +199,15 @@ export interface AgentsApi {
    * Call before starting a task, not before prompting a live one.
    */
   ensureRuntime(): boolean;
+  /**
+   * Whether a session on this harness can start now, saying nothing when it
+   * can't: the mock always; any other once there is a machine to run it
+   * (always on desktop, on the web with a paired one connected).
+   */
+  canStart(harnessId: string): boolean;
+  /** Fires when `canStart` may answer differently (a machine connected or
+   *  dropped); returns the unsubscribe. */
+  onCanStartChange(listener: () => void): () => void;
   /** Resolves once persisted task rows match this session (see
    *  AgentRuntime.whenReconciled); starts that if nothing has yet. */
   whenReconciled(): Promise<void>;
@@ -208,7 +225,14 @@ export interface AgentsDeps {
   kv: Pick<KvApi, "collection" | "write">;
   openAgentTab(taskId: string): void;
   isOpen(workspacePath: string): boolean;
-  ensureRuntime(): boolean;
+  /** The machine agents run on: whether it's reachable now, when that
+   *  changes (the tunnel, on the web; always reachable on desktop), and
+   *  how to tell the user it isn't. */
+  runtimeConnection: {
+    connected(): boolean;
+    subscribe(listener: () => void): () => void;
+    explain(): void;
+  };
 }
 
 export function createAgents({
@@ -217,8 +241,16 @@ export function createAgents({
   kv,
   openAgentTab,
   isOpen,
-  ensureRuntime,
+  runtimeConnection,
 }: AgentsDeps): AgentsApi {
+  const ensureRuntime = () => {
+    if (runtimeConnection.connected()) return true;
+    runtimeConnection.explain();
+    return false;
+  };
+  const canStart = (harnessId: string) =>
+    talksToMock({ id: harnessId }) || runtimeConnection.connected();
+
   /**
    * Trust granted in this run. The KV write is durable only after it
    * lands, but the start the user just confirmed must see the answer at
@@ -305,16 +337,20 @@ export function createAgents({
       removeQueuedPrompt(turnId) {
         runtime.removeQueuedPrompt(taskId, turnId);
       },
+      retryTurn: (turnId) => runtime.retryTurn(taskId, turnId),
       async isReachable() {
-        if (runtime.task(taskId)) return true;
+        const live = () => {
+          const task = runtime.task(taskId);
+          return task !== undefined && !task.exited;
+        };
+        if (live()) return true;
         await runtime.whenReconciled();
-        if (runtime.task(taskId)) return true;
+        if (live()) return true;
         const row = store.tasks.get(taskId);
         // Exactly the runtime's revive precondition: anything else — no row at
         // all, a row already demoted to "unavailable", or one with no session
         // to resume — is a task no prompt can reach.
-        if (!row) return false;
-        return row.status === "restored" && Boolean(row.sessionId);
+        return row !== undefined && isRevivable(row);
       },
       async cancel() {
         const task = runtime.task(taskId);
@@ -371,7 +407,10 @@ export function createAgents({
     return {
       workspacePath,
       async start(harness) {
-        if (!ensureRuntime()) return { status: "no-runtime" };
+        if (!canStart(harness.id)) {
+          runtimeConnection.explain();
+          return { status: "no-runtime" };
+        }
         // A cold start may click before the answers load; reading then would
         // ask again about a workspace the user already trusted. Once loaded
         // (boot preloads them) nothing waits.
@@ -420,6 +459,8 @@ export function createAgents({
     turn: turnHandle,
     workspace: workspaceHandle,
     ensureRuntime,
+    canStart,
+    onCanStartChange: (listener) => runtimeConnection.subscribe(listener),
     whenReconciled: () => runtime.whenReconciled(),
     disposeWorkspace: (workspacePath) =>
       runtime.disposeWorkspace(workspacePath),

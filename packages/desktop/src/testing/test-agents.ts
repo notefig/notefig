@@ -112,7 +112,7 @@ export function testAgents(
     kv,
     openAgentTab: () => {},
     isOpen: () => true,
-    ensureRuntime: () => true,
+    runtimeConnection: { connected: () => true, subscribe: () => () => {}, explain: () => {} },
     ...facade,
   });
   return { deps, hooks, store, runtime, agents };

@@ -124,6 +124,12 @@ export interface PromptWidgetHost {
   cancelTask(taskId: string): void;
   /** Withdraw a turn that is still queued behind others. */
   removeQueuedPrompt(taskId: string, turnId: string): void;
+  /**
+   * Run a failed turn again on its own session, as it was sent. False when
+   * the session can't take it (gone, or the turn didn't fail) — the widget
+   * then starts over.
+   */
+  retryTurn(taskId: string, turnId: string): boolean;
   /** False when no agent runtime is available; the host surfaces the reason. */
   ensureRuntime(): boolean;
 

@@ -16,7 +16,7 @@ vi.mock("../tunnel-connection", () => ({
 
 import { toast } from "sonner";
 import { openPairDialog } from "../pair-dialog-store";
-import { ensureAgentRuntime } from "../require-connection";
+import { agentRuntimeConnection } from "../require-connection";
 
 beforeEach(() => {
   mocks.web = true;
@@ -26,29 +26,27 @@ beforeEach(() => {
 
 afterEach(() => vi.clearAllMocks());
 
-describe("ensureAgentRuntime", () => {
-  it("passes on desktop without touching the tunnel", () => {
+describe("agentRuntimeConnection", () => {
+  it("is connected on desktop without touching the tunnel", () => {
     mocks.web = false;
-    expect(ensureAgentRuntime()).toBe(true);
-    expect(toast.error).not.toHaveBeenCalled();
+    expect(agentRuntimeConnection.connected()).toBe(true);
   });
 
-  it("passes on web when the tunnel is connected", () => {
+  it("is connected on web while the tunnel is", () => {
     mocks.status = "connected";
-    expect(ensureAgentRuntime()).toBe(true);
-    expect(toast.error).not.toHaveBeenCalled();
+    expect(agentRuntimeConnection.connected()).toBe(true);
   });
 
-  it("blocks + snackbars on web when disconnected, action opens the dialog", () => {
-    expect(ensureAgentRuntime()).toBe(false);
+  it("isn't while connecting (only 'connected' counts)", () => {
+    mocks.status = "connecting";
+    expect(agentRuntimeConnection.connected()).toBe(false);
+  });
+
+  it("explains with a snackbar whose action opens the pairing dialog", () => {
+    agentRuntimeConnection.explain();
     expect(toast.error).toHaveBeenCalledTimes(1);
     const opts = (toast.error as any).mock.calls[0][1];
     opts.action.onClick();
     expect(openPairDialog).toHaveBeenCalledTimes(1);
-  });
-
-  it("blocks while connecting too (only 'connected' passes)", () => {
-    mocks.status = "connecting";
-    expect(ensureAgentRuntime()).toBe(false);
   });
 });

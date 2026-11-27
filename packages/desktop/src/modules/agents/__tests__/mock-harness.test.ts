@@ -195,3 +195,95 @@ describe("mock harness session settings (MET-81)", () => {
     }
   });
 });
+
+describe("the mock's misbehaviours", () => {
+  const prompt = (client: NotefigAcpClient, sessionId: string, text: string) =>
+    client.prompt(sessionId, [{ type: "text", text }]);
+
+  it("offers them as its commands, right after session/new", async () => {
+    configureMockAgent({ scenario: "echo" });
+    const updates: SessionNotification[] = [];
+    await connectedClient((n) => updates.push(n));
+    await vi.waitFor(() =>
+      expect(
+        updates.find((n) => n.update.sessionUpdate === "available_commands_update"),
+      ).toBeDefined(),
+    );
+    const offered = updates.find(
+      (n) => n.update.sessionUpdate === "available_commands_update",
+    )!.update as { availableCommands: { name: string }[] };
+    expect(offered.availableCommands.map((c) => c.name)).toEqual(
+      expect.arrayContaining(["error", "flaky", "crash", "hang", "auth", "evict"]),
+    );
+  });
+
+  it("fails a turn with an API error, the agent still up", async () => {
+    const { client, sessionId } = await connectedClient(() => {});
+    await expect(prompt(client, sessionId, "/error")).rejects.toMatchObject({
+      message: expect.stringMatching(/Overloaded/),
+    });
+    await expect(prompt(client, sessionId, "hello")).resolves.toMatchObject({
+      stopReason: "end_turn",
+    });
+  });
+
+  it("asks for a sign-in once, then answers the same prompt", async () => {
+    const { client, sessionId } = await connectedClient(() => {});
+    await expect(prompt(client, sessionId, "/auth")).rejects.toMatchObject({
+      message: "Authentication required",
+    });
+    await expect(prompt(client, sessionId, "/auth")).resolves.toMatchObject({
+      stopReason: "end_turn",
+    });
+  });
+
+  it("fails a turn on a usage limit, reporting it rejected", async () => {
+    const updates: SessionNotification[] = [];
+    const { client, sessionId } = await connectedClient((n) => updates.push(n));
+    await expect(prompt(client, sessionId, "/rate-limit")).rejects.toMatchObject({
+      message: expect.stringMatching(/usage limit/),
+    });
+    const usage = updates.find((n) => n.update.sessionUpdate === "usage_update");
+    expect(JSON.stringify(usage)).toContain('"status":"rejected"');
+  });
+
+  it("ends turns as a refusal or on the output limit", async () => {
+    const { client, sessionId } = await connectedClient(() => {});
+    expect((await prompt(client, sessionId, "/refusal")).stopReason).toBe("refusal");
+    expect((await prompt(client, sessionId, "/max-tokens")).stopReason).toBe("max_tokens");
+  });
+
+  it("hangs until the turn is cancelled", async () => {
+    const { client, sessionId } = await connectedClient(() => {});
+    const turn = prompt(client, sessionId, "/hang");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await client.cancel(sessionId);
+    expect((await turn).stopReason).toBe("cancelled");
+  });
+
+  it("fails the next new session's start", async () => {
+    const { client, sessionId } = await connectedClient(() => {});
+    await prompt(client, sessionId, "/fail-start");
+    await expect(connectedClient(() => {})).rejects.toMatchObject({
+      message: expect.stringMatching(/Couldn't start a session/),
+    });
+    await expect(connectedClient(() => {})).resolves.toBeDefined();
+  });
+
+  it("exits its process mid-turn: the transport closes with the reason", async () => {
+    const transport = createMockAgentTransport();
+    const closed = new Promise((resolve) => transport.onClose(resolve));
+    const client = new NotefigAcpClient({
+      taskId: "task_test",
+      transport,
+      permissionBroker: new PermissionBroker("task_test", testAgentStore().permissionRequests),
+      onSessionUpdate: () => {},
+      fs: { readTextFile: vi.fn(async () => ""), writeTextFile: vi.fn(async () => {}) },
+    });
+    await transport.start();
+    await client.connect();
+    const { sessionId } = await client.newSession("/workspace/mock");
+    void prompt(client, sessionId, "/crash").catch(() => {});
+    expect(await closed).toMatchObject({ message: "agent process exited (code 1)" });
+  });
+});

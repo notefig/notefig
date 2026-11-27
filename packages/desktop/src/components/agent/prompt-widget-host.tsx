@@ -348,6 +348,7 @@ export function usePromptWidgetHost(): PromptWidgetHost {
       cancelTask: (taskId) => void agents.task(taskId).cancel(),
       removeQueuedPrompt: (taskId, turnId) =>
         agents.task(taskId).removeQueuedPrompt(turnId),
+      retryTurn: (taskId, turnId) => agents.task(taskId).retryTurn(turnId),
       ensureRuntime: () => agents.ensureRuntime(),
 
       useRound,

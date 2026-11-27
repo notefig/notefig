@@ -8,21 +8,27 @@
  * the test primitive). One file on purpose: agent + scenarios + wiring are
  * one protocol.
  *
- * Two consumers:
+ * Three consumers:
  *  - unit tests script `FakeAgent` directly per-assertion;
  *  - mock-mode app runs (and the tests/agent e2e specs) drive it with
  *    scenarios — `window.__mockAgent.configure({ scenario, options })`, or
  *    a prompt starting with `@@mock:{...json...}` typed straight into the
- *    composer (a one-turn override, handy for manual repros).
+ *    composer (a one-turn override, handy for manual repros);
+ *  - a dev build offers it as the "Mock" harness (./mock-mode.ts), next to
+ *    the real ones. Its commands make it misbehave on cue — `/error`,
+ *    `/flaky 2`, `/crash`, `/crash-idle`, `/hang`, `/auth`, `/rate-limit`,
+ *    `/refusal`, `/max-tokens`, `/evict`, `/fail-start` (MISBEHAVIOURS
+ *    below) — anywhere in a prompt, in either build.
  *
- * PRODUCTION SAFETY: every harness entry point checks `MOCK_AGENT_MODE`,
- * which Vite statically evaluates to false in normal builds (same pattern
- * as testing/shim-transport.ts), so this dead-code-eliminates away.
+ * PRODUCTION SAFETY: every harness entry point checks `MOCK_AGENT_MODE` or
+ * `talksToMock` (./mock-mode.ts), which Vite statically evaluates to false
+ * in a release build (same pattern as testing/shim-transport.ts), so this
+ * dead-code-eliminates away.
  */
 import { MOCK_AGENT_MODE } from "./mock-mode";
 import { defineModule } from "@notefig/core";
 import { createLoopbackPair } from "@notefig/agent";
-import type { LoopbackTransport } from "@notefig/agent";
+import { AgentTransportError, type LoopbackTransport } from "@notefig/agent";
 import type { AgentTransport, McpEndpoint } from "@notefig/agent";
 import type { FileSystemSurface } from "@/adapters/platform-adapter.interface";
 import type { WorkspaceFiles } from "@/modules/files";
@@ -340,6 +346,9 @@ export type MockTurnContext = {
   notifyWatcher: (path: string) => Promise<void>;
   /** Fires on `session/cancel`; scenarios should return promptly after. */
   signal: AbortSignal;
+  /** End the agent's "process": the transport closes with this reason, as
+   *  a harness that crashed or was killed closes its pipe. */
+  exit: (reason: string) => void;
 };
 
 /** A scenario plays one turn; the resolved stopReason answers the prompt. */
@@ -598,6 +607,175 @@ export function echo(): MockScenario {
   };
 }
 
+// ─── Misbehaviour: the ways a harness fails ─────────────────────────────────
+
+/** How many times each prompt was tried in a session — what `/flaky` and
+ *  `/auth` count, across a retry and across the session's revival (a new
+ *  FakeAgent, as a respawned adapter is a new process). */
+const attempts = new Map<string, number>();
+
+function attempt({ sessionId, promptText }: MockTurnContext): number {
+  const key = `${sessionId}\u0000${promptText}`;
+  const count = (attempts.get(key) ?? 0) + 1;
+  attempts.set(key, count);
+  return count;
+}
+
+/** Sessions whose next `session/load` fails: the harness lost them. */
+const evictedSessions = new Set<string>();
+/** Whether the next `session/new` fails. */
+let failNextNewSession = false;
+
+/** Stream `text` as the agent's message, a few characters at a time. */
+async function say({ emit, sleep, signal }: MockTurnContext, text: string) {
+  for (let at = 0; at < text.length && !signal.aborted; at += 24) {
+    emit({
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: text.slice(at, at + 24) },
+    });
+    await sleep(10);
+  }
+}
+
+/** A JSON-RPC error the prompt is answered with, as a harness reports an
+ *  API failure: the process lives on, the turn fails. */
+function fail(message: string): never {
+  throw new Error(message);
+}
+
+/** The first `failures` tries of a prompt fail; the next one answers. */
+function flaky(options: Json): MockScenario {
+  const failures = Number(options?.failures ?? 1);
+  return async (ctx) => {
+    const tried = attempt(ctx);
+    if (tried <= failures) {
+      await say(ctx, `Attempt ${tried}… `);
+      fail(`Overloaded (mock): attempt ${tried} of ${failures + 1} failed`);
+    }
+    return echo()(ctx);
+  };
+}
+
+const MISBEHAVIOURS: Record<string, { description: string; hint?: string; play: MockScenarioFactory }> = {
+  error: {
+    description: "Fail the turn with an API error; the agent stays up",
+    play: () => async (ctx) => {
+      await say(ctx, "Working on it… ");
+      fail("Overloaded (mock): the API is busy, try again");
+    },
+  },
+  flaky: {
+    description: "Fail this prompt the first N times, then answer it",
+    hint: "number of failures (default 1)",
+    play: flaky,
+  },
+  crash: {
+    description: "Exit the agent's process mid-turn, the first N times",
+    hint: "times to crash (default 1)",
+    play: (options) => async (ctx) => {
+      if (attempt(ctx) > Number(options?.failures ?? 1)) return echo()(ctx);
+      await say(ctx, "Starting… ");
+      ctx.exit("agent process exited (code 1)");
+    },
+  },
+  "crash-idle": {
+    description: "Answer, then exit the agent's process while idle",
+    play: () => async (ctx) => {
+      const result = await echo()(ctx);
+      setTimeout(() => ctx.exit("agent process exited (code 1)"), 200);
+      return result;
+    },
+  },
+  hang: {
+    description: "Never finish the turn, until it is stopped",
+    play: () => async (ctx) => {
+      await say(ctx, "Thinking… ");
+      if (!ctx.signal.aborted) {
+        await new Promise((resolve) =>
+          ctx.signal.addEventListener("abort", resolve, { once: true }),
+        );
+      }
+      return { stopReason: "cancelled" };
+    },
+  },
+  auth: {
+    description: "Ask for a sign-in once; the retry after it answers",
+    play: () => async (ctx) => {
+      if (attempt(ctx) === 1) fail("Authentication required");
+      return echo()(ctx);
+    },
+  },
+  "rate-limit": {
+    description: "Fail the turn on a usage limit",
+    play: () => async (ctx) => {
+      const resetsAt = Math.floor(Date.now() / 1000) + 3_600;
+      ctx.emit({
+        sessionUpdate: "usage_update",
+        used: 12_000,
+        size: 200_000,
+        _meta: {
+          "_claude/rateLimit": {
+            status: "rejected",
+            isUsingOverage: false,
+            unifiedWindows: { five_hour: { utilization: 1, resetsAt } },
+          },
+        },
+      });
+      fail("Claude AI usage limit reached (mock)");
+    },
+  },
+  refusal: {
+    description: "End the turn as a refusal",
+    play: () => async (ctx) => {
+      await say(ctx, "I can't help with that.");
+      return { stopReason: "refusal" };
+    },
+  },
+  "max-tokens": {
+    description: "End the turn on the output limit, mid-sentence",
+    play: () => async (ctx) => {
+      await say(ctx, "Here is a long answer that runs out of room before it");
+      return { stopReason: "max_tokens" };
+    },
+  },
+  evict: {
+    description: "Forget this session: its next load fails",
+    play: () => async (ctx) => {
+      evictedSessions.add(ctx.sessionId);
+      await say(ctx, "This session is gone the next time it loads.");
+    },
+  },
+  "fail-start": {
+    description: "Fail the next new session's start",
+    play: () => async (ctx) => {
+      failNextNewSession = true;
+      await say(ctx, "The next new session fails to start.");
+    },
+  },
+};
+
+/** The mock's commands, as a harness reports its own: what makes it
+ *  misbehave, offered in the composer. Built on first use, like every
+ *  value here: nothing runs at load, so a release build drops the file. */
+export function mockCommands(): Json[] {
+  return Object.entries(MISBEHAVIOURS).map(([name, { description, hint }]) => ({
+    name,
+    description,
+    ...(hint ? { input: { hint } } : {}),
+  }));
+}
+
+/** `/flaky 2` → the scenario the command names, with its options; null
+ *  for a prompt that names none. Anywhere it stands as a word: a harness
+ *  may get the command in a later block (Claude's goes last), and a
+ *  widget's draft can't start with "/". A path (`src/error.ts`) isn't one. */
+function misbehaviourFromPrompt(promptText: string): MockAgentConfig | null {
+  const match = /(?:^|\s)\/([\w-]+)(?:[ \t]+(\d+))?(?=\s|$)/.exec(promptText);
+  if (!match || !(match[1] in MISBEHAVIOURS)) return null;
+  const count = match[2] === undefined ? undefined : Number(match[2]);
+  return { scenario: match[1], options: count === undefined ? {} : { failures: count } };
+}
+
 // ─── Replay: a recording, played back ───────────────────────────────────────
 
 export type ReplayOptions = {
@@ -792,19 +970,28 @@ export type MockAgentConfig = {
   commands?: Json[];
 };
 
-const scenarioRegistry = new Map<string, MockScenarioFactory>([
-  ["echo", () => echo()],
-  ["longTranscript", (options) => longTranscript(options ?? {})],
-  ["replay", (options) => replay(options)],
-]);
+let registry: Map<string, MockScenarioFactory> | null = null;
+
+/** Every scenario by name, built on first use. */
+function scenarioRegistry(): Map<string, MockScenarioFactory> {
+  registry ??= new Map<string, MockScenarioFactory>([
+    ["echo", () => echo()],
+    ["longTranscript", (options) => longTranscript(options ?? {})],
+    ["replay", (options) => replay(options)],
+    ...Object.entries(MISBEHAVIOURS).map(
+      ([name, { play }]): [string, MockScenarioFactory] => [name, play],
+    ),
+  ]);
+  return registry;
+}
 
 let activeConfig: MockAgentConfig = { scenario: "echo" };
 
 /** Set the scenario future `session/prompt` turns play (all mock tasks). */
 export function configureMockAgent(config: MockAgentConfig): void {
-  if (!scenarioRegistry.has(config.scenario)) {
+  if (!scenarioRegistry().has(config.scenario)) {
     throw new Error(
-      `unknown mock scenario "${config.scenario}" (have: ${[...scenarioRegistry.keys()].join(", ")})`,
+      `unknown mock scenario "${config.scenario}" (have: ${[...scenarioRegistry().keys()].join(", ")})`,
     );
   }
   activeConfig = config;
@@ -816,7 +1003,7 @@ export function registerMockScenario(
   name: string,
   factory: MockScenarioFactory,
 ): void {
-  scenarioRegistry.set(name, factory);
+  scenarioRegistry().set(name, factory);
 }
 
 /** `@@mock:{"scenario":"longTranscript","options":{...}}` prompt directive —
@@ -827,7 +1014,7 @@ function configFromPrompt(promptText: string): MockAgentConfig | null {
     const parsed = JSON.parse(promptText.slice("@@mock:".length));
     if (
       typeof parsed?.scenario === "string" &&
-      scenarioRegistry.has(parsed.scenario)
+      scenarioRegistry().has(parsed.scenario)
     ) {
       return parsed as MockAgentConfig;
     }
@@ -846,6 +1033,8 @@ function promptText(params: Json): string {
 }
 
 let mockSessionCounter = 0;
+/** This page's run, in its sessions' ids. */
+let mockRun: string | null = null;
 /** The scenario agent most recently attached — specs read the params its
  *  `session/set_*` calls captured. */
 let lastScenarioAgent: FakeAgent | null = null;
@@ -859,6 +1048,14 @@ export function lastMockSetParams(method: string): Json {
  *  prompt as it went on the wire (text + resource_link parts), for specs
  *  that assert what the composer/widget actually sent. */
 let lastMockPromptParams: Json = null;
+/** Every prompt a mock agent was sent, in order, with the session it went
+ *  to — what shows a retry went to the same session, with the same text. */
+const mockPromptLog: { sessionId: string; text: string }[] = [];
+
+/** `window.__mockAgent.prompts()`, for unit tests. */
+export function mockPrompts(): { sessionId: string; text: string }[] {
+  return [...mockPromptLog];
+}
 
 /**
  * Per-session update history for the scenario agent, keyed by sessionId and
@@ -869,13 +1066,43 @@ let lastMockPromptParams: Json = null;
  * which is what makes revival and the manual session refresh real in mock
  * mode instead of returning an empty transcript.
  */
-const mockSessionHistories = new Map<string, Json[]>();
+let mockSessionHistories: Map<string, Json[]> | null = null;
+
+/** Where the histories outlive the page, as a harness's store outlives its
+ *  process: a reload, or a dev build's restart, still loads its sessions. */
+const MOCK_HISTORIES_KEY = "notefig:mock-session-histories";
+
+function histories(): Map<string, Json[]> {
+  if (!mockSessionHistories) {
+    try {
+      const raw = globalThis.localStorage?.getItem(MOCK_HISTORIES_KEY);
+      mockSessionHistories = new Map(raw ? JSON.parse(raw) : []);
+    } catch {
+      mockSessionHistories = new Map();
+    }
+  }
+  return mockSessionHistories;
+}
+
+/** Written once a turn ends, not per update: a long transcript streams
+ *  thousands of them. Best-effort — a full or blocked store keeps the
+ *  histories in memory only. */
+function saveMockHistories(): void {
+  try {
+    globalThis.localStorage?.setItem(
+      MOCK_HISTORIES_KEY,
+      JSON.stringify([...histories()]),
+    );
+  } catch {
+    // in memory only
+  }
+}
 
 function recordMockUpdate(sessionId: string, update: Json): void {
-  let history = mockSessionHistories.get(sessionId);
+  let history = histories().get(sessionId);
   if (!history) {
     history = [];
-    mockSessionHistories.set(sessionId, history);
+    histories().set(sessionId, history);
   }
   history.push(update);
 }
@@ -911,16 +1138,24 @@ function attachScenarioAgent(
 
   agent.onNewSession = async (params) => {
     workspacePath = params?.cwd ?? "";
-    agent.commandsAfterNewSession = activeConfig.commands ?? null;
+    if (failNextNewSession) {
+      failNextNewSession = false;
+      throw new Error("Couldn't start a session (mock)");
+    }
+    agent.commandsAfterNewSession = activeConfig.commands ?? mockCommands();
     return {
-      sessionId: `mock_session_${++mockSessionCounter}`,
+      // Unique across reloads: the histories outlive the counter.
+      sessionId: `mock_session_${(mockRun ??= Math.random().toString(36).slice(2, 8))}_${++mockSessionCounter}`,
       ...(activeConfig.session ?? {}),
     };
   };
 
   agent.onLoadSession = async (params) => {
     workspacePath = params?.cwd ?? workspacePath;
-    for (const update of mockSessionHistories.get(params.sessionId) ?? []) {
+    if (evictedSessions.delete(params.sessionId)) {
+      throw new Error(`Session ${params.sessionId} not found (mock)`);
+    }
+    for (const update of histories().get(params.sessionId) ?? []) {
       agent.update(params.sessionId, update);
     }
     return { ...(activeConfig.session ?? {}) };
@@ -942,8 +1177,10 @@ function attachScenarioAgent(
   agent.onPrompt = async (params) => {
     lastMockPromptParams = params;
     const text = promptText(params);
-    const config = configFromPrompt(text) ?? activeConfig;
-    const factory = scenarioRegistry.get(config.scenario)!;
+    mockPromptLog.push({ sessionId: params.sessionId, text });
+    const config =
+      configFromPrompt(text) ?? misbehaviourFromPrompt(text) ?? activeConfig;
+    const factory = scenarioRegistry().get(config.scenario)!;
     const scenario: MockScenario = factory(config.options);
 
     // History mirrors what a real harness persists: the prompt replays as a
@@ -987,6 +1224,7 @@ function attachScenarioAgent(
         writeNatively: (path, content) =>
           writeNatively(needHost(), path, content),
         notifyWatcher: (path) => notifyWatcher(needHost(), workspacePath, path),
+        exit: (reason) => void agentSide.close(new AgentTransportError("closed", reason)),
       });
       return (
         result ?? {
@@ -995,6 +1233,7 @@ function attachScenarioAgent(
       );
     } finally {
       if (currentAbort === abort) currentAbort = null;
+      saveMockHistories();
     }
   };
 }
@@ -1092,6 +1331,8 @@ declare global {
       }>;
       /** The last `session/prompt` params a mock agent received. */
       lastPrompt: () => Json;
+      /** Every prompt mock agents were sent, in order, and to which session. */
+      prompts: () => { sessionId: string; text: string }[];
       /** The params the latest scenario agent captured for a
        *  `session/set_mode` / `set_model` / `set_config_option` call. */
       lastSet: (method: string) => Json;
@@ -1115,7 +1356,7 @@ export const mockAgentModule = defineModule({
     window.__mockAgent = {
       configure: configureMockAgent,
       register: registerMockScenario,
-      scenarios: () => [...scenarioRegistry.keys()],
+      scenarios: () => [...scenarioRegistry().keys()],
       stats: async () => {
         const turns = store.turns.toArray;
         return {
@@ -1128,6 +1369,7 @@ export const mockAgentModule = defineModule({
         };
       },
       lastPrompt: () => lastMockPromptParams,
+      prompts: mockPrompts,
       lastSet: lastMockSetParams,
       replay: (recording, options) =>
         configureMockAgent({

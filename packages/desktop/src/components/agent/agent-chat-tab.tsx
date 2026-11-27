@@ -26,9 +26,9 @@ import type {
   ToolCallStatus,
   ToolCallUpdate,
   PlanEntry,
+  TranscriptRow,
   TurnUsage,
 } from "@notefig/shared/agent";
-import { sortEntriesChronologically } from "@notefig/shared/agent";
 import { Button } from "@notefig/ui/button";
 import {
   MessageScrollerProvider,
@@ -38,12 +38,11 @@ import { Markdown } from "@/components/ui/markdown";
 import { cn } from "@notefig/ui/utils";
 import {
   useHarnessLabels,
+  useReviveWhenShown,
   useTaskRow,
-  useTaskEntries,
-  useTaskTurns,
+  useTranscript,
   type AgentEntry,
   type AgentTaskRow,
-  type AgentTurn,
 } from "@/modules/agents/react";
 import {
   PromptEditor,
@@ -114,12 +113,13 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
   const { rootRef, composerRef } = useAgentTabController(taskId);
   const taskRow = useTaskRow(taskId);
   const isRunning = taskRow?.status === "running";
-  // The session/load window (MET-54): once a prompt revives a restored row,
-  // it becomes "starting" with its old session id while history streams in.
-  // A merely viewed restored session stays dormant and its composer remains
-  // available; sending is the explicit act that revives it.
+  // The session/load window (MET-54): a revived row is "starting" with its
+  // old session id while history streams in (a brand new task starts with
+  // none yet).
   const isLoadingSession =
     taskRow?.status === "starting" && taskRow.sessionId != null;
+
+  useReviveWhenShown(taskRow);
 
   // The floating composer overlay's live height (it grows when permission/
   // auth cards stack above the prompt box); the transcript pads its scroll
@@ -311,9 +311,6 @@ function ComposerOverlay({
         <PermissionCard taskId={taskRow.taskId} />
       </div>
       {taskRow.authRequired && <AuthCard task={taskRow} />}
-      {taskRow.status === "restored" && (
-        <RestoredSessionCard taskId={taskRow.taskId} />
-      )}
       {taskRow.status === "unavailable" ? (
         <UnavailableCard taskId={taskRow.taskId} />
       ) : (
@@ -331,26 +328,6 @@ function ComposerOverlay({
           composerRef={composerRef}
         />
       )}
-    </div>
-  );
-}
-
-/** Harness-backed history is intentionally not loaded merely by viewing an
- * old session (MET-288). Make the network/process work an explicit action. */
-function RestoredSessionCard({ taskId }: { taskId: string }) {
-  const { t } = useTranslation();
-  const { agents } = useCore();
-  return (
-    <div className="pointer-events-auto flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-      <span className="min-w-0 flex-1">{t("agentSessionHistoryDormant")}</span>
-      <Button
-        variant="outline"
-        size="sm"
-        className="shrink-0"
-        onClick={() => agents.task(taskId).revive()}
-      >
-        {t("agentLoadSessionHistory")}
-      </Button>
     </div>
   );
 }
@@ -379,19 +356,6 @@ function UnavailableCard({ taskId }: { taskId: string }) {
     </div>
   );
 }
-
-/** One transcript row fed to the virtualizer — entries and turn-error
- *  banners are peers in the same windowed list, so one bottom-anchor/follow
- *  path covers both. */
-type TranscriptRow =
-  | {
-      kind: "entry";
-      entry: AgentEntry;
-      queued: boolean;
-      /** On a turn's user entry: what the turn spent, once it settled. */
-      usage?: TurnUsage | null;
-    }
-  | { kind: "error"; turn: AgentTurn };
 
 function transcriptRowKey(row: TranscriptRow): string {
   return row.kind === "entry" ? row.entry.id : `error-${row.turn.turnId}`;
@@ -451,43 +415,6 @@ type TranscriptScrollHandleRef = { current: TranscriptScrollHandle };
  * useMessageScroller() keeps resolving (a no-op here); the composer reaches
  * this transcript's real scrollToEnd via `scrollHandleRef`.
  */
-/** The transcript's flat row list: entries in id order (ids are ascending,
- *  so document order = chronological — text and tool calls interleaved
- *  exactly as they streamed), then turn-error banners. */
-function useTranscriptRows(taskId: string): TranscriptRow[] {
-  const entries = useTaskEntries(taskId);
-  const turns = useTaskTurns(taskId);
-  const turnErrors = useMemo(
-    () => turns.filter((t) => t.status === "error" && t.error),
-    [turns],
-  );
-  const queuedTurnIds = useMemo(
-    () =>
-      new Set(turns.filter((t) => t.status === "queued").map((t) => t.turnId)),
-    [turns],
-  );
-  const turnUsage = useMemo(
-    () => new Map(turns.map((t) => [t.turnId, t.usage])),
-    [turns],
-  );
-  const sortedEntries = useMemo(
-    () => sortEntriesChronologically(entries),
-    [entries],
-  );
-  return useMemo<TranscriptRow[]>(
-    () => [
-      ...sortedEntries.map((entry): TranscriptRow => ({
-        kind: "entry",
-        entry,
-        queued: entry.type === "user" && queuedTurnIds.has(entry.turnId),
-        usage: entry.type === "user" ? turnUsage.get(entry.turnId) : undefined,
-      })),
-      ...turnErrors.map((turn): TranscriptRow => ({ kind: "error", turn })),
-    ],
-    [sortedEntries, queuedTurnIds, turnUsage, turnErrors],
-  );
-}
-
 /**
  * Follow-mode ("pinned to the live edge") state over the row virtualizer.
  *
@@ -624,7 +551,7 @@ const Transcript = memo(function Transcript({
   scrollHandleRef: TranscriptScrollHandleRef;
 }) {
   const { t } = useTranslation();
-  const rows = useTranscriptRows(taskId);
+  const rows = useTranscript(taskId);
   const scrollElRef = useRef<HTMLDivElement | null>(null);
 
   const rowVirtualizer = useVirtualizer({
