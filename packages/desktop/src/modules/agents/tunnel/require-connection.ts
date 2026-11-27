@@ -5,6 +5,12 @@ import { tunnelConnection } from "./tunnel-connection";
 import { openPairDialog } from "./pair-dialog-store";
 import { MOCK_AGENT_MODE } from "../mock-mode";
 
+/** Whether an agent can be started now, saying nothing when it can't:
+ *  on desktop always, on the web once a machine is connected. */
+export function agentRuntimeConnected(): boolean {
+  return MOCK_AGENT_MODE || !isWeb() || tunnelConnection.getState().status === "connected";
+}
+
 /**
  * Gate agent-start actions on the web having a paired worker. On desktop
  * agents run locally, so this is always true. On web with no live tunnel it

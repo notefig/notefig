@@ -75,6 +75,9 @@ import { agentTabId } from "@/modules/tabs/tab-id";
 import { CopyTextButton, renderPromptToolCall } from "@notefig/widgets";
 import { renderDiffToolCall } from "@notefig/widgets/diff-block/transcript";
 import { splitLeadingQuote } from "@/modules/agents/agents";
+import { useTunnelConnection } from "@/hooks/use-tunnel-connection";
+import { agentRuntimeConnected } from "@/modules/agents/tunnel/require-connection";
+import { talksToMock } from "@/modules/agents/mock-mode";
 
 /**
  * One agent session as a dockable tab: streamed turn output (message chunks
@@ -123,11 +126,16 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
   // A restored session comes back when its tab is viewed: the dock mounts
   // only the selected tab, so this runs on open and on selection, and
   // session/load streams the history back into the transcript (MET-54). A
-  // delete while it starts stops it (MET-288).
+  // delete while it starts stops it (MET-288). On the web it waits for a
+  // connected machine — and comes back once one connects.
   const status = taskRow?.status;
+  useTunnelConnection(); // re-render as a machine connects
+  const harnessId = taskRow?.harnessId;
+  const canStart =
+    harnessId !== undefined && (talksToMock({ id: harnessId }) || agentRuntimeConnected());
   useEffect(() => {
-    if (status === "restored") agents.task(taskId).revive();
-  }, [agents, status, taskId]);
+    if (status === "restored" && canStart) agents.task(taskId).revive();
+  }, [agents, status, taskId, canStart]);
 
   // The floating composer overlay's live height (it grows when permission/
   // auth cards stack above the prompt box); the transcript pads its scroll

@@ -347,13 +347,32 @@ export class ReplayStage implements AgentEntryWriter {
    * they aren't part of the replayed history, and they come after it: their
    * entries were minted before the replay's, and entry ids are the
    * transcript's order, so they move to fresh ids behind it.
+   *
+   * A kept turn in `resentTurnIds` is a retry of an attempt the harness may
+   * have kept (it died mid-turn): when the history ends on that attempt —
+   * its prompt, and what came of it — the history's copy goes, and the
+   * kept turn is the one copy.
    */
-  commit(replayTurn: AgentTurn, keepTurnIds: ReadonlySet<string>): void {
+  commit(
+    replayTurn: AgentTurn,
+    keepTurnIds: ReadonlySet<string>,
+    resentTurnIds: ReadonlySet<string> = new Set(),
+  ): void {
     const taskId = replayTurn.taskId;
     const kept: AgentEntry[] = [];
     for (const entry of this.store.entriesForTask(taskId)) {
       if (keepTurnIds.has(entry.turnId)) kept.push(entry);
       this.store.entries.delete(entry.id);
+    }
+    const resent = new Set(
+      kept
+        .filter((entry) => entry.type === "user" && resentTurnIds.has(entry.turnId))
+        .map((entry) => entry.text),
+    );
+    const replayed = [...this.rows.values()];
+    const lastPrompt = replayed.map((row) => row.type).lastIndexOf("user");
+    if (lastPrompt !== -1 && resent.has(replayed[lastPrompt].text)) {
+      for (const row of replayed.slice(lastPrompt)) this.rows.delete(row.id);
     }
     for (const turn of this.store.turnsForTask(taskId)) {
       if (!keepTurnIds.has(turn.turnId)) {

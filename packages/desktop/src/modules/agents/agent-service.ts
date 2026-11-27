@@ -292,10 +292,12 @@ function errorMessage(error: unknown): string {
 type PromptOptions = PromptExtras & {
   /** Enqueue ahead of already-queued prompts (held-prompt retry). */
   front?: boolean;
+  /** A retry: the harness may hold the failed attempt already. */
+  resent?: boolean;
 };
 
 /** A prompt waiting for its turn, with everything it was sent with. */
-type QueuedPrompt = PromptExtras & { turnId: string; text: string };
+type QueuedPrompt = PromptExtras & { turnId: string; text: string; resent?: boolean };
 
 /** A prompt sent while its task waited to revive: recorded, not queued. */
 type HeldPrompt = {
@@ -447,6 +449,9 @@ export class AgentTask {
   /** A retry queued while the drain was ending on the failure it retries:
    *  the drain runs again once it has (`drainQueue`). */
   private drainAgain = false;
+  /** The harness answered this task's session/load with an error: it has
+   *  no such session. */
+  private loadRejected = false;
   /** "How to sign in" hint, surfaced only when an auth error actually occurs. */
   private authHintValue?: string;
   /**
@@ -524,12 +529,18 @@ export class AgentTask {
        * row on "unavailable" (the harness no longer has the session).
        */
       resumeSessionId?: string;
+      /** The runtime this one replaces, closing: the same taskId names
+       *  both to the platform (a process, an MCP listener), so nothing of
+       *  this one starts until that one is gone. Prompts queue meanwhile. */
+      after?: Promise<unknown>;
     },
   ): Promise<void> {
     this.startCalled = true;
     this.upsertTaskRow();
 
     try {
+      await options?.after?.catch(() => {});
+      this.assertNotDisposed();
       // MCP channel first — the harness spawn may need its address. Same
       // construct-then-start pattern as the ACP transport below:
       // createMcpEndpoint is a dumb sync constructor, we call start()
@@ -627,18 +638,16 @@ export class AgentTask {
       const message = errorMessage(error);
       this.warn("start failed", message);
       // A REJECTED session/load means the harness no longer has the
-      // session — a distinct, deletable end state. A startup TIMEOUT is
-      // different: the session may be fine and the adapter just never
-      // came up, so it stays a plain (retryable-looking) error. A task
+      // session — a distinct, deletable end state. Anything else — a
+      // timeout, a spawn or connection that failed before the harness was
+      // asked (the web with no machine) — leaves the session as it was: a
+      // plain error, which the next prompt revives. A task
       // disposed mid-start (workspace close; StrictMode's remount cycle
       // when the chat tab auto-revives at boot) fails here LATE — setStatus
       // no-ops once disposed, so the demoted "restored" row is never
       // stomped, and dispose already settled the queued prompts (the
       // splice below is empty).
-      const timedOut = error instanceof StartupTimeoutError;
-      this.setStatus(
-        options?.resumeSessionId && !timedOut ? "unavailable" : "error",
-      );
+      this.setStatus(this.loadRejected ? "unavailable" : "error");
       for (const queued of this.pendingPrompts.splice(0)) {
         this.failedPrompts.set(queued.turnId, queued);
         this.settleQueuedTurn(queued.turnId, { status: "error", error: message });
@@ -837,12 +846,12 @@ export class AgentTask {
           );
         });
       }
-      await this.client.loadSession(
-        sessionId,
-        this.agentCwd,
-        mcpServers,
-        this.spawnPrep?.sessionParams,
-      );
+      await this.client
+        .loadSession(sessionId, this.agentCwd, mcpServers, this.spawnPrep?.sessionParams)
+        .catch((error: unknown) => {
+          this.loadRejected = true;
+          throw error;
+        });
       // The transport can die while the load is in flight —
       // handleTransportClose drops the staged turn and marks the task
       // errored. Committing the replay past that would hand the caller an
@@ -863,6 +872,7 @@ export class AgentTask {
       stage.commit(
         replayTurn,
         new Set(this.pendingPrompts.map((p) => p.turnId)),
+        new Set(this.pendingPrompts.filter((p) => p.resent).map((p) => p.turnId)),
       );
     } finally {
       this.currentTurn = null;
@@ -1352,6 +1362,9 @@ export class AgentTask {
    */
   retryTurn(prompt: QueuedPrompt): boolean {
     if (this.store.turns.get(prompt.turnId)?.status !== "error") return false;
+    // The failure's own drain may not have stopped yet: it would leave the
+    // retry queued behind it.
+    if (this.draining) this.drainAgain = true;
     if (this.heldPrompt?.turnId === prompt.turnId) {
       this.retryHeldPrompt();
       return true;
@@ -1360,10 +1373,7 @@ export class AgentTask {
     reopenTurn(this.store, this.deps.hooks, this.taskId, prompt.turnId);
     if (this.currentStatus === "error") this.setStatus("idle");
     const { turnId, text, ...extras } = prompt;
-    // The failure's own drain may not have stopped yet: it would leave the
-    // retry queued behind it.
-    if (this.draining) this.drainAgain = true;
-    void this.enqueuePrompt(turnId, text, { ...extras, front: true });
+    void this.enqueuePrompt(turnId, text, { ...extras, front: true, resent: true });
     return true;
   }
 
@@ -2449,7 +2459,11 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
   /** A revival asked for before the harness rows loaded: it runs once
    *  they have, unless its workspace closed first, and then hands the task
    *  the prompts sent meanwhile — or settles them, when there's no task. */
-  const waitForHarnesses = (taskId: string, row: AgentTaskRow): WaitingRevival => {
+  const waitForHarnesses = (
+    taskId: string,
+    row: AgentTaskRow,
+    after?: Promise<unknown>,
+  ): WaitingRevival => {
     const pending = waiting.get(taskId);
     if (pending) return pending;
     const entry: WaitingRevival = {
@@ -2464,7 +2478,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     };
     entry.revival.started = deps.harnesses.ready().then(
       () => {
-        const started = entry.off ? undefined : revive(taskId)?.started;
+        const started = entry.off ? undefined : revive(taskId, after)?.started;
         settle();
         return started;
       },
@@ -2521,13 +2535,17 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     });
   };
 
-  const revive: AgentRuntime["revive"] = (taskId) => {
+  const revive = (
+    taskId: string,
+    /** The runtime this replaces, closing (`AgentTask.start`). */
+    after?: Promise<unknown>,
+  ): { started: Promise<void> } | null => {
     if (live.get(taskId)) return null;
     const row = store.tasks.get(taskId);
     if (!row || !isRevivable(row)) return null;
     // Until the harness rows have loaded, a custom entry reads as missing
     // and an edited built-in as stock: revive once they have.
-    if (!deps.harnesses.isReady()) return waitForHarnesses(taskId, row).revival;
+    if (!deps.harnesses.isReady()) return waitForHarnesses(taskId, row, after).revival;
     // Read synchronously: revival registers the task in the same tick, so
     // a prompt can queue at once.
     const harness = deps.harnesses.harness(row.harnessId).definition();
@@ -2545,6 +2563,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
     );
     const started = task.start(transportFactory(task), {
       resumeSessionId: row.sessionId,
+      after,
     });
     // Failure lands on the row as "unavailable"/"error" — callers may still
     // await.
@@ -2563,9 +2582,9 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntime {
    */
   const restart = (task: AgentTask): AgentTask | undefined => {
     const queue = task.handOverQueue();
-    // Synchronous: the maps drop it before the dispose's first await.
-    void managerFor(task.workspacePath).cancelTask(task.taskId);
-    revive(task.taskId);
+    // The maps drop it at once; the new runtime starts once it has closed.
+    const closing = managerFor(task.workspacePath).cancelTask(task.taskId);
+    revive(task.taskId, closing);
     const next = live.get(task.taskId);
     // Until the harness rows load, the revival waits, and they wait in it.
     const waitingRevival = next ? undefined : waiting.get(task.taskId);

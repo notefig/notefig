@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import { tunnelConnection } from "@/modules/agents/tunnel/tunnel-connection";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
@@ -73,6 +74,7 @@ afterEach(() => {
   container = null;
   root = null;
   clearComposerDraft(TASK_ID);
+  vi.restoreAllMocks();
 });
 
 function seedTaskWithEntries(entryCount: number) {
@@ -113,7 +115,7 @@ function typeIntoComposer(element: HTMLElement, char: string) {
 }
 
 describe("AgentChatTab composer isolation (MET-139)", () => {
-  it("brings a restored session back when its tab is viewed", async () => {
+  it("brings a restored session back when its tab is viewed, once a machine is connected", async () => {
     agents.store.tasks.insert({
       taskId: TASK_ID,
       workspacePath: "/ws",
@@ -127,6 +129,15 @@ describe("AgentChatTab composer isolation (MET-139)", () => {
     const revive = vi
       .spyOn(agents.runtime, "revive")
       .mockReturnValue({ started: Promise.resolve() });
+    // The test page is the web: agents run on a paired machine.
+    let notify = () => {};
+    vi.spyOn(tunnelConnection, "subscribe").mockImplementation((listener) => {
+      notify = listener;
+      return () => {};
+    });
+    const tunnel = vi
+      .spyOn(tunnelConnection, "getState")
+      .mockReturnValue({ status: "disconnected" });
 
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -146,6 +157,11 @@ describe("AgentChatTab composer isolation (MET-139)", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
+    // No machine: loading would fail and leave nothing to retry.
+    expect(revive).not.toHaveBeenCalled();
+
+    tunnel.mockReturnValue({ status: "connected" } as never);
+    act(() => notify());
     expect(revive).toHaveBeenCalledWith(TASK_ID);
   });
 
