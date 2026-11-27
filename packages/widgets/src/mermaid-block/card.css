@@ -16,3 +16,8 @@
   --pele-font: var(--font-sans);
   --pele-font-mono: var(--font-mono);
 }
+/* Centred while it fits; from its left edge once it scrolls. */
+.notefig-mermaid svg {
+  display: block;
+  margin-inline: auto;
+}
