@@ -22,6 +22,8 @@ describe("<notefig-mermaid-block>", () => {
     expect(root.querySelector<HTMLElement>("notefig-mermaid-block > pre")!.hidden).toBe(true);
     expect(root.querySelector("[data-mermaid-diagram]")!.textContent).toContain("Draft");
     expect(root.querySelector("[data-mermaid-edit]")).toBeNull();
+    // Nothing edits it here, so the keys can reach it to scroll it.
+    expect(root.querySelector("[data-mermaid-diagram]")!.getAttribute("tabindex")).toBe("0");
   });
 
   it("shrinks a wide diagram only so far, then scrolls it", async () => {

@@ -595,6 +595,7 @@ i18n
           diffBlockShow: "Show changes",
           diffBlockHide: "Hide changes",
           mermaidBlockEdit: "Edit diagram",
+          mermaidBlockDiagram: "Diagram",
           promptBlobDone: "Done",
           promptBlobStopped: "Stopped",
           promptBlobFailed: "Failed.",

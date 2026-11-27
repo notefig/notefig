@@ -39,6 +39,7 @@ export function MermaidCard({
   /** The keys are on the card: each control shows the digit that runs it. */
   keys?: boolean;
 }) {
+  const { t } = useTranslation();
   const diagram = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
 
@@ -77,7 +78,14 @@ export function MermaidCard({
       className="not-prose group relative w-full select-text overflow-hidden rounded-lg border border-border/60 bg-card/80 p-3"
       data-mermaid-card
     >
-      <div ref={diagram} className="notefig-mermaid overflow-x-auto" data-mermaid-diagram />
+      {/* Where it isn't edited (chat, a response) the keys scroll it; in the
+          editor they select the card, and Enter shows its source. */}
+      <div
+        ref={diagram}
+        className="notefig-mermaid overflow-x-auto rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        data-mermaid-diagram
+        {...(onEdit ? {} : { tabIndex: 0, role: "region", "aria-label": t("mermaidBlockDiagram") })}
+      />
       {failed && (
         <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-muted-foreground">{source}</pre>
       )}

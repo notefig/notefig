@@ -27,7 +27,7 @@ export function isMermaidInfo(info: string): boolean {
 
 /** The translation keys the card resolves; the app asserts it defines them
  *  (see ../prompt/i18n-keys.ts for why). */
-export const MERMAID_BLOCK_I18N_KEYS = ["mermaidBlockEdit"] as const;
+export const MERMAID_BLOCK_I18N_KEYS = ["mermaidBlockEdit", "mermaidBlockDiagram"] as const;
 
 /** When and how an agent draws one; its MCP instructions carry this. */
 export const MERMAID_GUIDE =

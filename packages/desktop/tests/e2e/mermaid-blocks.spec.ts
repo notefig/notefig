@@ -75,3 +75,48 @@ test("a mermaid block is drawn as its diagram, selected as one, and edited when 
   await expect(card.locator(".pele-error")).toBeVisible();
   await expect(card.locator("pre")).toContainText("Merged -->");
 });
+
+const WIDE = `flowchart TD\n${Array.from({ length: 14 }, (_, i) => `  Root --> C${i}[Child service ${i}]`).join("\n")}`;
+
+test("a wide diagram shrinks only so far, then scrolls from its left edge", async ({ page }) => {
+  const workspace = "/workspace/mermaid-wide";
+  await setupTestDatabase(page, "mermaid-wide");
+  await openWorkspace(page, workspace);
+  await seedTestFiles(page, [
+    {
+      path: `${workspace}/wide.md`,
+      content: `# Wide\n\n\`\`\`mermaid\n${WIDE}\n\`\`\`\n\n\`\`\`mermaid\n${DIAGRAM}\n\`\`\`\n`,
+      type: "file",
+    },
+  ]);
+  await page.reload();
+  await waitForFileTree(page, "wide.md");
+  await openFileInTree(page, "wide.md");
+  const areas = page.locator(".ProseMirror notefig-mermaid-block [data-mermaid-diagram]");
+  await expect(areas.nth(0).locator("svg")).toBeVisible();
+  await expect(areas.nth(1).locator("svg")).toBeVisible();
+
+  const measure = (index: number) =>
+    areas.nth(index).evaluate((area) => {
+      const svg = area.querySelector("svg")!;
+      const a = area.getBoundingClientRect();
+      const s = svg.getBoundingClientRect();
+      return {
+        overflows: area.scrollWidth > area.clientWidth,
+        scale: s.width / Number(svg.getAttribute("width")),
+        leftGap: s.left - a.left,
+        centreGap: Math.abs(s.left + s.width / 2 - (a.left + a.width / 2)),
+      };
+    });
+
+  // The wide one: no smaller than 3/4, scrolled from its left edge.
+  const wide = await measure(0);
+  expect(wide.overflows).toBe(true);
+  expect(wide.scale).toBeGreaterThanOrEqual(0.74);
+  expect(wide.leftGap).toBeCloseTo(0, 0);
+
+  // One that fits: centred, nothing to scroll.
+  const small = await measure(1);
+  expect(small.overflows).toBe(false);
+  expect(small.centreGap).toBeLessThan(1);
+});
