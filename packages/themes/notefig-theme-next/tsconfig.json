@@ -21,8 +21,8 @@
       "@/*": [
         "./*"
       ],
-      "contentlayer/generated": [
-        "./.contentlayer/generated"
+      "content-collections": [
+        "./.content-collections/generated/index.d.ts"
       ]
     },
     "target": "ES2017"
@@ -31,7 +31,7 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
-    ".contentlayer/generated"
+    ".content-collections/generated"
   ],
   "exclude": [
     "node_modules"

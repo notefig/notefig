@@ -5,6 +5,7 @@
   },
   "ignorePatterns": [
     "**/.contentlayer/**",
+    "**/.content-collections/**",
     "**/dist/**",
     "**/build/**",
     "**/*.d.ts",
@@ -33,8 +34,6 @@
     "tailwind-merge",
     "tailwindcss-animate",
     "next-themes",
-    "contentlayer2",
-    "next-contentlayer2",
     "rehype-highlight",
     "remark-gfm",
     "vaul",

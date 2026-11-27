@@ -4,7 +4,7 @@ import { readdir } from "fs/promises";
 import { join } from "path";
 import { twMerge } from "tailwind-merge";
 import { coverPath, acceptedCoverFormats, defaultCoverPath } from "@/constants";
-import type { Meta, Chapter } from ".contentlayer/generated";
+import type { Meta, Chapter } from "content-collections";
 import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
 import * as React from "react";
 
