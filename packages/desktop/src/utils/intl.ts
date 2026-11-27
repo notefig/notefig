@@ -547,9 +547,6 @@ i18n
           // Agent UI — restored sessions (MET-54)
           agentSessionUnavailableNotice:
             "This session is no longer available — the harness has no record of it.",
-          agentSessionHistoryDormant:
-            "This saved session's history has not been loaded.",
-          agentLoadSessionHistory: "Load history",
           agentDeleteSession: "Delete session",
           agentBlobAnswerOrphaned:
             "Answer saved to the document, but the session that asked is no longer available.",

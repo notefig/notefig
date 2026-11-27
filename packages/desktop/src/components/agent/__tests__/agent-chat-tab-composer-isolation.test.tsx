@@ -113,7 +113,7 @@ function typeIntoComposer(element: HTMLElement, char: string) {
 }
 
 describe("AgentChatTab composer isolation (MET-139)", () => {
-  it("keeps a restored session dormant until the user sends", async () => {
+  it("brings a restored session back when its tab is viewed", async () => {
     agents.store.tasks.insert({
       taskId: TASK_ID,
       workspacePath: "/ws",
@@ -146,17 +146,6 @@ describe("AgentChatTab composer isolation (MET-139)", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
-    expect(revive).not.toHaveBeenCalled();
-    expect(
-      container.querySelector<HTMLElement>(".ProseMirror")?.getAttribute(
-        "contenteditable",
-      ),
-    ).toBe("true");
-    const load = [...container.querySelectorAll("button")].find(
-      (button) => button.textContent === "agentLoadSessionHistory",
-    );
-    expect(load).toBeDefined();
-    act(() => load?.click());
     expect(revive).toHaveBeenCalledWith(TASK_ID);
   });
 

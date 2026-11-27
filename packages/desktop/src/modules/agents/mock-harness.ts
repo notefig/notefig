@@ -1026,6 +1026,8 @@ function promptText(params: Json): string {
 }
 
 let mockSessionCounter = 0;
+/** This page's run, in its sessions' ids. */
+const MOCK_RUN = Math.random().toString(36).slice(2, 8);
 /** The scenario agent most recently attached — specs read the params its
  *  `session/set_*` calls captured. */
 let lastScenarioAgent: FakeAgent | null = null;
@@ -1057,13 +1059,43 @@ export function mockPrompts(): { sessionId: string; text: string }[] {
  * which is what makes revival and the manual session refresh real in mock
  * mode instead of returning an empty transcript.
  */
-const mockSessionHistories = new Map<string, Json[]>();
+let mockSessionHistories: Map<string, Json[]> | null = null;
+
+/** Where the histories outlive the page, as a harness's store outlives its
+ *  process: a reload, or a dev build's restart, still loads its sessions. */
+const MOCK_HISTORIES_KEY = "notefig:mock-session-histories";
+
+function histories(): Map<string, Json[]> {
+  if (!mockSessionHistories) {
+    try {
+      const raw = globalThis.localStorage?.getItem(MOCK_HISTORIES_KEY);
+      mockSessionHistories = new Map(raw ? JSON.parse(raw) : []);
+    } catch {
+      mockSessionHistories = new Map();
+    }
+  }
+  return mockSessionHistories;
+}
+
+/** Written once a turn ends, not per update: a long transcript streams
+ *  thousands of them. Best-effort — a full or blocked store keeps the
+ *  histories in memory only. */
+function saveMockHistories(): void {
+  try {
+    globalThis.localStorage?.setItem(
+      MOCK_HISTORIES_KEY,
+      JSON.stringify([...histories()]),
+    );
+  } catch {
+    // in memory only
+  }
+}
 
 function recordMockUpdate(sessionId: string, update: Json): void {
-  let history = mockSessionHistories.get(sessionId);
+  let history = histories().get(sessionId);
   if (!history) {
     history = [];
-    mockSessionHistories.set(sessionId, history);
+    histories().set(sessionId, history);
   }
   history.push(update);
 }
@@ -1105,7 +1137,8 @@ function attachScenarioAgent(
     }
     agent.commandsAfterNewSession = activeConfig.commands ?? MOCK_COMMANDS;
     return {
-      sessionId: `mock_session_${++mockSessionCounter}`,
+      // Unique across reloads: the histories outlive the counter.
+      sessionId: `mock_session_${MOCK_RUN}_${++mockSessionCounter}`,
       ...(activeConfig.session ?? {}),
     };
   };
@@ -1115,7 +1148,7 @@ function attachScenarioAgent(
     if (evictedSessions.delete(params.sessionId)) {
       throw new Error(`Session ${params.sessionId} not found (mock)`);
     }
-    for (const update of mockSessionHistories.get(params.sessionId) ?? []) {
+    for (const update of histories().get(params.sessionId) ?? []) {
       agent.update(params.sessionId, update);
     }
     return { ...(activeConfig.session ?? {}) };
@@ -1193,6 +1226,7 @@ function attachScenarioAgent(
       );
     } finally {
       if (currentAbort === abort) currentAbort = null;
+      saveMockHistories();
     }
   };
 }

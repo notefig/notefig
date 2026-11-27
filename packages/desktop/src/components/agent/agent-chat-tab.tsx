@@ -114,12 +114,20 @@ function AgentChatTabBody({ taskId }: { taskId: string }) {
   const { rootRef, composerRef } = useAgentTabController(taskId);
   const taskRow = useTaskRow(taskId);
   const isRunning = taskRow?.status === "running";
-  // The session/load window (MET-54): once a prompt revives a restored row,
-  // it becomes "starting" with its old session id while history streams in.
-  // A merely viewed restored session stays dormant and its composer remains
-  // available; sending is the explicit act that revives it.
+  // The session/load window (MET-54): a revived row is "starting" with its
+  // old session id while history streams in (a brand new task starts with
+  // none yet).
   const isLoadingSession =
     taskRow?.status === "starting" && taskRow.sessionId != null;
+
+  // A restored session comes back when its tab is viewed: the dock mounts
+  // only the selected tab, so this runs on open and on selection, and
+  // session/load streams the history back into the transcript (MET-54). A
+  // delete while it starts stops it (MET-288).
+  const status = taskRow?.status;
+  useEffect(() => {
+    if (status === "restored") agents.task(taskId).revive();
+  }, [agents, status, taskId]);
 
   // The floating composer overlay's live height (it grows when permission/
   // auth cards stack above the prompt box); the transcript pads its scroll
@@ -311,9 +319,6 @@ function ComposerOverlay({
         <PermissionCard taskId={taskRow.taskId} />
       </div>
       {taskRow.authRequired && <AuthCard task={taskRow} />}
-      {taskRow.status === "restored" && (
-        <RestoredSessionCard taskId={taskRow.taskId} />
-      )}
       {taskRow.status === "unavailable" ? (
         <UnavailableCard taskId={taskRow.taskId} />
       ) : (
@@ -331,26 +336,6 @@ function ComposerOverlay({
           composerRef={composerRef}
         />
       )}
-    </div>
-  );
-}
-
-/** Harness-backed history is intentionally not loaded merely by viewing an
- * old session (MET-288). Make the network/process work an explicit action. */
-function RestoredSessionCard({ taskId }: { taskId: string }) {
-  const { t } = useTranslation();
-  const { agents } = useCore();
-  return (
-    <div className="pointer-events-auto flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
-      <span className="min-w-0 flex-1">{t("agentSessionHistoryDormant")}</span>
-      <Button
-        variant="outline"
-        size="sm"
-        className="shrink-0"
-        onClick={() => agents.task(taskId).revive()}
-      >
-        {t("agentLoadSessionHistory")}
-      </Button>
     </div>
   );
 }
